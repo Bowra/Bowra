@@ -518,3 +518,69 @@ async def test_lead_retains_missing_requirement_without_business_failure(collab,
     assert "_delivery_completion" not in done
     saved = await store.list_events(collab.worker.turn_id)
     assert [(event.event_type, event.payload) for event in saved] == [(event.event_type, event.payload) for event in live]
+
+
+def test_revision_scope_question_is_not_undelivered_work():
+    """The refusal asks Lead to let the user choose; asking ends the Turn without review."""
+    from bowhead_core.tool_delivery_review import failed_calls, requires_delivery_review
+
+    scope = {"error_kind": "invalid_args", "reason_code": "revise_scope_unresolved", "path": "revise_scope"}
+    question = ToolInvocation(tool_name="subagent_spawn", arguments={}, result=scope, call_id="revise-1")
+    assert failed_calls([question]) == {} and not requires_delivery_review([question])
+    # Other refused dispatches and other Tools claiming the same code still need review.
+    invalid = ToolInvocation(tool_name="subagent_spawn", arguments={}, result={"error_kind": "invalid_args"}, call_id="spawn-1")
+    forged = ToolInvocation(tool_name="teammcp.lookup", arguments={}, result=dict(scope), call_id="mcp-1")
+    assert set(failed_calls([question, invalid, forged])) == {"spawn-1", "mcp-1"}
+
+
+@pytest.mark.parametrize("citable", [True, False], ids=["stated_gap", "unreviewed_helper"])
+async def test_a_partial_helper_is_delivered_with_its_gap_named(collab, monkeypatch, citable):
+    """Regression check N1: the report was delivered and one preference was not; the answer names that gap."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    requests = 0
+    reviewed: list[bool] = []
+    answer = "The HTML report is ready for your meeting."
+
+    async def spawn(args, ctx):
+        result = {"ok": True, "completion": "partial", "delivered": "payload", "final_answer": "Report delivered."}
+        if citable:
+            result["partial_delivery"] = {"unfulfilled": ["Sort stores by province"]}
+        return result
+
+    async def provider(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return LLMResponse(content="", tool_calls=[ToolCall(id="helper", name="subagent_spawn", arguments={"profile": "compute"})])
+        guidance = [message.content for message in request.messages if message.role == "user" and "review_context (JSON data): " in message.content]
+        if guidance and not reviewed:
+            reviewed.append(True)
+            context = json.loads(guidance[-1].split("review_context (JSON data): ", 1)[1])
+            helper = context["failed_calls"][0]
+            assert helper.get("citable", False) is citable
+            review = {
+                "requirements": [
+                    {"requirement": "HTML report for the meeting", "status": "fulfilled", "evidence_call_ids": [helper["call_id"]]},
+                    {"requirement": "Sort stores by province.", "status": "unfulfilled", "evidence_call_ids": []},
+                ],
+                "issues": [{"call_id": helper["call_id"], "resolution": "unfulfilled", "evidence_call_ids": [], "explanation": "No province field."}],
+            }
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id="review", name="review_delivery", arguments={"payload": {"delivery_review": review}})]
+            )
+        return LLMResponse(content=answer)
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("subagent_spawn", spawn)
+    register_subagent_return_tool(harness.registry)
+    result = await harness.run(collab.lead, tool_deny=_LEAD_TOOL_DENY)
+    assert not harness.provider.failures, harness.provider.failures
+    assert result.completion == "partial" and not result.reviewed_delivery_complete
+    assert delivery_summary_input(result) == {"_delivery_completion": "partial"}
+    generic = "Some requested work remains unfulfilled or unverified."
+    if citable:
+        assert result.final_answer == f"{answer}\n\nNot completed: Sort stores by province."
+    else:
+        assert result.final_answer.startswith(answer) and result.final_answer.endswith(
+            generic + " Review the failed steps before relying on a complete result."
+        )

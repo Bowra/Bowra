@@ -31,7 +31,12 @@ import {
   HttpStatusError,
   readApiError,
 } from "./api-client";
-import { genericUserFacingErrorMessage } from "./user-facing-error";
+import {
+  attachHttpCause,
+  genericUserFacingErrorMessage,
+  HttpResponseFailure,
+  isHtmlErrorBody,
+} from "./user-facing-error";
 import { responseRequestId } from "./error-presentation";
 import {
   parseEffectiveThemeResponse,
@@ -1746,6 +1751,11 @@ export interface FileDTO {
   has_canvas_ref: boolean;
   /** D7 retention rule: only long_term files are automatically indexed (this drives the badge's ✨). */
   retention_hint: string | null;
+  /** File versions: this entry is the file's latest version; earlier versions are kept with it. */
+  version_no?: number | null;
+  version_count?: number | null;
+  /** File versions: the knowledge base indexes an older version of this file (the user may add this version). */
+  kb_outdated?: boolean;
   url: string;
 }
 
@@ -2448,18 +2458,21 @@ export async function undeleteSession(sessionId: string): Promise<void> {
 async function readSessionArchiveError(
   response: Response,
 ): Promise<SessionArchiveError> {
-  let code = "session_archive_failed";
+  let responseCode: string | undefined;
   try {
     const body = (await response.json()) as {
       detail?: { error?: { code?: unknown } };
     };
     if (typeof body.detail?.error?.code === "string") {
-      code = body.detail.error.code;
+      responseCode = body.detail.error.code;
     }
   } catch {
     // A stable fallback keeps the UI actionable when a proxy strips JSON.
   }
-  return new SessionArchiveError(response.status, code);
+  return attachHttpCause(
+    new SessionArchiveError(response.status, responseCode ?? "session_archive_failed"),
+    new HttpResponseFailure(response.status, responseCode, isHtmlErrorBody("", response.headers.get("content-type"))),
+  );
 }
 
 export interface SessionDetailDTO {
@@ -2939,7 +2952,7 @@ export interface NotificationItemDTO {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  /** FEATURE_NOTIFICATION_REACH: "personal" items never carry a Team or switch it. */
+  /** "personal" items never carry a Team or switch it. */
   scope?: "team" | "personal";
   /** Set only when the user belongs to more than one Team. */
   teamName?: string | null;
@@ -2951,7 +2964,7 @@ export interface NotificationCountDTO {
   actionRequired: number;
   updatesUnread: number;
   totalBadge: number;
-  /** FEATURE_NOTIFICATION_REACH: when the newest item the browser may announce arrived. */
+  /** When the newest item the browser may announce arrived. */
   latestBrowserCandidateAt?: string | null;
 }
 
@@ -2972,7 +2985,7 @@ export async function fetchNotifications(
   return r.json();
 }
 
-/** Unread urgent items delivered after `since` that the open app may announce (FEATURE_NOTIFICATION_REACH). */
+/** Unread urgent items delivered after `since` that the open app may announce. */
 export async function fetchBrowserCandidates(since: string | null): Promise<NotificationItemDTO[]> {
   const params = new URLSearchParams();
   if (since) params.set("since", since);
@@ -3352,7 +3365,7 @@ export type ScheduledRunStatus =
 export interface ScheduledNotifyChannels {
   email?: string[];
   deliver_on_success?: boolean;
-  /** FEATURE_ROUTINE_NOTIFY: "on_alert" delivers only runs the task's Agent flagged; absent means "always". */
+  /** "on_alert" delivers only runs the task's Agent flagged; absent means "always". */
   deliver?: "always" | "on_alert";
 }
 
@@ -3400,7 +3413,7 @@ export interface ScheduledJobRunDTO {
   status: ScheduledRunStatus;
   error?: string | null;
   error_diagnostics?: unknown;
-  /** FEATURE_NOTIFICATION_DELIVERY: what happened to this run's result and alert emails (no addresses). */
+  /** What happened to this run's result and alert emails (no addresses). */
   deliveries?: ScheduledRunDeliveryDTO[];
 }
 

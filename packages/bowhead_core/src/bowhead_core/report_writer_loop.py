@@ -802,7 +802,7 @@ async def bake_report_markdown(
         # stripped counts were discarded and tool arguments unpersisted, concealing whether anchors were unwritten or stripped. Log each write
         # using written/stripped counts; record numbers only, never prose.
         _written = len(_FIGURE_ID_IN_RUN.findall(md))
-        # 116 dogfood (1.3.43, `t_a855…`/`t_d4765c0ccb5c`): written=2 stripped=2 valid=0 figure_pool=2; charts existed but all anchors were stripped.
+        # Regression check (1.3.43, `t_a855…`/`t_d4765c0ccb5c`): written=2 stripped=2 valid=0 figure_pool=2; charts existed but all anchors were stripped.
         # Counts cannot identify model-written IDs (art_ data IDs? invented IDs?). Log invalid IDs themselves, at most five, without prose.
         _invalid_ids = [fid for fid in _FIGURE_ID_IN_RUN.findall(_FENCED_BLOCK_RE.sub("", md)) if fid not in figure_ids][:5]
         md, _stripped = _strip_invalid_figure_anchors(md, figure_ids)
@@ -1088,8 +1088,10 @@ async def _maybe_finish_peer_authored_report(
             )
             if "kpi_row" not in _present:
                 written += await _emit_kpi_band(canvas_store, bus, canvas.id, request, payload or {})
+        from bowhead_core.canvas_revise import no_document_chrome
+
         reg = await get_turn_sources_registry(bus, canvas_store=canvas_store, canvas_id=canvas.id, turn_id=turn_id)
-        reg.ingest_payload_sources((payload or {}).get("sources"), tool_invocations)
+        reg.ingest_payload_sources((payload or {}).get("sources"), tool_invocations, revision=no_document_chrome(bus))
         reg.ingest_tool_invocations(tool_invocations)
         if not reg.is_empty():
             from bowhead_core.sources_resolver import enrich_source_labels
@@ -1161,7 +1163,7 @@ async def _maybe_finish_peer_authored_report(
         from bowhead_core.canvas_revise import no_document_chrome as _no_chrome_prov
 
         if _prov and _no_chrome_prov(bus):
-            # Batch B1-5 (116 dogfood R10 `s_0a9c3b144419`): an append turn produced a **second** provenance-warning section.
+            # Batch B1-5 (Regression check R10 `s_0a9c3b144419`): an append turn produced a **second** provenance-warning section.
             # Revision finalization already merged them, but handwritten finalization, mandatory for append, missed it. Merge into the document's provenance by line.
             from bowhead_core.canvas_revise import upsert_provenance_section as _upsert_prov_f
 
@@ -1251,6 +1253,23 @@ def _section_alias_key(section: Any) -> str:
     return "section_alias_other"
 
 
+async def _revise_title_only(*, canvas_store: Any, bus: Any, canvas: Any, turn_id: str, payload: dict[str, Any], request: Any) -> list[str] | None:
+    """Finalizer side of a title-only revision (Regression check N8): the title is normally replaced when the
+    helper returns (``apply_title_only_revision``); this is the fallback, and it reports the h1 either way."""
+    from bowhead_core.canvas_revise import apply_title_only_revision, revise_title_applied
+
+    if revise_title_applied(bus) or await apply_title_only_revision(
+        canvas_store,
+        bus,
+        session_id=getattr(request, "session_id", None) or getattr(canvas, "session_id", None),
+        turn_id=turn_id,
+        payload=payload,
+        language_context=getattr(request, "language_context", None),
+    ):
+        return ["h1"]
+    return None
+
+
 async def _revise_finish_if_applicable(
     *,
     canvas_store: Any,
@@ -1270,6 +1289,7 @@ async def _revise_finish_if_applicable(
     （`narrative`），不造下游不认识的串。未命中 → None。
     """
     from bowhead_core.canvas_revise import (
+        no_document_chrome,
         note_revised_section_ids,
         revised_prior_narratives,
         turn_opened_new_document,
@@ -1287,18 +1307,16 @@ async def _revise_finish_if_applicable(
         if canvas is None or not turn_id:
             return None
         touched = await canvas_store.section_ids_touched_by_turn(turn_id)
-        if not touched:
-            return None
-        all_secs = await canvas_store.list_sections(canvas.id)
-        revised = revised_prior_narratives(all_secs, touched_ids=touched, this_turn_id=turn_id)
-        if not revised:
-            return None
+        all_secs = await canvas_store.list_sections(canvas.id) if touched else []
+        revised = revised_prior_narratives(all_secs, touched_ids=touched, this_turn_id=turn_id) if touched else []
         appended = await canvas_store.list_sections_appended_by_turn(turn_id)
         if turn_opened_new_document(appended):
             return None
     except Exception:
         logger.exception("compose_report.revise_detect_failed turn=%s", turn_id)
         return None  # Probe failure -> original path (fail open).
+    if not revised:
+        return await _revise_title_only(canvas_store=canvas_store, bus=bus, canvas=canvas, turn_id=turn_id, payload=payload, request=request)
     if getattr(bus, "_md_finisher_done", False):
         return []
     with contextlib.suppress(Exception):
@@ -1307,7 +1325,7 @@ async def _revise_finish_if_applicable(
     written: list[str] = ["narrative"] * len(revised)
     try:
         reg = await get_turn_sources_registry(bus, canvas_store=canvas_store, canvas_id=canvas.id, turn_id=turn_id)
-        reg.ingest_payload_sources((payload or {}).get("sources"), tool_invocations)
+        reg.ingest_payload_sources((payload or {}).get("sources"), tool_invocations, revision=no_document_chrome(bus))
         reg.ingest_tool_invocations(tool_invocations)
         if not reg.is_empty():
             from bowhead_core.report_chrome_text import chrome_lang as _chrome_lang_r
@@ -1342,7 +1360,7 @@ async def _revise_finish_if_applicable(
             for _sid, _prev in await canvas_store.list_revisions_by_turn(turn_id):
                 _prev_by_id.setdefault(_sid, _prev)  # First entry = before this turn's edit.
         if _block is not None:
-            # 116 dogfood R12: partial plan-chapter edits have chapter-specific title/KPI; leave the document cover and that chapter's KPI band alone.
+            # Regression check R12: partial plan-chapter edits have chapter-specific title/KPI; leave the document cover and that chapter's KPI band alone.
             from bowhead_core.canvas_revise import chapter_scoped_revision as _chapter_scope
             from bowhead_core.canvas_revise import patch_chapter_kpi_row as _patch_ch_kpi
 
@@ -1613,7 +1631,7 @@ async def compose_report(
         # while finalization's `written` vocabulary is only {eyebrow,h1,meta,kpi_row,narrative,sources,
         # caveats,recommendations,provenance_caveats}, with **no `_FIGURE_KINDS`**.
         # Looking only at `kinds` makes `visual_output` **structurally unreachable** for handwritten turns.
-        # 116 dogfood `t_c5c57f197cd7`: canvas contains meta/h1/kpi_row/narrative/
+        # Regression check `t_c5c57f197cd7`: canvas contains meta/h1/kpi_row/narrative/
         # data_table×2/sources/code_block×2, but `compose_report.peer_authored_finish`
         # logs `kinds=['narrative','meta','sources']`, leaving the criterion undecided and recording nothing.
         # Include **visible** current-turn canvas sections, matching report-library criteria that exclude hidden/superseded.

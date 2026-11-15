@@ -1,4 +1,4 @@
-"""FEATURE_ROUTINE_NOTIFY in the scheduled runner: "only when flagged" delivery and the urgent email."""
+"""Routine alerts in the scheduled runner: "only when flagged" delivery and the urgent email."""
 
 from __future__ import annotations
 
@@ -38,17 +38,17 @@ async def _deliver(job, notifications):
 
 
 @pytest.mark.parametrize(
-    ("switch", "deliver", "flagged", "delivered"),
+    ("center", "deliver", "flagged", "delivered"),
     [
         ("1", "on_alert", False, 0),  # only when flagged, nothing flagged: no delivery
         ("1", "on_alert", True, 1),
         ("1", "always", False, 1),
         ("1", None, False, 1),  # a task saved before the mode existed delivers every run
-        ("0", "on_alert", False, 1),  # switch off: the mode is ignored, so turning it off never silences a task
+        ("0", "on_alert", False, 1),  # notification center off: no alert can be raised, so the mode is ignored
     ],
 )
-async def test_delivery_mode(monkeypatch, switch, deliver, flagged, delivered):
-    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", switch)
+async def test_delivery_mode(monkeypatch, center, deliver, flagged, delivered):
+    monkeypatch.setenv("BOWHEAD_NOTIFICATION_CENTER", center)
     notifications = _Notifications(flagged)
 
     await _deliver(_job(deliver), notifications)
@@ -56,9 +56,7 @@ async def test_delivery_mode(monkeypatch, switch, deliver, flagged, delivered):
     assert notifications.delivered == delivered
 
 
-async def test_an_unknown_alert_state_still_delivers(monkeypatch):
-    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", "1")
-
+async def test_an_unknown_alert_state_still_delivers():
     class Broken(_Notifications):
         async def routine_alert_raised(self, job, *, run_id):
             raise RuntimeError("store unavailable")

@@ -2,23 +2,29 @@
 
 import asyncio
 import json
+import time
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 import pytest
 import respx
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_collaboration import CollaborationStore
+from bowhead_core.agent_run_limits import AgentRunLimits
 from bowhead_core.agents.clarification_tool import register_clarification_tool
+from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.ordinary_lead_continuation import read_ordinary_card_in_tx, reopen_ordinary_checkpoint
 from bowhead_core.subagent import PROFILES
+from bowhead_core.tool_registry import ToolSpec
 from bowhead_gateway.routes import clarifications
+from bowhead_router.types import ToolSchema
 from test_ordinary_lead_question_http import call, response
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
 from test_reference_http_start import start_case as start_case
 
-from bowhead_core import events
+from bowhead_core import events, ordinary_lead_continuation, turn_runner
 from bowhead_router import AgentBinding
 
 pytestmark = [
@@ -65,7 +71,33 @@ def _tool_results(body):
 @pytest.mark.parametrize("agent_source", ["team", "system", "private", "single_helper"])
 @pytest.mark.parametrize("premature_return", [False, True], ids=["verified-return", "corrected-return"])
 async def test_default_peer_exchange_and_clarification_resume_keep_original_work(http_start, monkeypatch, agent_source, premature_return):
+    await _peer_exchange_question_and_answer(http_start, monkeypatch, agent_source, premature_return)
+
+
+async def test_an_answer_after_the_task_deadline_continues_the_original_work(http_start, monkeypatch):
+    # 116 t_5449b0d64780: the user answered 47 minutes after Lead asked; the
+    # 900 s collaboration deadline had kept running, so the Turn never resumed.
+    await _peer_exchange_question_and_answer(http_start, monkeypatch, "system", False, answer_delay=3600.0)
+
+
+async def _peer_exchange_question_and_answer(http_start, monkeypatch, agent_source, premature_return, *, answer_delay=0.0):
     case = http_start
+    # The user leaves for ``answer_delay`` seconds after the question card is
+    # created: shift the collaboration clock and the consumption timestamp together.
+    offset = [0.0]
+    original_init = CollaborationStore.__init__
+
+    def shifted_clock(store, *args, **kwargs):
+        original_init(store, *args, **kwargs)
+        store.clock = lambda: time.time() + offset[0]
+
+    class ShiftedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) + timedelta(seconds=offset[0])
+
+    monkeypatch.setattr(CollaborationStore, "__init__", shifted_clock)
+    monkeypatch.setattr(ordinary_lead_continuation, "datetime", ShiftedDatetime)
     enable_lead_writer(case, monkeypatch)
     if agent_source == "single_helper":
         monkeypatch.setenv("FEATURE_CHAT_MULTI_HELPER_QUESTION", "0")
@@ -73,6 +105,10 @@ async def test_default_peer_exchange_and_clarification_resume_keep_original_work
     monkeypatch.setenv("BOWHEAD_LEAD_POST_PEER_BREAK", "0")
     monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("subagent_spawn", "clarification_ask"), max_iterations=8))
     orch = case.app.state.orchestrator
+    # Context capture authorizes inputs against the Session's own artifact store (79b123899).
+    artifacts = ArtifactStore(str(case.path), LocalBackend(case.path.parent / "collaboration-uploads"))
+    await artifacts.initialize()
+    case.app.state.artifact_store = orch.artifact_store = artifacts
     orch.router.bind(AgentBinding(agent_type="echo", primary=("primary", "large")))
     register_clarification_tool(orch.tool_registry)
     case.app.include_router(clarifications.router, prefix="/api/v1/clarifications")
@@ -199,6 +235,7 @@ async def test_default_peer_exchange_and_clarification_resume_keep_original_work
         executions = [row["id"] for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id]
         assert len(executions) == 2
         assert len(lead_calls) == 2 and len(helper_calls) == 4 + int(premature_return) and len(coordination_calls) == 1
+        offset[0] = answer_delay
         resolved = await case.client.post(
             f"/api/v1/clarifications/{card_id}/resolve",
             json={"answers": [{"question": question["question"], "source": "custom", "answer": "The operations team"}]},
@@ -344,3 +381,136 @@ async def test_default_collaboration_allows_live_siblings_in_one_helper_batch(ht
     assert len(operations) == 1 and operations[0]["dependency_status"] == "resolved"
     assert counts == {"lead": 3, "compute": 4, helper_profile: 2}
     assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"
+
+
+def _team_run_limits(monkeypatch, limits: AgentRunLimits) -> None:
+    async def prefetch(_orch, _request):
+        return limits
+
+    monkeypatch.setattr(turn_runner, "_run_limits_prefetch", prefetch)
+
+
+def _probe_helper(case, monkeypatch) -> None:
+    async def probe(arguments, _ctx):
+        return {"ok": True, "region": arguments.get("region"), "rows": 12}
+
+    case.app.state.orchestrator.tool_registry.register(
+        ToolSpec(
+            schema=ToolSchema(
+                name="probe", description="Check one region.", input_schema={"type": "object", "properties": {"region": {"type": "string"}}}
+            ),
+            handler=probe,
+        )
+    )
+    monkeypatch.setitem(PROFILES, "compute", replace(PROFILES["compute"], tool_whitelist=("probe", "subagent_return")))
+    monkeypatch.setenv("BOWHEAD_PI_K_ENABLED", "0")
+    monkeypatch.setenv("BOWHEAD_LEAD_POST_PEER_BREAK", "0")
+    case.client.headers["Content-Type"] = "application/json"
+
+
+_SPAWN_PROBE = call(
+    "regional-check",
+    "subagent_spawn",
+    {"required_source_urls": [], "profile": "compute", "task": "Check every region.", "delegation_role": "helper"},
+)
+
+
+async def _send(case, respond) -> str:
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post(
+            "/api/v1/chat/send", json={"workspace_id": case.fixture.scope.workspace_id, "message": "Check every region."}
+        )
+        assert accepted.status_code == 200, accepted.text
+        turn_id = accepted.json()["turn_id"]
+        await settled(turn_id)
+    return turn_id
+
+
+def _admitted_policy(case, turn_id: str) -> dict:
+    task = next(row for row in rows(case, "agent_collaboration_turn") if row["turn_id"] == turn_id)
+    return {**json.loads(task["policy_json"]), "deadline_after_admission": task["deadline"]}
+
+
+async def test_a_helper_at_the_team_model_call_limit_returns_partial_work_and_lead_answers(http_start, monkeypatch):
+    # 116 t_6b624c829346 failed as lead_internal_error after 100 collaboration
+    # model attempts. The Team model-call limit stops the helper with its
+    # partial work while Lead keeps two decisions to answer.
+    case = http_start
+    enable_lead_writer(case, monkeypatch)
+    _team_run_limits(monkeypatch, AgentRunLimits(model_call_limit=6))
+    _probe_helper(case, monkeypatch)
+    lead_calls, helper_calls = [], []
+    answer = "North and South are verified; West is unfinished because this turn reached its model-call limit."
+
+    def respond(request):
+        body = json.loads(request.content)
+        names = {item["function"]["name"] for item in body.get("tools", [])}
+        if body.get("tool_choice") == "none":
+            lead_calls.append(body)
+            assert "Team limit of 6 model calls" in str(body["messages"])
+            return response(body, {"role": "assistant", "content": answer}, "stop")
+        if "subagent_spawn" in names:
+            lead_calls.append(body)
+            assert len(lead_calls) == 1
+            return response(body, _SPAWN_PROBE, "tool_calls")
+        if "subagent_return" in names:
+            helper_calls.append(body)
+            return response(body, call(f"probe-{len(helper_calls)}", "probe", {"region": str(len(helper_calls))}), "tool_calls")
+        return response(body, {"role": "assistant", "content": "Regional check"}, "stop")
+
+    turn_id = await _send(case, respond)
+    assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"
+    # Lead's spawn plus three helper decisions reach 6 minus Lead's reserve of 2.
+    assert len(helper_calls) == 3 and len(lead_calls) == 2
+    partial = [
+        json.loads(row["payload_json"])
+        for row in rows(case, "turn_events")
+        if row["turn_id"] == turn_id and '"stop_reason": "model_call_limit"' in row["payload_json"]
+    ]
+    assert partial and partial[0]["step_usage"] == {"used": 4, "limit": 6}
+    policy = _admitted_policy(case, turn_id)
+    assert (policy["task_seconds"], policy["max_model_attempts"], policy["max_tool_attempts"]) == (1800, None, None)
+
+
+async def test_collaboration_work_continues_past_900_seconds_within_the_team_turn_time(http_start, monkeypatch):
+    case = http_start
+    enable_lead_writer(case, monkeypatch)
+    _team_run_limits(monkeypatch, AgentRunLimits(turn_time_limit_s=1200))
+    _probe_helper(case, monkeypatch)
+    offset = [0.0]
+    original_init = CollaborationStore.__init__
+
+    def shifted_clock(store, *args, **kwargs):
+        original_init(store, *args, **kwargs)
+        store.clock = lambda: time.time() + offset[0]
+
+    monkeypatch.setattr(CollaborationStore, "__init__", shifted_clock)
+    helper_calls = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        names = {item["function"]["name"] for item in body.get("tools", [])}
+        if "subagent_spawn" in names:
+            if not helper_calls:
+                return response(body, _SPAWN_PROBE, "tool_calls")
+            return response(body, {"role": "assistant", "content": "Every region is verified."}, "stop")
+        if "subagent_return" in names:
+            helper_calls.append(body)
+            if len(helper_calls) == 1:
+                return response(body, call("probe-1", "probe", {"region": "north"}), "tool_calls")
+            # The helper's later work happens 1,000 s into the collaboration task.
+            offset[0] = 1000.0
+            if len(helper_calls) == 2:
+                return response(body, call("probe-2", "probe", {"region": "south"}), "tool_calls")
+            return response(
+                body,
+                call("done", "subagent_return", {"payload": {"delivery_surface": "chat", "exec_summary": "Every region is verified."}}),
+                "tool_calls",
+            )
+        return response(body, {"role": "assistant", "content": "Regional check"}, "stop")
+
+    turn_id = await _send(case, respond)
+    assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"
+    assert len(helper_calls) == 3
+    assert _admitted_policy(case, turn_id)["task_seconds"] == 1200

@@ -48,7 +48,7 @@
 }
 .acr-panel-quote {
   width: 100%;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--c-fill-1, var(--c-surface-2));
   padding: 8px 12px;
   font-size: 0.78125rem;
@@ -81,8 +81,8 @@
   width: 100%;
   min-height: 64px;
   resize: vertical;
-  border-radius: 8px;
-  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  border: var(--border-w, 1px) solid var(--c-line);
   background: var(--c-surface);
   color: var(--c-ink);
   padding: 8px 10px;
@@ -135,12 +135,12 @@
 .acr-panel-title:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .acr-who {
   width: 100%;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--c-fill-1, var(--c-surface-2));
   padding: 10px 12px;
   font-size: 0.78125rem;
@@ -161,7 +161,7 @@
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--c-fill-1, var(--c-surface-2));
   margin-bottom: 16px;
 }
@@ -169,7 +169,7 @@
   font: inherit;
   font-size: 0.78125rem;
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 0;
   background: transparent;
   color: var(--c-ink-2);
@@ -208,8 +208,8 @@
   flex: 1;
   min-width: 160px;
   height: 30px;
-  border-radius: 8px;
-  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  border: var(--border-w, 1px) solid var(--c-line);
   background: var(--c-surface);
   color: var(--c-ink);
   padding: 0 9px;

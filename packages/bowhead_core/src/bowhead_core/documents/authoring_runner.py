@@ -18,7 +18,7 @@ from bowhead_router.usage import detached_usage_context, usage_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from bowhead_core._db import open_shared_ctx
-from bowhead_core.agent_run_limits import AgentRunLimits, get_tool_call_budget, model_call_budget_s
+from bowhead_core.agent_run_limits import AgentRunLimits, get_model_call_budget, get_tool_call_budget, model_call_budget_s
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef
 from bowhead_core.documents.authoring_context import context as authoring_context
 from bowhead_core.documents.authoring_context import tools
@@ -298,6 +298,11 @@ async def run_authoring_turn(
         while used_tools < limits.tool_call_limit and (limits.step_limit is None or used_steps < limits.step_limit):
             if authorize_inputs is not None:
                 await authorize_inputs()
+            # Authoring model calls share the Turn's model-call budget; like a helper they
+            # leave Lead's reserved decisions for the answer.
+            shared_model_budget = get_model_call_budget()
+            if shared_model_budget is not None and not shared_model_budget.admit(is_lead=False):
+                raise DocumentRequestError("document_authoring_budget_exhausted")
             call_no += 1
             used_steps += 1
             hook = DocumentModelHook(str(delivery.path), scope, job_id, worker.owner_id, call_no, attempt_no=attempt_no)
@@ -314,6 +319,10 @@ async def run_authoring_turn(
             await _observed(delivery, scope, worker, job_id, attempt_no, call_no)
             if reply.finish_reason not in {"stop", "tool_use"} or not reply.tool_calls:
                 raise DocumentRequestError("document_authoring_no_output")
+            from bowhead_core.tool_name_canon import canonicalize_tool_calls
+
+            # This loop dispatches by name, so renamed Tool names are normalized like every agent loop.
+            canonicalize_tool_calls(reply.tool_calls, source="document_authoring")
             messages.append(
                 Message(role="assistant", content=reply.content, tool_calls=reply.tool_calls, provider_reasoning=reply.provider_reasoning)
             )

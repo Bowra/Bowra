@@ -31,7 +31,7 @@ import { subscribeNotificationCount } from "@/lib/attention-loop";
 import { localizeNotification, notificationTypeLabel } from "@/lib/notification-copy";
 import { openNotificationTarget, opensInAnotherTeam } from "@/lib/notification-open";
 import { useAppRouter } from "@/lib/use-app-router";
-import { useNotificationReachCapability } from "@/lib/use-notification-reach-capability";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const HELP_PATH = "/help/?article=notification-center";
 
@@ -48,7 +48,6 @@ function hasStatus(error: unknown, status: number): boolean {
 export function NotificationCenter() {
   const t = useTranslations("notifications");
   const router = useAppRouter();
-  const reach = useNotificationReachCapability();
   const [disabled, setDisabled] = useState(
     process.env.NEXT_PUBLIC_BOWHEAD_NOTIFICATION_CENTER === "0",
   );
@@ -116,7 +115,7 @@ export function NotificationCenter() {
     } catch (e: unknown) {
       if (!current()) return;
       if (hasStatus(e, 404)) disableCenter();
-      else setCountErr(shownError(t("count_failed_notice"), e));
+      else setCountErr(shownError(withHttpFailureReason(t("count_failed_notice"), e, { read: true }), e));
     }
   }, [disabled, disableCenter, t]);
 
@@ -137,7 +136,7 @@ export function NotificationCenter() {
     } catch (e: unknown) {
       if (!current()) return;
       if (hasStatus(e, 404)) disableCenter();
-      else setErr(shownError(t("load_failed_notice"), e));
+      else setErr(shownError(withHttpFailureReason(t("load_failed_notice"), e, { read: true }), e));
     } finally {
       if (current()) setLoading(false);
       if (pageInFlight.current === pageKey) pageInFlight.current = null;
@@ -146,27 +145,17 @@ export function NotificationCenter() {
 
   useEffect(() => {
     if (disabled) return;
-    if (reach) {
-      // FEATURE_NOTIFICATION_REACH: the attention loop polls; the bell only reads its counts.
-      return subscribeNotificationCount((result) => {
-        if (!mounted.current) return;
-        countGeneration.current += 1;
-        if (result.ok) {
-          setCounts(result.counts);
-          setCountErr(null);
-        } else if (hasStatus(result.error, 404)) disableCenter();
-        else setCountErr(shownError(t("count_failed_notice"), result.error));
-      });
-    }
-    void refreshCount();
-    const id = window.setInterval(() => void refreshCount(), 45000);
-    const onFocus = () => void refreshCount();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.clearInterval(id);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [disabled, disableCenter, reach, refreshCount, t]);
+    // The attention loop polls; the bell only reads its counts.
+    return subscribeNotificationCount((result) => {
+      if (!mounted.current) return;
+      countGeneration.current += 1;
+      if (result.ok) {
+        setCounts(result.counts);
+        setCountErr(null);
+      } else if (hasStatus(result.error, 404)) disableCenter();
+      else setCountErr(shownError(withHttpFailureReason(t("count_failed_notice"), result.error, { read: true }), result.error));
+    });
+  }, [disabled, disableCenter, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -239,7 +228,7 @@ export function NotificationCenter() {
         return;
       }
       if (url) {
-        // An item from another Team opens after switching to that Team (FEATURE_NOTIFICATION_REACH).
+        // An item from another Team opens after switching to that Team.
         switching = opensInAnotherTeam(item);
         await openNotificationTarget(item, url, router);
         close();
@@ -249,10 +238,10 @@ export function NotificationCenter() {
     } catch (e: unknown) {
       if (!ownsView(generation)) return;
       if (switching) {
-        setErr(shownError(t("team_switch_failed_notice", { team: item.teamName ?? "" }), e));
+        setErr(shownError(withHttpFailureReason(t("team_switch_failed_notice", { team: item.teamName ?? "" }), e), e));
         return;
       }
-      setErr(shownError(t(hasStatus(e, 404) ? "item_unavailable_notice" : "mark_read_failed_notice"), e));
+      setErr(shownError(withHttpFailureReason(t(hasStatus(e, 404) ? "item_unavailable_notice" : "mark_read_failed_notice"), e), e));
       if (hasStatus(e, 404)) {
         setItems((current) => current.filter((x) => x.id !== item.id));
         void refreshCount();
@@ -274,7 +263,7 @@ export function NotificationCenter() {
       if (mounted.current && view.current.open) void load(view.current.tab);
     } catch (e: unknown) {
       if (!ownsView(generation)) return;
-      setErr(shownError(t(hasStatus(e, 404) ? "item_unavailable_notice" : "archive_failed_notice"), e));
+      setErr(shownError(withHttpFailureReason(t(hasStatus(e, 404) ? "item_unavailable_notice" : "archive_failed_notice"), e), e));
       if (hasStatus(e, 404)) {
         setItems((current) => current.filter((x) => x.id !== id));
         void refreshCount();
@@ -298,7 +287,7 @@ export function NotificationCenter() {
       if (ownsView(generation)) setItems((current) => current.map((x) => ids.has(x.id) ? { ...x, readAt: x.readAt ?? new Date().toISOString() } : x));
       if (mounted.current && view.current.open) void load(view.current.tab);
     } catch (e: unknown) {
-      if (ownsView(generation)) setErr(shownError(t("read_all_failed_notice"), e));
+      if (ownsView(generation)) setErr(shownError(withHttpFailureReason(t("read_all_failed_notice"), e), e));
     } finally {
       readAllInFlight.current = false;
       if (mounted.current) setReadingAll(false);
@@ -360,18 +349,16 @@ export function NotificationCenter() {
                   {counts ? t("panel_meta", { action: actionCount, updates: pendingUpdates }) : t(countErr ? "count_unavailable" : "loading")}
                 </div>
               </div>
-              {reach ? (
-                <button
-                  type="button"
-                  className="notification-ghost-btn notification-panel__help"
-                  onClick={() => {
-                    close();
-                    router.push(HELP_PATH);
-                  }}
-                >
-                  {t("help_link")}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="notification-ghost-btn notification-panel__help"
+                onClick={() => {
+                  close();
+                  router.push(HELP_PATH);
+                }}
+              >
+                {t("help_link")}
+              </button>
               {tab !== "action" && items.some((x) => !x.readAt) ? (
                 <button type="button" className="notification-ghost-btn" disabled={readingAll} onClick={() => void handleReadAll()}>
                   <Check size={12} />
@@ -418,7 +405,6 @@ export function NotificationCenter() {
                     key={item.id}
                     item={item}
                     busy={busyIds.has(item.id)}
-                    reach={reach}
                     onOpen={(url) => void handleAction(item, url)}
                     onArchive={() => void handleArchive(item.id)}
                   />
@@ -462,13 +448,11 @@ export function rowActions(item: NotificationItemDTO): NotificationItemDTO["acti
 function NotificationRow({
   item,
   busy = false,
-  reach = false,
   onOpen,
   onArchive,
 }: {
   item: NotificationItemDTO;
   busy?: boolean;
-  reach?: boolean;
   onOpen: (url?: string | null) => void;
   onArchive: () => void;
 }) {
@@ -477,8 +461,8 @@ function NotificationRow({
   const copy = localizeNotification(item, t, locale);
   const unread = !item.readAt;
   const actionRequired = item.actionRequired;
-  const actions = reach ? rowActions(item) : [];
-  const teamName = reach ? item.teamName : null;
+  const actions = rowActions(item);
+  const teamName = item.teamName;
   return (
     <article
       className={clsx("notification-row", { unread, action: actionRequired, "is-busy": busy, "has-actions": actions.length > 0 })}

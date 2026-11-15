@@ -31,7 +31,10 @@ import type {
   TransportFailureContext,
 } from "./error-presentation";
 import {
+  attachHttpCause,
   genericUserFacingErrorMessage,
+  HttpResponseFailure,
+  isHtmlErrorBody,
   safeUserFacingErrorMessage,
 } from "./user-facing-error";
 import { TERMINAL_CHAT_CAPABILITY_HEADERS } from "./terminal-chat-capability";
@@ -72,18 +75,14 @@ export interface MeUser {
     shopify_plugin?: boolean;
     /** FEATURE_AGENT_EVAL_ALIGNMENT: the Coach alignment loop, point and suite review, held-out controls. */
     agent_eval_alignment?: boolean;
-    /** FEATURE_NOTIFICATION_REACH: one attention loop, panel actions, Team labels and browser notifications. */
+    /** The notification center is on (`BOWHEAD_NOTIFICATION_CENTER`): shows the Notifications help. */
     notification_reach?: boolean;
-    /** FEATURE_ROUTINE_NOTIFY: scheduled runs may flag results; the task form offers "only when flagged". */
+    /** The notification center is on: scheduled runs may flag results; the task form offers "only when flagged". */
     routine_notify?: boolean;
-    /** FEATURE_NOTIFICATION_DELIVERY: recorded email deliveries, reminder emails and their personal switch. */
+    /** The notification center is on: recorded email deliveries, reminder emails and their personal switch. */
     notification_delivery?: boolean;
-    /** Both Shopify integration and requester-confirmed content writes are enabled. */
-    shopify_content_confirmations?: boolean;
-    /** FEATURE_TEAM_TOOL_CONFIRMATION: the requester confirms each non-read Team MCP call. */
+    /** FEATURE_TEAM_TOOL_CONFIRMATION: team tool settings offer the tool category confirmation. */
     team_tool_confirmations?: boolean;
-    /** FEATURE_INLINE_TOOL_CONFIRMATION: confirmations are cards in the conversation plus a notice, not dialogs. */
-    inline_tool_confirmations?: boolean;
     credit?: CreditCapabilities;
     /** Future Composer controls and the legacy submission-reader capability. */
     composer?: {
@@ -392,6 +391,15 @@ function _authError(
   );
 }
 
+/** An AuthError that keeps the failed response's status and code for shared failure copy. */
+function _authResponseError(r: Response, path: string, data: unknown, rawText: string): AuthError {
+  const error = _authError(r.status, path, data, rawText, _responseRequestId(r));
+  return attachHttpCause(
+    error,
+    new HttpResponseFailure(r.status, error.reasonCode, isHtmlErrorBody(rawText, r.headers.get("content-type"))),
+  );
+}
+
 async function _readAuthBody(response: Response): Promise<ParsedAuthBody> {
   const rawText = await response.text().catch(() => "");
   if (!rawText) return { data: {}, rawText: "" };
@@ -550,7 +558,7 @@ async function _post<T>(path: string, body: unknown): Promise<T> {
   });
   const { data, rawText } = await _readAuthBody(r);
   if (!r.ok) {
-    throw _authError(r.status, path, data, rawText, _responseRequestId(r));
+    throw _authResponseError(r, path, data, rawText);
   }
   return data as T;
 }
@@ -564,7 +572,7 @@ async function _put<T>(path: string, body: unknown): Promise<T> {
   });
   const { data, rawText } = await _readAuthBody(r);
   if (!r.ok) {
-    throw _authError(r.status, path, data, rawText, _responseRequestId(r));
+    throw _authResponseError(r, path, data, rawText);
   }
   return data as T;
 }
@@ -576,7 +584,7 @@ async function _get<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const { data, rawText } = await _readAuthBody(r);
   if (!r.ok) {
-    throw _authError(r.status, path, data, rawText, _responseRequestId(r));
+    throw _authResponseError(r, path, data, rawText);
   }
   return data as T;
 }

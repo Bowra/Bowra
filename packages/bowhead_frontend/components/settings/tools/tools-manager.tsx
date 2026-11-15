@@ -93,6 +93,7 @@ import {
 import { useAppRouter } from "@/lib/use-app-router";
 import { randomUuid } from "@/lib/random-id";
 import { CharIcon, CharIconText } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Semantic colors (mockup: MCP blue/OpenAPI purple, low-saturation strokes). All user-facing technical identifiers mono.
 // Kind badges (MCP --c-info, OpenAPI --c-accent) moved to styles/ui-controls-legacy.css .legacy-badge-tool-kind.
@@ -814,7 +815,7 @@ export function ToolsManager() {
       setBuiltinTools(builtin);
       setError(null);
     } catch (e) {
-      setError(t("load_failed_safe"));
+      setError(withHttpFailureReason(t("load_failed_safe"), e, { read: true }));
     } finally {
       setBusy(false);
     }
@@ -854,7 +855,7 @@ export function ToolsManager() {
       setError(null);
       return true;
     } catch (e) {
-      setError(t("impact_failed_safe"));
+      setError(withHttpFailureReason(t("impact_failed_safe"), e, { read: true }));
       return false;
     } finally {
       setRowBusy(null);
@@ -873,7 +874,7 @@ export function ToolsManager() {
       await patchSource(s.id, { status: nextStatus });
       await refresh();
     } catch (e) {
-      setError(t("change_failed_safe"));
+      setError(withHttpFailureReason(t("change_failed_safe"), e));
     } finally {
       setRowBusy(null);
       if (restoreFocus) {
@@ -900,7 +901,7 @@ export function ToolsManager() {
       const { authorization_url } = await authorizeSource(s.id);
       window.location.href = authorization_url; // full-page navigation → we don't return here
     } catch (e) {
-      setError(t("connect_failed_safe"));
+      setError(withHttpFailureReason(t("connect_failed_safe"), e));
       setRowBusy(null);
     }
   };
@@ -948,7 +949,7 @@ export function ToolsManager() {
       setEditTarget(null);
       await refresh();
     } catch (e) {
-      setError(t("change_failed_safe"));
+      setError(withHttpFailureReason(t("change_failed_safe"), e));
     } finally {
       setBusy(false);
     }
@@ -976,7 +977,7 @@ export function ToolsManager() {
         const refreshed = await openImpactConfirmation(source, action, patch);
         if (refreshed) setError(t("impact_changed"));
       } else {
-        setError(t("change_failed_safe"));
+        setError(withHttpFailureReason(t("change_failed_safe"), e));
       }
     } finally {
       setBusy(false);
@@ -991,7 +992,7 @@ export function ToolsManager() {
       setLegacyDeleteTarget(null);
       await refresh();
     } catch (e) {
-      setError(t("delete_failed_safe"));
+      setError(withHttpFailureReason(t("delete_failed_safe"), e));
     } finally {
       setBusy(false);
     }
@@ -1047,7 +1048,7 @@ export function ToolsManager() {
     if (!tavily) return;
     setRowBusy("tavily");
     try { await setTavilyEnabled(tavily.status !== "enabled"); await refresh(); }
-    catch (e) { setError(t("change_failed_safe")); } finally { setRowBusy(null); }
+    catch (e) { setError(withHttpFailureReason(t("change_failed_safe"), e)); } finally { setRowBusy(null); }
   };
   const refreshScope = async (tool: TeamBuiltinTool) => {
     setRowBusy(tool.id);
@@ -1057,7 +1058,7 @@ export function ToolsManager() {
       setDatarcEditTarget((current) => current?.id === refreshed.id ? refreshed : current);
       setError(null);
     } catch (e) {
-      setError(t("scope_failed_safe"));
+      setError(withHttpFailureReason(t("scope_failed_safe"), e));
     } finally {
       setRowBusy(null);
     }
@@ -1109,13 +1110,13 @@ export function ToolsManager() {
   const toggleDatarc = async (tool: TeamBuiltinTool) => {
     setRowBusy(tool.id);
     try { await setDatarcEnabled(tool.id, tool.status !== "enabled"); await refresh(); }
-    catch (e) { setError(t("change_failed_safe")); } finally { setRowBusy(null); }
+    catch (e) { setError(withHttpFailureReason(t("change_failed_safe"), e)); } finally { setRowBusy(null); }
   };
   const confirmDeleteDatarc = async () => {
     if (!datarcDeleteTarget) return;
     setBusy(true);
     try { await deleteDatarcTool(datarcDeleteTarget.id); setDatarcDeleteTarget(null); await refresh(); }
-    catch (e) { setError(t("delete_failed_safe")); } finally { setBusy(false); }
+    catch (e) { setError(withHttpFailureReason(t("delete_failed_safe"), e)); } finally { setBusy(false); }
   };
   const loadUsage = useCallback(() => {
     if (!usageTarget) return Promise.reject(new Error("resource_usage_target_missing"));

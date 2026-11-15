@@ -73,6 +73,44 @@ describe("AgentRunLimitsSettings", () => {
     expect(saveMock.mock.calls[1][0].modelCallTimeLimitS).toBeNull();
   });
 
+  it("saves model calls per turn as a number or unlimited and names the default on reset", async () => {
+    const initial = limits({
+      modelCallLimit: 200,
+      defaults: { ...limits().defaults, modelCallLimit: 200 },
+      ranges: { ...limits().ranges, modelCallLimit: { min: 1, max: 10000 } },
+    });
+    saveMock.mockResolvedValue({ ...initial, modelCallLimit: 50, isDefault: false, version: "v2" });
+    render(<AgentRunLimitsSettings initial={initial} />);
+    const input = screen.getByLabelText("model_calls_input_label") as HTMLInputElement;
+    expect(input.value).toBe("200");
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(screen.getByText('error_range:{"field":"model_calls_title","min":1,"max":10000}')).toBeTruthy();
+    fireEvent.change(input, { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+    expect(saveMock.mock.calls[0][0]).toEqual({ turnTimeLimitS: 1800, stepLimit: null, toolCallLimit: 300, modelCallLimit: 50 });
+    await screen.findByText("saved");
+    saveMock.mockResolvedValue({ ...initial, modelCallLimit: null, isDefault: false, version: "v3" });
+    fireEvent.click(screen.getAllByRole("radio", { name: "steps_unlimited" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2));
+    expect(saveMock.mock.calls[1][0].modelCallLimit).toBeNull();
+    await waitFor(() => expect((screen.getByLabelText("model_calls_input_label") as HTMLInputElement).disabled).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "reset" }));
+    expect(screen.getByText(/model_calls_reset:\{"calls":200\}/)).toBeTruthy();
+  });
+
+  it("leaves model calls out of the save body when the gateway does not offer them", async () => {
+    saveMock.mockResolvedValue(limits({ toolCallLimit: 500, isDefault: false, version: "v2" }));
+    render(<AgentRunLimitsSettings initial={limits()} />);
+    expect(screen.queryByLabelText("model_calls_input_label")).toBeNull();
+    fireEvent.change(screen.getByLabelText("tool_calls_title"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+    expect(saveMock.mock.calls[0][0]).not.toHaveProperty("modelCallLimit");
+  });
+
   it("shows the defaults with unlimited steps and the step input disabled", () => {
     render(<AgentRunLimitsSettings initial={limits()} />);
     expect((screen.getByLabelText("turn_time_title") as HTMLInputElement).value).toBe("30");

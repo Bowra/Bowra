@@ -59,8 +59,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-# Truncation limit: inline stdout/stderr shown to the agent must not be too large.
+# Inline stdout/stderr shown to the agent stays within this bound. A longer stream keeps
+# its beginning (setup, headers) and end (final results, tracebacks) around an explicit
+# omission marker with counts; stdout favors its end less than stderr, whose tracebacks end it.
 _MAX_STDIO_CHARS = 8 * 1024
+_STDOUT_HEAD_CHARS = 3 * 1024
+_STDERR_HEAD_CHARS = 1024
 # Maximum 50MB per output file (needed for large datasets; the former 10 MB limit blocked real analyses).
 _MAX_OUTPUT_BYTES = 50 * 1024 * 1024
 # Sanitize filenames: strip path separators and control characters.
@@ -612,6 +616,8 @@ def _kind_for_output(
     *,
     purpose: str = "analysis",
     deliverable_outputs: frozenset[str] = frozenset(),
+    work_outputs: frozenset[str] = frozenset(),
+    analysis_declared: bool = False,
 ) -> str | None:
     """pptx-from-template M3w.2 (RD-2) / subagent-unification P5a: per-output
     asset kind by filename.
@@ -632,10 +638,17 @@ def _kind_for_output(
     run's stray ``slide-*.png`` is NOT mis-tagged / made report-worthy).
     """
     n = name.lower()
+    if name in work_outputs:
+        # Declared work in progress: an ordinary sandbox output a later call can read, never a result file.
+        return None
     if n.startswith("deck-slide-") and n.endswith(".png"):
         return "deck_preview"
     if purpose == "deliverable" and name in deliverable_outputs:
         return "deliverable"
+    if analysis_declared:
+        # Regression check: a call that explicitly declared purpose='analysis' wrote drafts
+        # (stage1.html, final.html) that became result cards beside the declared deliverable.
+        return None
     if n.endswith(_DELIVERABLE_EXTS):
         return "deliverable"
     return None
@@ -690,6 +703,7 @@ def _upload_artifact(
     created_by_turn: str | None = None,
     derived_from: str | None = None,
     token: str | None = None,
+    version_of: str | None = None,
 ) -> dict | None:
     """把 workdir 里产出的文件 POST /api/v1/files/upload → 拿 artifact_id.
 
@@ -737,6 +751,8 @@ def _upload_artifact(
             _qs["created_by_turn"] = created_by_turn
         if derived_from:
             _qs["derived_from"] = derived_from
+        if version_of:
+            _qs["version_of"] = version_of
         _headers = {
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "X-Bowhead-Upload-Source": source,
@@ -752,8 +768,19 @@ def _upload_artifact(
             method="POST",
             headers=_headers,
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-            data = json.loads(resp.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as http_error:
+            # A refused file version names its reason (and the latest version) so the caller can say which file to target.
+            if version_of and http_error.code in {400, 409}:
+                try:
+                    detail = (json.loads(http_error.read().decode()).get("detail") or {}).get("error") or {}
+                except Exception:  # noqa: BLE001 — fall through to the generic failure below
+                    detail = {}
+                if str(detail.get("code") or "").startswith("version_target_"):
+                    return {"name": path.name, "version_error": detail["code"], "latest_id": detail.get("latest_id")}
+            raise
         return {
             "name": path.name,
             "artifact_id": data.get("file_id"),
@@ -1046,7 +1073,7 @@ def _friendly_runtime_error(stdout: str, stderr: str, dur: int, exit_code: int, 
         "ok": False,
         "exit_code": exit_code,
         "stdout": "" if _is_prod else _trunc(stdout),
-        "stderr": "" if _is_prod else _trunc(stderr),
+        "stderr": "" if _is_prod else _trunc(stderr, head=_STDERR_HEAD_CHARS),
         "error": "暂不支持代码执行 (sandbox 未就绪), 该问题需手动计算",
         "cause": _sandbox_not_ready_cause(sl),
         "duration_ms": dur,
@@ -1130,7 +1157,7 @@ def _run_via_executor(
     stdout = result.get("stdout") or ""
     result["_stdout_full"] = stdout
     result["stdout"] = _trunc(stdout)
-    result["stderr"] = _trunc(result.get("stderr") or "")
+    result["stderr"] = _trunc(result.get("stderr") or "", head=_STDERR_HEAD_CHARS)
     return result
 
 
@@ -1172,7 +1199,7 @@ def _run_subprocess(*, workdir: Path, timeout: int) -> dict:
             "exit_code": -1,
             "stdout": _trunc(stdout),
             "_stdout_full": stdout,
-            "stderr": _trunc(stderr),
+            "stderr": _trunc(stderr, head=_STDERR_HEAD_CHARS),
             "error": f"timeout after {timeout}s",
             "duration_ms": int((time.perf_counter() - t0) * 1000),
         }
@@ -1183,16 +1210,33 @@ def _run_subprocess(*, workdir: Path, timeout: int) -> dict:
         "exit_code": proc.returncode,
         "stdout": _trunc(stdout),
         "_stdout_full": stdout,
-        "stderr": _trunc(proc.stderr or ""),
+        "stderr": _trunc(proc.stderr or "", head=_STDERR_HEAD_CHARS),
         "error": None if proc.returncode == 0 else f"exit_code={proc.returncode}",
         "duration_ms": dur,
     }
 
 
-def _trunc(s: str) -> str:
+def _trunc(s: str, *, head: int = _STDOUT_HEAD_CHARS, complete: str | None = None) -> str:
+    """Bound an inline stream to its beginning and end, stating exactly what was omitted."""
     if len(s) <= _MAX_STDIO_CHARS:
         return s
-    return s[:_MAX_STDIO_CHARS] + f"\n[... {_MAX_STDIO_CHARS} chars truncated ...]"
+    tail = _MAX_STDIO_CHARS - head
+    omitted = s[head : len(s) - tail]
+    total_lines = s.count("\n") + (0 if s.endswith("\n") else 1)
+    marker = (
+        f"[... {len(omitted)} of {len(s)} characters ({omitted.count(chr(10))} of {total_lines} lines) omitted; "
+        f"showing the first {head} and last {tail} characters. {complete or 'The complete stream was not saved.'}]"
+    )
+    return f"{s[:head]}\n{marker}\n{s[-tail:]}"
+
+
+def _complete_stdout_note(artifact_id: str | None) -> str:
+    if not artifact_id:
+        return "The complete stdout could not be saved."
+    return (
+        f"Complete stdout: Data artifact {artifact_id} (sandbox-stdout.txt). To read omitted lines, call python_exec with "
+        f'inputs={{"stdout": {{"artifact_id": "{artifact_id}"}}}} and print only the lines you need.'
+    )
 
 
 # ─────────────────────────────────────────────────────────
@@ -1356,6 +1400,7 @@ _SKILL_CONTROL_KEYS = frozenset(
         "timeout_sec",
         "_skill_dir",
         "_skill_entry",
+        "_requires_isolated_runtime",
         # follow-up② command-mode control keys (server-injected; the `_`-prefix shape guard already excludes them from the container);
         # list them here to preserve SSOT parity.
         "_skill_command",
@@ -1367,7 +1412,10 @@ _SKILL_CONTROL_KEYS = frozenset(
         "_session_id",
         "_turn_id",
         "_output_purpose",
+        "_output_purpose_declared",
         "_deliverable_outputs",
+        "_work_outputs",
+        "_revises",
         "_artifact_fetch_token",
         "_sandbox_executor_url",
         "_sandbox_executor_token",
@@ -1439,10 +1487,14 @@ def _stage_user_skill(workdir: Path, skill_dir: Path, entry: str) -> str | None:
     """
     if skill_dir.is_symlink() or not skill_dir.is_dir() or not (skill_dir / "SKILL.md").is_file():
         return f"skill dir invalid or missing SKILL.md: {skill_dir}"
-    # review-P2 defense in depth: tools.py owns the guard, but runner also asserts _skill_dir is under
-    # .data/{user_skills,team_skills}, preventing future runner callers from pointing it at /app or elsewhere.
+    # Keep uploaded bundles under the existing data roots. The one bundled
+    # compiler is an exact path relative to this installed runner, not a
+    # caller-supplied trusted-root or a name-only exception.
     _parts = skill_dir.resolve().parts
-    if not any(part == ".data" and _parts[i + 1] in {"user_skills", "team_skills", "org_skills"} for i, part in enumerate(_parts[:-3])):
+    bundled_compiler = Path(__file__).resolve().parents[2] / "latex-report"
+    if skill_dir.resolve() != bundled_compiler.resolve() and not any(
+        part == ".data" and _parts[i + 1] in {"user_skills", "team_skills", "org_skills"} for i, part in enumerate(_parts[:-3])
+    ):
         return f"skill dir not under .data/{{user,team}}_skills: {skill_dir}"
     dst = workdir / "skill"
 
@@ -1604,7 +1656,9 @@ def _materialize_data_outputs(
     is runner-private and is always removed before result.json is written.
     """
 
+    complete_stdout = "_stdout_full" in result
     stdout = result.pop("_stdout_full", result.get("stdout") or "")
+    stdout_artifact_id: str | None = None
     skill_result = result.get("skill_result")
     candidates: list[tuple[str, str, str]] = []
     materialization_errors: list[str] = []
@@ -1651,11 +1705,16 @@ def _materialize_data_outputs(
             )
             continue
         record["data_role"] = data_role
+        if data_role == "stdout":
+            stdout_artifact_id = record["artifact_id"]
         if data_role == "structured":
             preview = _preview_structured(path)
             if preview:
                 record["preview"] = preview
         outputs.append(record)
+    if complete_stdout and len(stdout) > _MAX_STDIO_CHARS:
+        # Point the bounded preview at the saved complete stream, or say it was not saved.
+        result["stdout"] = _trunc(stdout, complete=_complete_stdout_note(stdout_artifact_id))
     for materialization_error in materialization_errors:
         _fail_data_materialization(result, materialization_error)
 
@@ -1720,6 +1779,22 @@ def main() -> int:
 
     gateway = os.environ.get("BOWHEAD_GATEWAY_URL", "http://127.0.0.1:8080")
     backend = (os.environ.get("BOWHEAD_SANDBOX_BACKEND") or "executor").lower()
+    if payload.get("_requires_isolated_runtime") and backend != "executor":
+        _write_result(
+            workdir,
+            {
+                "ok": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "",
+                "cause": "isolated_runtime_required",
+                "execution_state": "not_started",
+                "error": "This Skill requires the isolated sandbox executor. Host subprocess execution is not supported.",
+                "duration_ms": 0,
+                "outputs": [],
+            },
+        )
+        return 0
     # pptx-from-template M2 (wheelhouse) — offline hash-pinned long-tail deps.
     _wheelhouse = (os.environ.get("BOWHEAD_SANDBOX_WHEELHOUSE") or "").strip() or None
 
@@ -1743,10 +1818,23 @@ def main() -> int:
     _output_purpose = str(payload.get("_output_purpose") or "analysis").strip()
     if _output_purpose not in {"analysis", "deliverable"}:
         _output_purpose = "analysis"
+    _analysis_declared = _output_purpose == "analysis" and payload.get("_output_purpose_declared") is True
     _raw_deliverable_outputs = payload.get("_deliverable_outputs")
     _deliverable_outputs = frozenset(
         str(name) for name in (_raw_deliverable_outputs if isinstance(_raw_deliverable_outputs, list) else []) if isinstance(name, str) and name
     )
+    _raw_work_outputs = payload.get("_work_outputs")
+    _work_outputs = (
+        frozenset(str(name) for name in (_raw_work_outputs if isinstance(_raw_work_outputs, list) else []) if isinstance(name, str) and name)
+        - _deliverable_outputs
+    )
+    # File versions: {declared output filename: artifact it revises}, validated by tools.py (server key only).
+    _raw_revises = payload.get("_revises")
+    _revises = {
+        str(name): str(target)
+        for name, target in (_raw_revises.items() if isinstance(_raw_revises, dict) else ())
+        if isinstance(name, str) and name in _deliverable_outputs and isinstance(target, str) and target
+    }
     # cca P3 F-B: artifact-fetch token (set by tools.py from the gateway ctx minter). Read
     # HOST-SIDE only; threaded into _materialize_inputs → _fetch_artifact as a Bearer header
     # so the gateway download owner-check runs as the real caller. NEVER written into the
@@ -1857,6 +1945,9 @@ def main() -> int:
             if _k in _SKILL_CONTROL_KEYS or _k == "inputs" or _k.startswith("_"):
                 continue
             _container_input.setdefault(_k, _v)
+        if payload.get("_requires_isolated_runtime"):
+            # Pass the normalized execution budget, not an independent helper default.
+            _container_input["timeout_sec"] = timeout
     (workdir / "input.json").write_text(
         json.dumps(_container_input, ensure_ascii=False),
         encoding="utf-8",
@@ -1926,6 +2017,8 @@ def main() -> int:
             p.name,
             purpose=_output_purpose,
             deliverable_outputs=_deliverable_outputs,
+            work_outputs=_work_outputs,
+            analysis_declared=_analysis_declared,
         )
         rec = _upload_artifact(
             p,
@@ -1934,8 +2027,14 @@ def main() -> int:
             kind=_out_kind,
             created_by_turn=_created_by_turn,
             token=_artifact_fetch_token,  # cca P3 F-B: own outputs as the real caller
+            version_of=_revises.get(p.name) if _out_kind == "deliverable" else None,
         )
-        if rec:
+        if rec and rec.get("version_error"):
+            latest = f"; the latest version is {rec['latest_id']}" if rec.get("latest_id") else ""
+            output_data_errors.append(
+                f"sandbox file {p.name} was not stored as a new version of {_revises.get(p.name)}: {rec['version_error']}{latest}"
+            )
+        elif rec:
             # Structured tabular files (csv/tsv/json/jsonl) get previews so the canvas
             # decomposer can convert them into data_table sections in the Data tab.
             preview = _preview_structured(p)

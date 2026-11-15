@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 import {
   AuthError,
   AuthField,
@@ -31,8 +32,8 @@ export default function CommunitySetupPage() {
         if (!status.required) router.replace("/login/");
         else setReady(true);
       })
-      .catch(() => {
-        if (active) setError(t("status_failed"));
+      .catch((cause: unknown) => {
+        if (active) setError(withHttpFailureReason(t("status_failed"), cause, { read: true }));
       });
     return () => {
       active = false;
@@ -62,7 +63,7 @@ export default function CommunitySetupPage() {
       router.replace("/login/");
     } catch (cause) {
       const code = cause && typeof cause === "object" && "code" in cause ? String(cause.code) : "";
-      setError(
+      setError(withHttpFailureReason(
         t(
           code === "invalid_setup_token"
             ? "invalid_token"
@@ -70,7 +71,8 @@ export default function CommunitySetupPage() {
               ? "already_initialized"
               : "failed",
         ),
-      );
+        cause,
+      ));
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,10 @@
 import { clearInvalidSessionAndRedirect, fetchWithRefresh } from "./auth-api";
 import {
+  GENERIC_ERROR_CODE,
   genericUserFacingErrorMessage,
+  httpFailureKind,
+  httpFailureMessage,
+  isHtmlErrorBody,
   safeUserFacingErrorMessage,
 } from "./user-facing-error";
 import {
@@ -183,16 +187,16 @@ export async function readApiError(response: Response): Promise<ApiError> {
     try {
       body = JSON.parse(raw) as unknown;
     } catch {
-      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-      const looksLikeHtml =
-        contentType.includes("text/html") ||
-        /^\s*<!doctype\s+html\b/i.test(raw) ||
-        /^\s*<html\b/i.test(raw);
+      const looksLikeHtml = isHtmlErrorBody(raw, response.headers.get("content-type"));
       body = looksLikeHtml ? null : raw;
       nonApiResponse = looksLikeHtml;
     }
   }
-  const { message, code } = readApiErrorBody(body, fallback);
+  const parsed = readApiErrorBody(body, fallback);
+  const { code } = parsed;
+  // An uncoded status (proxy page, restart, timeout, rate limit) says why instead of the generic copy.
+  const kind = httpFailureKind({ name: "ApiError", status: response.status, code, nonApiResponse });
+  const message = kind && (parsed.message === fallback || code === GENERIC_ERROR_CODE) ? httpFailureMessage(kind) : parsed.message;
   const diagnostics = parsePublishedErrorDiagnostics(body, {
     status: response.status,
     code,

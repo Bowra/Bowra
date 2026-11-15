@@ -65,7 +65,7 @@ _DELIVERY_MODES = frozenset({"always", "on_alert"})
 
 
 def _checked_notify_channels(value: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Reject an unknown delivery mode. ``deliver`` (FEATURE_ROUTINE_NOTIFY): "always" (the default
+    """Reject an unknown delivery mode. ``deliver``: "always" (the default
     when absent) delivers every successful run; "on_alert" only runs the task's Agent flagged."""
     if value is not None and "deliver" in value and value["deliver"] not in _DELIVERY_MODES:
         raise HTTPException(
@@ -537,7 +537,7 @@ class ScheduledJobDTO(BaseModel):
     # user pauses from system pauses for invalid/changed workflows, offering rebinding for the latter.
     pause_reason: str | None = None
     recipe_ref: str | None = None
-    # scheduled-recipe-runs S1 FR-1.5 / FR-3.2 (116 dogfood P2-1): readable bound-workflow name and author.
+    # scheduled-recipe-runs S1 FR-1.5 / FR-3.2 (Regression check P2-1): readable bound-workflow name and author.
     # recipe_ref is JSON {form, id_or_name}; both team forms use unreadable oskill_* ids
     # for id_or_name, preventing FE from showing the bound workflow and author. Server enrichment avoids FE joining three
     # endpoints and supports US-6 delegated-permission visibility at list level (execution via team-solidified workflow X, authored by Y).
@@ -581,7 +581,7 @@ class ScheduledJobRunDTO(BaseModel):
     status: str
     error: str | None = None
     error_diagnostics: dict[str, Any] | None = None
-    # FEATURE_NOTIFICATION_DELIVERY: what happened to this run's result and alert emails. No addresses.
+    # What happened to this run's result and alert emails. No addresses.
     deliveries: list[ScheduledRunDeliveryDTO] = Field(default_factory=list)
 
 
@@ -1214,7 +1214,7 @@ async def delete_job(
                 request.app,
                 request_ids=[item.request_id for item in result.invalidations],
             )
-    # Deleted jobs invalidate their pending actions too (116 dogfood P2-4); otherwise the bell keeps requesting
+    # Deleted jobs invalidate their pending actions too (Regression check P2-4); otherwise the bell keeps requesting
     # scheduled-task information, deep-linking to a session with no job/run ownership, while scheduled.paused
     # remains pending for all admins. Best effort: deletion succeeded; incomplete notification cleanup must not become 5xx.
     notify = getattr(request.app.state, "notification_service", None)
@@ -1332,7 +1332,7 @@ async def run_now(
             status.HTTP_409_CONFLICT,
             "scheduled_recipe_lost",
         )
-    # Supersede old awaiting runs first (S3 · FR-5.5 · 116 dogfood P1-B). Manual reruns are the owner's escape route:
+    # Supersede old awaiting runs first (S3 · FR-5.5 · Regression check P1-B). Manual reruns are the owner's escape route:
     # if a job asks for definitions every period and run-now always returns 409, owners are locked out of their routines; @manual
     # jobs are permanently unusable (next_run_at always NULL → never due → tick's expiry branch cannot reach them).
     # Superseding records skipped/scheduled_input_superseded (**no strike**: deliberate replacement is not failure) and invalidates old cards,

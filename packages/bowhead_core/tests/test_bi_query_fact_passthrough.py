@@ -95,7 +95,8 @@ async def test_single_and_batch_preserve_query_facts(monkeypatch: pytest.MonkeyP
         assert result["_parse"]["unknown_words"] == ["不含"]
         assert result["sample_rows"] == single["rows"][:10]
     assert by_query[_TEXT_QUERY]["query_explain_text"] == _TEXT
-    assert by_query[_STRUCTURED_QUERY]["query_explain"] == _STRUCTURED
+    # The model view states the absent filter explicitly (Datarc omits keys that took no effect).
+    assert by_query[_STRUCTURED_QUERY]["query_explain"] == {**_STRUCTURED, "filters": []}
     assert by_query[_STRUCTURED_QUERY]["_rows_limited_by_query"] is True
     assert client.download_data.await_count == 4
 
@@ -106,7 +107,7 @@ async def test_empty_result_retains_the_engine_report_and_query() -> None:
     client.download_data.side_effect = None
     result = await _run(client, [_STRUCTURED_QUERY])
     assert result["row_count"] == result["rows_shown"] == 0
-    assert result["query_explain"] == _STRUCTURED
+    assert result["query_explain"] == {**_STRUCTURED, "filters": []}
     assert result["query_text"] == _STRUCTURED_QUERY
     assert result["_no_data"] is True
     assert "Datarc returned 0 rows for this query" in result["_no_data_hint"]

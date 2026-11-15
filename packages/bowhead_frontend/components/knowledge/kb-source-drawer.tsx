@@ -7,6 +7,7 @@ import { getKbFile, type KbFileDTO } from "@/lib/kb-api";
 import { toast } from "@/lib/use-toast";
 
 import { KbFileDrawer } from "./kb-file-drawer";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /**
  * View a knowledge base file in place on the current page, with its cited excerpt pinned first and highlighted.
@@ -35,9 +36,9 @@ export function KbSourceDrawer({
       .then((f) => {
         if (!cancelled) setFile(f);
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (cancelled) return;
-        toast({ kind: "info", text: t("view_source_failed") });
+        toast({ kind: "info", text: withHttpFailureReason(t("view_source_failed"), cause, { read: true }) });
         onClose();
       });
     return () => {

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import re
 
-StopReason = str  # "step_limit" | "time_limit" | "tool_call_limit" | "no_progress" | "budget"
+StopReason = str  # "step_limit" | "time_limit" | "tool_call_limit" | "model_call_limit" | "no_progress" | "budget"
 
-STOP_REASONS = ("step_limit", "time_limit", "tool_call_limit", "no_progress", "budget", "agent_stalled")
+STOP_REASONS = ("step_limit", "time_limit", "tool_call_limit", "model_call_limit", "no_progress", "budget", "agent_stalled")
 WRAP_UP_TIMEOUT_S = 90.0
 WRAP_UP_MAX_OUTPUT_TOKENS = 2000
 # Lead receives each section up to this length; persisted events use a shorter bound.
@@ -22,6 +22,7 @@ _REASON_TEXT = {
     "agent_stalled": "the local execution stall timeout",
     "time_limit": "the time limit of this turn",
     "tool_call_limit": "the Team's tool-call limit for this turn",
+    "model_call_limit": "the Team's model-call limit for this turn",
     "no_progress": "several steps in a row that produced no new results",
     "budget": "the available credit",
 }

@@ -118,7 +118,7 @@ async def run_manual_context(runner, request, *, ctx, bus, agent_runner) -> Turn
         )
         runner._check_cancel()
         if result.candidate is not None:
-            publication = await view.conversation_publication(messages)
+            publication = await view.conversation_publication(messages, hygiene=False)
             bus._context_publication = replace(publication, append_answer=False)
             bus._context_maintenance_completions = tuple(completed)
         elif not result.attempted:

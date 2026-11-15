@@ -264,7 +264,8 @@ describe("ChartStyleEditor", () => {
     vi.mocked(getTeamChartStyle).mockRejectedValueOnce(new ApiError(503, "boom"));
     renderEditor();
 
-    await screen.findByText(messages.settings.appearance.chartStyleV2.errors.load);
+    // The load sentence stays first; the temporary unavailability follows it.
+    await screen.findByText((text) => text.startsWith(messages.settings.appearance.chartStyleV2.errors.load));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await screen.findByRole("heading", { name: "经营复盘" });
   });

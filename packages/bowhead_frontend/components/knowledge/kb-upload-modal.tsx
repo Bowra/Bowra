@@ -57,6 +57,7 @@ import { useSpaceSelection } from "@/lib/use-space";
 import { typeMeta } from "./kb-file-types";
 import { IconCheckBig, IconRetry, IconSpin, IconX } from "./kb-icons";
 import { useKbMeState } from "./use-kb-me";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 
 interface Props {
@@ -304,7 +305,9 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       setDriveResults(await importKbFromGoogleDrive(picked.slice(0, DRIVE_IMPORT_LIMIT).map((f) => f.id), { scope, scope_id: computeScopeId() }));
     } catch (e) {
       const code = e instanceof ApiError ? e.code : undefined;
-      setError(code === "google_not_connected" || code === "google_reauth_required" ? tDrive("not_connected") : tDrive("load_failed"));
+      setError(code === "google_not_connected" || code === "google_reauth_required"
+        ? tDrive("not_connected")
+        : withHttpFailureReason(tDrive("load_failed"), e));
     } finally {
       setDriveBusy(false);
     }

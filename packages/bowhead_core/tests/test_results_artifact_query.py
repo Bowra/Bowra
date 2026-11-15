@@ -246,3 +246,61 @@ async def test_report_closure_scope_precedes_count_search_direct_lens_and_exact_
     assert [entry.artifact.id for entry in direct.entries] == ["art_other"]
     assert exact_inside is not None and exact_inside.created_by == "user_2"
     assert exact_outside is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_results_show_one_entry_per_file_at_its_first_position(tmp_path: Path) -> None:
+    """File versions R2: versions of a file are one entry keyed by the first version, showing the latest
+    version the caller may see, at the position the file already had (a new version never moves it)."""
+    from importlib import import_module
+
+    store = await _store(tmp_path)
+    async with aiosqlite.connect(store.db_path) as db:
+        # Another deliverable between the file's first and second version: ordering by the latest version would swap them.
+        await db.execute(
+            "INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,trust) VALUES "
+            "('art_deliverable_b','周报.pptx','application/vnd.openxmlformats-officedocument.presentationml.presentation',1,"
+            "'fixture','fixture/path','user_1','2026-08-24T12:06:30+00:00','deliverable','trusted')"
+        )
+        await db.execute(
+            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1','art_deliverable_b','2026-08-24T00:00:00+00:00',NULL)"
+        )
+        await db.commit()
+    before_snapshot = await store.results_high_water(session_id="session_1", user_id="user_1")
+    before = await store.query_results_for_session(session_id="session_1", user_id="user_1", snapshot=before_snapshot, normalized_query="")
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    pptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    async with aiosqlite.connect(store.db_path) as db:
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        await db.executemany(
+            "INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,trust,version_of,lineage_id,version_no) "
+            "VALUES (?,'交付报告.pptx',?,1,'fixture','fixture/path',?,?,'deliverable','trusted',?,'art_deliverable',?)",
+            [
+                ("art_deliverable_v2", pptx, "user_1", "2026-08-24T12:07:00+00:00", "art_deliverable", 2),
+                # A later version the caller may not see never hides the visible one.
+                ("art_deliverable_v3", pptx, "user_2", "2026-08-24T12:08:00+00:00", "art_deliverable_v2", 3),
+            ],
+        )
+        await db.executemany(
+            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1',?,'2026-08-24T00:00:00+00:00',NULL)",
+            [("art_deliverable_v2",), ("art_deliverable_v3",)],
+        )
+        await db.commit()
+    store._version_cols_present = None  # the columns arrived after the first query cached their absence
+    snapshot = await store.results_high_water(session_id="session_1", user_id="user_1")
+    page = await store.query_results_for_session(session_id="session_1", user_id="user_1", snapshot=snapshot, normalized_query="")
+
+    keys = [entry.sort_tuple[-1] for entry in page.entries]
+    assert keys == [entry.sort_tuple[-1] for entry in before.entries], "Same entries, same order"
+    file_entry = next(entry for entry in page.entries if entry.sort_tuple[-1] == "artifact:art_deliverable")
+    assert (file_entry.artifact.id, file_entry.lineage_count) == ("art_deliverable_v2", 2)
+    assert file_entry.position == next(e.position for e in before.entries if e.sort_tuple[-1] == "artifact:art_deliverable")
+    assert page.authorized_total == before.authorized_total and page.group_counts == before.group_counts
+
+    query = {"session_id": "session_1", "user_id": "user_1", "snapshot": snapshot, "normalized_query": ""}
+    for anchor in ("art_deliverable", "art_deliverable_v2"):
+        located = await store.result_entry_for_artifact(artifact_id=anchor, **query)
+        assert located is not None and (located.artifact.id, located.position) == ("art_deliverable_v2", file_entry.position)
+    assert await store.count_new_results_for_session(session_id="session_1", user_id="user_1", snapshot=before_snapshot, normalized_query="") == 1

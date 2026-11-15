@@ -33,6 +33,13 @@ import { subscribeNotificationCount } from "@/lib/attention-loop";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 const turns = (cursor: string) => json({ items: [], cursor });
+const turn = (session_id: string, outcome = "completed") => ({
+  turn_id: `t_${session_id}`,
+  session_id,
+  title: `Q3 ${session_id}`,
+  outcome,
+  ended_at: "2026-10-21T09:00:00+00:00",
+});
 const count = (latest: string | null, action = 1) => ({ actionRequired: action, updatesUnread: 0, totalBadge: action, latestBrowserCandidateAt: latest });
 
 function urgent(id: string, overrides: Record<string, unknown> = {}) {
@@ -94,6 +101,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   FakeChannel.instances = [];
   vi.stubGlobal("BroadcastChannel", FakeChannel);
+  window.history.replaceState(null, "", "/");
   mocks.apiFetch.mockImplementation(async () => turns("c0"));
 });
 
@@ -119,6 +127,32 @@ describe("AttentionLoop", () => {
     expect(mocks.fetchNotificationCount).toHaveBeenCalledTimes(2);
     expect(seen).toEqual([{ ok: true, counts: count(null) }, { ok: true, counts: count(null) }]);
     unsubscribe();
+  });
+
+  it("announces turns that end after it starts, with an Open action, but not the session being viewed", async () => {
+    window.history.replaceState(null, "", "/?session=s_here");
+    mocks.fetchNotificationCount.mockResolvedValue(count(null));
+    mocks.apiFetch.mockResolvedValueOnce(turns("c0")).mockResolvedValueOnce(json({ items: [turn("s_away", "partial"), turn("s_here")], cursor: "c1" }));
+    render(<AttentionLoop />);
+    await tick(0);
+    expect(mocks.toast).not.toHaveBeenCalled();
+    await tick(15_000);
+
+    expect(mocks.apiFetch.mock.calls[1][0]).toContain("after=c0");
+    expect(mocks.toast).toHaveBeenCalledTimes(1);
+    const shown = mocks.toast.mock.calls[0][0];
+    expect(shown.kind).toBe("warning");
+    expect(shown.text).toBe('partial:{"title":"Q3 s_away"}');
+    shown.action.onAction();
+    expect(mocks.push).toHaveBeenCalledWith("/?session=s_away");
+  });
+
+  it("never announces turns that ended before the page loaded", async () => {
+    mocks.fetchNotificationCount.mockResolvedValue(count(null));
+    mocks.apiFetch.mockResolvedValueOnce(json({ items: [turn("s_old")], cursor: "c0" }));
+    render(<AttentionLoop />);
+    await tick(0);
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 
   it("never announces urgent items that arrived before the page loaded", async () => {

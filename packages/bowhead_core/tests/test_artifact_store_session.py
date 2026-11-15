@@ -646,3 +646,69 @@ async def test_kb_chat_binding_retains_upload_owner_and_space_fences(store: Arti
     async with aiosqlite.connect(store.db_path) as db:
         count = (await (await db.execute("SELECT COUNT(*) FROM artifact_upload_bindings WHERE artifact_id=?", (artifact.id,))).fetchone())[0]
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_single_file_membership_matches_the_session_list_without_scanning_turn_events(
+    store: ArtifactStore,
+) -> None:
+    """Context publication checks one file at a time inside its write transaction.
+
+    Each check must give the Session list's answer, and a file proven by an indexed
+    source must not rebuild the Session set (its receipt branch scans every Turn event).
+    """
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.executemany(
+            "INSERT INTO sessions(id, workspace_id, user_id, started_at, last_active_at) VALUES (?, '1', 'u1', ?, ?)",
+            [("s_main", _at(-30), _at(-1)), ("s_other", _at(-30), _at(-1))],
+        )
+        await db.executemany("INSERT INTO turns(id, session_id) VALUES (?, ?)", [("t_main", "s_main"), ("t_other", "s_other")])
+        await db.execute("INSERT INTO canvases(id, session_id) VALUES ('cv_main', 's_main')")
+        await db.commit()
+
+    async def put(name: str, *, user: str = "u1", **fields):  # type: ignore[no-untyped-def]
+        return await store.put_bytes(content=name.encode(), filename=name, mime="text/plain", source="python_sandbox", created_by=user, **fields)
+
+    uploaded = await put("upload.txt")
+    pinned = await put("pinned.txt")
+    detached = await put("detached.txt")
+    on_canvas = await put("canvas.txt")
+    produced = await put("produced.txt", created_by_turn="t_main")
+    elsewhere = await put("elsewhere.txt", created_by_turn="t_other")
+    foreign = await put("foreign.txt", user="u2", created_by_turn="t_main")
+    deleted = await put("deleted.txt", created_by_turn="t_main")
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("INSERT INTO turn_attachments(turn_id, artifact_id, seq) VALUES ('t_main', ?, 0)", (uploaded.id,))
+        await db.executemany(
+            "INSERT INTO session_attachments(session_id, artifact_id, pinned_at, detached_at) VALUES ('s_main', ?, ?, ?)",
+            [(pinned.id, _at(-5), None), (detached.id, _at(-5), _at(-2))],
+        )
+        await db.execute("UPDATE artifacts SET canvas_id='cv_main' WHERE id=?", (on_canvas.id,))
+        await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=?", (_at(-1), deleted.id))
+        await db.commit()
+
+    members = {item.id for item in await store.list_for_session(session_id="s_main", user_id="u1")}
+    assert members == {uploaded.id, pinned.id, on_canvas.id, produced.id}
+    statements: list[str] = []
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.set_trace_callback(statements.append)
+        for artifact in (uploaded, pinned, detached, on_canvas, produced, elsewhere, foreign, deleted):
+            statements.clear()
+            found = await store.list_for_session(session_id="s_main", user_id="u1", artifact_id=artifact.id, limit=1, connection=db)
+            assert [item.id for item in found] == ([artifact.id] if artifact.id in members else []), artifact.filename
+            if artifact.id in members:
+                assert not any("turn_events" in statement for statement in statements), artifact.filename
+
+
+def test_a_slow_completion_write_is_a_warning(caplog) -> None:
+    """Regression check H2: the completion transaction holds the execution writer lock, so a slow one is surfaced."""
+    import logging
+
+    from bowhead_core.session_store import COMPLETION_WRITE_WARN_MS, _record_completion_write
+
+    with caplog.at_level(logging.INFO, logger="bowhead_core.session_store"):
+        _record_completion_write("t_fast", 12.0, context=True, transitioned=True)
+        _record_completion_write("t_slow", COMPLETION_WRITE_WARN_MS + 1, context=True, transitioned=True)
+    levels = {record.getMessage().split(" ")[0]: record.levelno for record in caplog.records}
+    assert levels["session.completion_write"] == logging.INFO
+    assert levels["session.completion_write_slow"] == logging.WARNING

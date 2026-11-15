@@ -192,3 +192,30 @@ describe("文件页删除后撤销（行为批 B）", () => {
     expect(await screen.findByText("已撤销删除")).toBeTruthy();
   });
 });
+
+describe("文件版本（file versions A2）", () => {
+  beforeEach(() => _clearAllToasts());
+  afterEach(() => _clearAllToasts());
+
+  it("a revised file shows its version, and Undo names the earlier versions deleted with it", async () => {
+    const versioned = file("f_v2", "经营报告.html", { mime: "text/html", version_no: 2, version_count: 2 });
+    api.listFiles.mockImplementation(async (params: { include_deleted?: boolean }) => {
+      const items = params.include_deleted ? [] : [versioned];
+      return { items, total: items.length, size_total_bytes: 1024 };
+    });
+    renderIntl(<><FilesPage /><ToastContainer /></>);
+    expect(await screen.findByText("v2")).toBeTruthy();
+    const menu = await openRowMenu("经营报告.html 的更多操作");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "删除" }));
+    await waitFor(() => expect(api.deleteFile).toHaveBeenCalledWith("f_v2"));
+    expect((await screen.findByTestId("toast-info")).textContent).toContain("已删除 经营报告.html 及其之前的 1 个版本");
+  });
+
+  it("a file a document draft still uses explains what to do instead of failing silently", async () => {
+    api.deleteFile.mockRejectedValue(Object.assign(new Error("in use"), { code: "file_in_document" }));
+    renderIntl(<><FilesPage /><ToastContainer /></>);
+    const menu = await openRowMenu("九月销售.pdf 的更多操作");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "删除" }));
+    expect(await screen.findByText(/有文档草稿仍在使用这个文件/)).toBeTruthy();
+  });
+});

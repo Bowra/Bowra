@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
 import { HttpStatusError } from "@/lib/api-client";
+import { httpFailureMessage } from "@/lib/user-facing-error";
 
 const state = vi.hoisted(() => ({
   fetchNotifications: vi.fn(),
@@ -34,6 +35,7 @@ function failure(status: number) {
 }
 
 afterEach(() => {
+  document.documentElement.lang = "";
   state.diagnosticsEnabled = false;
   state.fetchNotifications.mockReset();
 });
@@ -44,13 +46,15 @@ describe("NotificationCenter load failure copy", () => {
     ["en-US", "Notifications", "Couldn't load notifications. Try again later."],
     ["de-DE", "Benachrichtigungen", "Benachrichtigungen konnten nicht geladen werden. Versuchen Sie es später erneut."],
     ["fr-FR", "Notifications", "Impossible de charger les notifications. Réessayez plus tard."],
-  ] as const)("says what happened without a status code (%s)", async (locale, _bell, message) => {
+  ] as const)("says what happened and why, without a status code (%s)", async (locale, _bell, message) => {
+    document.documentElement.lang = locale;
     state.fetchNotifications.mockRejectedValue(failure(500));
     renderIntl(<NotificationCenter />, { locale });
 
     fireEvent.click(screen.getByRole("button", { expanded: false }));
 
-    expect(await screen.findByText(message)).toBeInTheDocument();
+    const reason = httpFailureMessage("server_error", locale);
+    expect(await screen.findByText((text) => text.startsWith(message) && text.endsWith(reason))).toBeInTheDocument();
     const panel = document.querySelector("[data-notification-center]");
     expect(panel?.textContent ?? "").not.toMatch(STATUS_CODE);
   });

@@ -2,20 +2,18 @@ import "./_process-shim";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
-import { EmailSendConfirmations } from "../components/chat/email-send-confirmations";
 import { ToastContainer } from "../components/chat/toast-container";
 import { ConfirmDialog } from "../components/ui/confirm-dialog";
 import { Dialog } from "../components/ui/dialog";
 import { MenuFloating, useMenu, useMenuItem } from "../components/ui/menu";
 import { toast } from "../lib/use-toast";
 import zh from "../messages/zh-CN.json";
-import "../styles/personal-mcp.css";
 
 /**
  * Real-browser layer-contract fixture (docs/design/组件统一-技术设计.md “图层”): use real
  * DialogShell / Dialog / confirmation / useMenu / ToastContainer and real styles to build nested combinations.
  */
-type Scene = "none" | "toast-over-confirm" | "menu-in-top-dialog" | "dialog-from-high-host" | "email-confirm-over-dialog";
+type Scene = "none" | "toast-over-confirm" | "menu-in-top-dialog" | "dialog-from-high-host";
 
 declare global {
   interface Window {
@@ -85,18 +83,6 @@ function Harness() {
           <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.2)" }} data-testid="high-host">
             <Nested />
           </div>
-        ) : null}
-        {scene === "email-confirm-over-dialog" ? (
-          <>
-            {/* An ordinary dialog is already open (mounted on body), then polling receives an email confirmation. The confirmation renders in the app shell:
-                on desktop, .v2-app-root is fixed and creates its own stacking context. */}
-            <Dialog title="成员设置" onClose={() => undefined}>
-              <p>已经打开的弹窗</p>
-            </Dialog>
-            <div className="v2-app-root">
-              <EmailSendConfirmations />
-            </div>
-          </>
         ) : null}
       </main>
       <ToastContainer />

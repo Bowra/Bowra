@@ -13,6 +13,7 @@ import { DialogShell } from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api-client";
 import { randomUuid } from "@/lib/random-id";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 interface AgentForkDialogProps {
   agentId: string;
@@ -41,9 +42,9 @@ export function AgentForkDialog({ agentId, onClose, onComplete }: AgentForkDialo
         setDisplayName(value.suggested_display_name);
         setState("ready");
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (!active) return;
-        setError(t("fork_preview_failed"));
+        setError(withHttpFailureReason(t("fork_preview_failed"), cause, { read: true }));
         setState("error");
       });
     return () => { active = false; };
@@ -73,7 +74,7 @@ export function AgentForkDialog({ agentId, onClose, onComplete }: AgentForkDialo
           ? t("fork_name_unavailable")
           : code === "agent_fork_source_changed" || code === "agent_fork_policy_changed"
             ? t("fork_source_changed")
-            : t("fork_create_failed"),
+            : withHttpFailureReason(t("fork_create_failed"), cause),
       );
       setState("ready");
     }

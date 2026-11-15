@@ -25,6 +25,7 @@ import {
   formatBytes,
 } from "@/lib/kb-api";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { appPath } from "@/lib/base-path";
 import { formatShortDateTime } from "@/lib/locale";
 
 import { IconChat, IconChevL, IconDownload, IconEye, IconTrash, IconX } from "./kb-icons";
@@ -355,6 +356,16 @@ export function KbFileDrawer({
               </div>
             </div>
           )}
+
+          {file.newer_version ? (
+            <div className="prog" data-testid="kb-drawer-newer-version">
+              <div className="t">{t("newer_version_title", { version: file.newer_version.version_no })}</div>
+              <div className="d">{t("newer_version_body")}</div>
+              <div className="r">
+                <a className="kb-btn kb-btn-ghost kb-btn-sm" href={appPath("/files/")}>{t("newer_version_open_files")}</a>
+              </div>
+            </div>
+          ) : null}
 
           {ready && (
             <div className="dr-acts">

@@ -28,6 +28,7 @@ from bowhead_gateway.public_url import public_app_url_for_base
 
 if TYPE_CHECKING:
     from bowhead_core.scheduled_store import ScheduledJob
+    from bowhead_core.types import ScheduledRunRef
     from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
@@ -402,7 +403,7 @@ async def _deliver_run_result(
             body = "\n".join(lines)
             # `send_notification` returns `(ok, error)` and **does not raise**. Ignoring it makes an undelivered email
             # a completely silent failure: the run stays successful, in-app delivery proceeds, logs are clean, and users believe email was delivered.
-            # (116 dogfood, 2026-08-06: the entire delivery path logged neither success nor failure). Minimal visibility here:
+            # (Regression check, 2026-08-06: the entire delivery path logged neither success nor failure). Minimal visibility here:
             # warn with failure counts for diagnosis. Omit addresses (recipients are PII; the dropped-address log also omits them).
             sent = 0
             failures: list[str] = []
@@ -439,7 +440,7 @@ async def _record_run_delivery(
     run_id: str,
     team_id: str | None,
 ) -> None:
-    """FEATURE_NOTIFICATION_DELIVERY: the run's result becomes one in-app item plus recorded emails.
+    """Recorded deliveries: the run's result becomes one in-app item plus recorded emails.
 
     Each configured address must belong to an active member of the task's Team (the same allowlist,
     at most 5 people); the delivery worker sends, retries and records each outcome for the run
@@ -476,7 +477,7 @@ async def _result_email_user_ids(app: FastAPI, emails: list[str], team_id: str |
 
 
 async def routine_result_email_reaches_owner(app: FastAPI, run: Any) -> bool:
-    """Whether this run's result email will go to the task owner (FEATURE_NOTIFICATION_DELIVERY).
+    """Whether this run's result email will go to the task owner (recorded deliveries).
 
     True when the task emails its results and the owner's address is among the member recipients.
     An urgent alert in such a run holds its email for the result email to carry it.
@@ -510,15 +511,32 @@ async def _release_held_alert_email(app: FastAPI, job: ScheduledJob, run_id: str
         await _settle_alert_email(notif, job, run_id, merged=False)
 
 
+def scheduled_run_ref(job: Any, *, run_id: str, session_id: str) -> ScheduledRunRef:
+    """The ``ScheduledRunRef`` a Turn of this task's run carries, from its start and again when an
+    answer resumes it: without it the resumed half cannot alert (``routine_notify``) and is not
+    checked for a claimed alert (Regression check N10)."""
+    from bowhead_core.types import ScheduledRunRef
+
+    return ScheduledRunRef(
+        job_id=job.id,
+        run_id=run_id,
+        owner_id=job.user_id,
+        workspace_id=job.workspace_id,
+        job_name=job.name,
+        session_id=session_id,
+        delivers_only_when_flagged=_delivers_only_when_flagged(getattr(job, "notify_channels", None) or {}),
+    )
+
+
 def _delivers_only_when_flagged(channels: dict[str, Any]) -> bool:
     """Delivery mode "only when flagged" (``notify_channels.deliver == "on_alert"``) is in effect.
 
-    With FEATURE_ROUTINE_NOTIFY off the mode is ignored and every run is delivered as before,
-    so turning the switch off never silences a task.
+    With the notification center off (``BOWHEAD_NOTIFICATION_CENTER=0``) no alert can be raised, so
+    the mode is ignored and every run is delivered: switching the center off never silences a task.
     """
-    from bowhead_core.routine_notify_tool import routine_notify_enabled
+    from bowhead_core.notification_service import notification_center_enabled
 
-    return channels.get("deliver") == "on_alert" and routine_notify_enabled()
+    return channels.get("deliver") == "on_alert" and notification_center_enabled()
 
 
 async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict[str, Any], *, run_id: str) -> bool:
@@ -538,7 +556,7 @@ async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict
 
 
 async def send_routine_alert_email(app: FastAPI, run: Any, item: Any) -> None:
-    """Email the task owner about an urgent ``routine_notify`` alert, once (FEATURE_ROUTINE_NOTIFY).
+    """Email the task owner about an urgent ``routine_notify`` alert, once.
 
     Fixed product copy naming the task and a link to the run; no model text. The owner's address
     must pass the same member allowlist as scheduled result email, under the task's own Team;
@@ -1060,8 +1078,6 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
         # IANA zone); an unknown zone keeps the deployment clock. Snapshotted with the
         # language context, so a resumed run keeps the same clock.
         language_context = language_context.with_time_zone(getattr(job, "tz", None))
-        from bowhead_core.types import ScheduledRunRef
-
         turn_id = f"t_sched_{uuid4().hex[:10]}"
         from bowhead_gateway.chart_authoring_projection import actor_chart_authoring_projection
 
@@ -1074,15 +1090,7 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
                 app, session_id=session_id, workspace_id=job.workspace_id, team_id=team_id or "", user_id=job.user_id
             ),
             # The positive signal that this Turn is a scheduled run (admits routine_notify).
-            scheduled_run=ScheduledRunRef(
-                job_id=job.id,
-                run_id=turn_id,
-                owner_id=job.user_id,
-                workspace_id=job.workspace_id,
-                job_name=job.name,
-                session_id=session_id,
-                delivers_only_when_flagged=_delivers_only_when_flagged(getattr(job, "notify_channels", None) or {}),
-            ),
+            scheduled_run=scheduled_run_ref(job, run_id=turn_id, session_id=session_id),
             workspace_id=job.workspace_id,
             datarc_binding=datarc_ctx.connection_binding,
             active_datarc_project=_active_project,  # Batch 2/c9: per-user + snapshot = pin value.

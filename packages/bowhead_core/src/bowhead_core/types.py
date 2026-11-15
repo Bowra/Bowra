@@ -236,6 +236,9 @@ class TurnRequest:
     # Original retained Lead state is loaded by the server after scope checks.
     ordinary_clarification_id: str | None = field(default=None, repr=False, compare=False)
     ordinary_lead_checkpoint: OrdinaryLeadCheckpoint | None = field(default=None, repr=False, compare=False)
+    # The exact checkpoint was refused after the answer: restart Lead with the
+    # original request and the saved answers instead of failing the Turn.
+    ordinary_restart: bool = field(default=False, repr=False, compare=False)
     # Server-injected storage for fresh ordinary Web Chat collaboration.
     # Resumes reopen an existing admission instead of granting a new one.
     collaboration_store: Any = field(default=None, repr=False, compare=False)

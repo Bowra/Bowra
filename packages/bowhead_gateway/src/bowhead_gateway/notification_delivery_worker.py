@@ -1,4 +1,4 @@
-"""Send recorded notification emails (FEATURE_NOTIFICATION_DELIVERY).
+"""Send recorded notification emails.
 
 Each tick leases due ``notification_deliveries`` rows and, for each, rechecks at send time:
 
@@ -42,11 +42,6 @@ _MAX_ATTEMPTS = 5
 _BACKOFF = {1: 60, 2: 300, 3: 1800, 4: 7200}
 _PERMANENT_PREFIXES = ("SMTPRecipientsRefused", "SMTPSenderRefused", "SMTPAuthenticationError", "smtp_target_blocked", "invalid to address")
 _UNCONFIGURED = {"smtp not configured", "smtp sender not configured"}
-
-
-def notification_delivery_enabled() -> bool:
-    """FEATURE_NOTIFICATION_DELIVERY (default off). Rollout and rollback: docs/灰度功能清单.md."""
-    return os.environ.get("FEATURE_NOTIFICATION_DELIVERY", "0").strip().lower() in {"1", "true", "yes"}
 
 
 def env_interval_s() -> int:

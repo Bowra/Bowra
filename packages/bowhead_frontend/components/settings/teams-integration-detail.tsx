@@ -9,6 +9,7 @@ import { fetchTeamsAdminConfig, TeamsAdminConfig, updateTeamsAdminConfig } from 
 import { withUiHooks } from "./ui-hook-classes";
 import rawStyles from "./integration-pages.module.css";
 import { CharIconText } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Append a global ui-integ-* hook to each class (new appearance in styles/ui-refresh-pages-settings.css).
 const styles = withUiHooks(rawStyles, "ui-integ");
@@ -28,7 +29,7 @@ export function TeamsIntegrationDetail() {
   const [error, setError] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
 
-  useEffect(() => { void fetchTeamsAdminConfig().then(setConfig).catch(() => setError(t("load_failed"))); }, [t]);
+  useEffect(() => { void fetchTeamsAdminConfig().then(setConfig).catch((cause: unknown) => setError(withHttpFailureReason(t("load_failed"), cause, { read: true }))); }, [t]);
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setSaving(true); setError("");
@@ -40,7 +41,7 @@ export function TeamsIntegrationDetail() {
         sso_connection_name: String(form.get("connection") || ""), teams_manifest_id: String(form.get("manifest") || ""),
         status: String(form.get("status") || "draft") as TeamsAdminConfig["status"], ...(secret ? { app_secret: secret } : {}),
       })); setSecret("");
-    } catch { setError(t("save_failed")); } finally { setSaving(false); }
+    } catch (cause) { setError(withHttpFailureReason(t("save_failed"), cause)); } finally { setSaving(false); }
   };
 
   return <div className={styles.page}>

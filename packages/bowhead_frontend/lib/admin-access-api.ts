@@ -1,4 +1,5 @@
 import { responseRequestId } from "./error-presentation";
+import { attachHttpCause, HttpResponseFailure, isHtmlErrorBody } from "./user-facing-error";
 import { appFetch as fetch } from "@/lib/base-path";
 
 export interface AccessGroup {
@@ -107,21 +108,25 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, { ...init, credentials: "include" });
   if (!r.ok) {
     const detail = await r.json().catch(() => ({}));
-    const code =
-      detail?.detail?.error?.code ??
-      detail?.detail?.code ??
-      detail?.code ??
-      "error";
+    const responseCode = detail?.detail?.error?.code ?? detail?.detail?.code ?? detail?.code;
+    const code = responseCode ?? "error";
     // Pages show localized explanations via adminAccessErrorKey; raw API text, status and error codes are never shown directly,
     // only in diagnostics (Copy Diagnostics or collapsed section).
     const message =
       detail?.detail?.error?.message ?? detail?.detail?.message;
-    throw new AdminAccessError(
-      r.status,
-      code,
-      typeof message === "string" ? message : "",
-      responseRequestId(r),
-      typeof detail?.detail === "string" ? detail.detail : undefined,
+    throw attachHttpCause(
+      new AdminAccessError(
+        r.status,
+        code,
+        typeof message === "string" ? message : "",
+        responseRequestId(r),
+        typeof detail?.detail === "string" ? detail.detail : undefined,
+      ),
+      new HttpResponseFailure(
+        r.status,
+        typeof responseCode === "string" ? responseCode : undefined,
+        isHtmlErrorBody("", r.headers.get("content-type")),
+      ),
     );
   }
   if (r.status === 204) return undefined as T;

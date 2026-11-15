@@ -203,6 +203,13 @@ async def present_artifacts(arguments: dict, ctx) -> dict:
             if (inspection := await inspect_retained_html(ctx.artifact_store, artifact)) is not None:
                 output["html_static_check"] = inspection
             outputs.append(output)
+        # File versions (R6): say when a presented file has a newer version; the model decides.
+        from bowhead_core.artifact_store import newer_version_facts
+
+        newer = await newer_version_facts(ctx.artifact_store, [output["artifact_id"] for output in outputs])
+        for output in outputs:
+            if output["artifact_id"] in newer:
+                output["newer_version"] = newer[output["artifact_id"]]
         await _require_scope(ctx)
         return NativePresentationResult(
             {

@@ -531,3 +531,104 @@ async def test_post_cas_first_wire_failure_occurs_after_hide() -> None:
 
     assert store.hidden is True
     assert bus.snapshot() == []
+
+
+# Revision-target design §9 (Regression check M2): a revised file is its own report, so a pointer to the unchanged
+# Canvas is retracted, and only that clause: "报告已生成" there names the new file version.
+_VERSION_ANSWER = "第 8 版 HTML 报告已生成：2025年全年经营分析报告.html。主要改动：月度图改柱状图，完整报告见画布。"
+
+
+def _file_turn_bus(text: str = _VERSION_ANSWER, **overrides) -> _Bus:
+    attrs = {
+        "_canvas_pointer_claimed": lo._claims_canvas_pointer(text),
+        "_lead_chat_text": text,
+        "_file_revision_dispatched": True,
+        "_terminal_canvas_changed": False,
+        **overrides,
+    }
+    return _Bus(**attrs)
+
+
+async def test_file_revision_turn_retracts_only_the_canvas_pointer() -> None:
+    bus = _file_turn_bus()
+    assert await lo._reconcile_canvas_pointer(bus, "t1", "completed", True)
+    [final] = _finals(bus)
+    assert final.payload["reason_code"] == "canvas_pointer_reconciled"
+    assert final.payload["text"].startswith("第 8 版 HTML 报告已生成：2025年全年经营分析报告.html。主要改动：月度图改柱状图")
+    assert "见画布" not in final.payload["text"]
+
+
+@pytest.mark.parametrize(
+    ("text", "overrides"),
+    [
+        (_VERSION_ANSWER, {"_terminal_canvas_changed": True}),  # a mixed Turn also revised the Canvas report
+        (_VERSION_ANSWER, {"_terminal_canvas_changed": None}),  # the terminal read could not tell
+        (_VERSION_ANSWER, {"_canvas_followed_file_version": True}),  # the Canvas embed shows the new version
+        (_VERSION_ANSWER, {"_file_revision_dispatched": False}),  # no file revision: today's behavior
+        ("完整报告见画布。", {}),  # nothing would remain; "no canvas report" would mislead after a file
+        ("第 2 版 HTML 报告已生成：report.html。", {}),  # a version sentence without a Canvas pointer stays
+    ],
+)
+async def test_file_revision_pointer_is_kept_without_full_evidence(text: str, overrides: dict) -> None:
+    bus = _file_turn_bus(text, **overrides)
+    assert not await lo._reconcile_canvas_pointer(bus, "t1", "completed", True)
+    assert _finals(bus) == []
+
+
+class _Section(SimpleNamespace):
+    pass
+
+
+class _RevisionCanvasStore:
+    def __init__(self, appended: list, touched: set[str], listed: list, *, broken: bool = False) -> None:
+        self.appended, self.touched, self.listed, self.broken = appended, touched, listed, broken
+        self.touched_reads = 0
+
+    async def list_sections_appended_by_turn(self, _turn_id: str) -> list:
+        return self.appended
+
+    async def section_ids_touched_by_turn(self, _turn_id: str) -> set[str]:
+        self.touched_reads += 1
+        if self.broken:
+            raise RuntimeError("ledger unavailable")
+        return self.touched
+
+    async def get_canvas_by_session(self, _session_id: str):
+        return SimpleNamespace(id="cv_1")
+
+    async def list_sections(self, _canvas_id: str, include_hidden: bool = False) -> list:
+        return self.listed
+
+
+class _DeliverableStore:
+    async def turn_has_deliverable(self, _turn_id: str) -> bool:
+        return True
+
+
+_CODE = _Section(id="sec_code", kind="code_block", payload={})
+_CHART = _Section(id="sec_chart", kind="chart", payload={})
+
+
+@pytest.mark.parametrize(
+    ("store", "expected"),
+    [
+        (_RevisionCanvasStore([_CODE], {"sec_code"}, [_CODE]), False),  # python_exec streams code; the report is unchanged
+        (_RevisionCanvasStore([_CODE, _Section(id="sec_n", kind="narrative", payload={})], set(), []), True),
+        (_RevisionCanvasStore([], {"sec_chart"}, [_CHART]), True),  # an edit_chart patch on an earlier chart
+        (_RevisionCanvasStore([], {"sec_gone"}, [_CHART]), True),  # an unlisted touched section counts as a change
+        (_RevisionCanvasStore([_CODE], set(), [], broken=True), None),  # unreadable ledger: unknown, never "unchanged"
+    ],
+)
+async def test_terminal_read_records_whether_a_file_turn_changed_the_canvas(store, expected) -> None:
+    bus = _Bus(_d6_canvas_store=store, _d6_artifact_store=_DeliverableStore(), _d6_turn_id="t_file", _d6_session_id="s1")
+    bus._file_revision_dispatched = True
+    await lo._resolve_terminal_response_kind(bus, "t_file", "chat")
+    assert bus._terminal_canvas_changed is expected
+    assert bus._terminal_report_kept is True, "The delivered file keeps the report surface"
+
+
+async def test_terminal_read_skips_the_canvas_probe_without_a_file_revision() -> None:
+    store = _RevisionCanvasStore([_CODE], {"sec_code"}, [_CODE])
+    bus = _Bus(_d6_canvas_store=store, _d6_artifact_store=_DeliverableStore(), _d6_turn_id="t_plain", _d6_session_id="s1")
+    await lo._resolve_terminal_response_kind(bus, "t_plain", "chat")
+    assert bus._terminal_canvas_changed is None and store.touched_reads <= 1

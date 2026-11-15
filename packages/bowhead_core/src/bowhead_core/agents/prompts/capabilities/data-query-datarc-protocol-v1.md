@@ -34,7 +34,7 @@ Inspect the parse report on each result before you use the rows.
 
 - Unknown words present — the engine did not understand them. Stop and report a domain mismatch. The rows you got back are a fuzzy fallback, not an answer.
 - Half-matched values present — resolve those terms before deciding anything.
-- Every token carrying a resolved property — the request parsed cleanly.
+- Every token carrying a resolved property — the request parsed cleanly. A clean parse does not mean every condition was applied; see the next section.
 
 Two more shapes require stopping rather than retrying:
 
@@ -43,9 +43,13 @@ Two more shapes require stopping rather than retrying:
 
 ## What the engine actually ran
 
-Every result carries the engine's own report of the query it executed: a structured report keyed by aspect, or a single sentence on older instances. Treat it as the record of what ran, and use it when you state which measure, grouping and date range your answer covers. Do not parse the wording inside it; those strings are display text in the member's account language.
+Every result carries the engine's own report of the query it executed: a structured report keyed by aspect, or a single sentence on older instances. It comes first in the result, right after the hint, and a structured report with no filter shows `"filters": []`. Treat it as the only record of what ran, and use it when you state which measure, grouping, filter and date range your answer covers. The words of your query, or a concept lookup that matched one of them, do not show that a condition was applied; never describe the scope from them. Do not parse the wording inside it; those strings are display text in the member's account language.
 
 Detection is already done for you. When the engine applied no filter for a term you asked about, cut the result to a row limit, or covered a period that has not finished yet, the tool states that fact in the result's hint. Act on the stated fact — resolve the term, restrict to values the data holds, re-query without the limit, or keep the partial period out of comparisons — rather than re-deriving it yourself. No report at all means the instance does not provide one; that is not evidence that nothing was filtered.
+
+The hint also names a filter value your query text contains but the executed query applies under no `filters` or `having` condition. The engine did not apply it, typically because the measure comes from a model without that dimension, so the rows are totals across all values. Whether that value belongs to the scope the user asked for is your judgment. If it does, the rows are not its result: re-query with a related measure the schema offers for that breakdown, or state plainly that the data cannot be restricted that way, and never label these rows with the value in a title, chart or prose. If the value is incidental wording, use the rows as returned.
+
+Record that judgment when you return: `subagent_return` takes one `filter_scope_checks` entry per named value, giving the value, whether it is in scope, and how you handled it — `requeried` (the delivered rows come from a query whose report lists the condition), `stated_limit` (the answer says the data cannot be restricted that way) or `incidental`. A missing or contradictory entry is refused. Decide before you build charts, so titles do not need reworking.
 
 ## When the result is incomplete
 

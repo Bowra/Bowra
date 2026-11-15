@@ -132,6 +132,21 @@ for (const width of [412, 1440]) {
       }));
       expect(scrollLayout.messageHeight).toBeLessThanOrEqual(scrollLayout.parentHeight);
       expect(scrollLayout.parentOverflow).toBeLessThanOrEqual(1);
+      // A running Turn's band announces through an absolutely positioned status (`.bh-band__sr`). Its containing
+      // block must lie inside the message scroller: on 116 it resolved to the outer body, kept a layout position far
+      // below the visible messages and gave the body a second scrollbar while the Turn ran.
+      const runningStatus = await page.locator(".v2-messages-inner").evaluate((inner) => {
+        const status = document.createElement("span");
+        status.className = "bh-band__sr";
+        status.setAttribute("role", "status");
+        status.textContent = "Working out the next step · Step 3";
+        inner.append(status);
+        const messages = inner.closest(".v2-messages")!;
+        const containedByMessages = Boolean(status.offsetParent && messages.contains(status.offsetParent));
+        status.remove();
+        return { containedByMessages };
+      });
+      expect(runningStatus.containedByMessages).toBe(true);
       expect(sourceRequests).toBe(0);
       await links.first().hover();
       await links.first().focus();

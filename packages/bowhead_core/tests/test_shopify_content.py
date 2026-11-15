@@ -145,7 +145,6 @@ async def test_unapproved_change_never_dispatches(setup, monkeypatch, decision):
             self.events.append((event.event_type, dict(event.payload)))
             return True
 
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
     api = RecordingApi([reply("product", obj())] * 2, scopes=setup.scopes)
     transport(monkeypatch, api)
     view = specs(setup)

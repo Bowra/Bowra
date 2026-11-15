@@ -479,7 +479,6 @@ export function dispatchToTurnStore(
           category: parsed.category,
           choices: parsed.choices,
           expiresAt: parsed.expiresAt,
-          timeoutSeconds: parsed.timeoutSeconds,
         },
       });
       return true;

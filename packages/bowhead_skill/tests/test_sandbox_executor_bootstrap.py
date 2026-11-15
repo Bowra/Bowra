@@ -194,7 +194,9 @@ def test_executor_does_not_claim_cleanup_when_docker_remove_fails(tmp_path, monk
     assert result["execution_state"] == "unknown"
 
 
-@pytest.mark.parametrize("boundary", ["settled", "cleanup_failed", "identity_missing", "cancel_during_inspect"])
+@pytest.mark.parametrize(
+    "boundary", ["settled", "script_failed", "cleanup_failed", "script_failed_cleanup_failed", "identity_missing", "cancel_during_inspect"]
+)
 def test_executor_attests_actual_container_only_after_confirmed_cleanup(tmp_path, monkeypatch, boundary):
     import json
     from types import SimpleNamespace
@@ -214,18 +216,24 @@ def test_executor_attests_actual_container_only_after_confirmed_cleanup(tmp_path
                 workdir.with_name(f".{workdir.name}.cancelled").touch()
             metadata = [{"Image": "sha256:" + "a" * 64, "HostConfig": {"Runtime": "runsc", "NetworkMode": "none"}}]
             return subprocess.CompletedProcess(argv, 0, "[]" if boundary == "identity_missing" else json.dumps(metadata), "")
-        failed = boundary == "cleanup_failed" and argv[1] == "rm"
+        failed = boundary.endswith("cleanup_failed") and argv[1] == "rm"
         return subprocess.CompletedProcess(argv, 1 if failed else 0, "", "daemon unavailable" if failed else "")
 
     def start(*args, **kwargs):
         assert boundary != "cancel_during_inspect"
-        return SimpleNamespace(returncode=0, communicate=lambda **kwargs: ("42", ""))
+        # A script error exits non-zero; the container still stops and is removed.
+        return SimpleNamespace(returncode=1 if boundary.startswith("script_failed") else 0, communicate=lambda **kwargs: ("42", ""))
 
     monkeypatch.setattr(mod.subprocess, "run", run)
     monkeypatch.setattr(mod.subprocess, "Popen", start)
     result = mod._run({"workdir": str(workdir)})
     assert [command[1] for command in commands] == ["create", "inspect", "rm"]
-    if boundary == "settled":
+    if boundary == "script_failed":
+        # A failed script in a removed container is settled: its outcome and outputs are final.
+        assert result["ok"] is False and result["cause"] == "execution_failed" and result["execution_state"] == "stopped"
+        assert result["execution"]["settled"] is True
+        assert result["execution"]["id"] == commands[0][commands[0].index("--name") + 1]
+    elif boundary == "settled":
         assert result["execution"]["image_id"] == "sha256:" + "a" * 64
         assert result["execution"]["runtime"] == "runsc"
         assert result["execution"]["settled"] is True

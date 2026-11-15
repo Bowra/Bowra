@@ -329,7 +329,7 @@ async def test_new_deck_style_reference_excludes_generated_output(kind, source):
     )
     assert artifacts.read_ids == ["art_reference"]
     assert "not an in-place edit" in block
-    assert "existing-template edits retain their original workflows" in block
+    assert "This Tool creates new slides and does not change an existing file." in block
 
 
 def test_overclaim_caveat_needed_logic() -> None:

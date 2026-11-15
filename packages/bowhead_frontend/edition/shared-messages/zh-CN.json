@@ -786,9 +786,11 @@
     "credits_badge": "额度",
     "credits_low": "余 {pct}% · {balance}",
     "credits_critical": "即将用完 · {balance}",
+    "credits_exhausted": "额度已用完",
     "credits_button_aria": "额度：{value}",
     "credits_plan": "{plan} 套餐",
     "credits_left": "剩余 <num>{balance}</num>",
+    "credits_over": "超出本期配额 <num>{amount}</num>",
     "credits_usage_label": "本期已用额度",
     "credits_usage_value": "已用 {used} / {quota}（{pct}%）",
     "credits_used_of": "已用 {used} / {quota}",
@@ -796,7 +798,7 @@
     "credits_resets_on": "{date} 重置",
     "credits_state_low": "额度偏低：本期配额还剩 {pct}%。",
     "credits_state_critical": "即将用完：本期配额只剩 {pct}%。",
-    "credits_state_empty": "额度已用完。",
+    "credits_state_exhausted": "本期额度已用完。新的请求要等额度重置，或请管理员增加额度。",
     "credits_view_details": "查看用量明细",
     "navigation_drawer": "导航抽屉",
     "close_drawer": "关闭抽屉",
@@ -7416,6 +7418,7 @@
         "turn_time_limit_s": "每轮时限（秒）",
         "step_limit": "每项任务步数",
         "tool_call_limit": "每轮工具调用次数",
+        "model_call_limit": "每轮模型调用次数",
         "model_call_time_limit_s": "模型调用时限（秒）",
         "max_retries": "模型重试次数",
         "providers": "连接与模型声明",
@@ -7491,6 +7494,9 @@
         },
         "model_call_time_limit_s": {
           "null": "自动"
+        },
+        "model_call_limit": {
+          "null": "不限制"
         }
       },
       "eyebrow": "设置建议",
@@ -7604,6 +7610,11 @@
       "tool_calls_desc": "一轮对话里所有智能体调用工具的总次数，每种工具都一样计数。",
       "tool_calls_hint": "{min} – {max} 次",
       "unit_calls": "次",
+      "model_calls_title": "每轮模型调用上限",
+      "model_calls_desc": "一轮对话里 Lead 和所有助手调用模型的总次数。助手会提前 2 次停下，留给 Lead 写回答。",
+      "model_calls_input_label": "每轮最多模型调用次数",
+      "model_calls_hint": "{min} – {max} 次。设为 1 或 2 时，助手无法运行。",
+      "model_calls_reset": "每轮模型调用上限恢复为 {calls} 次。",
       "footer": "达到限制时停止未完成工作并保留已知结果。仅有受支持的已保存执行时才能继续。",
       "error_range": "{field}要在 {min} 到 {max} 之间。",
       "invalid_count": "有 {count} 处超出范围，改好后才能保存",
@@ -7770,6 +7781,10 @@
     "bundle_file_count": "{count} 个文件",
     "bundle_more_indexed": "还有 {count} 个已索引",
     "file_pages": "{count} 页",
+    "file_updated_version": "已更新到第 {version} 版",
+    "file_this_version": "下载第 {version} 版",
+    "file_this_version_failed": "第 {version} 版下载失败 · 重试",
+    "file_this_version_pruned": "第 {version} 版已清理，只保留最近 3 个版本",
     "duplicate": "这个文件已添加",
     "bundle_done": "完成"
   },
@@ -8120,7 +8135,10 @@
         "parse_failed": "解析失败"
       },
       "preview_source_missing": "上次处理时未找到原文件，暂时无法预览。若原件已恢复，请重试解析。",
-      "preview_processing_failed": "文件处理失败，暂时无法预览。请先查看上方失败原因。"
+      "preview_processing_failed": "文件处理失败，暂时无法预览。请先查看上方失败原因。",
+      "newer_version_title": "此文件已有更新的第 {version} 版",
+      "newer_version_body": "这一条仍使用当初添加的版本。要改用新版本，请在“文件”里添加新版本，再删除这一条。",
+      "newer_version_open_files": "打开“文件”"
     },
     "files_view": {
       "deep_link_failed": "无法打开该文件：它可能已被删除，或你没有所在空间的访问权限。",
@@ -8157,7 +8175,8 @@
       "load_failed_title": "没能加载文件列表",
       "search_failed_title": "没能完成内容深搜",
       "load_retry": "重试",
-      "refresh_failed": "列表没能刷新，显示的是上次加载的结果。{error}"
+      "refresh_failed": "列表没能刷新，显示的是上次加载的结果。{error}",
+      "newer_version": "已有更新的第 {version} 版"
     },
     "errors": {
       "empty_file": "文件为空",
@@ -9261,7 +9280,9 @@
       "purge_failed": "无法永久删除文件，请刷新回收站后重试。",
       "preview_failed": "无法生成文件预览，你仍可下载原文件或稍后重试。",
       "category_failed": "无法修改文件分类，请刷新文件信息后重试。",
-      "usages_failed": "无法加载文件引用记录，请稍后重试。"
+      "usages_failed": "无法加载文件引用记录，请稍后重试。",
+      "file_in_document": "有文档草稿仍在使用这个文件或它的某个版本。请先完成或移除该草稿，再删除文件。",
+      "file_in_document_version": "有文档草稿仍在使用此文件的第 {n} 版。请先完成或移除该草稿，再删除文件。"
     },
     "table": {
       "filename": "文件名",
@@ -9387,6 +9408,8 @@
     "kb_col": {
       "added": "已加入 · {status}",
       "added_plain": "已加入",
+      "older_version": "知识库里是旧版本",
+      "add_this_version": "添加第 {version} 版",
       "not_added": "未加入",
       "view_in_kb": "在知识库中查看",
       "view_progress": "查看处理进度",
@@ -9451,7 +9474,8 @@
       "restored": "已恢复 {name}",
       "restored_n": "已恢复 {count} 项",
       "purged": "已永久删除 {count} 项",
-      "purged_partial": "已永久删除 {count} 项 · {blocked} 项属于知识库未删除"
+      "purged_partial": "已永久删除 {count} 项 · {blocked} 项属于知识库未删除",
+      "deleted_versions": "已删除 {name} 及其之前的 {count} 个版本"
     },
     "use_in_chat": "在新会话中使用",
     "upload_uploading": "上传中…",
@@ -9464,7 +9488,9 @@
       "toolRun": "智能体运行产出"
     },
     "upload_failed": "上传失败 · {reason}",
-    "usage_split": "资产 {assets} · 运行数据 {run}"
+    "usage_split": "资产 {assets} · 运行数据 {run}",
+    "version_badge": "v{n}",
+    "version_title": "此文件的第 {n} 版（保留 {count} 个版本）"
   },
   "results_workspace": {
     "choose_result_title": "选择成果",
@@ -9600,7 +9626,17 @@
     "unsupported_feedback_recorded": "已记录此格式需求",
     "download_current_version": "下载当前版本",
     "download_this_version": "下载此版本",
-    "explorer_retry_locate": "重试列表定位"
+    "explorer_retry_locate": "重试列表定位",
+    "quick_version": "第 {number} 版，共 {count} 版",
+    "file_versions_title": "版本",
+    "file_versions_scope": "从新到旧 · 保留最近 3 个版本",
+    "file_versions_close": "关闭",
+    "file_versions_failed": "版本列表加载失败。",
+    "file_versions_retry": "重试",
+    "file_versions_empty": "没有可用的版本。",
+    "file_version_label": "第 {number} 版",
+    "file_version_current": "当前版本",
+    "file_version_download": "下载第 {number} 版"
   },
   "data_files": {
     "empty_no_session": "开始对话后，生成的数据文件会出现在这里.",
@@ -9753,6 +9789,9 @@
   "html_artifact": {
     "open_raw": "在新标签打开原始 HTML",
     "reload": "重新加载 HTML",
+    "updated_version": "已更新到第 {version} 版",
+    "provenance_version": "数据说明记录于第 {version} 版",
+    "version_too_large": "此文件的第 {version} 版超过团队 HTML 上限（{size}），这里仍显示之前的版本。请缩小文件，或请团队管理员调高上限。",
     "loading": "正在加载 HTML 产物…",
     "computed_badge": "静态内容未核对",
     "injected_badge": "已附带生成数据",
@@ -10479,6 +10518,8 @@
       "agent_step_limit_body": "任务达到有效模型决策上限。请查看保留结果，再缩小剩余任务范围，或请管理员调整上限。",
       "agent_tool_call_limit_title": "达到工具调用上限",
       "agent_tool_call_limit_body": "本轮工具调用预算已用完。开始剩余工作前，请先查看已完成结果。",
+      "agent_model_call_limit_title": "达到模型调用上限",
+      "agent_model_call_limit_body": "本轮已用完团队的模型调用次数上限。开始剩余工作前，请先查看已完成结果。团队负责人或管理员可以在 团队设置 › 智能体 › 运行上限 调高上限。",
       "agent_stalled_title": "任务因本地停滞停止",
       "agent_stalled_body": "没有活跃操作或本地执行状态推进。开始剩余工作前，请先查看保留结果。",
       "step_usage": "模型决策：{used} / {limit}。"
@@ -10496,6 +10537,7 @@
         "step_limit": "达到了团队的步数上限",
         "time_limit": "达到了本轮时长上限",
         "tool_call_limit": "达到了本轮的工具调用次数上限",
+        "model_call_limit": "达到了本轮的模型调用次数上限",
         "no_progress": "连续几步没有新结果，已经停下",
         "budget": "因为额度用完停下了，请先补充额度",
         "other": "达到了运行上限"
@@ -12033,6 +12075,8 @@
     "band_handoff": "接手自 {from}",
     "band_elapsed_sec": "{count} 秒",
     "band_paused": "仍在等模型响应",
+    "band_waiting_confirmation": "等待你确认",
+    "band_waiting_requester": "等待发起人确认",
     "band_model_retry_timeout": "模型响应超时，正在重试（{retry}/{max}）",
     "band_model_retry_network": "与模型服务的连接中断，正在重试（{retry}/{max}）",
     "band_model_retry_unavailable": "模型服务暂时不可用，正在重试（{retry}/{max}）",
@@ -12085,6 +12129,7 @@
       "iteration_limit_exceeded": "这个智能体用完了本轮可用的步数，任务还没做完，已停止。可以回复「继续」让它接着做，或把任务拆成更小的几步；智能体负责人或团队管理员也可以在智能体设置中调高步数上限。",
       "tool_failure_limit_exceeded": "这个分析智能体因多次工具调用失败而停止，请稍后重试。",
       "tool_call_limit_exceeded": "这个分析智能体已停止：本轮工具调用次数达到了团队上限。可以继续这个任务，或请团队管理员调高上限。",
+      "model_call_limit_exceeded": "这个分析智能体已停止：本轮模型调用次数达到了团队上限。可以继续这个任务，或请团队管理员调高上限。",
       "credit_exhausted": "这个分析智能体已停止：可用额度已用完。补充额度后可以继续这个任务。"
     },
     "collab_errors": {
@@ -12105,6 +12150,7 @@
       "step_limit": "部分完成：达到有效模型步骤上限。进一步执行前，请先查看保留的结果。",
       "time_limit": "部分完成：达到了本轮时长上限。已完成的部分在回答里，可以继续。",
       "tool_call_limit": "部分完成：本轮工具调用次数达到了团队上限。已完成的部分在回答里，可以继续。",
+      "model_call_limit": "部分完成：本轮模型调用次数达到了团队上限。已完成的部分在回答里，可以继续。",
       "no_progress": "部分完成：连续多步没有新结果，已停止。已完成的部分在回答里，可以继续。",
       "budget": "部分完成：可用额度已用完。补充额度后可以继续。",
       "other": "部分完成。已生成的成果会保留，请查看待完成事项和后续建议。",
@@ -13363,13 +13409,11 @@
     }
   },
   "emailSendConfirmation": {
-    "title": "确认发送邮件",
+    "attachment_newer_version": "此文件已有更新的第 {version} 版",
     "warning": "Bowhead 将通过团队邮件服务发送以下邮件。邮件发出后无法撤回，请核对收件人和正文，尤其是其中的数字。",
     "to": "收件人：{to}",
     "attachments": "附件",
     "subject": "主题：{subject}",
-    "expires": "请在 {time} 前决定，过期将不发送。",
-    "decisionError": "没有提交成功，或这封邮件的确认已经失效。请稍后查看对话中的结果。",
     "reject": "不发送",
     "approve": "确认发送"
   },
@@ -13435,10 +13479,7 @@
     "noPrivateAgents": "当前团队还没有你拥有的已发布智能体。",
     "saveBinding": "保存个人工具绑定",
     "removeBindings": "移除全部个人绑定",
-    "confirmTitle": "确认个人工具调用",
     "confirmWarning": "确认后，以下完整参数会发送到该外部服务。外部操作可能修改或删除数据，且不一定能撤销。请确认信息范围和操作目的。",
-    "expires": "请在 {time} 前决定，过期将跳过本次调用。",
-    "decisionError": "没有提交成功，或这个调用已经失效。请稍后刷新确认状态。",
     "reject": "拒绝并跳过",
     "approveOnce": "允许本次调用",
     "approveSession": "本次会话中始终允许",
@@ -14202,6 +14243,7 @@
       "document_candidate_invalid": "演示文稿未通过文件结构检查，未发布文件。请检查原模板，或在聊天中要求修正草稿。",
       "agent_step_limit": "达到任务步骤上限。任务达到有效模型决策上限。请查看保留结果，再缩小剩余任务范围，或请管理员调整上限。",
       "agent_tool_call_limit": "达到工具调用上限。本轮工具调用预算已用完。开始剩余工作前，请先查看已完成结果。",
+      "agent_model_call_limit": "达到模型调用上限。本轮已用完团队的模型调用次数上限。开始剩余工作前，请先查看已完成结果。团队负责人或管理员可以在 团队设置 › 智能体 › 运行上限 调高上限。",
       "agent_stalled": "任务因本地停滞停止。没有活跃操作或本地执行状态推进。开始剩余工作前，请先查看保留结果。",
       "tool_arguments_invalid": "本步骤的输入格式或数据字段不符合要求，尚未执行成功。智能体需要修正输入后再尝试。",
       "tool_resource_unavailable": "所选数据来源当前不可用。请检查访问权限或选择可用来源后继续。",
@@ -14934,7 +14976,6 @@
     "content_plugin_created": "内容优化 Plugin 已创建。请在智能体编辑器中选择；每次更新都需要你审阅确认。"
   },
   "shopifyContentConfirmation": {
-    "title": "审阅 Shopify 内容修改",
     "notice": "请核对完整修改后再更新店铺内容。若有其他人正在编辑相同内容，请先协调。",
     "product": "商品",
     "page": "页面",
@@ -14942,8 +14983,6 @@
     "after": "修改后",
     "defaultValue": "使用 Shopify 默认值",
     "emptyValue": "空白",
-    "expires": "审阅有效期至 {time}",
-    "decisionError": "未能记录你的决定。未经确认，修改不会继续。",
     "reject": "拒绝修改",
     "approve": "应用这些修改",
     "fields": {
@@ -14955,13 +14994,9 @@
     }
   },
   "teamToolConfirmation": {
-    "title": "确认团队工具调用",
-    "notice": "处理你请求的智能体要调用这个团队工具。调用使用团队连接的账号，以下完整参数会发送到该外部服务。",
     "riskExternalWrite": "这个工具被归为会修改外部服务数据的操作。",
     "riskDestructive": "这个工具被归为可能删除或覆盖数据的操作，且不一定能撤销。",
     "riskUnknown": "服务和团队都没有说明这个工具会做什么，允许前请先看清参数。",
-    "expires": "请在 {time} 前决定，过期将跳过本次调用。",
-    "decisionError": "没有提交成功，或这个调用已经失效。请在对话中查看结果。",
     "reject": "拒绝并跳过",
     "approveOnce": "允许本次调用",
     "approveSession": "本次会话中始终允许",
@@ -15263,7 +15298,8 @@
     "d_db65a4d59c05244006c6": "用于知识来源导航说明的可选团队文本模型。默认关闭。仅在新来源版本发布或用户主动请求生成时调用；读取目录或保存模型设置不会发起生成，也不会补跑历史文件。清除分配会停止新任务，仍有效的已有说明可继续使用。",
     "d_f6ce942fbba9c47980fe": "完整的新 AI 工作说明文本。逐行保留未要求修改的内容；仅在明确要求时用空文本清除。长度限制在去除字节顺序标记和首尾空白后计算。",
     "d_5351928bd1475f951a2a": "知识库模型、当前向量／重排分工和检索条数。主动关闭的可选分工不会因自动维护重新开启；来源描述默认关闭。向量模型变更仍需原有索引重建确认，索引状态由服务端维护。",
-    "d_37d82cf26c6b5a5d5176": "已主动关闭的可选分工。连接变更和验证不能将其重新开启；即使此列表没有记录，来源描述仍默认关闭。"
+    "d_37d82cf26c6b5a5d5176": "已主动关闭的可选分工。连接变更和验证不能将其重新开启；即使此列表没有记录，来源描述仍默认关闭。",
+    "d_31ae8f16122466d147cf": "Lead 和所有助手在一轮对话中共用的模型调用次数上限；设为 null 表示不限制。单个任务步数上限另行约束每次智能体运行。"
   },
   "sourceNavigation": {
     "title": "来源导航",

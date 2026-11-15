@@ -42,6 +42,9 @@ class _FakeUserStore:
     async def get_user(self, user_id: str):  # noqa: ANN201
         return SimpleNamespace(id=user_id, team_id=_TEAM)
 
+    async def get_workspace_team_id(self, workspace_id: str) -> str:
+        return _TEAM
+
 
 @pytest.fixture
 async def app_client(tmp_path: Path):
@@ -50,7 +53,7 @@ async def app_client(tmp_path: Path):
     await ss.initialize()
     store = ArtifactStore(backend=LocalBackend(root_dir=tmp_path / "f"), db_path=db_path)
     await store.initialize()
-    access = AccessControlStore(tmp_path / "ac.db")
+    access = AccessControlStore(db_path)  # One database, as in production (pruning reads share grants there).
     await access.initialize()
 
     app = FastAPI()
@@ -450,3 +453,94 @@ async def test_disabled_file_sharing_suspends_reads_and_preserves_owner_revocati
     assert client.delete(path + f"/share/workspace/{_WS}", headers=_H_OWNER).status_code == 204
     monkeypatch.setattr(share_service, "_content_sharing_cache", True)
     assert client.get(path, headers=_H_PEER).status_code == 404
+
+
+async def _versioned_file(store: ArtifactStore):
+    """A deliverable with the 0228 version columns (the frozen legacy layout lacks them)."""
+    from importlib import import_module
+
+    import aiosqlite
+
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS artifact_purge_claims (artifact_id TEXT PRIMARY KEY)")  # Migration 0046 shape.
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+            await db.execute(statement)
+        await db.commit()
+    store._version_cols_present = None
+    sessions = SessionStore(store.db_path)
+    await sessions.ensure_session(session_id="s_v", workspace_id=_WS, user_id=_OWNER)
+    for turn in ("t1", "t2", "t3", "t4", "t5", "t6", "t7"):
+        await sessions.record_turn(turn_id=turn, session_id="s_v", user_text="revise the report")
+        await sessions.finalize_turn(session_id="s_v", current_turn_id=turn, next_turn_id=None)
+
+    async def version(turn: str, target: str | None = None):
+        return await store.put_bytes(
+            content=f"<html>{turn}</html>".encode(), filename="report.html", mime="text/html", source="python_sandbox",
+            kind="deliverable", created_by=_OWNER, created_by_turn=turn, session_id="s_v", workspace_id=_WS, version_of_target=target,
+        )  # fmt: skip
+
+    return version
+
+
+async def test_a_share_follows_the_file_and_recipients_read_only_its_latest_version(app_client) -> None:
+    """File versions R5: one share covers every version; a recipient reads only the latest, an older ID is a 404."""
+    client, store, access = app_client
+    version = await _versioned_file(store)
+    v1 = await version("t1")
+    share = client.post(f"/api/v1/files/{v1.id}/share", json={"subject_kind": "workspace", "subject_id": _WS}, headers=_H_OWNER)
+    assert share.status_code == 201, share.text
+    v2 = await version("t2", v1.id)
+    assert client.get(f"/api/v1/files/{v2.id}", headers=_H_PEER).status_code == 200
+    assert client.get(f"/api/v1/files/{v1.id}", headers=_H_PEER).status_code == 404
+    shared = client.get("/api/v1/files/?shared_with_me=1", headers=_H_PEER).json()["items"]
+    assert [item["file_id"] for item in shared] == [v2.id], "The shared file is listed once, at its latest version"
+    assert client.get(f"/api/v1/files/{v2.id}/shares", headers=_H_OWNER).json()["shares"] == [{"subject_kind": "workspace", "subject_id": _WS}]
+
+    # A share made before versions (stored on that version) still follows the file.
+    v3 = await version("t3", v2.id)
+    await access.create_or_update_resource_grant(
+        team_id=_TEAM, resource_kind=ARTIFACT_RESOURCE_KIND, resource_id=v2.id, principal_type="team", principal_id=_TEAM,
+        permission="read", created_by=_OWNER,
+    )  # fmt: skip
+    assert client.get(f"/api/v1/files/{v3.id}", headers=_H_PEER).status_code == 200
+    assert client.get(f"/api/v1/files/{v2.id}", headers=_H_PEER).status_code == 404
+
+    # Revoking from any version removes the share on every version.
+    assert client.delete(f"/api/v1/files/{v3.id}/share/workspace/{_WS}", headers=_H_OWNER).status_code == 204
+    assert client.delete(f"/api/v1/files/{v3.id}/share/team/{_TEAM}", headers=_H_OWNER).status_code == 204
+    assert client.get(f"/api/v1/files/{v3.id}", headers=_H_PEER).status_code == 404
+    assert client.get("/api/v1/files/?shared_with_me=1", headers=_H_PEER).json()["items"] == []
+
+
+async def test_a_share_survives_pruning_and_the_purge_of_older_versions(app_client) -> None:
+    """File versions B4 x R5: a share is stored on the version recipients read, and pruning keeps a version holding a grant.
+
+    Stored on the already-pruned first version, the grant would resolve through a row the 30-day purge removes.
+    """
+    client, store, access = app_client
+    version = await _versioned_file(store)
+    v = [await version("t1")]
+    for turn in ("t2", "t3", "t4"):
+        v.append(await version(turn, v[-1].id))
+    assert await store.prune_versions(await store.prune_version_candidates([v[0].id]), kb_protected=set()) == 1
+    share = client.post(f"/api/v1/files/{v[3].id}/share", json={"subject_kind": "workspace", "subject_id": _WS}, headers=_H_OWNER)
+    assert share.status_code == 201, share.text
+    grants = await access.list_resource_grants(_TEAM, resource_kind=ARTIFACT_RESOURCE_KIND)
+    assert [grant.resource_id for grant in grants] == [v[3].id], "The grant names the version recipients read"
+    for turn in ("t5", "t6", "t7"):
+        v.append(await version(turn, v[-1].id))
+    candidates = await store.prune_version_candidates([v[0].id])
+    assert set(candidates) == {v[1].id, v[2].id}, "The version holding the grant is kept"
+    assert await store.prune_versions(candidates, kb_protected=set()) == 2
+    import aiosqlite
+
+    async with aiosqlite.connect(store.db_path) as db:  # The 30-day purge of pruned rows.
+        await db.execute("DELETE FROM artifacts WHERE deleted_at IS NOT NULL")
+        await db.commit()
+    assert client.get(f"/api/v1/files/{v[6].id}", headers=_H_PEER).status_code == 200
+    assert client.get(f"/api/v1/files/{v[3].id}", headers=_H_PEER).status_code == 404
+    shared = client.get("/api/v1/files/?shared_with_me=1", headers=_H_PEER).json()["items"]
+    assert [item["file_id"] for item in shared] == [v[6].id]

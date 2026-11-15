@@ -65,6 +65,8 @@ export interface ResultItem {
     availableVersionCount: number;
     exportJobCount: number;
   };
+  /** File versions: the shown version's number and the file's version count (complete Results list only). */
+  lineage?: { number: number; count: number };
 }
 
 export type ResultModelLabels = {
@@ -225,6 +227,7 @@ export function projectResultsDTO(
         producer: artifact?.producer_kind ?? null,
       },
       artifactItem: artifact,
+      ...(item.lineage ? { lineage: { number: item.lineage.number, count: item.lineage.count } } : {}),
     };
   });
 }

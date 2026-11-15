@@ -32,7 +32,6 @@ function confirmation(over: Partial<StepConfirmation> = {}): StepConfirmation {
     category: "unknown",
     choices: ["reject", "approve", "approve_session"],
     expiresAt: "2026-11-08T10:03:00Z",
-    timeoutSeconds: 180,
     receivedAt: Date.now(),
     ...over,
   };

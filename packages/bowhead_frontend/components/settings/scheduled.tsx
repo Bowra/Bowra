@@ -994,7 +994,7 @@ const DELIVERY_OUTCOMES = new Set([
 ]);
 
 /**
- * FEATURE_NOTIFICATION_DELIVERY: one line per recorded email of this run (its result, its alert), with
+ * One line per recorded email of this run (its result, its alert), with
  * what to do when it did not go out and the diagnostic reference to quote.
  */
 function RunDeliveries({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
@@ -1134,7 +1134,7 @@ export function RoutineDrawer({
   const [sendEmail, setSendEmail] = useState(
     (job?.notify_channels?.email?.length ?? 0) > 0 || (job?.notify_channels?.deliver_on_success ?? false),
   );
-  // FEATURE_ROUTINE_NOTIFY: deliver every run, or only runs the task's Agent flagged for the owner.
+  // Deliver every run, or only runs the task's Agent flagged for the owner.
   const routineNotify = useOptionalAuthSession()?.me?.capabilities?.routine_notify === true;
   const [deliverMode, setDeliverMode] = useState<"always" | "on_alert">(
     job?.notify_channels?.deliver === "on_alert" ? "on_alert" : "always",

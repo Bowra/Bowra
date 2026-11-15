@@ -10,7 +10,7 @@ prompt_modules:
     version: 1
     lifecycle: active
     path: data-query-datarc-protocol-v1.md
-    sha256: sha256:cc2e7503e3d4697673cca91b0f33f5bf8202ada4a71c4c86a807f0ba11776d34
+    sha256: sha256:b48b7f1be1c5355f49b55c4f8c8462af5e8805ccbea12db5964b564eac9c6c48
     priority: 90
     conflicts_with: []
     # The anchor comes from `capi_data_query_native.required_tools` (`bi_query`); no further narrowing is needed.

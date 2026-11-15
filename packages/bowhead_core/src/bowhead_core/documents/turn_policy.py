@@ -43,8 +43,7 @@ NATIVE_DOCUMENT_GUIDANCE = (
     "use template_document_submit; the document worker reads the template and supplied data. "
     "DOCX requires the enabled Word capability. This same Tool supports source-only requested_outputs=['source'] "
     "as well as source plus PDF. Source-only publishes no PDF; private PDF/page rendering for Canvas review does not publish a PDF. "
-    + TEMPLATE_REQUEST_WORKFLOW_GUIDANCE
-    + "The answer resumes the same document job with its retained full request and files; do not start an answer-only generate request. "
+    "The answer resumes the same document job with its retained full request and files; do not start an answer-only generate request. "
     "Do not route the template edit itself to a BI Agent, recreate slides, or generate a generic downloadable file. "
     "Any requested PDF must be derived from the reviewed source presentation or Word document in this same workflow, not from a separate report. "
     "Follow this Tool's current action-specific schema for request fields and file roles. The server resolves file positions. "
@@ -57,12 +56,6 @@ NATIVE_DOCUMENT_GUIDANCE = (
     "For an explicitly bound document revision target, use action=revise with evidence from the current request only. "
     "The server retains the selected draft and frozen inputs; do not supply a parent ID or fall back to generate. "
     "Unrelated file reading, analysis or a new presentation or Word document still follows its normal workflow."
-)
-
-UNAVAILABLE_DOCUMENT_GUIDANCE = (
-    "Uploaded-template updates are not available in this task. If requested, explain that limitation; "
-    "do not substitute scripts or a new presentation for a layout-preserving update or its source-derived PDF. "
-    "Ordinary reading, analysis and explicitly requested new presentations retain their own available Tools."
 )
 
 DOCUMENT_REVISION_GUIDANCE = (

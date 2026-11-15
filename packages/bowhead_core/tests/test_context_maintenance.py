@@ -41,6 +41,9 @@ class Decisions:
         self.used = 0
         self.budget = SimpleNamespace(step_limit=limit)
 
+    def has_decisions(self, count):
+        return self.used + count <= self.budget.step_limit
+
     def admit(self):
         if self.used >= self.budget.step_limit:
             return False

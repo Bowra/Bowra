@@ -740,7 +740,19 @@ async def prepare_lead_collaboration(
         raise CollaborationUnavailable("collaboration_owner_invalid")
     await AgentExecutionBindingStore(store.db_path).mark_running(binding.execution_id)
     if admitted is None:
-        await store.admit(worker, owner_execution_id=binding.execution_id, policy=CollaborationPolicy())
+        from bowhead_core.agent_run_limits import DEFAULT_LIMITS, get_run_limits
+
+        # Admission follows the Lead deadline start by the startup seconds, so this
+        # deadline never ends work before the turn deadline does.
+        policy = CollaborationPolicy.for_run_limits(get_run_limits() or getattr(ctx, "agent_run_limits", None) or DEFAULT_LIMITS)
+        await store.admit(worker, owner_execution_id=binding.execution_id, policy=policy)
+        logging.getLogger(__name__).info(
+            "agent_collaboration.policy turn=%s task_seconds=%s model_attempts=%s tool_attempts=%s source=team_run_limits",
+            ctx.turn_id,
+            policy.task_seconds,
+            policy.max_model_attempts,
+            policy.max_tool_attempts,
+        )
         await store.join(
             worker,
             execution_id=binding.execution_id,

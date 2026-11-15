@@ -243,7 +243,7 @@ describe("api-client", () => {
     await expect(apiJson("/api/v1/settings")).rejects.toMatchObject({
       name: "ApiError",
       status: 500,
-      message: "操作失败，请稍后重试；如问题持续，请联系管理员。",
+      message: "服务内部出错，请稍后重试；如果持续出现，请联系管理员。",
     } satisfies Partial<ApiError>);
   });
 
@@ -263,7 +263,7 @@ describe("api-client", () => {
     await expect(apiJson("/api/v1/settings")).rejects.toMatchObject({
       name: "ApiError",
       status: 502,
-      message: "操作失败，请稍后重试；如问题持续，请联系管理员。",
+      message: "服务暂时不可用，可能正在重启或维护，请稍后重试。",
       body: null,
     } satisfies Partial<ApiError>);
   });
@@ -289,8 +289,39 @@ describe("api-client", () => {
       status: 502,
       requestId: "fedcba9876543210fedcba9876543210",
       message:
-        "Something went wrong. Please try again. If the problem continues, contact your administrator.",
+        "The service is temporarily unavailable, possibly restarting or under maintenance. Try again shortly.",
       diagnostics: undefined,
+    } satisfies Partial<ApiError>);
+  });
+
+  it.each([
+    [504, "text/html", "<html><body>504 Gateway Time-out</body></html>", "The service took too long to respond, so the result is unconfirmed. Refresh to check before trying again."],
+    [429, "text/plain", "Too Many Requests", "Too many requests. Wait a moment and try again."],
+    [403, "text/html", "<!doctype html><html><body>Blocked by WAF</body></html>", "A gateway or proxy blocked the request before it reached the application. Ask your administrator to check the gateway rules."],
+  ])("says why an uncoded %i response failed", async (status, contentType, text, message) => {
+    document.documentElement.lang = "en-US";
+    globalThis.fetch = vi.fn(async () => new Response(text, { status, headers: { "content-type": contentType } })) as typeof fetch;
+
+    await expect(apiJson("/api/v1/settings")).rejects.toMatchObject({ name: "ApiError", status, message } satisfies Partial<ApiError>);
+  });
+
+  it("explains the Gateway's generic internal error and keeps specific codes", async () => {
+    document.documentElement.lang = "en-US";
+    globalThis.fetch = vi.fn(async () =>
+      jsonResp(500, { detail: { code: "E_USER_VISIBLE_GENERIC", message: "操作失败，请稍后重试；如问题持续，请联系管理员。" } }),
+    ) as typeof fetch;
+    await expect(apiJson("/api/v1/settings")).rejects.toMatchObject({
+      status: 500,
+      code: "E_USER_VISIBLE_GENERIC",
+      message: "The service ran into an internal error. Try again shortly; if it keeps happening, contact your administrator.",
+    } satisfies Partial<ApiError>);
+
+    globalThis.fetch = vi.fn(async () =>
+      jsonResp(503, { detail: { code: "kb_embedding_not_configured", message: "Configure an embedding model first." } }),
+    ) as typeof fetch;
+    await expect(apiJson("/api/v1/settings")).rejects.toMatchObject({
+      status: 503,
+      message: "Configure an embedding model first.",
     } satisfies Partial<ApiError>);
   });
 });

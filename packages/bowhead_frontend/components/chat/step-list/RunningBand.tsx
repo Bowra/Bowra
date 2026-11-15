@@ -40,6 +40,7 @@ import {
 } from "@/lib/transport-health";
 import { useTranslations } from "next-intl";
 
+import { useIsConfirmationRequester } from "@/components/chat/tool-confirmation/ToolConfirmationCard";
 import { turnElapsedMs } from "@/lib/turn-elapsed";
 import type { ModelRetryStatus, PeerTerminal } from "@/lib/turn-store";
 import type { AgentProgress } from "@/lib/types";
@@ -377,8 +378,17 @@ export function RunningBand({
       status: t(`collaboration.${collaborationTopicState(latestTopic, !running)}`),
     }) : "";
 
+  // A tool call waiting for its requester's decision: the model is idle on purpose, so the
+  // paused copy ("still waiting on the model") and the step's own action would both mislead.
+  const awaitingConfirmation = running
+    ? steps.find((step) => step.confirmation && !step.confirmation.outcome)?.confirmation
+    : undefined;
+  const confirmationIsMine = useIsConfirmationRequester(awaitingConfirmation);
+
   const action = noSignal
     ? t("band_no_signal", { sec: Math.floor((silentMs ?? 0) / 1000) })
+    : awaitingConfirmation
+    ? t(confirmationIsMine ? "band_waiting_confirmation" : "band_waiting_requester")
     : modelRetry
     ? formatModelRetry(modelRetry, t)
     : compacting.length > 0

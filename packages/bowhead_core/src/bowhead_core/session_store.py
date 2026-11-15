@@ -56,6 +56,53 @@ from bowhead_core.types import (
     normalize_legacy_turn_status,
 )
 
+#: Turns whose worker holds its completion transaction in this process. The
+#: transaction holds the execution database's single writer lock, so no other
+#: owner or recovery can take the dispatch over until it ends; a heartbeat that
+#: waits on that lock is not evidence of owner loss (turn_service lease monitor).
+_OPEN_COMPLETION_WRITES: dict[str, int] = {}
+
+
+def completion_write_open(turn_id: str) -> bool:
+    """Whether this process is inside ``turn_id``'s fenced completion transaction."""
+    return _OPEN_COMPLETION_WRITES.get(turn_id, 0) > 0
+
+
+@contextlib.contextmanager
+def _completion_write(turn_id: str):  # type: ignore[no-untyped-def]
+    _OPEN_COMPLETION_WRITES[turn_id] = _OPEN_COMPLETION_WRITES.get(turn_id, 0) + 1
+    try:
+        yield
+    finally:
+        remaining = _OPEN_COMPLETION_WRITES.get(turn_id, 1) - 1
+        if remaining > 0:
+            _OPEN_COMPLETION_WRITES[turn_id] = remaining
+        else:
+            _OPEN_COMPLETION_WRITES.pop(turn_id, None)
+
+
+#: A completion write longer than this holds the execution writer lock long enough
+#: to delay every other Turn's heartbeat and state writes (Regression check H2).
+COMPLETION_WRITE_WARN_MS = 5_000
+
+
+def _record_completion_write(turn_id: str, elapsed_ms: float, *, context: bool, transitioned: bool) -> None:
+    """Log and measure one completion transaction; a slow one is a warning, not only an info line."""
+    log = logging.getLogger(__name__)
+    level = logging.WARNING if elapsed_ms >= COMPLETION_WRITE_WARN_MS else logging.INFO
+    event = "session.completion_write_slow" if level == logging.WARNING else "session.completion_write"
+    log.log(level, "%s turn=%s ms=%d context=%s transitioned=%s", event, turn_id, elapsed_ms, context, transitioned)
+    with contextlib.suppress(Exception):  # Metrics never affect completion.
+        from bowhead_core import metrics
+
+        metrics.observe(
+            "session_completion_write_ms",
+            elapsed_ms,
+            labels={"context": str(context).lower()},
+            help="Duration of the Turn completion transaction, which holds the execution writer lock.",
+            buckets=(50, 250, 1_000, 5_000, 15_000, 30_000, 60_000),
+        )
+
 
 async def _begin_worker_transition(db: aiosqlite.Connection, *, turn_id: str, worker: DocumentTurnOwner | None) -> bool:
     """Fence a worker-owned state write and its terminal cleanup atomically."""
@@ -6774,46 +6821,84 @@ class SessionStore:
             adoption_readers = context_publication.open_adoption_readers()
         else:
             adoption_readers = nullcontext(context_publication)
-        async with adoption_readers as context_publication, open_shared_ctx(self._db_path) as db:
-            if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
-                return False
-            if context_publication is not None:
-                if worker is None:
-                    raise ValueError("Context publication requires the original worker")
-                await context_publication(db, final_answer)
-            now = _now()
-            cursor = await db.execute(
-                """
-                UPDATE turns SET
-                    status='completed',
-                    ended_at=?,
-                    intent=?,
-                    final_answer=?,
-                    tokens_input=generation_base_tokens_input+?,
-                    tokens_output=generation_base_tokens_output+?,
-                    cost_usd=generation_base_cost_usd+?,
-                    error_kind=?
-                WHERE id=? AND status='running'
-                """,
-                # D7a: write error_kind directly (NOT COALESCE). A turn that reaches
-                # `completed` succeeded, so error_kind=None on success must CLEAR any
-                # value left by an earlier phase. Same-Turn resume first advances
-                # clarification_pending→running in spawn_resume_turn, so completion
-                # never needs to overwrite a paused terminal row directly.
-                # (mark_aborted/mark_cancelled/mark_clarification_pending keep COALESCE
-                #  on purpose — those are non-success terminal states.)
-                (now, intent, final_answer, tokens_input, tokens_output, cost_usd, error_kind, turn_id),
+        async with adoption_readers as context_publication:
+            if isinstance(context_publication, ContextPublication):
+                # Authority is rechecked here, before the writer lock: the checks read other databases and
+                # must not keep every other Turn from writing while they run.
+                context_publication = await context_publication.verify_authority(final_answer)
+            async with open_shared_ctx(self._db_path) as db:
+                if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
+                    return False
+                started = datetime.now(tz=UTC)
+                with _completion_write(turn_id) if worker is not None else nullcontext():
+                    transitioned = await self._complete_in_tx(
+                        db,
+                        turn_id=turn_id,
+                        worker=worker,
+                        intent=intent,
+                        final_answer=final_answer,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        cost_usd=cost_usd,
+                        error_kind=error_kind,
+                        context_publication=context_publication,
+                    )
+                # The writer lock is held for this whole span; the dispatch lease is 30 s.
+                elapsed_ms = (datetime.now(tz=UTC) - started).total_seconds() * 1000
+                _record_completion_write(turn_id, elapsed_ms, context=context_publication is not None, transitioned=transitioned)
+                return transitioned
+
+    async def _complete_in_tx(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        turn_id: str,
+        worker: DocumentTurnOwner | None,
+        intent: str | None,
+        final_answer: str,
+        tokens_input: int,
+        tokens_output: int,
+        cost_usd: float,
+        error_kind: str | None,
+        context_publication: Callable[[aiosqlite.Connection, str], Awaitable[None]] | None,
+    ) -> bool:
+        if context_publication is not None:
+            if worker is None:
+                raise ValueError("Context publication requires the original worker")
+            await context_publication(db, final_answer)
+        now = _now()
+        cursor = await db.execute(
+            """
+            UPDATE turns SET
+                status='completed',
+                ended_at=?,
+                intent=?,
+                final_answer=?,
+                tokens_input=generation_base_tokens_input+?,
+                tokens_output=generation_base_tokens_output+?,
+                cost_usd=generation_base_cost_usd+?,
+                error_kind=?
+            WHERE id=? AND status='running'
+            """,
+            # D7a: write error_kind directly (NOT COALESCE). A turn that reaches
+            # `completed` succeeded, so error_kind=None on success must CLEAR any
+            # value left by an earlier phase. Same-Turn resume first advances
+            # clarification_pending→running in spawn_resume_turn, so completion
+            # never needs to overwrite a paused terminal row directly.
+            # (mark_aborted/mark_cancelled/mark_clarification_pending keep COALESCE
+            #  on purpose — those are non-success terminal states.)
+            (now, intent, final_answer, tokens_input, tokens_output, cost_usd, error_kind, turn_id),
+        )
+        transitioned = cursor.rowcount == 1
+        if transitioned:
+            # D7b: roll the winner's tokens+cost into the session. A late
+            # terminal loser must have no aggregate or ordering side effects.
+            await self._rollup_session_usage(db, turn_id)
+            await db.execute(
+                "UPDATE sessions SET last_active_at=? WHERE id=(SELECT session_id FROM turns WHERE id=?) AND last_active_at < ?",
+                (now, turn_id, now),
             )
-            transitioned = cursor.rowcount == 1
-            if transitioned:
-                # D7b: roll the winner's tokens+cost into the session. A late
-                # terminal loser must have no aggregate or ordering side effects.
-                await self._rollup_session_usage(db, turn_id)
-                await db.execute(
-                    "UPDATE sessions SET last_active_at=? WHERE id=(SELECT session_id FROM turns WHERE id=?) AND last_active_at < ?",
-                    (now, turn_id, now),
-                )
-            await db.commit()
+        await db.commit()
         return transitioned
 
     @completion_capacity()
@@ -7615,7 +7700,7 @@ class SessionStore:
                     summaries_by_turn[str(r["turn_id"])] = payload  # Multiple records in one turn: traverse by ascending seq; the last record wins.
                 elif payload.get("subagent_id") and payload.get("status") in (None, "running", "cancelled", "aborted"):
                     spawned_by_turn[str(r["turn_id"])] = payload
-            # 116 dogfood round 4: stopping a turn kills its peer, leaving no lead.subagent_summary, but its findings are crucial to the next turn;
+            # Regression check round 4: stopping a turn kills its peer, leaving no lead.subagent_summary, but its findings are crucial to the next turn;
             # without a summary, fall back to agent_spawned (persisted on delegation), using the turn's status.
             hit = next((t for t in turns if str(t["id"]) in summaries_by_turn or str(t["id"]) in spawned_by_turn), None)
             if hit is None:
@@ -7708,7 +7793,7 @@ class SessionStore:
                     err_v = parsed_for_err.get("error") or parsed_for_err.get("error_message")
                     if isinstance(err_v, str) and err_v.strip():
                         error_text = err_v.strip()
-                    # 116 dogfood round 4: the outer sandbox error is only "exit_code=1"; the real traceback is in result_json.stderr
+                    # Regression check round 4: the outer sandbox error is only "exit_code=1"; the real traceback is in result_json.stderr
                     # (the outer wrapper process exits 0). The last two nonempty lines (exception type + message) are far more useful than "exit_code=1".
                     inner_rj = parsed_for_err.get("result_json")
                     for src in (parsed_for_err, inner_rj if isinstance(inner_rj, dict) else None):

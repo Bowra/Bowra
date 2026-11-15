@@ -73,6 +73,22 @@ def test_bi_query_cap_keeps_the_truncation_sentence():
 
 
 @pytest.mark.unit
+def test_bi_query_cap_does_not_point_to_a_missing_data_file():
+    """A result without a data file (fallback-measure withholding) is told the rest of its rows cannot be read."""
+    r = _big_bi_query(rows_count=438)
+    for key in ("artifact_id", "_how_to_use_in_sandbox"):
+        r.pop(key)
+    r["_preflight_hint"] = "其他说明" * 3000  # Force the still-over-budget branch that regenerates the notes
+    out, _ = cap_result("bi_query", r)
+    hint = out["_preflight_hint"]
+    assert "只给你看了" in hint and "438" in hint and "没有数据文件" in hint, hint
+    assert "在 artifact_id 里" not in hint, hint
+    # With a data file the note keeps pointing to it.
+    out2, _ = cap_result("bi_query", _big_bi_query(rows_count=200))
+    assert "在 artifact_id 里" in out2["_preflight_hint"]
+
+
+@pytest.mark.unit
 def test_bi_query_cap_keeps_the_unknown_words_sentence():
     """「datarc 没认出」那句同样不能在裁剪时丢（bi-answer-correctness A）——数据越大越需要它。"""
     r = _big_bi_query(rows_count=1081)

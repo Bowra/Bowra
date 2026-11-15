@@ -6,7 +6,7 @@
 /* Width and gutters come from PageFrame (Header, Language & Paging Spec D4). */
 .kb-page-v2 { box-sizing: border-box; width: 100%; min-width: 0; }
 
-.kb-page-v2 .kb-v2-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin-bottom: 16px; border: 1px solid var(--c-line); border-radius: 9px; padding: 8px 13px; color: var(--c-ink-2); background: var(--c-surface); font-size: 0.75rem; }
+.kb-page-v2 .kb-v2-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin-bottom: 16px; border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-lg); padding: 8px 13px; color: var(--c-ink-2); background: var(--c-surface); font-size: 0.75rem; }
 .kb-page-v2 .kb-v2-banner .muted { color: var(--c-ink-3); }
 .kb-page-v2 .kb-v2-bannerlink { border: 0; padding: 0; color: var(--c-ink); background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
 
@@ -23,7 +23,7 @@
 
 /* ---- Document matrix / template-record cards ---- */
 .kb-page-v2 .mxlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
-.kb-page-v2 .mx { border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); padding: 13px 14px; cursor: pointer; transition: border-color .12s; }
+.kb-page-v2 .mx { border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-xl); background: var(--c-surface); padding: 13px 14px; cursor: pointer; transition: border-color .12s; }
 .kb-page-v2 .mx:hover, .kb-page-v2 .mx:focus-visible { border-color: var(--c-ink-4); }
 .kb-page-v2 .mx .nm { font-size: 0.84375rem; font-weight: 600; overflow-wrap: anywhere; }
 .kb-page-v2 .mx .mt { font-size: 0.75rem; color: var(--c-ink-3); margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -48,9 +48,9 @@
 .kb-page-v2 .tgh .n { font-size: 0.71875rem; color: var(--c-muted-2); }
 .kb-page-v2 .tgh .d { font-size: 0.75rem; color: var(--c-ink-3); margin-left: 4px; }
 .kb-page-v2 .tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-.kb-page-v2 .tcard { border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); padding: 12px 13px; display: flex; flex-direction: column; gap: 6px; }
+.kb-page-v2 .tcard { border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-xl); background: var(--c-surface); padding: 12px 13px; display: flex; flex-direction: column; gap: 6px; }
 .kb-page-v2 .tcard .nm { font-size: 0.8125rem; font-weight: 600; display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; }
-.kb-page-v2 .tcard .tag { font-family: var(--mono); font-size: 0.59375rem; font-weight: 600; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--c-line); color: var(--c-ink-3); background: var(--c-bg-2); }
+.kb-page-v2 .tcard .tag { font-family: var(--mono); font-size: 0.59375rem; font-weight: 600; border-radius: var(--radius-md); padding: 1px 6px; border: var(--border-w, 1px) solid var(--c-line); color: var(--c-ink-3); background: var(--c-bg-2); }
 .kb-page-v2 .tcard .tag.x { color: var(--c-blue-ink); background: var(--c-blue-soft); border-color: color-mix(in srgb, var(--c-blue) 30%, transparent); }
 .kb-page-v2 .tcard .cols { font-size: 0.71875rem; color: var(--c-ink-3); line-height: 1.55; }
 .kb-page-v2 .tcard .ft { display: flex; align-items: center; gap: 8px; font-size: 0.71875rem; color: var(--c-muted-2); margin-top: 2px; }

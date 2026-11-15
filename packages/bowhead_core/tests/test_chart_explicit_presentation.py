@@ -255,6 +255,46 @@ def test_explicit_axes_validate_declared_units_without_reassigning_fields() -> N
     assert [column.unit for column in spec.columns if column.role == "y"] == ["USD", "USD million"]
 
 
+async def test_a_right_axis_field_named_only_in_y_right_is_plotted() -> None:
+    """Regression check M1: the model named the right-axis field only in y_right twice; it is explicit, so it is plotted."""
+    raw = b"month,revenue,units\n1,4.2,120\n2,3.9,110\n"
+    ctx, canvas = context(raw)
+    requested = args(
+        force_kind="dual_axis",
+        axes={"x": "month", "y": ["revenue"], "y_right": ["units"], "x_scale": "category"},
+        group_by=[],
+        column_units={"revenue": "CNY 100 million", "units": "items"},
+    )
+    before = copy.deepcopy(requested)
+    result = await _add_chart(requested, ctx)
+    assert "error" not in result, result
+    spec = canvas.appended_payload["spec"]
+    assert spec["explicit_presentation"]["axes"]["y"] == ["revenue", "units"], "The saved binding records the completed axes"
+    assert [(column["key"], column.get("y_axis_id")) for column in spec["columns"] if column.get("role") == "y"] == [("revenue", 0), ("units", 1)]
+    assert requested == before, "The model's recorded tool call is not rewritten"
+
+
+def test_dual_axis_errors_state_the_working_shape() -> None:
+    from bowhead_core.chart.explicit import validate_request
+
+    whole = {"force_kind": "dual_axis", "axes": {"x": "m", "y": ["a", "b"], "y_right": ["a", "b"], "x_scale": "category"}, "group_by": []}
+    with pytest.raises(ExplicitPresentationError, match="keep at least one y field on the left axis"):
+        validate_request(whole)
+    from bowhead_core.chart.types import ChartColumn
+
+    rows = [{"m": "A", "a": 1, "b": 2}, {"m": "B", "a": 3, "b": 4}]
+    cols = [
+        ChartColumn(key="m", header="m", type="categorical"),
+        ChartColumn(key="a", header="a", type="numeric", unit="people"),
+        ChartColumn(key="b", header="b", type="numeric", unit="USD"),
+    ]
+    line = args(force_kind="line", axes={"x": "m", "y": ["a", "b"], "x_scale": "category"}, group_by=[])
+    with pytest.raises(
+        ExplicitPresentationError, match=r"dual_axis with every plotted field in axes\.y and the right-axis fields also in axes\.y_right"
+    ):
+        compile_view(line, rows, cols, artifact_id="art_aaaaaaaaaaaa", raw=b"m,a,b\nA,1,2\nB,3,4\n")
+
+
 async def test_plot_with_only_missing_values_fails_without_creating_a_chart() -> None:
     ctx, canvas = context(b"label,value\nA,\nB,\n")
     result = await _add_chart(args(force_kind="bar", axes={"x": "label", "y": ["value"], "x_scale": "category"}, group_by=[]), ctx)

@@ -351,3 +351,73 @@ def test_one_data_upload_failure_does_not_hide_other_outputs(
     assert result["ok"] is False
     assert result["error"] == "sandbox stdout Data artifact upload failed"
     assert [output["data_role"] for output in outputs] == ["structured"]
+
+
+def test_inline_streams_keep_beginning_and_end_with_exact_omission(runner: ModuleType) -> None:
+    lines = [f"line {index:05d}" for index in range(2_000)]
+    stream = "\n".join(lines) + "\n"
+    assert runner._trunc("short\n") == "short\n"
+
+    preview = runner._trunc(stream)
+    head, marker, tail = preview.split("\n[", 1)[0], preview.split("\n[", 1)[1].split("]\n", 1)[0], preview.split("]\n", 1)[1]
+    assert stream.startswith(head) and stream.endswith(tail)
+    assert len(head) == 3 * 1024 and len(tail) == 5 * 1024
+    omitted = len(stream) - len(head) - len(tail)
+    assert f"{omitted} of {len(stream)} characters" in marker
+    assert "of 2000 lines" in marker and "The complete stream was not saved." in marker
+    # stderr keeps more of its end, where tracebacks finish.
+    error_preview = runner._trunc(stream, head=runner._STDERR_HEAD_CHARS)
+    assert error_preview.endswith(stream[-7 * 1024 :])
+
+
+@pytest.mark.parametrize("saved", [True, False])
+def test_truncated_stdout_names_its_saved_complete_artifact(
+    runner: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    saved: bool,
+) -> None:
+    full_stdout = "".join(f"value {index}\n" for index in range(5_000))
+
+    def upload(path: Path, *_args: object, **_kwargs: object) -> dict[str, object] | None:
+        if not saved:
+            return None
+        return {"name": path.name, "artifact_id": "art_stdout123456", "mime": "text/plain", "size": path.stat().st_size}
+
+    monkeypatch.setattr(runner, "_upload_artifact", upload)
+    result = {"ok": True, "exit_code": 0, "stdout": runner._trunc(full_stdout), "_stdout_full": full_stdout, "stderr": ""}
+
+    runner._materialize_data_outputs(
+        workdir=tmp_path,
+        result=result,
+        outputs=[],
+        gateway="http://gateway",
+        session_id="s_1",
+        created_by_turn="t_1",
+        token="token",
+    )
+
+    assert result["stdout"].startswith("value 0\n") and result["stdout"].endswith("value 4999\n")
+    if saved:
+        assert "Complete stdout: Data artifact art_stdout123456 (sandbox-stdout.txt)" in result["stdout"]
+        assert '"artifact_id": "art_stdout123456"' in result["stdout"]
+    else:
+        assert "The complete stdout could not be saved." in result["stdout"]
+        assert result["ok"] is False
+
+
+def test_declared_work_file_is_not_a_result_file(runner: ModuleType) -> None:
+    """A half-edited deck carried between calls stays an ordinary output."""
+    work = frozenset({"deck-step.pptx"})
+    assert runner._kind_for_output("deck-step.pptx", work_outputs=work) is None
+    assert runner._kind_for_output("deck-step.pptx", purpose="deliverable", deliverable_outputs=frozenset({"final.pptx"}), work_outputs=work) is None
+    # The finished file written beside it is still a result file.
+    assert runner._kind_for_output("final.pptx", work_outputs=work) == "deliverable"
+
+
+def test_a_document_written_by_a_declared_analysis_call_is_not_a_result_file(runner: ModuleType) -> None:
+    """Regression check N5: stage1.html / final.html drafts from purpose='analysis' calls became result cards."""
+    assert runner._kind_for_output("stage1.html", analysis_declared=True) is None
+    # The deck preview rule and an omitted purpose keep the extension-based result file.
+    assert runner._kind_for_output("deck-slide-01.png", analysis_declared=True) == "deck_preview"
+    assert runner._kind_for_output("report.html") == "deliverable"

@@ -8,6 +8,7 @@
 
 
 import { apiFetch, readApiError } from "./api-client";
+import { attachHttpCause } from "./user-facing-error";
 import {
   clearInvalidSessionAndRedirect,
   refreshAccessToken,
@@ -65,11 +66,9 @@ async function _send<T>(
   const r = await apiFetch(path, init);
   if (!r.ok) {
     const error = await readApiError(r);
-    throw new SecurityError(
-      error.status,
-      error.code ?? "error",
-      error.message,
-      error.requestId,
+    throw attachHttpCause(
+      new SecurityError(error.status, error.code ?? "error", error.message, error.requestId),
+      error,
     );
   }
   return r.json();
@@ -129,11 +128,9 @@ async function _readSecurityError(
   response: Response,
 ): Promise<SecurityError> {
   const error = await readApiError(response);
-  return new SecurityError(
-    error.status,
-    error.code ?? "error",
-    error.message,
-    error.requestId,
+  return attachHttpCause(
+    new SecurityError(error.status, error.code ?? "error", error.message, error.requestId),
+    error,
   );
 }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -94,12 +95,20 @@ async def _authorize(ctx, db, source, files: list[ContextAttachment]) -> list:
     return artifacts
 
 
-async def _validate_bytes(ctx, files: list[ContextAttachment], artifacts: list) -> None:
+async def _validate_bytes(ctx, files: list[ContextAttachment], artifacts: list, *, verified_bytes: set[str] | None = None) -> None:
     for item, art in zip(files, artifacts, strict=True):
         if item.content_hash is not None:
+            # A Session file is recorded once per Turn that kept it. Inside one
+            # storage operation the same stored bytes are hashed once, however
+            # many Turns depend on them; authority is still checked per proof.
+            key = json.dumps(["attachment_bytes", str(art.path), item.size, item.content_hash], separators=(",", ":"))
+            if verified_bytes is not None and key in verified_bytes:
+                continue
             data = await ctx.artifact_store.backend.read_bounded(art.path, limit=item.size)
             if len(data) != item.size or "sha256:" + hashlib.sha256(data).hexdigest() != item.content_hash:
                 raise _attachment_unavailable(item, "context_attachment_bytes_changed")
+            if verified_bytes is not None:
+                verified_bytes.add(key)
 
 
 async def capture_attachment_dependencies(ctx, db, source) -> AttachmentContextDependencies | None:
@@ -196,7 +205,9 @@ async def capture_attachment_dependencies(ctx, db, source) -> AttachmentContextD
     )
 
 
-async def validate_attachment_dependencies(ctx, db, source, proof: AttachmentContextDependencies, *, read_bytes: bool = True) -> None:
+async def validate_attachment_dependencies(
+    ctx, db, source, proof: AttachmentContextDependencies, *, read_bytes: bool = True, verified_bytes: set[str] | None = None
+) -> None:
     from bowhead_core.chat_turn_source import chat_turn_user_source_projection
     from bowhead_core.ordinary_lead_continuation import content_hash
 
@@ -204,4 +215,4 @@ async def validate_attachment_dependencies(ctx, db, source, proof: AttachmentCon
         raise ValueError("context_attachment_source_changed")
     artifacts = await _authorize(ctx, db, source, proof.files)
     if read_bytes:
-        await _validate_bytes(ctx, proof.files, artifacts)
+        await _validate_bytes(ctx, proof.files, artifacts, verified_bytes=verified_bytes)

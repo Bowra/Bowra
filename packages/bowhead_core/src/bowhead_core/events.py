@@ -150,7 +150,7 @@ EventType = Literal[
     "step_started",  # payload: StepStartedPayload — Step List Card adds new step row
     "step_progress",  # payload: StepProgressPayload — content delta or N/M progress
     "step_done",  # payload: StepDonePayload — step finish (success/failure/partial)
-    # Inline tool confirmation (FEATURE_INLINE_TOOL_CONFIRMATION): a waiting tool step asks its requester
+    # Inline tool confirmation: a waiting tool step asks its requester
     # and records the outcome. Labels only; arguments/bodies/diffs stay in the owner-only queue.
     "confirmation_requested",  # payload: ConfirmationRequestedPayload
     "confirmation_resolved",  # payload: ConfirmationResolvedPayload

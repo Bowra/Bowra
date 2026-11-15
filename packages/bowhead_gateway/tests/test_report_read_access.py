@@ -106,6 +106,31 @@ async def test_outline_selection_unknown_ids_and_no_mutations(report_case):
     assert oversized["error"] == "report_read_too_large"
 
 
+async def test_a_section_citing_bare_numbers_stays_readable_and_an_unauthorized_source_still_hides_it(report_case):
+    """Stored ``source_refs`` such as "100" name no source; they must not hide a section the user can see."""
+    ctx, section, canvas, request = report_case
+    numbered = await ctx.canvas_store.append_section(
+        canvas_id=canvas.id,
+        kind="narrative",
+        payload={"markdown": "## Brand analysis\nTop ten brands.", "source_refs": ["100", "101", "105"]},
+        by_turn_id="t_recovery",
+    )
+    outline = await _read_report({}, ctx)
+    assert outline.get("ok"), outline
+    assert {row["section_id"] for row in outline["outline"]} == {section.id, numbered.id}
+    assert outline["coverage"]["complete"] is True and outline["coverage"]["omissions"] == []
+    full = await _read_report({"section_ids": [numbered.id]}, ctx)
+    assert full["sections"][0]["content"].endswith("Top ten brands.")
+    await validate_context_dependencies(ctx, capture_context_dependencies(ctx))
+    # An identity in a source form is still a requirement: one that cannot be authorized hides its section.
+    guarded = await ctx.canvas_store.append_section(
+        canvas_id=canvas.id, kind="narrative", payload={"markdown": "From a file.", "source_refs": ["art_0000missing"]}, by_turn_id="t_recovery"
+    )
+    later = await _read_report({}, ctx)
+    assert guarded.id not in {row["section_id"] for row in later["outline"]} and numbered.id in {row["section_id"] for row in later["outline"]}
+    assert later["coverage"]["complete"] is False and later["coverage"]["omissions"] == ["unavailable_content"]
+
+
 async def test_reconstruction_uses_persisted_section_ids_and_checks_current_access(report_case):
     from bowhead_core.context_assembly import build_turn_history
     from bowhead_core.result_material_history import load_material_history
@@ -708,3 +733,34 @@ async def test_chart_palette_reuses_effective_style_and_offers_a_named_green(rep
         await db.execute("UPDATE users SET team_id=? WHERE id=?", (other.id, ctx.user_id))
         await db.commit()
     assert await ctx.report_read_access.chart_palette() == options
+
+
+async def test_one_validation_pass_reads_a_report_once_and_the_next_pass_reads_again(report_case, monkeypatch):
+    """A report recorded many times in a conversation is loaded once per pass, and a later pass still sees a revocation."""
+    from bowhead_core.report_read_material import report_read_validation_pass, validate_report_read
+
+    ctx, section, _canvas, _request = report_case
+    assert (await _read_report({"section_ids": [section.id]}, ctx)).get("ok")
+    record = next(iter(ctx.context_source_observations.tool_materials.values()))
+    loads = 0
+    original = ctx.canvas_store.list_sections
+
+    async def counted(*args, **kwargs):
+        nonlocal loads
+        loads += 1
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(ctx.canvas_store, "list_sections", counted)
+    with report_read_validation_pass():
+        for _ in range(5):
+            await validate_report_read(ctx, record)
+    assert loads == 1
+    for _ in range(2):
+        await validate_report_read(ctx, record)
+    assert loads == 3
+
+    async with open_shared_ctx(ctx.session_store.db_path) as db:
+        await db.execute("UPDATE workspace_members SET status='inactive' WHERE workspace_id=? AND user_id=?", (ctx.workspace_id, ctx.user_id))
+        await db.commit()
+    with report_read_validation_pass(), pytest.raises(OrdinaryContinuationUnavailable):
+        await validate_report_read(ctx, record)

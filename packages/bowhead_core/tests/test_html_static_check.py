@@ -94,3 +94,64 @@ async def test_non_html_does_not_add_work_or_inspection_claims():
     backend = SimpleNamespace(read_bounded=AsyncMock())
     assert await inspect_retained_html(SimpleNamespace(backend=backend), SimpleNamespace(mime="application/pdf")) is None
     backend.read_bounded.assert_not_awaited()
+
+
+def _lookups(result: dict) -> list[tuple[str, int, int]]:
+    return [(item["value"], item["line"], item["column"]) for item in result["findings"] if item["code"] == "script_id_reference_missing"]
+
+
+def test_copied_script_lookups_without_matching_elements_are_reported():
+    """the original regression (synthetic shape): a reference file's script looked up 43 IDs the new markup lacked;
+    the first null assignment threw, so no script-drawn chart rendered."""
+    missing = [f"chart-{index}" for index in range(43)]
+    lookups = "\n".join(f"$('{identity}').innerHTML = '';" for identity in missing)
+    source = f"""<main><div id="kpi"></div></main>
+<script>
+const $ = (id) => document.getElementById(id);
+$('kpi').textContent = '1';
+{lookups}
+</script>""".encode()
+    result = inspect_html(source)
+    assert result["status"] == "issues_found" and "script_id_references" in result["checks"]
+    assert result["runtime_checked"] is False
+    assert result["total_findings"] == 43 and result["truncated"] is True
+    assert _lookups(result)[:2] == [("chart-0", 5, 1), ("chart-1", 6, 1)]
+
+
+def test_function_helpers_and_simple_id_selectors_are_lookups():
+    source = b"""<div id="present"></div><script type="module">
+function byId(name) { return document.getElementById(name); }
+byId("absent-a"); byId("present");
+document.querySelector('#absent-b'); document.querySelectorAll("#present");
+document.querySelector('#absent-b .row'); document.getElementById(`absent-c`);
+</script>"""
+    assert [identity for identity, _, _ in _lookups(inspect_html(source))] == ["absent-a", "absent-b", "absent-c"]
+
+
+def test_ids_from_markup_templates_and_script_created_elements_are_not_reported():
+    source = b"""<div id="live"></div><template><tr id="row-template"></tr></template>
+<script>
+const $ = id => document.getElementById(id);
+const table = '<table id="made-in-string"></table>';
+const cell = document.createElement('td'); cell.id = 'made-by-property';
+const box = document.createElement('div'); box.setAttribute('id', "made-by-attribute");
+[$('live'), $('row-template'), $('made-in-string'), $('made-by-property'), $('made-by-attribute')];
+document.getElementById(dynamicId); $(prefix + 'computed');
+</script>"""
+    result = inspect_html(source)
+    assert result["status"] == "no_static_issues_found" and "script_id_references" in result["checks"]
+
+
+def test_external_and_non_executable_scripts_are_not_analyzed():
+    source = b"""<script type="application/json">{"x": "document.getElementById('json-only')"}</script>
+<script type="text/template">document.getElementById('template-only')</script>
+<script src="app.js">document.getElementById('ignored-body')</script>
+<template><script>document.getElementById('dormant')</script></template>"""
+    assert _lookups(inspect_html(source)) == []
+
+
+def test_script_budget_skips_only_the_lookup_check(monkeypatch):
+    monkeypatch.setattr("bowhead_core.html_static_check._MAX_SCRIPT_CHARS", 10)
+    result = inspect_html(b'<a href="#gone">x</a><script>document.getElementById("absent")</script>')
+    assert "script_id_references" not in result["checks"]
+    assert [item["code"] for item in result["findings"]] == ["missing_fragment_target"]

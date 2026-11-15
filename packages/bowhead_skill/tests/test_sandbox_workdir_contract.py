@@ -439,3 +439,66 @@ async def test_sandbox_fails_closed_on_real_eacces(tmp_path: Path, monkeypatch) 
     assert res.error is not None
     assert "共享工作目录不可用" in res.error
     assert "Errno" not in res.error
+
+
+async def test_flat_python_exec_threads_declared_work_files(tmp_path: Path) -> None:
+    """A work file is declared by name and reaches the runner as a control key."""
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult())
+
+    await _flat_tool(cat, rt).handler({"code": "open('deck-step.pptx', 'wb').write(b'x')", "work_outputs": ["deck-step.pptx"]}, object())
+
+    assert rt.calls[0]["_work_outputs"] == ["deck-step.pptx"]
+    assert rt.calls[0]["_output_purpose"] == "analysis"
+    assert "work_outputs" not in rt.calls[0]
+
+
+@pytest.mark.parametrize(("arguments", "declared"), [({"purpose": "analysis"}, True), ({}, None), ({"_output_purpose_declared": True}, None)])
+async def test_flat_python_exec_marks_only_an_explicit_analysis_purpose(tmp_path: Path, arguments: dict, declared: bool | None) -> None:
+    """Regression check N5: only an explicit purpose='analysis' keeps documents out of the result files; the key is server-only."""
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult())
+
+    await _flat_tool(cat, rt).handler({"code": "open('stage1.html', 'w').write('x')", **arguments}, object())
+
+    assert rt.calls[0].get("_output_purpose_declared") is declared
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"work_outputs": ["steps/deck.pptx"]},
+        {"work_outputs": "deck.pptx"},
+        {"work_outputs": ["final.pptx"], "purpose": "deliverable", "deliverable_outputs": ["final.pptx"]},
+    ],
+)
+async def test_python_exec_rejects_invalid_work_files(tmp_path: Path, arguments: dict) -> None:
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult())
+
+    result = await _flat_tool(cat, rt).handler({"code": "pass", **arguments}, object())
+
+    assert result["error_kind"] == "invalid_args" and "work_outputs" in result["error"]
+    assert rt.calls == []
+
+
+async def test_skill_invoke_keeps_server_control_keys_out_of_the_recorded_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The recorded Tool call is repeated to the model, so it must not gain the executor or fetch token."""
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult())
+    monkeypatch.setenv("BOWHEAD_SANDBOX_EXECUTOR_URL", "http://sandbox-executor:8091")
+    monkeypatch.setenv("BOWHEAD_SANDBOX_EXECUTOR_TOKEN", "executor-secret")
+    arguments = {"name": "python_sandbox", "script": "runner.py", "input": {"code": "print(1)", "inputs": {}}}
+
+    await _invoke_tool(cat, rt).handler(arguments, object())
+
+    assert rt.calls[0]["_sandbox_executor_token"] == "executor-secret"
+    assert arguments == {"name": "python_sandbox", "script": "runner.py", "input": {"code": "print(1)", "inputs": {}}}

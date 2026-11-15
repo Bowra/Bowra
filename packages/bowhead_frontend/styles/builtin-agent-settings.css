@@ -63,7 +63,7 @@
   list-style: none;
   padding: 0;
   margin: 0;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-4);
   background: var(--c-surface);
 }
@@ -78,7 +78,7 @@
   padding: 10px 16px;
 }
 .builtin-agent-row + .builtin-agent-row {
-  border-top: 1px solid var(--c-line);
+  border-top: var(--rule-w, 1px) solid var(--c-line);
 }
 .builtin-agent-symbol {
   display: grid;
@@ -237,7 +237,7 @@
 }
 .builtin-agents-empty {
   padding: 48px 24px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-4);
   text-align: center;
 }
@@ -285,7 +285,7 @@
   line-height: 1.6;
 }
 .builtin-agent-config-section + .builtin-agent-config-section {
-  border-top: 1px solid var(--c-line);
+  border-top: var(--rule-w, 1px) solid var(--c-line);
   padding-top: 24px;
   margin-top: 24px;
 }
@@ -304,7 +304,7 @@
   line-height: 1.6;
 }
 .builtin-agent-skills {
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-3);
   background: var(--c-surface);
   max-height: 240px;
@@ -380,7 +380,7 @@
   display: flex;
   gap: 4px;
   margin: 12px 0 16px;
-  border-bottom: 1px solid var(--c-line);
+  border-bottom: var(--rule-w, 1px) solid var(--c-line);
 }
 .builtin-agents-tabs button {
   padding: 9px 14px;

@@ -786,9 +786,11 @@
     "credits_badge": "Kontingent",
     "credits_low": "{pct}% übrig · {balance}",
     "credits_critical": "Guthaben fast aufgebraucht · {balance}",
+    "credits_exhausted": "Guthaben aufgebraucht",
     "credits_button_aria": "Kontingent: {value}",
     "credits_plan": "{plan}-Plan",
     "credits_left": "<num>{balance}</num> übrig",
+    "credits_over": "<num>{amount}</num> über dem Kontingent dieses Zeitraums",
     "credits_usage_label": "In diesem Zeitraum verbrauchte Credits",
     "credits_usage_value": "{used} von {quota} verbraucht ({pct} %)",
     "credits_used_of": "{used} von {quota} verbraucht",
@@ -796,7 +798,7 @@
     "credits_resets_on": "Wird am {date} zurückgesetzt",
     "credits_state_low": "Kontingent wird knapp: Noch {pct} % des Kontingents für diesen Zeitraum übrig.",
     "credits_state_critical": "Fast aufgebraucht: Nur noch {pct} % des Kontingents für diesen Zeitraum übrig.",
-    "credits_state_empty": "Keine Credits mehr übrig.",
+    "credits_state_exhausted": "Das Guthaben für diesen Zeitraum ist aufgebraucht. Neue Anfragen sind nach dem Zurücksetzen möglich, oder die Administration fügt Guthaben hinzu.",
     "credits_view_details": "Verbrauchsdetails anzeigen",
     "navigation_drawer": "Navigationsmenü",
     "close_drawer": "Menü schließen",
@@ -7416,7 +7418,8 @@
         "turn_time_limit_s": "Zeitlimit pro Runde (Sekunden)",
         "step_limit": "Schritte pro Aufgabe",
         "tool_call_limit": "Tool-Aufrufe pro Runde",
-        "model_call_time_limit_s": "Modellaufruf-Limit (Sekunden)",
+        "model_call_limit": "Modellaufrufe pro Runde",
+        "model_call_time_limit_s": "Zeitlimit pro Modellaufruf (Sekunden)",
         "max_retries": "Modellwiederholungen",
         "providers": "Verbindungen und Modelldeklarationen",
         "tiers": "Modellzuweisungen",
@@ -7491,6 +7494,9 @@
         },
         "model_call_time_limit_s": {
           "null": "Automatisch"
+        },
+        "model_call_limit": {
+          "null": "Unbegrenzt"
         }
       },
       "eyebrow": "Einstellungsvorschlag",
@@ -7604,6 +7610,11 @@
       "tool_calls_desc": "Gesamtzahl der Tool-Aufrufe aller Agents in einer Runde; jedes Tool zählt gleich.",
       "tool_calls_hint": "{min} – {max} Aufrufe",
       "unit_calls": "Aufrufe",
+      "model_calls_title": "Modellaufrufe pro Runde",
+      "model_calls_desc": "Gesamtzahl der Modellaufrufe von Lead und allen Helfern in einer Runde. Helfer stoppen 2 Aufrufe früher, damit Lead die Antwort schreiben kann.",
+      "model_calls_input_label": "Höchstzahl der Modellaufrufe pro Runde",
+      "model_calls_hint": "{min} – {max} Aufrufe. Bei 1 oder 2 können keine Helfer laufen.",
+      "model_calls_reset": "Modellaufrufe pro Runde werden auf {calls} zurückgesetzt.",
       "footer": "Beim Erreichen einer Grenze wird unerledigte Arbeit gestoppt; bekannte Ergebnisse bleiben erhalten. Fortsetzen ist nur für unterstützte gespeicherte Ausführungen verfügbar.",
       "error_range": "{field} muss zwischen {min} und {max} liegen.",
       "invalid_count": "{count, plural, one {# Wert liegt außerhalb des Bereichs. Korrigieren Sie ihn, um zu speichern.} other {# Werte liegen außerhalb des Bereichs. Korrigieren Sie sie, um zu speichern.}}",
@@ -7770,6 +7781,10 @@
     "bundle_file_count": "{count, plural, one {# Datei} other {# Dateien}}",
     "bundle_more_indexed": "{count} weitere indexiert",
     "file_pages": "{count, plural, one {# Seite} other {# Seiten}}",
+    "file_updated_version": "Auf Version {version} aktualisiert",
+    "file_this_version": "Version {version} herunterladen",
+    "file_this_version_failed": "Download von Version {version} fehlgeschlagen · Erneut versuchen",
+    "file_this_version_pruned": "Version {version} wurde bereinigt; nur die drei neuesten Versionen werden aufbewahrt",
     "duplicate": "Diese Datei ist bereits angehängt",
     "bundle_done": "Fertig"
   },
@@ -8120,7 +8135,10 @@
         "parse_failed": "Analyse fehlgeschlagen"
       },
       "preview_source_missing": "Die Originaldatei wurde während der Verarbeitung nicht gefunden. Eine Vorschau ist daher nicht verfügbar. Falls sie wiederhergestellt wurde, versuchen Sie die Verarbeitung erneut.",
-      "preview_processing_failed": "Die Verarbeitung ist fehlgeschlagen. Eine Vorschau ist daher nicht verfügbar. Prüfen Sie den obigen Fehler."
+      "preview_processing_failed": "Die Verarbeitung ist fehlgeschlagen. Eine Vorschau ist daher nicht verfügbar. Prüfen Sie den obigen Fehler.",
+      "newer_version_title": "Von dieser Datei gibt es eine neuere Version (Version {version})",
+      "newer_version_body": "Dieser Eintrag verwendet weiterhin die hinzugefügte Version. Um die neuere Version zu verwenden, fügen Sie sie unter „Dateien“ hinzu und entfernen Sie dann diesen Eintrag.",
+      "newer_version_open_files": "Dateien öffnen"
     },
     "files_view": {
       "deep_link_failed": "Diese Datei konnte nicht geöffnet werden. Möglicherweise wurde sie gelöscht oder Sie haben keinen Zugriff auf den Bereich.",
@@ -8157,7 +8175,8 @@
       "load_failed_title": "Die Dateiliste konnte nicht geladen werden",
       "search_failed_title": "Die Tiefensuche konnte nicht abgeschlossen werden",
       "load_retry": "Erneut versuchen",
-      "refresh_failed": "Die Liste konnte nicht aktualisiert werden; angezeigt werden die zuletzt geladenen Ergebnisse. {error}"
+      "refresh_failed": "Die Liste konnte nicht aktualisiert werden; angezeigt werden die zuletzt geladenen Ergebnisse. {error}",
+      "newer_version": "Neuere Version {version} verfügbar"
     },
     "errors": {
       "empty_file": "Datei ist leer",
@@ -9261,7 +9280,9 @@
       "purge_failed": "Die Datei konnte nicht dauerhaft gelöscht werden. Aktualisieren Sie den Papierkorb und versuchen Sie es erneut.",
       "preview_failed": "Eine Vorschau konnte nicht erstellt werden. Sie können die Originaldatei trotzdem herunterladen oder es später erneut versuchen.",
       "category_failed": "Die Dateikategorie konnte nicht geändert werden. Aktualisieren Sie die Dateidetails und versuchen Sie es erneut.",
-      "usages_failed": "Dateiverweise konnten nicht geladen werden. Versuchen Sie es später erneut."
+      "usages_failed": "Dateiverweise konnten nicht geladen werden. Versuchen Sie es später erneut.",
+      "file_in_document": "Ein Dokumententwurf verwendet diese Datei oder eine ihrer Versionen noch. Schließen Sie den Entwurf ab oder entfernen Sie ihn und löschen Sie dann die Datei.",
+      "file_in_document_version": "Ein Dokumententwurf verwendet noch Version {n} dieser Datei. Schließen Sie den Entwurf ab oder entfernen Sie ihn und löschen Sie dann die Datei."
     },
     "table": {
       "filename": "Dateiname",
@@ -9387,6 +9408,8 @@
     "kb_col": {
       "added": "Hinzugefügt · {status}",
       "added_plain": "Hinzugefügt",
+      "older_version": "Enthält eine ältere Version",
+      "add_this_version": "Version {version} hinzufügen",
       "not_added": "Nicht hinzugefügt",
       "view_in_kb": "In Wissensdatenbank anzeigen",
       "view_progress": "Fortschritt anzeigen",
@@ -9451,7 +9474,8 @@
       "restored": "{name} wiederhergestellt",
       "restored_n": "{count} Dateien wiederhergestellt",
       "purged": "{count} Dateien dauerhaft gelöscht",
-      "purged_partial": "{count} dauerhaft gelöscht · {blocked} beibehalten (Wissensdatenbank)"
+      "purged_partial": "{count} dauerhaft gelöscht · {blocked} beibehalten (Wissensdatenbank)",
+      "deleted_versions": "{name} und {count} frühere Versionen gelöscht"
     },
     "use_in_chat": "In neuer Unterhaltung verwenden",
     "upload_uploading": "Wird hochgeladen …",
@@ -9464,7 +9488,9 @@
       "toolRun": "Ausgabe eines Agent-Durchlaufs"
     },
     "upload_failed": "Upload fehlgeschlagen · {reason}",
-    "usage_split": "Dateien {assets} · Ausführungsdaten {run}"
+    "usage_split": "Dateien {assets} · Ausführungsdaten {run}",
+    "version_badge": "v{n}",
+    "version_title": "Version {n} dieser Datei ({count} Versionen gespeichert)"
   },
   "results_workspace": {
     "choose_result_title": "Ergebnis auswählen",
@@ -9600,7 +9626,17 @@
     "unsupported_feedback_recorded": "Diese Formatunterstützung wurde angefragt.",
     "download_current_version": "Aktuelle Version herunterladen",
     "download_this_version": "Diese Version herunterladen",
-    "explorer_retry_locate": "Listenpositionierung wiederholen"
+    "explorer_retry_locate": "Listenpositionierung wiederholen",
+    "quick_version": "Version {number} von {count}",
+    "file_versions_title": "Versionen",
+    "file_versions_scope": "Neueste zuerst · die drei neuesten werden aufbewahrt",
+    "file_versions_close": "Schließen",
+    "file_versions_failed": "Die Versionen konnten nicht geladen werden.",
+    "file_versions_retry": "Erneut versuchen",
+    "file_versions_empty": "Keine Versionen verfügbar.",
+    "file_version_label": "Version {number}",
+    "file_version_current": "Aktuell",
+    "file_version_download": "Version {number} herunterladen"
   },
   "data_files": {
     "empty_no_session": "Sobald Sie einen Chat beginnen, erscheinen hier erstellte Datendateien.",
@@ -9753,6 +9789,9 @@
   "html_artifact": {
     "open_raw": "Rohes HTML in neuem Tab öffnen",
     "reload": "HTML neu laden",
+    "updated_version": "Auf Version {version} aktualisiert",
+    "provenance_version": "Datenhinweise für Version {version} erfasst",
+    "version_too_large": "Version {version} dieser Datei überschreitet das HTML-Limit des Teams ({size}), daher zeigt dieser Abschnitt weiterhin die frühere Version. Verkleinern Sie die Datei oder bitten Sie einen Team-Administrator, das Limit zu erhöhen.",
     "loading": "HTML-Artefakt wird geladen …",
     "computed_badge": "Statischer Inhalt nicht geprüft",
     "injected_badge": "Generierungsdaten angefügt",
@@ -10479,6 +10518,8 @@
       "agent_step_limit_body": "Die wirksame Grenze für Modellentscheidungen wurde erreicht. Prüfen Sie die erhaltenen Ergebnisse und begrenzen Sie die Restaufgabe oder bitten Sie einen Administrator, die Grenze anzupassen.",
       "agent_tool_call_limit_title": "Werkzeugaufrufgrenze erreicht",
       "agent_tool_call_limit_body": "Das Werkzeugbudget dieses Durchgangs ist aufgebraucht. Prüfen Sie die Ergebnisse vor weiteren Arbeiten.",
+      "agent_model_call_limit_title": "Modellaufruf-Limit erreicht",
+      "agent_model_call_limit_body": "Diese Runde hat das Modellaufruf-Limit des Teams aufgebraucht. Prüfen Sie die Ergebnisse vor weiteren Arbeiten. Team-Inhaber oder -Admins können das Limit unter Team-Einstellungen › Agents › Laufzeitlimits erhöhen.",
       "agent_stalled_title": "Aufgabe nach lokalem Stillstand gestoppt",
       "agent_stalled_body": "Keine aktive Operation oder lokaler Ausführungszustand kam voran. Prüfen Sie die erhaltenen Ergebnisse vor weiteren Arbeiten.",
       "step_usage": "Modellentscheidungen: {used} / {limit}."
@@ -10496,6 +10537,7 @@
         "step_limit": "hat das Schrittlimit des Teams erreicht",
         "time_limit": "hat das Zeitlimit dieses Durchlaufs erreicht",
         "tool_call_limit": "hat das Werkzeugaufruf-Limit dieses Durchlaufs erreicht",
+        "model_call_limit": "hat das Modellaufruf-Limit dieses Durchlaufs erreicht",
         "no_progress": "hat nach mehreren Schritten ohne neue Ergebnisse angehalten",
         "budget": "hat angehalten, weil das Guthaben aufgebraucht ist; laden Sie zuerst Guthaben auf",
         "other": "hat ein Laufzeitlimit erreicht"
@@ -12033,6 +12075,8 @@
     "band_handoff": "Übernommen von {from}",
     "band_elapsed_sec": "{count} Sek.",
     "band_paused": "Wartet weiterhin auf das Modell",
+    "band_waiting_confirmation": "Wartet auf Ihre Bestätigung",
+    "band_waiting_requester": "Wartet auf die Bestätigung der anfragenden Person",
     "band_model_retry_timeout": "Zeitüberschreitung bei der Modellantwort, neuer Versuch ({retry}/{max})",
     "band_model_retry_network": "Verbindung zum Modelldienst unterbrochen, neuer Versuch ({retry}/{max})",
     "band_model_retry_unavailable": "Modelldienst vorübergehend nicht verfügbar, neuer Versuch ({retry}/{max})",
@@ -12085,6 +12129,7 @@
       "iteration_limit_exceeded": "Dieser Agent hat alle Schritte, die ihm pro Durchlauf zur Verfügung stehen, aufgebraucht, bevor die Aufgabe fertig war, und wurde angehalten. Antworten Sie mit „weiter“, damit er an dieser Stelle fortfährt, oder teilen Sie die Aufgabe in kleinere Schritte auf. Die verantwortliche Person des Agents oder ein Teamadministrator kann das Schrittlimit auch in den Agent-Einstellungen erhöhen.",
       "tool_failure_limit_exceeded": "Dieser Analyse-Agent wurde nach wiederholten Tool-Fehlern angehalten. Bitte versuchen Sie es später erneut.",
       "tool_call_limit_exceeded": "Dieser Analyse-Agent wurde angehalten, weil diese Runde das Tool-Aufruflimit des Teams erreicht hat. Setzen Sie die Aufgabe fort oder bitten Sie einen Team-Admin, das Limit zu erhöhen.",
+      "model_call_limit_exceeded": "Dieser Analyse-Agent wurde angehalten, weil diese Runde das Modellaufruf-Limit des Teams erreicht hat. Setzen Sie die Aufgabe fort oder bitten Sie einen Team-Admin, das Limit zu erhöhen.",
       "credit_exhausted": "Dieser Analyse-Agent wurde angehalten, weil das verfügbare Guthaben aufgebraucht ist. Laden Sie Guthaben auf und setzen Sie die Aufgabe dann fort."
     },
     "collab_errors": {
@@ -12105,6 +12150,7 @@
       "step_limit": "Teilweise abgeschlossen: Die wirksame Schrittgrenze wurde erreicht. Prüfen Sie die erhaltenen Ergebnisse vor weiteren Arbeiten.",
       "time_limit": "Teilweise abgeschlossen: Das Zeitlimit dieser Runde wurde erreicht. Der fertige Teil steht in der Antwort, und Sie können fortfahren.",
       "tool_call_limit": "Teilweise abgeschlossen: Diese Runde hat das Tool-Aufruflimit des Teams erreicht. Der fertige Teil steht in der Antwort, und Sie können fortfahren.",
+      "model_call_limit": "Teilweise abgeschlossen: Diese Runde hat das Modellaufruf-Limit des Teams erreicht. Der fertige Teil steht in der Antwort, und Sie können fortfahren.",
       "no_progress": "Teilweise abgeschlossen: Angehalten, nachdem mehrere Schritte keine neuen Ergebnisse brachten. Der fertige Teil steht in der Antwort, und Sie können fortfahren.",
       "budget": "Teilweise abgeschlossen: Das verfügbare Guthaben ist aufgebraucht. Laden Sie Guthaben auf und fahren Sie dann fort.",
       "other": "Teilweise abgeschlossen. Prüfen Sie die erhaltenen Ergebnisse, die offenen Aufgaben und die vorgeschlagenen nächsten Schritte.",
@@ -13363,13 +13409,11 @@
     }
   },
   "emailSendConfirmation": {
-    "title": "E-Mail bestätigen",
+    "attachment_newer_version": "von dieser Datei gibt es eine neuere Version {version}",
     "warning": "Bowhead sendet die folgende E-Mail über den E-Mail-Dienst Ihres Teams. Gesendete E-Mails können nicht zurückgerufen werden. Prüfen Sie daher Empfänger und Inhalt, insbesondere Zahlen.",
     "to": "An: {to}",
     "attachments": "Anhänge",
     "subject": "Betreff: {subject}",
-    "expires": "Entscheiden Sie bis {time}. Andernfalls wird die E-Mail nicht gesendet.",
-    "decisionError": "Ihre Entscheidung wurde nicht übermittelt oder diese Bestätigung ist abgelaufen. Prüfen Sie das Ergebnis in der Unterhaltung.",
     "reject": "Nicht senden",
     "approve": "Senden"
   },
@@ -13435,10 +13479,7 @@
     "noPrivateAgents": "In diesem Team ist noch kein veröffentlichter Agent in Ihrem Besitz verfügbar.",
     "saveBinding": "Persönliche Toolbindungen speichern",
     "removeBindings": "Alle persönlichen Bindungen entfernen",
-    "confirmTitle": "Persönlichen Toolaufruf bestätigen",
     "confirmWarning": "Wenn Sie bestätigen, werden die vollständigen Argumente unten an den externen Dienst gesendet. Die Aktion kann Daten ändern oder löschen und möglicherweise nicht rückgängig gemacht werden. Prüfen Sie sowohl die übermittelten Informationen als auch die beabsichtigte Aktion.",
-    "expires": "Entscheiden Sie bis {time}. Ein abgelaufener Aufruf wird übersprungen.",
-    "decisionError": "Ihre Auswahl wurde nicht übermittelt oder dieser Aufruf ist nicht mehr verfügbar. Aktualisieren Sie den Bestätigungsstatus und versuchen Sie es erneut.",
     "reject": "Ablehnen und überspringen",
     "approveOnce": "Diesen Aufruf erlauben",
     "approveSession": "In dieser Sitzung immer erlauben",
@@ -14202,6 +14243,7 @@
       "document_candidate_invalid": "Die Präsentation hat die Dateistrukturprüfung nicht bestanden. Es wurden keine Dateien veröffentlicht. Prüfen Sie die ursprüngliche Vorlage oder bitten Sie im Chat um einen korrigierten Entwurf.",
       "agent_step_limit": "Schrittgrenze der Aufgabe erreicht. Die wirksame Grenze für Modellentscheidungen wurde erreicht. Prüfen Sie die erhaltenen Ergebnisse und begrenzen Sie die Restaufgabe oder bitten Sie einen Administrator, die Grenze anzupassen.",
       "agent_tool_call_limit": "Werkzeugaufrufgrenze erreicht. Das Werkzeugbudget dieses Durchgangs ist aufgebraucht. Prüfen Sie die Ergebnisse vor weiteren Arbeiten.",
+      "agent_model_call_limit": "Modellaufruf-Limit erreicht. Diese Runde hat das Modellaufruf-Limit des Teams aufgebraucht. Prüfen Sie die Ergebnisse vor weiteren Arbeiten. Team-Inhaber oder -Admins können das Limit unter Team-Einstellungen › Agents › Laufzeitlimits erhöhen.",
       "agent_stalled": "Aufgabe nach lokalem Stillstand gestoppt. Keine aktive Operation oder lokaler Ausführungszustand kam voran. Prüfen Sie die erhaltenen Ergebnisse vor weiteren Arbeiten.",
       "tool_arguments_invalid": "Eingabeformat oder Datenfelder passen nicht zu diesem Schritt. Der Agent muss die Eingaben vor einem neuen Versuch korrigieren.",
       "tool_resource_unavailable": "Die gewählte Quelle ist nicht verfügbar. Prüfen Sie den Zugriff oder wählen Sie eine verfügbare Quelle.",
@@ -14934,7 +14976,6 @@
     "content_plugin_created": "Inhalts-Plugin erstellt. Wählen Sie es im Agent-Editor; jede Änderung muss von Ihnen geprüft werden."
   },
   "shopifyContentConfirmation": {
-    "title": "Shopify-Inhaltsänderung prüfen",
     "notice": "Prüfen Sie die vollständigen Änderungen vor dem Speichern im Shop. Stimmen Sie sich mit anderen Bearbeitern desselben Inhalts ab.",
     "product": "Produkt",
     "page": "Seite",
@@ -14942,8 +14983,6 @@
     "after": "Nachher",
     "defaultValue": "Verwendet den Shopify-Standard",
     "emptyValue": "Leer",
-    "expires": "Prüfung läuft um {time} ab",
-    "decisionError": "Ihre Entscheidung konnte nicht gespeichert werden. Ohne Bestätigung wird nichts geändert.",
     "reject": "Änderung ablehnen",
     "approve": "Diese Änderungen anwenden",
     "fields": {
@@ -14955,13 +14994,9 @@
     }
   },
   "teamToolConfirmation": {
-    "title": "Team-Toolaufruf bestätigen",
-    "notice": "Ein Agent, der Ihre Anfrage bearbeitet, möchte dieses Team-Tool aufrufen. Der Aufruf verwendet das Konto, das Ihr Team verbunden hat, und die vollständigen Argumente unten werden an den externen Dienst gesendet.",
     "riskExternalWrite": "Dieses Tool ist als Aktion eingestuft, die Daten im externen Dienst ändert.",
     "riskDestructive": "Dieses Tool ist als Aktion eingestuft, die Daten löschen oder überschreiben kann; sie lässt sich möglicherweise nicht rückgängig machen.",
     "riskUnknown": "Weder der Dienst noch Ihr Team hat angegeben, was dieses Tool tut. Prüfen Sie die Argumente, bevor Sie den Aufruf erlauben.",
-    "expires": "Entscheiden Sie bis {time}. Ein abgelaufener Aufruf wird übersprungen.",
-    "decisionError": "Ihre Auswahl wurde nicht übermittelt oder dieser Aufruf ist nicht mehr verfügbar. Prüfen Sie das Ergebnis in der Unterhaltung.",
     "reject": "Ablehnen und überspringen",
     "approveOnce": "Diesen Aufruf erlauben",
     "approveSession": "In dieser Sitzung immer erlauben",
@@ -15263,7 +15298,8 @@
     "d_db65a4d59c05244006c6": "Optionales Team-Textmodell für Quellenbeschreibungen zur Navigation. Standardmäßig deaktiviert. Aufrufe erfolgen nur bei neuen veröffentlichten Quellversionen oder ausdrücklicher Generierung. Kataloglesen und Speichern der Modelleinstellungen starten keine Generierung und keine Nachverarbeitung bestehender Dateien. Entfernen der Zuweisung stoppt neue Aufgaben; weiterhin gültige Beschreibungen bleiben nutzbar.",
     "d_f6ce942fbba9c47980fe": "Vollständiger neuer Text der KI-Arbeitsanweisungen. Alle nicht zur Änderung angeforderten Zeilen exakt beibehalten; nur auf ausdrücklichen Wunsch mit leerem Text löschen. Die Längengrenze gilt nach Entfernen von Byte-Order-Marks und äußeren Leerzeichen.",
     "d_5351928bd1475f951a2a": "Wissensmodelle, aktive Vektor-/Rerank-Zuweisungen und Anzahl der Suchergebnisse. Explizit deaktivierte optionale Zuweisungen bleiben bei automatischer Pflege aus; Quellenbeschreibungen sind standardmäßig deaktiviert. Vektoränderungen erfordern die ursprüngliche Indexprüfung. Der Indexstatus wird vom Server verwaltet.",
-    "d_37d82cf26c6b5a5d5176": "Explizit deaktivierte optionale Zuweisungen. Verbindungsänderungen und Prüfungen dürfen sie nicht aktivieren. Quellenbeschreibungen bleiben auch ohne Eintrag hier standardmäßig deaktiviert."
+    "d_37d82cf26c6b5a5d5176": "Explizit deaktivierte optionale Zuweisungen. Verbindungsänderungen und Prüfungen dürfen sie nicht aktivieren. Quellenbeschreibungen bleiben auch ohne Eintrag hier standardmäßig deaktiviert.",
+    "d_31ae8f16122466d147cf": "Höchstzahl der Modellaufrufe, die Lead und alle Helfer in einer Runde gemeinsam nutzen; null hebt das Limit auf. Das Schrittlimit begrenzt jeden Agent-Lauf separat."
   },
   "sourceNavigation": {
     "title": "Quellennavigation",

@@ -1,16 +1,13 @@
 "use client";
 
 /**
- * Kind-specific previews of a call waiting for confirmation. The email and Shopify
- * previews are shared by the inline card and the original dialogs (kept until
- * Release), so both show the same exact content. The MCP argument list is shared
- * by personal and Team MCP cards.
+ * Kind-specific previews of a call waiting for confirmation, shown in its card. The MCP
+ * argument list is shared by personal and Team MCP cards.
  */
 import { useTranslations } from "next-intl";
 
-import type { EmailSendConfirmation } from "@/lib/email-send-confirmation-api";
 import { formatByteSize } from "@/lib/format";
-import type { ShopifyContentConfirmation } from "@/lib/shopify-content-confirmation-api";
+import type { EmailSendConfirmation, ShopifyContentConfirmation } from "@/lib/tool-confirmation-api";
 
 /** Recipient, subject, body and attachments of an outgoing email. */
 export function EmailSendPreview({ item }: { item: EmailSendConfirmation }) {
@@ -27,6 +24,9 @@ export function EmailSendPreview({ item }: { item: EmailSendConfirmation }) {
             {item.attachments.map((attachment) => (
               <li key={attachment.artifact_id}>
                 {attachment.filename} ({formatByteSize(attachment.size) || "0 B"})
+                {attachment.newer_version
+                  ? ` · ${t("attachment_newer_version", { version: attachment.newer_version.version })}`
+                  : null}
               </li>
             ))}
           </ul>

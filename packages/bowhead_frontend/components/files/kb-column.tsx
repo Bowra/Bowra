@@ -13,7 +13,7 @@ import { appPath } from "@/lib/base-path";
 import { kbFileState, type KbFileState } from "@/lib/kb-file-status";
 
 export type KbColumnView =
-  | { kind: "added"; state: KbFileState; pct: number | null; href: string }
+  | { kind: "added"; state: KbFileState; pct: number | null; href: string; outdated?: boolean }
   /** Present in the knowledge base, but the record lies outside your visible scope: show no status or navigation. */
   | { kind: "added_hidden" }
   | { kind: "suggested" }
@@ -29,7 +29,7 @@ export function kbFileHref(kb: Pick<FileKbStatus, "file_id" | "scope"> & { works
   return appPath(`/knowledge/?${q.toString()}`);
 }
 
-export function kbColumnView(f: Pick<FileDTO, "in_kb" | "kb" | "kb_promotable" | "kind">): KbColumnView {
+export function kbColumnView(f: Pick<FileDTO, "in_kb" | "kb" | "kb_promotable" | "kind" | "kb_outdated">): KbColumnView {
   if (f.kb) {
     const state = kbFileState(f.kb);
     return {
@@ -37,6 +37,8 @@ export function kbColumnView(f: Pick<FileDTO, "in_kb" | "kb" | "kb_promotable" |
       state,
       pct: state === "processing" ? (f.kb.parse_progress_pct ?? null) : null,
       href: kbFileHref(f.kb),
+      // File versions: the entry indexes an older version; the user adds this one to update it.
+      ...(f.kb_outdated ? { outdated: true } : {}),
     };
   }
   if (f.in_kb) return { kind: "added_hidden" };
@@ -73,6 +75,19 @@ export function KbColumn({ file, onAdd }: { file: FileDTO; onAdd: () => void }) 
       <div className="kbcol" data-testid="kb-col">
         <span className={`kbbadge ${BADGE_CLASS[view.state]}`}>{t("kb_col.added", { status })}</span>
         <a href={view.href} onClick={stop}>{t(LINK_KEY[view.state])}</a>
+        {view.outdated ? (
+          <>
+            <span className="kbcol-none" data-testid="kb-outdated">{t("kb_col.older_version")}</span>
+            {file.kb_promotable ? (
+              <button
+                type="button"
+                className="kbcol-link"
+                data-testid="kb-add-version"
+                onClick={(e) => { e.stopPropagation(); onAdd(); }}
+              >{t("kb_col.add_this_version", { version: file.version_no ?? 1 })}</button>
+            ) : null}
+          </>
+        ) : null}
       </div>
     );
   }

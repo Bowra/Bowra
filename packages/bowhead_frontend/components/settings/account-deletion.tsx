@@ -7,6 +7,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/notice";
 import { ApiError, apiJson } from "@/lib/api-client";
 import { clearInvalidSessionAndRedirect, type MeUser } from "@/lib/auth-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const ERROR_KEYS = {
   account_transfer_required: "transfer",
@@ -73,9 +74,10 @@ export function AccountDeletionControl({ user }: { user: MeUser }) {
             .map((team) => team?.name)
             .filter((name): name is string => typeof name === "string")
         : [];
-      setError(
+      setError(withHttpFailureReason(
         `${t(key)}${teams.length ? ` ${t("affected", { teams: teams.join(", ") })}` : ""}`,
-      );
+        caught,
+      ));
       setBusy(false);
     }
   };

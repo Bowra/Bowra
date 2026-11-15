@@ -33,7 +33,7 @@ vi.mock("@/lib/tool-confirmation-api", () => ({
   listToolConfirmations: mocks.list,
 }));
 
-import { ToolConfirmationNotice } from "./ToolConfirmationNotice";
+import { ToolConfirmationNotice, ToolConfirmationNoticeSlot } from "./ToolConfirmationNotice";
 
 function summary(id: string, sessionId: string, sessionTitle: string | null): ToolConfirmationSummary {
   return {
@@ -105,6 +105,30 @@ describe("ToolConfirmationNotice", () => {
     // Scrolled out of view: the notice lists it again.
     act(() => setConfirmationCardVisible("ttc_visible", false));
     expect(screen.getByText('noticeSession {"title":"Open here","count":1}')).toBeInTheDocument();
+  });
+
+  it("docks above a visible chat composer and floats again while the chat column is hidden", async () => {
+    mocks.list.mockResolvedValue([summary("ttc_a", "s_one", "Quarterly review")]);
+    const text = 'noticeSession {"title":"Quarterly review","count":1}';
+    const view = render(
+      <>
+        <ToolConfirmationNoticeSlot active />
+        <ToolConfirmationNotice />
+      </>,
+    );
+    expect(screen.getByTestId("tool-confirmation-notice-slot")).toContainElement(await screen.findByText(text));
+    expect(screen.getByRole("status")).toHaveClass("tcf-notice", "is-docked");
+
+    // A maximized Results pane hides the column: the notice must not disappear with it.
+    view.rerender(
+      <>
+        <ToolConfirmationNoticeSlot active={false} />
+        <ToolConfirmationNotice />
+      </>,
+    );
+    expect(screen.getByTestId("tool-confirmation-notice-slot")).toBeEmptyDOMElement();
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.getByRole("status")).not.toHaveClass("is-docked");
   });
 
   it("opens the session and asks its card to take focus", async () => {

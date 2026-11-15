@@ -81,6 +81,8 @@ export interface KbFileDTO {
   soft_deleted_at: string | null;
   can_delete: boolean;
   can_change_scope: boolean;
+  /** File versions: the source file has a newer version (shown to the file's owner only). */
+  newer_version?: { artifact_id: string; version_no: number } | null;
 }
 
 export interface KbFileListResponse {

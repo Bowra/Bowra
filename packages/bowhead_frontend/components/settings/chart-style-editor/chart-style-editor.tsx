@@ -53,6 +53,7 @@ import { Notice } from "@/components/ui/notice";
 import { Segment, SegmentedControl } from "@/components/ui/segmented-control";
 import { ChartStylePreview } from "./chart-style-preview";
 import { describeIssue } from "./issue-description";
+import { type HttpFailureReasonOptions, withHttpFailureReason } from "@/lib/user-facing-error";
 
 type SaveStatus = "idle" | "saving" | "saved" | "publishing" | "conflict" | "error";
 type PaletteMode = "light" | "dark";
@@ -156,7 +157,7 @@ export function ChartStyleEditor({ styleId }: { styleId: string }) {
       if (!mounted.current) return;
       const reason = unavailableReason(caught);
       if (reason) setUnavailable(reason);
-      else setError(messageOf(caught, t("errors.load"), t));
+      else setError(messageOf(caught, t("errors.load"), t, { read: true }));
     }
   }, [adopt, styleId, t]);
 
@@ -194,7 +195,7 @@ export function ChartStyleEditor({ styleId }: { styleId: string }) {
         })
         .catch((caught) => {
           if (controller.signal.aborted) return;
-          setPreviewError(messageOf(caught, t("errors.preview"), t));
+          setPreviewError(messageOf(caught, t("errors.preview"), t, { read: true }));
         })
         .finally(() => {
           if (!controller.signal.aborted) setPreviewing(false);
@@ -1135,7 +1136,12 @@ function unavailableReason(error: unknown): UnavailableReason | null {
   return null;
 }
 
-function messageOf(error: unknown, fallback: string, t: ReturnType<typeof useTranslations>): string {
+function messageOf(
+  error: unknown,
+  fallback: string,
+  t: ReturnType<typeof useTranslations>,
+  options?: HttpFailureReasonOptions,
+): string {
   if (error instanceof ApiError && error.code) {
     const known = [
       "chart_style_name_conflict",
@@ -1148,5 +1154,5 @@ function messageOf(error: unknown, fallback: string, t: ReturnType<typeof useTra
     ];
     if (known.includes(error.code)) return t(`errors.${error.code}`);
   }
-  return fallback;
+  return withHttpFailureReason(fallback, error, options);
 }

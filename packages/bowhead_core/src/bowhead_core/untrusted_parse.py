@@ -215,6 +215,7 @@ async def run_worker_json(
     control: dict[str, Any],
     *,
     data: bytes | None = None,
+    extra_files: dict[str, bytes] | None = None,
     limits: ExtractLimits = DEFAULT_LIMITS,
 ) -> tuple[dict[str, Any] | None, str]:
     """Drive the one-shot extraction child: write `control` (+ any raw `data`
@@ -240,6 +241,11 @@ async def run_worker_json(
                 data_path = tmpdir / "data.bin"
                 await asyncio.to_thread(data_path.write_bytes, data)
                 ctl["data_path"] = str(data_path)
+            # Further raw inputs of the same parse, each exposed as ``<name>_path``.
+            for index, (name, content) in enumerate((extra_files or {}).items()):
+                extra_path = tmpdir / f"extra-{index}.bin"
+                await asyncio.to_thread(extra_path.write_bytes, content)
+                ctl[f"{name}_path"] = str(extra_path)
             in_path.write_text(json.dumps(ctl), encoding="utf-8")
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,

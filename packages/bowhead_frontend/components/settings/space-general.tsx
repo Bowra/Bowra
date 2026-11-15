@@ -23,6 +23,7 @@ import {
   type WorkspaceSettingsSavedTarget,
 } from "@/lib/workspace-settings-notifications";
 import type { WorkspaceSettingsLifecycle } from "@/lib/workspace-settings-agent";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 interface SpaceGeneralProps {
   workspaceId?: string;
@@ -121,7 +122,7 @@ function SpaceGeneralPage({
       if (!saved.current || value.revision >= saved.current.revision) install(value);
     } catch (reason) {
       if (mounted.current && readTicket === ticket.current) {
-        setError(t("load_failed"));
+        setError(withHttpFailureReason(t("load_failed"), reason, { read: true }));
         if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) deny();
       }
     } finally {
@@ -213,7 +214,7 @@ function SpaceGeneralPage({
       if (originalTeamId) notifyWorkspaceMetadataSaved({ teamId: originalTeamId, workspaceId });
     } catch (reason) {
       if (mounted.current) {
-        setError(t("save_failed"));
+        setError(withHttpFailureReason(t("save_failed"), reason));
         if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) deny();
       }
     } finally {

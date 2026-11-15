@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { SaveBar } from "@/components/ui/save-bar";
+import { type HttpFailureReasonOptions, withHttpFailureReason } from "@/lib/user-facing-error";
 
 const BUILT_INS: BuiltInChartStyleId[] = [
   "bowhead-editorial",
@@ -75,7 +76,9 @@ export function TeamChartStyleLibrary() {
       setPolicyEtag(policyView.etag);
       return true;
     } catch (caught) {
-      setError(mutationSucceeded ? t("errors.saved_refresh_failed") : messageOf(caught, t("errors.load"), t));
+      setError(mutationSucceeded
+        ? withHttpFailureReason(t("errors.saved_refresh_failed"), caught, { read: true })
+        : messageOf(caught, t("errors.load"), t, { read: true }));
       return false;
     } finally {
       setLoading(false);
@@ -374,12 +377,17 @@ function formatDate(value: string, locale: string): string {
   return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
-function messageOf(error: unknown, fallback: string, t: ReturnType<typeof useTranslations>): string {
+function messageOf(
+  error: unknown,
+  fallback: string,
+  t: ReturnType<typeof useTranslations>,
+  options?: HttpFailureReasonOptions,
+): string {
   if (error instanceof ApiError && error.code) {
     const known = ["chart_style_name_conflict", "chart_style_limit_reached", "chart_style_precondition_failed", "chart_style_policy_precondition_failed", "chart_style_policy_minimum", "chart_style_default_style"];
     if (known.includes(error.code)) return t(`errors.${error.code}`);
   }
-  return fallback;
+  return withHttpFailureReason(fallback, error, options);
 }
 
 /** Remove unavailable styles (disabled or team styles without an effective revision) from unsaved scope; default falls back to the first still-enabled style. */

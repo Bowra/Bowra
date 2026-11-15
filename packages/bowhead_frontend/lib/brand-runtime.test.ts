@@ -198,6 +198,27 @@ describe("V2 effective brand runtime", () => {
     ).toBe("STYLE");
   });
 
+  it("applies a Team's frame options, restores them from its cache and clears them on fallback", () => {
+    const framed = response("team_1");
+    framed.frame = { corners: "square", elevation: "hard" };
+    const root = document.documentElement;
+
+    applyBrandBundleToDocument(framed);
+    expect(root.getAttribute("data-frame-corners")).toBe("square");
+    expect(root.getAttribute("data-frame-elevation")).toBe("hard");
+
+    applyCanonicalBrandFallback();
+    expect(root.hasAttribute("data-frame-corners")).toBe(false);
+    expect(root.hasAttribute("data-frame-elevation")).toBe(false);
+
+    expect(activateCachedBrandForTeam("team_1")).toBe(true);
+    expect(root.getAttribute("data-frame-corners")).toBe("square");
+
+    // A bundle without the key is the product look, not "keep whatever was there".
+    applyBrandBundleToDocument(response("team_1"));
+    expect(root.hasAttribute("data-frame-corners")).toBe(false);
+  });
+
   it("never leaves the previous team brand visible across a team switch", () => {
     applyBrandBundleToDocument(response("team_1"));
 

@@ -2740,11 +2740,9 @@ def build_default_registry() -> ToolRegistry:
             preflight_notes.append("⚠ 本次数据不完整：" + "；".join(_partial_parts) + "。结论里要说明这一点，或把问题拆成多条 query 分别取。")
             out["_partial_data"] = True
         if truncated_for_llm:
-            preflight_notes.append(
-                "Only a preview of the returned rows is shown. `rows_shown` is the displayed count; "
-                "`row_count` counts all returned rows, not source-wide completeness. "
-                "Use the artifact to read the remaining returned rows when available."
-            )
+            from bowhead_core.tool_result_budget import PREVIEW_NOTE
+
+            preflight_notes.append(PREVIEW_NOTE)
             out["_rows_truncated"] = True
             out["_rows_inline_count"] = len(rows_for_llm)
             out["_rows_full_count"] = full_count
@@ -3012,8 +3010,10 @@ def build_default_registry() -> ToolRegistry:
         if cut_result is not None and isinstance(result, dict):
             from bowhead_core.bi_cut_tokens import describe_token
             from bowhead_core.bi_unknown_words import (
+                FIELDS_NOT_IN_REPORT,
                 denoise_unknown_words,
                 fallback_measure_columns,
+                fields_not_in_report,
                 parse_gap_notes,
                 withhold_fallback_measures,
             )
@@ -3028,6 +3028,11 @@ def build_default_registry() -> ToolRegistry:
                 "unknown_words": unknown_words,
                 "half_match_values": half_match,
             }
+            # Parsed fields the report does not list; recorded here because only the handler holds the schema names
+            # that make the comparison language-safe (criteria in bi_unknown_words).
+            _unreported = fields_not_in_report(result["_parse"]["tokens"], result.get("query_explain"), schema_measures=measure_names.values())
+            if _unreported:
+                result["_parse"][FIELDS_NOT_IN_REPORT] = _unreported
             result["_debug_cut_props"] = [{"word": t.word, "prop": t.prop} for t in cut_result.tokens]
             # Step 2: deterministic naming, without relying on the model to inspect `_parse`. Skip failed retrievals: without data there is no filtering claim.
             # Report key presence without interpreting localized text or unknown-word semantics. A cleanly parsed filter value

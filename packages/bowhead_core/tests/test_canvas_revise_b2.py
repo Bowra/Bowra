@@ -80,6 +80,37 @@ async def test_ledger_reports_what_the_database_says(store: CanvasStore) -> None
     assert cc["prior_charts_visible"] == [{"section_id": ids["rank_chart"], "title": "2026年各门店全年营业额排名"}]
 
 
+async def test_ledger_lists_text_a_helper_added_this_turn(store: CanvasStore) -> None:
+    """116 `t_eb052e2762c8`: an added chapter was reported as an in-place rewrite. The ledger now names added text.
+
+    Chrome, provenance and text not written by a helper are left out; the emptiness check (delivery decisions) ignores it.
+    """
+    from bowhead_core.canvas_revise import canvas_changes_is_empty
+
+    ids = await _seed_prior_report(store)
+    canvas = ids["canvas"]
+    added = await store.append_section(
+        canvas_id=canvas, kind="narrative", payload={"markdown": "## 客户画像\n\n新写的一章。"}, by_turn_id="t2", owner="sub_writer"
+    )
+    await store.append_section(
+        canvas_id=canvas, kind="narrative", payload={"markdown": "## 建议\n\n…", "style": "recommendations"}, by_turn_id="t2", owner="sub_writer"
+    )
+    await store.append_section(
+        canvas_id=canvas,
+        kind="narrative",
+        payload={"markdown": "## 数据可信度提示\n\n…", "_meta": {"provenance": True}},
+        by_turn_id="t2",
+        owner="sub_writer",
+    )
+    await store.append_section(canvas_id=canvas, kind="narrative", payload={"markdown": "## Lead note"}, by_turn_id="t2")
+
+    cc = await build_canvas_changes(store, canvas_id=canvas, turn_id="t2")
+
+    assert cc is not None and cc["patched"] == []
+    assert cc["added_sections"] == [{"section_id": added.id, "heading": "客户画像"}]
+    assert canvas_changes_is_empty(cc)
+
+
 async def test_ledger_when_nothing_was_removed(store: CanvasStore) -> None:
     """116 A3 的形状：只改了文字、一张图都没收 ⇒ removed 为空，旧图全在 prior_charts_visible。"""
     ids = await _seed_prior_report(store)
@@ -561,7 +592,7 @@ async def test_missing_canvas_mode_rejected_once_then_defaults_to_append(store: 
     await _seed_prior_report(store)
     bus = _Bus()
     first = await _spawn_args(monkeypatch, store, bus, {}, batch=1)
-    assert first["error_kind"] == "invalid_args" and "不是系统故障" in first["hint"]
+    assert first["error_kind"] == "invalid_args" and first["path"] == "canvas_mode"
     assert lead_canvas_mode(bus) is None
     second = await _spawn_args(monkeypatch, store, bus, {"canvas_mode": "bogus"}, batch=2)
     assert not second.get("error") and second.get("ok") is True, second
@@ -709,7 +740,7 @@ async def _seed_plan_report(store: CanvasStore) -> dict[str, str]:
 
 
 def test_mixed_plan_doc_lists_non_chapter_sections_grouped_by_heading() -> None:
-    """116 dogfood（1.3.46，`s_030bdd27d75a`）：只有月度一步落成了带章 h1 的 plan 章，品类 / 结论是「## 标题 + ### 小节」的普通正文。
+    """Regression check（1.3.46，`s_030bdd27d75a`）：只有月度一步落成了带章 h1 的 plan 章，品类 / 结论是「## 标题 + ### 小节」的普通正文。
     原先只列 plan 章 ⇒ 唯一选项是月度章，「改第二章（品类）」被 Lead 照着清单落到了月度章上。"""
     from types import SimpleNamespace as NS
 
@@ -763,7 +794,7 @@ def test_chart_revision_scope_requires_a_unique_user_named_visible_chart() -> No
 
 
 def test_plan_chapter_without_an_h1_is_listed_by_its_first_heading() -> None:
-    """116 dogfood（1.3.47，`s_6f8297c12cd1`）：月度章四段都带 chapter meta、没有章 h1——原先要求有 h1 才列，
+    """Regression check（1.3.47，`s_6f8297c12cd1`）：月度章四段都带 chapter meta、没有章 h1——原先要求有 h1 才列，
     整章从清单里消失（清单只剩 3 个单元），它的段也不进章外分组，点名月度章永远对不上。"""
     from types import SimpleNamespace as NS
 
@@ -790,7 +821,7 @@ def test_plan_chapter_without_an_h1_is_listed_by_its_first_heading() -> None:
 
 
 def test_plan_chapter_with_a_meaningless_title_is_named_by_its_first_heading() -> None:
-    """116 dogfood（1.3.43，`s_549979486a1b`）：plan 章 h1 是「表+insight」——用正文第一个小标题点名，清单也带上它。"""
+    """Regression check（1.3.43，`s_549979486a1b`）：plan 章 h1 是「表+insight」——用正文第一个小标题点名，清单也带上它。"""
     from types import SimpleNamespace as NS
 
     from bowhead_core.canvas_revise import resolve_revise_scope, revise_scope_units
@@ -938,43 +969,77 @@ async def test_resolved_scopes_in_later_steps_still_dispatch(store: CanvasStore,
     for batch, scope in ((1, ["月度营业额趋势"]), (2, ["门店营业额排名"]), (3, None)):
         res, cap = await _revise_spawn(monkeypatch, store, bus, scope, batch=batch)
         assert res.get("ok") is True and cap, (batch, res)
+        assert "scope_after_miss" not in res
 
 
-async def test_unresolved_scope_asks_the_user_and_blocks_later_dispatches(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """用户拍板（2026-10-01）：点名的章对不上 ⇒ 由模型 clarification_ask 问用户。116 1.3.56 实测：回清单让 Lead 重给，
-    「第五章」被它硬挑成第四部分改掉（t_8c8b80040f9c）、「客户画像」被它去掉范围重派后新写一章（t_eb052e2762c8）。
-    ⇒ 本步拒、给现成问法；更晚的步本轮一律不再派活（挑一章、去掉范围、换档位都不行）；同一步并行的兄弟照常判。"""
+async def test_unresolved_scope_refuses_the_call_and_offers_choices(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A miss refuses that dispatch with the parts and a ready question; it no longer locks the Turn (2026-11-10).
+
+    116 1.3.56 (`t_8c8b80040f9c`, `t_eb052e2762c8`) and 1.3.43 (`s_549979486a1b`) keep the narrow rules: after a
+    position-only miss a subset retry, an unscoped revision and a new report are refused; append is admitted and disclosed.
+    """
     await _seed_plan_report(store)
     bus = _Bus()
     first, cap1 = await _revise_spawn(monkeypatch, store, bus, ["第九章"], batch=1)
-    assert first["error_kind"] == "invalid_args" and not cap1
-    assert "clarification_ask" in first["hint"] and "｜" not in str(first) and "suggested_question" not in first["hint"]
+    assert first["error_kind"] == "invalid_args" and first["reason_code"] == "revise_scope_unresolved" and not cap1
+    assert "clarification_ask" in first["hint"] and "never count positions" in first["hint"] and "｜" not in str(first)
+    assert "不要再调用 subagent_spawn" not in first["hint"]
     q = first["suggested_question"]
-    # 「第 N 章」类：章可能存在、只是标题里没写编号 ⇒ 不说「没找到」
+    # Position-style names: the part may exist without a number in its title, so the question does not say "not found".
     assert q["question"].startswith("没法确定「第九章」指的是报告里的哪一部分") and "你想改哪一部分" in q["question"]
-    # 三章 + 综合结论 = 4 部分，卡片放不下（每题最多 4 个选项，还要留「新加一章」）⇒ 章名列在问题里、自由回答
+    # Three chapters plus the summary are four parts: free text, names listed in the question.
     assert q["type"] == "free_text" and q["options"] == [] and len(q["question"]) <= 200
     assert "2026年门店营业额排名；2026年各品类大类营业额对比；2026年月度营业额趋势；综合结论" in q["question"] and "新加一章" in q["question"]
-    # 同一步并行的兄弟：自己的范围对得上就照常派
+    # A sibling in the same step is judged on its own arguments.
     sibling, cap_s = await _revise_spawn(monkeypatch, store, bus, ["月度营业额趋势"], batch=1)
-    assert sibling.get("ok") is True and cap_s
-    # 更晚的步：从清单里挑一章 / 去掉范围 / 换别的档位 / 不带档位，一律不再派
-    for scope, mode in ((["月度营业额趋势"], "revise"), (None, "revise"), (None, "append"), (None, "new_report"), (None, None)):
+    assert sibling.get("ok") is True and cap_s and "scope_after_miss" not in sibling
+    # A later step: a position is never mapped onto a part, an unscoped revision and a new report stay refused.
+    for scope, mode, path in ((["月度营业额趋势"], "revise", "revise_scope"), (None, "revise", "revise_scope"), (None, "new_report", "canvas_mode")):
         later, cap_l = await _revise_spawn(monkeypatch, store, bus, scope, batch=2, mode=mode)
-        assert later["error_kind"] == "invalid_args" and "不要再调用 subagent_spawn" in later["hint"] and not cap_l, (scope, mode)
-    assert bus._lead_revise_scope_must_ask_n == 5
+        assert (later["reason_code"], later["path"]) == ("revise_scope_unresolved", path) and not cap_l, (scope, mode)
+        assert later["suggested_question"]["question"].startswith("没法确定「第九章」")
+    # Every part is the whole report, and append adds content: both run and say what they did instead.
+    every = ["2026年门店营业额排名", "2026年各品类大类营业额对比", "2026年月度营业额趋势", "综合结论"]
+    whole, cap_w = await _revise_spawn(monkeypatch, store, bus, every, batch=3)
+    assert whole.get("ok") is True and cap_w
+    assert whole["scope_after_miss"] == {"not_found": ["第九章"], "mode": "revise", "scope_parts": [], "whole_report": True}
+    added, cap_a = await _revise_spawn(monkeypatch, store, bus, None, batch=3, mode="append")
+    assert added.get("ok") is True and cap_a
+    assert added["scope_after_miss"] == {"not_found": ["第九章"], "mode": "append", "scope_parts": [], "whole_report": False}
+    assert "scope_after_miss" in added["directive"] and "Never present the change as a change to the part that was not found" in added["directive"]
+
+
+async def test_named_miss_can_be_corrected_in_a_later_step(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A misquoted name is corrected from the listed parts; the result states the part actually revised."""
+    from bowhead_core.canvas_revise import out_of_revise_scope
+
+    ids = await _seed_plan_report(store)
+    bus = _Bus()
+    first, _ = await _revise_spawn(monkeypatch, store, bus, ["月度趋势分析章"], batch=1)
+    assert first["reason_code"] == "revise_scope_unresolved"
+    retry, cap = await _revise_spawn(monkeypatch, store, bus, ["月度营业额趋势"], batch=2)
+    assert retry.get("ok") is True and cap
+    assert retry["scope_after_miss"] == {
+        "not_found": ["月度趋势分析章"],
+        "mode": "revise",
+        "scope_parts": ["2026年月度营业额趋势"],
+        "whole_report": False,
+    }
+    assert not out_of_revise_scope(bus, ids["ch3_n"]) and out_of_revise_scope(bus, ids["summary"])
 
 
 async def test_resumed_turn_replies_instead_of_asking_again(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """review P1：用户刚答过一次澄清的续跑轮里，clarification_ask 会被 resume_guard 拒——此时仍让 Lead 去问，它两头被拒，
-    只剩编「已改好」或空转。续跑轮改成：不给问法，直接回复用户、列出现有各部分、不许说改了。"""
+    """review P1 (2026-10-01): after the user has answered a question, clarification_ask is refused by the resume guard.
+    The refusal then offers a retry with a listed name or a direct reply, never a second question."""
     await _seed_plan_report(store)
     bus = _Bus()
     first, cap1 = await _revise_spawn(monkeypatch, store, bus, ["第五部分"], batch=1, resumed=True)
     assert first["error_kind"] == "invalid_args" and not cap1 and "suggested_question" not in first
-    assert "不能再问" in first["hint"] and "2026年月度营业额趋势" in first["hint"] and "不要说已经改了" in first["hint"]
-    later, _ = await _revise_spawn(monkeypatch, store, bus, None, batch=2, resumed=True)
-    assert "不能再问" in later["hint"] and "clarification_ask" not in later["hint"]
+    assert "do not ask again" in first["hint"] and "2026年月度营业额趋势" in first["hint"]
+    assert "Do not tell the user anything was changed" in first["hint"] and "clarification_ask" not in first["hint"]
+    later, cap_l = await _revise_spawn(monkeypatch, store, bus, None, batch=2, resumed=True)
+    assert later["reason_code"] == "revise_scope_unresolved" and not cap_l
+    assert "do not ask again" in later["hint"] and "clarification_ask" not in later["hint"]
 
 
 async def test_report_without_nameable_parts_ignores_the_scope(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1070,7 +1135,7 @@ def test_duplicate_titles_become_distinct_resolvable_options() -> None:
 
 
 async def test_scope_naming_every_chapter_is_a_whole_report_revision(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """116 dogfood（1.3.43，`t_49b2fb04ec3d`）：「把这份报告改成 1-6 月」，Lead 拿到章节清单后把全部章节传回来——
+    """Regression check（1.3.43，`t_49b2fb04ec3d`）：「把这份报告改成 1-6 月」，Lead 拿到章节清单后把全部章节传回来——
     被当成「只改这几章」，封面 KPI / 标题 / 没有标题的导语段都没改。点满全部章节＝整份修订，不设范围。"""
     from bowhead_core.canvas_revise import out_of_revise_scope, revise_scope_bounded
 
@@ -1288,7 +1353,7 @@ async def test_ledger_reports_stale_kpi_and_out_of_scope_text(store: CanvasStore
 
 
 async def test_write_report_translates_simple_int_figure_anchors(store: CanvasStore, caplog: pytest.LogCaptureFixture) -> None:
-    """116 dogfood（1.3.46）：`written=2 stripped=2 invalid_ids=['15','17']`——写手用本 run 的 ν1.5 编号写图锚，bake 全剥，
+    """Regression check（1.3.46）：`written=2 stripped=2 invalid_ids=['15','17']`——写手用本 run 的 ν1.5 编号写图锚，bake 全剥，
     图与正文零挂钩。现在写入前用这个 run 自己那份表翻：图的号 → `sec_*`；数据的号不翻（照剥，不把锚绑到 art_ 上）。
     ctx 上那份是并行 sibling 共享、后写者赢的表——同一个号在那边指向**别的**图，读它就会绑错。"""
     import logging
@@ -1396,7 +1461,7 @@ async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.
 
 
 async def test_writer_can_retitle_a_prior_chapter_but_not_the_document_title(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """116 dogfood（1.3.49，`s_18c8b86f3003`）：整份改成 1-6 月后章标题仍是「2026年1-9月…」——写手对 h1 只拿到 kind_not_editable。
+    """Regression check（1.3.49，`s_18c8b86f3003`）：整份改成 1-6 月后章标题仍是「2026年1-9月…」——写手对 h1 只拿到 kind_not_editable。
     现在章标题可改：只写 payload.text（h1 渲染读的键），不进正文 bake；文档大标题仍拒（它由收尾器按 payload.title 换）。"""
     from bowhead_core.agents._lead_context import reset_current_peer_name, set_current_peer_name
     from bowhead_core.agents.report_tools import _read_report, _write_report
@@ -1524,3 +1589,51 @@ async def test_remove_chart_is_open_to_team_agents_with_the_switch_on(store: Can
     ids = await _seed_prior_report(store)
     done = await _call_remove(monkeypatch, store, "my-team-agent", {"section_ids": [ids["trend_chart"]], "reason": "removed"})
     assert done["removed"] == [ids["trend_chart"]]
+
+
+@pytest.mark.parametrize("case", ["title_only", "also_revised_text", "scoped"])
+async def test_a_title_only_revision_reaches_lead_as_a_canvas_change(store: CanvasStore, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    """Regression check N8: the title is replaced when the helper returns, so Lead's canvas_changes shows it and delivered is not 'none'."""
+    from bowhead_core.canvas_revise import apply_title_only_revision
+
+    ids = await _seed_prior_report(store)
+
+    class TitleRunner:
+        async def run(self, **kwargs):
+            bus = kwargs["parent_bus"]
+            if case == "also_revised_text":
+                await store.patch_section(
+                    section_id=ids["trend_text"], patch={"markdown": "## 按月趋势分析\n\n改了"}, by_turn_id="parent_t", caller=None
+                )
+            payload = {"delivery_surface": "report", "title": "2026年门店经营复盘", "exec_summary": "大标题已改。"}
+            # What subagent_return does when the helper returns this payload.
+            await apply_title_only_revision(store, bus, session_id="s1", turn_id="parent_t", payload=payload)
+            return SubagentResult(profile="compute", subagent_id="peer", ok=True, final_answer="", payload=payload)
+
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    ctx = ToolExecutionContext(
+        workspace_id="1",
+        member_uid="m",
+        user_id="u",
+        turn_id="parent_t",
+        datarc=None,
+        subagent_runner=TitleRunner(),
+        parent_bus=_Bus(),
+        session_id="s1",
+    )
+    ctx.canvas_store = store
+    args = {"profile": "compute", "task": "把大标题改成…", "canvas_mode": "revise"}
+    if case == "scoped":
+        args["revise_scope"] = ["按月趋势分析"]  # Lead named a part, so the cover stays as it is.
+    inv = await registry.execute("subagent_spawn", args, ctx)
+    assert inv.error is None, inv.error
+    h1 = next(s for s in await store.list_sections(ids["canvas"]) if s.id == ids["h1"])
+    patched_kinds = [item["kind"] for item in inv.result["canvas_changes"]["patched"]]
+    if case == "title_only":
+        assert h1.payload["text"] == "2026年门店经营复盘"
+        assert "h1" in patched_kinds and inv.result["delivered"] == "payload"
+    else:
+        # A revision that also changed text leaves the title to the finalizer; a named scope keeps the cover.
+        assert h1.payload["text"] == "2026年各门店营业额分析报告" and "h1" not in patched_kinds

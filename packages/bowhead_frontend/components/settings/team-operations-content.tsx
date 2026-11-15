@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { getTeamOperations, saveTeamOperationsTimezone, type OperationsDay, type TeamOperationsReport } from "@/lib/team-operations-api";
 import styles from "./team-operations.module.css";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Range = 1 | 7 | 30;
 type Metric = "login_users" | "sessions" | "tokens" | "background_tokens" | "skill_loads" | "tool_loads" | "tool_calls";
@@ -56,8 +57,8 @@ export function TeamOperationsContent() {
       await saveTeamOperationsTimezone(timezone);
       setSaveMessage(t("timezone_saved"));
       setRefresh((n) => n + 1);
-    } catch {
-      setSaveMessage(t("save_error"));
+    } catch (cause) {
+      setSaveMessage(withHttpFailureReason(t("save_error"), cause));
     } finally {
       setSaving(false);
     }

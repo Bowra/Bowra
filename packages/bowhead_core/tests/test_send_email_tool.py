@@ -270,7 +270,6 @@ def test_numbers_the_user_dictated_are_a_source(configured, owner_decides) -> No
 
 
 def test_confirmation_card_carries_labels_but_not_the_email(configured, monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
     queue = EmailSendConfirmations(timeout_seconds=5)
     events: list[tuple[str, dict]] = []
 

@@ -46,7 +46,6 @@ function confirmation(over: Partial<StepConfirmation> = {}): StepConfirmation {
     category: "destructive",
     choices: ["reject", "approve", "approve_session"],
     expiresAt: "2026-11-08T10:03:00Z",
-    timeoutSeconds: 180,
     receivedAt: Date.now(),
     ...over,
   };
@@ -198,17 +197,22 @@ describe("ToolConfirmationCard for the requester", () => {
 
   it("anchors the countdown to the server's remaining seconds", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<ToolConfirmationCard confirmation={confirmation({ timeoutSeconds: 180 })} />);
+    // A reload redelivers the request long after it was emitted: nothing counts down from it.
+    let resolveDetail: (detail: ToolConfirmationDetail) => void = () => {};
+    mocks.getDetail.mockReturnValue(new Promise((resolve) => (resolveDetail = resolve)));
+    render(<ToolConfirmationCard confirmation={confirmation()} />);
+    expect(screen.queryByText(/toolConfirmation\.countdown/)).toBeNull();
+    await act(async () => resolveDetail(teamDetail()));
     expect(await screen.findByText(/toolConfirmation\.countdownSkip \{"time":"0:42"\}/)).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect(screen.getByText(/toolConfirmation\.countdownSkip \{"time":"0:40"\}/)).toBeInTheDocument();
   });
 
-  it("falls back to the event's remaining seconds while the preview is unavailable", async () => {
+  it("offers a retry and no choice while the preview is unavailable", async () => {
     mocks.getDetail.mockRejectedValue(new Error("offline"));
-    render(<ToolConfirmationCard confirmation={confirmation({ timeoutSeconds: 95 })} />);
+    render(<ToolConfirmationCard confirmation={confirmation()} />);
     expect(await screen.findByText(/toolConfirmation\.detailsFailed/)).toBeInTheDocument();
-    expect(screen.getByText(/toolConfirmation\.countdownSkip \{"time":"1:3[45]"\}/)).toBeInTheDocument();
+    expect(screen.queryByText(/toolConfirmation\.countdown/)).toBeNull();
     // Nothing can be allowed without seeing what will be sent.
     expect(screen.queryByRole("button", { name: /teamToolConfirmation/ })).toBeNull();
     mocks.getDetail.mockResolvedValue(teamDetail());

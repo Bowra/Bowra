@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "refresh_failed";
 
@@ -52,8 +53,8 @@ export function PersonalChartStyleSettings() {
     try {
       const response = await getChartStyleOptionsV2();
       setOptions(response.items);
-    } catch {
-      setError(t("loadFailed"));
+    } catch (cause) {
+      setError(withHttpFailureReason(t("loadFailed"), cause, { read: true }));
     } finally {
       setLoading(false);
     }

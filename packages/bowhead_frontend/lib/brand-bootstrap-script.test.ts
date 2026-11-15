@@ -85,6 +85,9 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-brand-checksum");
   document.documentElement.removeAttribute("data-brand-team");
   document.documentElement.removeAttribute("data-brand-revision");
+  for (const name of ["corners", "border", "elevation", "line-contrast"]) {
+    document.documentElement.removeAttribute(`data-frame-${name}`);
+  }
   document.documentElement.style.removeProperty("--c-bg");
   document.documentElement.style.removeProperty("--surface");
   document.title = "Bowhead";
@@ -122,6 +125,29 @@ describe("authenticated brand bootstrap", () => {
     expect(runBootstrap("custom")?.getAttribute("href")).toMatch(
       /^data:image\/svg\+xml,/,
     );
+  });
+
+  it("applies cached Team frame options before hydration and ignores unknown values", () => {
+    const cache = cacheBrand("custom");
+    window.localStorage.setItem(BRAND_CACHE_POINTER_KEY, "team_1");
+    window.localStorage.setItem(
+      `${BRAND_CACHE_PREFIX}team_1`,
+      JSON.stringify({
+        ...cache,
+        response: {
+          ...cache.response,
+          frame: { corners: "square", elevation: "flat", border: "dotted" },
+        },
+      }),
+    );
+
+    Function(BRAND_BOOTSTRAP_SCRIPT)();
+
+    const dataset = document.documentElement.dataset;
+    expect(dataset.frameCorners).toBe("square");
+    expect(dataset.frameElevation).toBe("flat");
+    expect(dataset.frameBorder).toBeUndefined();
+    expect(dataset.frameLineContrast).toBeUndefined();
   });
 
   it("takes token ownership from legacy inline styles with one fixed node", () => {

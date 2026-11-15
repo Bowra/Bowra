@@ -2,11 +2,38 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, content_hash
+
+_VALIDATION_PASS: ContextVar[dict[Any, Any] | None] = ContextVar("report_read_validation_pass", default=None)
+
+
+@contextmanager
+def report_read_validation_pass() -> Iterator[None]:
+    """One pass over a conversation's recorded dependencies.
+
+    A long conversation records the same report many times. Inside a pass the reader may load the report
+    and project a given set of sources once and reuse them for every record; nothing is kept after it.
+    """
+    if _VALIDATION_PASS.get() is not None:
+        yield
+        return
+    token = _VALIDATION_PASS.set({})
+    try:
+        yield
+    finally:
+        _VALIDATION_PASS.reset(token)
+
+
+def validation_pass_cache() -> dict[Any, Any] | None:
+    """The current pass's store, or None when each check must read for itself."""
+    return _VALIDATION_PASS.get()
 
 
 class ReportReadObservation(BaseModel):

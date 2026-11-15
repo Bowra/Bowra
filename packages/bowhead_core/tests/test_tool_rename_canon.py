@@ -293,6 +293,7 @@ class TestChokepointDriftGuard:
     _LOOPS_REQUIRING_C1 = {
         "subagent.py",  # Shared by Lead + all peers.
         "report_writer_loop.py",  # Own handler table; bypasses ToolRegistry.execute.
+        "authoring_runner.py",  # Private document authoring loop with its own handler table.
     }
     #: Consumers of `.tool_calls` **without name-based decisions** are exempt (explain; no silent exemptions).
     _EXEMPT = {
@@ -327,6 +328,18 @@ class TestChokepointDriftGuard:
         # a call from here.
         "ordinary_lead_checkpoint.py": "continuation checkpoint validation; transcript comes from the C1-checked loop, mismatches reject",
         "ordinary_lead_runtime.py": "continuation checkpoint capture; transcript comes from the C1-checked loop, mismatches reject",
+        # 2026-10-21 be7c42410: resumed-transcript serialization; calls are paired with results by id only.
+        "subagent_resume.py": "resume transcript serialization; pairs calls and results by id, no name decision",
+        # 2026-10-30 79b123899: context compaction and dependency capture check message shape and
+        # call/result pairing on the C1-checked history; no Tool is selected by name.
+        "context_dependencies.py": "checks whether a message carries tool calls; no name decision",
+        "context_view.py": "checks whether a summary carries tool calls; no name decision",
+        "context_compaction.py": "validates call/result pairing of the C1-checked history; no name decision",
+        # 2026-10-27 34fd40d69: output recovery only checks whether a reply carried tool calls.
+        "output_recovery.py": "checks whether a reply carried tool calls; no name decision",
+        # 2026-10-28 8844b0061: knowledge source checks match kb_* results by call id on the C1-checked
+        # history; none of those Tools is renamed.
+        "knowledge_source_runtime.py": "matches kb_* results by call id on the C1-checked history; kb Tools are not renamed",
     }
     #: 2026-10-13 7f2a04a53: the team daily usage report reads and upserts a `tool_calls` count
     #: column in SQL (`o.tool_calls`, `excluded.tool_calls`). These exact SQL qualifiers name a number,
@@ -537,6 +550,10 @@ class TestPrefixCouplingGuard:
         "lead_orchestrator.py": 'startswith("canvas.") —— 点号老名，改名不影响',
         # Decision function's own body.
         "tool_category.py": "判定函数本体",
+        # SQLite FTS table names (`canvas_fts_*`), not Tool names.
+        "sqlite_upgrade.py": 'startswith("canvas_fts_") —— SQLite table names, not Tool names',
+        # Session lifecycle request IDs (`canvas-delete:<id>`), not Tool names.
+        "session_lifecycle.py": 'startswith("canvas-delete:") —— lifecycle request IDs, not Tool names',
     }
 
     def test_no_raw_canvas_prefix_check_on_tool_names(self) -> None:

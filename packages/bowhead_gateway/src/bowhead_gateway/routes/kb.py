@@ -48,6 +48,7 @@ from bowhead_core.kb.schemas import (
     KbFileDTO,
     KbFileScopePatchRequest,
     KbListScopeIn,
+    KbNewerVersionDTO,
     KbScopeIn,
     KbSearchRequest,
     KbSearchResult,
@@ -694,6 +695,28 @@ def _enrich_dto(dto: KbFileDTO, ctx: ScopeContext) -> KbFileDTO:
     )
 
 
+async def _with_newer_versions(request: Request, ctx: ScopeContext, dtos: list[KbFileDTO]) -> list[KbFileDTO]:
+    """File versions (Q7): tell the file's owner that the source file has a newer version.
+
+    The entry keeps the version that was added; the owner adds the newer version from Files
+    and removes this entry. Other readers learn nothing about the owner's file. Best-effort.
+    """
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if artifact_store is None or not hasattr(artifact_store, "newer_versions") or not dtos:
+        return dtos
+    try:
+        newer = await artifact_store.newer_versions({d.artifact_id: (None, None) for d in dtos})
+    except Exception:
+        logger.warning("kb.newer_version_lookup_failed team_id=%s", ctx.team_id, exc_info=True)
+        return dtos
+    return [
+        d.model_copy(update={"newer_version": KbNewerVersionDTO(artifact_id=state.latest.id, version_no=state.latest.version_no or 1)})
+        if (state := newer.get(d.artifact_id)) is not None and state.latest.created_by == ctx.user_id
+        else d
+        for d in dtos
+    ]
+
+
 async def _with_uploader_names(request: Request, ctx: ScopeContext, dtos: list[KbFileDTO]) -> list[KbFileDTO]:
     """填 ``uploaded_by_name``（知识库体验整治 PRD FR2.3）：界面只显示成员名，不显示用户 id。
 
@@ -711,6 +734,7 @@ async def _with_uploader_names(request: Request, ctx: ScopeContext, dtos: list[K
         except Exception:
             version = None
         dtos = [d.model_copy(update={"source_health": cached_source_state(d, index_version=version)}) for d in dtos]
+    dtos = await _with_newer_versions(request, ctx, dtos)
     user_store = getattr(request.app.state, "user_store", None)
     if user_store is None or not dtos:
         return dtos

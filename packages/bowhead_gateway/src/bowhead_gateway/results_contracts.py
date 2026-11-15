@@ -95,6 +95,13 @@ class ResultVersionV1(_ContractModel):
     available_version_count: int = Field(ge=1)
 
 
+class ResultLineageV1(_ContractModel):
+    """File versions: the displayed version's number and how many versions of the file match."""
+
+    number: int = Field(ge=1)
+    count: int = Field(ge=1)
+
+
 class ResultArtifactMetadataV1(_ContractModel):
     """Minimum authorized metadata needed to select the existing safe viewer."""
 
@@ -134,6 +141,7 @@ class ResultItemDTOV1(_ContractModel):
     position: int = Field(ge=1)
     version: ResultVersionV1 | None
     artifact_metadata: ResultArtifactMetadataV1 | None
+    lineage: ResultLineageV1 | None = None
 
     @model_validator(mode="after")
     def validate_artifact_metadata(self) -> ResultItemDTOV1:
@@ -221,7 +229,30 @@ class ResultsQueryResponseV1(_ContractModel):
     projection_status: ResultsProjectionStatusV1
     projection_revision: str = Field(min_length=1, max_length=128)
     new_results: ResultsNewResultsV1
+    # The listed item `current_key` names: the key itself, or for a locate whose current
+    # key is its anchor, the entry the anchor resolved to (a file version names its file).
     resolved_current_key: str | None = Field(default=None, max_length=256)
+
+
+class ResultVersionsRequestV1(_ContractModel):
+    """File versions: list the versions of the file this artifact belongs to (any version's ID)."""
+
+    artifact_id: str = Field(min_length=1, max_length=128, pattern=r"^art_[A-Za-z0-9_-]+$")
+
+
+class ResultFileVersionV1(_ContractModel):
+    artifact_id: str
+    version_no: int = Field(ge=1)
+    filename: str
+    mime: str
+    size: int = Field(ge=0)
+    created_at: str
+    latest: bool
+
+
+class ResultVersionsResponseV1(_ContractModel):
+    dto_version: Literal[1] = 1
+    versions: list[ResultFileVersionV1]
 
 
 __all__ = [
@@ -245,5 +276,8 @@ __all__ = [
     "ResultsProjectionStatusV1",
     "ResultsQueryRequestV1",
     "ResultsQueryResponseV1",
+    "ResultFileVersionV1",
     "ResultVersionV1",
+    "ResultVersionsRequestV1",
+    "ResultVersionsResponseV1",
 ]

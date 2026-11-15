@@ -39,6 +39,7 @@ import { AccessRequestPanel } from "@/components/access/access-request-panel";
 import { AgentResourceList } from "./agent-resource-list";
 import { LucideGlyph } from "@/components/icon-refresh";
 import { toast } from "@/lib/use-toast";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const HIRED_STATUSES: ReadonlySet<string> = new Set(["active", "personal_disabled", "access_revoked"]);
 
@@ -294,7 +295,7 @@ export function AgentDetail() {
     } catch (cause) {
       if (loadSequence.current !== sequence) return;
       if (options.preserve) {
-        setError(t(options.mutationSucceeded ? "saved_refresh_failed" : "load_failed"));
+        setError(withHttpFailureReason(t(options.mutationSucceeded ? "saved_refresh_failed" : "load_failed"), cause, { read: true }));
         setState("ready");
         return;
       }
@@ -305,7 +306,7 @@ export function AgentDetail() {
         setError(t("agent_access_denied"));
         setState("forbidden");
       } else {
-        setError(t("detail_load_failed"));
+        setError(withHttpFailureReason(t("detail_load_failed"), cause, { read: true }));
         setState("error");
       }
     }
@@ -353,7 +354,7 @@ export function AgentDetail() {
       if (mutation) applyMutation(mutation);
       await load({ preserve: true, mutationSucceeded: true });
     } catch (cause) {
-      setError(t("action_failed"));
+      setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
       setPending(false);
     }

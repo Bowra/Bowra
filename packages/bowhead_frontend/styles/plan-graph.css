@@ -88,7 +88,7 @@
   letter-spacing: 0.03em;
   color: var(--c-ink-3);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-pill);
   padding: 2px 9px;
   cursor: pointer;
@@ -106,7 +106,7 @@
 .gwrap .gtop-fold {
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: transparent;
   color: var(--c-ink-4);
@@ -187,8 +187,8 @@
   gap: 8px;
   min-height: 36px;
   padding: 0 9px 0 7px;
-  border: 1px solid var(--c-line);
-  border-radius: 9px;
+  border: var(--border-w, 1px) solid var(--c-line);
+  border-radius: var(--radius-lg);
   background: var(--c-surface);
   cursor: pointer;
   transition:
@@ -203,7 +203,7 @@
   flex: none;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   display: grid;
   place-items: center;
 }
@@ -241,8 +241,8 @@
 }
 .gwrap .gn-vf.ok { color: var(--c-pos); background: var(--c-pos-soft); }
 .gwrap .gn-vf.part { color: var(--c-ink-3); background: var(--c-surface-2); }
-.gwrap .gn-vf.unmet { color: var(--c-err); border: 1px solid var(--c-err-soft); background: var(--c-surface); }
-.gwrap .gn-vf.none { color: var(--c-ink-4); border: 1px dashed var(--c-line); background: transparent; }
+.gwrap .gn-vf.unmet { color: var(--c-err); border: var(--border-w, 1px) solid var(--c-err-soft); background: var(--c-surface); }
+.gwrap .gn-vf.none { color: var(--c-ink-4); border: var(--border-w, 1px) dashed var(--c-line); background: transparent; }
 /* State glyph — shape first, color second */
 .gwrap .gn-st {
   width: 16px;
@@ -271,7 +271,7 @@
   letter-spacing: 0.03em;
   color: var(--c-accent);
   background: var(--c-accent-tint);
-  border: 1px solid var(--c-accent-soft);
+  border: var(--border-w, 1px) solid var(--c-accent-soft);
   border-radius: var(--r-pill);
   padding: 1px 5px;
   display: inline-flex;
@@ -406,7 +406,7 @@
   width: 288px;
   z-index: 30;
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-2, 12px);
   box-shadow: var(--shadow-float, var(--shadow-2));
   padding: 11px 12px;
@@ -434,7 +434,7 @@
   flex-wrap: wrap;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
 }
 .gwrap .gpop-k { font-family: var(--f-mono); font-size: 0.59375rem; color: var(--c-ink-4); letter-spacing: 0.05em; }
 .gwrap .gpop-acts {
@@ -443,7 +443,7 @@
   flex-wrap: wrap;
   margin-top: 9px;
   padding-top: 9px;
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
 }
 .gwrap .gpop-note {
   font-family: var(--f-mono);
@@ -452,7 +452,7 @@
   line-height: 1.5;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
 }
 /* Nodes outside the first layer open detail cards to the left, avoiding card overflow */
 .gwrap .glayer.is-fan .gpop { left: auto; right: 0; }
@@ -471,8 +471,8 @@
 }
 .pcard .vpill.ok { color: var(--c-pos); background: var(--c-pos-soft); }
 .pcard .vpill.part { color: var(--c-ink-3); background: var(--c-surface-2); }
-.pcard .vpill.unmet { color: var(--c-err); background: var(--c-surface); border: 1px solid var(--c-err-soft); }
-.pcard .vpill.none { color: var(--c-ink-4); background: transparent; border: 1px dashed var(--c-line); }
+.pcard .vpill.unmet { color: var(--c-err); background: var(--c-surface); border: var(--border-w, 1px) solid var(--c-err-soft); }
+.pcard .vpill.none { color: var(--c-ink-4); background: transparent; border: var(--border-w, 1px) dashed var(--c-line); }
 
 /* Recovery actions (within the detail card · same source and copy as the list recovery bar) */
 .gwrap .gact {
@@ -484,13 +484,13 @@
   padding: 6px 11px;
   border-radius: var(--r-pill);
   cursor: pointer;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   background: var(--c-surface);
   color: var(--c-ink-2);
   white-space: nowrap;
 }
 .gwrap .gact svg { width: 12px; height: 12px; }
-.gwrap .gact.primary { background: var(--c-accent); border-color: transparent; color: #fff; }
+.gwrap .gact.primary { background: var(--c-accent); border-color: transparent; color: var(--c-accent-ink); }
 .gwrap .gact.primary:hover { background: var(--c-accent-hover); }
 .gwrap .gact.warn { border-color: var(--c-warn); color: var(--c-warn); }
 .gwrap .gact:hover:not(.primary) { border-color: var(--c-ink-3); color: var(--c-ink); }
@@ -540,7 +540,7 @@
    the link on the row that needs it most. Use an inset outline channel that does not compete for background. */
 .pcard .pstep.is-hl {
   box-shadow: inset 0 0 0 2px var(--c-accent);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -585,7 +585,7 @@
   font-size: 0.625rem;
   letter-spacing: 0.06em;
   color: var(--c-ink-4);
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
   margin-top: 4px;
 }
 .pcard .plist-hd b { color: var(--c-ink-2); font-weight: 600; }

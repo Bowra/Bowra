@@ -34,7 +34,7 @@ describe("EditModeToggle theme colors", () => {
     }) as HTMLButtonElement;
     expect(readButton.className).toBe("v2-edit-toggle-btn report-edit-btn");
     expect(ruleBody(".report-edit-btn")).toContain("background: var(--c-surface)");
-    expect(ruleBody(".report-edit-btn")).toContain("border: 1px solid var(--c-line)");
+    expect(ruleBody(".report-edit-btn")).toContain("border: var(--border-w, 1px) solid var(--c-line)");
     expect(ruleBody(".report-edit-btn")).toContain("color: var(--c-ink)");
 
     cleanup();

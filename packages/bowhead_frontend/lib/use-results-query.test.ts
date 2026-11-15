@@ -667,6 +667,31 @@ describe("useResultsQuery", () => {
     expect(hook.result.current.catalogItems.some((value) => value.key === "artifact:selected")).toBe(true);
   });
 
+  it("locates a revised file from any version's card through the entry the server resolved", async () => {
+    const revised: ResultItemDTO = {
+      ...item("artifact:art_v1"),
+      route: { type: "artifact", artifact_id: "art_v3", default_mode: "preview" },
+      lineage: { number: 3, count: 3 },
+    };
+    queryResultsMock.mockResolvedValueOnce(page([item("artifact:first")]))
+      .mockResolvedValueOnce(page([revised], { resolved_current_key: "artifact:art_v1" }));
+    const hook = renderHook(() => useResultsQuery({
+      enabled: true, query: "", scope: "session", sessionId: "s_1",
+    }));
+    await flushLoad();
+
+    let located: ResultItemDTO | null = null;
+    await act(async () => { located = await hook.result.current.locate("artifact:art_v2"); });
+    expect(located).toBe(revised);
+    expect(queryResultsMock.mock.calls[1]?.[0]?.request).toMatchObject({
+      surface: "locate", anchor_key: "artifact:art_v2", current_key: "artifact:art_v2",
+    });
+    // The shown version now resolves from the catalog without another request.
+    await act(async () => { located = await hook.result.current.locate("artifact:art_v3"); });
+    expect(located).toBe(revised);
+    expect(queryResultsMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps page loading independent when changes finishes, then preserves its notification on page commit", async () => {
     let resolveChanges!: (value: ResultsQueryResponse) => void;
     let resolveNext!: (value: ResultsQueryResponse) => void;

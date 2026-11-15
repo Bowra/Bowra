@@ -59,6 +59,7 @@ CHAT_TURN_FAILURE_CODES = frozenset(
     {
         "agent_step_limit",
         "agent_tool_call_limit",
+        "agent_model_call_limit",
         "agent_stalled",
         "access_context_missing",
         "canvas_payload_invalid",
@@ -115,6 +116,7 @@ CHAT_PEER_FAILURE_CODES = frozenset(
         "peer_iteration_limit_exceeded",
         "peer_tool_failure_limit_exceeded",
         "peer_tool_call_limit_exceeded",
+        "peer_model_call_limit_exceeded",
         "peer_credit_exhausted",
     }
 )
@@ -130,6 +132,7 @@ _CHAT_PEER_FAILURE_FACTS_BY_PARENT = types.MappingProxyType(
         "peer_iteration_limit_exceeded": ("limit", False),
         "peer_tool_failure_limit_exceeded": ("limit", True),
         "peer_tool_call_limit_exceeded": ("limit", False),
+        "peer_model_call_limit_exceeded": ("limit", False),
         "peer_credit_exhausted": ("limit", False),
     }
 )
@@ -491,6 +494,7 @@ _CHAT_FAILURE_CLASS_BY_PARENT = types.MappingProxyType(
         "token_cap_exhausted": "limit",
         "agent_step_limit": "limit",
         "agent_tool_call_limit": "limit",
+        "agent_model_call_limit": "limit",
         "agent_stalled": "timeout",
         "user_credit_exhausted": "credit",
         "wallclock_exceeded": "timeout",
@@ -538,6 +542,7 @@ _CHAT_RETRYABLE_BY_PARENT = types.MappingProxyType(
         "token_cap_exhausted": False,
         "agent_step_limit": False,
         "agent_tool_call_limit": False,
+        "agent_model_call_limit": False,
         "agent_stalled": False,
         "user_credit_exhausted": False,
         "wallclock_exceeded": True,
@@ -587,6 +592,7 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         "token_cap_exhausted": "edit_and_resend",
         "agent_step_limit": "edit_and_resend",
         "agent_tool_call_limit": "edit_and_resend",
+        "agent_model_call_limit": "edit_and_resend",
         "agent_stalled": "edit_and_resend",
         "canvas_payload_invalid": "edit_and_resend",
         "no_safe_fields_changed": "edit_and_resend",
@@ -1396,6 +1402,8 @@ def normalize_chat_peer_failure_code(reason: object) -> str:
         return "peer_execution_timeout"
     if prefix == "run_limit_tool_call_limit":
         return "peer_tool_call_limit_exceeded"
+    if prefix == "run_limit_model_call_limit":
+        return "peer_model_call_limit_exceeded"
     if prefix == "run_limit_budget":
         return "peer_credit_exhausted"
     if prefix == "peer_total_failures":
@@ -1668,7 +1676,7 @@ def build_chat_turn_failure(
         else {}
     )
     if (
-        safe_reason in {"agent_step_limit", "agent_stalled", "agent_tool_call_limit", "wallclock_exceeded"}
+        safe_reason in {"agent_step_limit", "agent_stalled", "agent_tool_call_limit", "agent_model_call_limit", "wallclock_exceeded"}
         and isinstance(step_usage, dict)
         and set(step_usage) == {"used", "limit"}
         and type(step_usage["used"]) is int

@@ -42,6 +42,7 @@ Les propriétaires et administrateurs de l’équipe définissent les limites de
 - **Durée d’un appel au modèle** : suit par défaut le temps restant de l’Agent. Choisissez **Au plus** pour fixer une limite plus courte de 30 à 36 000 secondes. Cela ne prolonge pas le tour ; le délai de la connexion au modèle reste applicable.
 - **Limite d’étapes par tâche** : nombre d’étapes qu’un agent peut effectuer pour une tâche. La valeur par défaut est **Illimité**. Un agent qui ne produit aucun nouveau résultat pendant plusieurs étapes est arrêté automatiquement ; une limite d’étapes est donc rarement nécessaire.
 - **Appels d’outils par tour** : nombre total d’appels d’outils de tous les agents dans un tour. La valeur par défaut est 300 ; chaque outil compte de la même façon.
+- **Appels au modèle par tour** : nombre total d’appels au modèle de Lead et de tous les assistants dans un tour, y compris leur coordination et la rédaction de documents. La valeur par défaut est **Au plus 200** ; vous pouvez choisir **Illimité** ou 1–10 000. Les assistants s’arrêtent 2 appels avant la limite pour que Lead puisse encore rédiger la réponse à partir de leurs résultats ; avec 1 ou 2, les assistants ne peuvent pas s’exécuter. Cette limite diffère de la limite d’étapes par tâche, qui borne chaque agent séparément.
 
 1. Ouvrez **Paramètres de l’équipe › Agents** et choisissez l’onglet **Limites d’exécution**.
 2. Modifiez les valeurs voulues. Une valeur hors limites affiche la plage autorisée sous le champ, et Enregistrer reste indisponible.

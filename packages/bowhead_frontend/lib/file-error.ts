@@ -24,6 +24,7 @@ export type FileErrorKey =
   | "errors.access_denied"
   | "errors.file_not_found"
   | "errors.file_in_knowledge_base"
+  | "errors.file_in_document"
   | "errors.file_too_large"
   | "errors.file_type_unsupported"
   | "errors.office_type_mismatch"
@@ -61,6 +62,7 @@ const FILE_ERROR_KEY: Readonly<Record<string, FileErrorKey>> = {
   file_upload_session_denied: "errors.access_denied",
   file_not_found: "errors.file_not_found",
   file_in_knowledge_base: "errors.file_in_knowledge_base",
+  file_in_document: "errors.file_in_document",
   file_too_large: "errors.file_too_large",
   file_type_unsupported: "errors.file_type_unsupported",
   file_office_type_mismatch: "errors.office_type_mismatch",

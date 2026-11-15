@@ -6,7 +6,6 @@ import { renderIntl } from "@/__tests__/intl-render";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
-  reach: { on: true },
   items: [] as unknown[],
   fetchNotificationCount: vi.fn(async () => ({ actionRequired: 1, updatesUnread: 0, totalBadge: 1 })),
   markNotificationRead: vi.fn(async (_id: string) => undefined),
@@ -22,7 +21,6 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("@/lib/auth-api", () => ({ setLastTeam: (id: string) => mocks.setLastTeam(id) }));
 vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => ({ push: mocks.push, replace: vi.fn() }) }));
-vi.mock("@/lib/use-notification-reach-capability", () => ({ useNotificationReachCapability: () => mocks.reach.on }));
 
 import { NotificationCenter } from "./notification-center";
 import { publishNotificationCount } from "@/lib/attention-loop";
@@ -71,7 +69,6 @@ async function openPanel() {
 }
 
 beforeEach(() => {
-  mocks.reach.on = true;
   mocks.items = [item()];
 });
 
@@ -79,7 +76,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("NotificationCenter with notification reach", () => {
+describe("NotificationCenter Team labels, actions and the shared count", () => {
   it("shows the item's Team and its actions in the interface language", async () => {
     const row = await openPanel();
     expect(row).toHaveTextContent("Team B");
@@ -150,13 +147,5 @@ describe("NotificationCenter with notification reach", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("keeps the previous panel when the switch is off", async () => {
-    mocks.reach.on = false;
-    const row = await openPanel();
-    expect(row).not.toHaveTextContent("Team B");
-    expect(row.querySelector(".notification-row__actions")).toBeNull();
-    expect(screen.queryByRole("button", { name: "How notifications work" })).toBeNull();
   });
 });

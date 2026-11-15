@@ -69,8 +69,6 @@ export interface StepConfirmation {
   choices: ToolConfirmationChoice[];
   /** Server clock; display only, never compared with the local clock. */
   expiresAt: string;
-  /** Remaining seconds when the request was emitted (countdown fallback). */
-  timeoutSeconds: number;
   /** Local `Date.now()` when this client applied the request (live or replay). */
   receivedAt: number;
   outcome?: StepConfirmationOutcome;

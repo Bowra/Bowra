@@ -32,6 +32,7 @@ import {
   ShTypeTag, T, avatarColor,
 } from "./share-ui";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export interface ShareDialogProps {
   kind: ShareKind;
@@ -99,7 +100,7 @@ export function ShareDialog(props: ShareDialogProps) {
       setState(await getShares(props.kind, props.resourceId));
       setErr(null);
     } catch (e) {
-      setErr(t("load_failed_safe"));
+      setErr(withHttpFailureReason(t("load_failed_safe"), e, { read: true }));
     }
   }, [props.kind, props.resourceId, t]);
 
@@ -113,7 +114,7 @@ export function ShareDialog(props: ShareDialogProps) {
       if (e instanceof ApiError && e.code === "content_sharing_disabled") {
         setServerDisabled(true);
         setErr(null);
-      } else setErr(t("change_failed_safe"));
+      } else setErr(withHttpFailureReason(t("change_failed_safe"), e));
     }
     finally { setBusy(false); }
   }, [load, fireChanged, t]);

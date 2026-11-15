@@ -489,7 +489,7 @@ async def delete_language_policy(
 
 
 # ─────────────────────────────────────────────────────────────
-# Agent run limits: turn time, subagent steps, tool calls.
+# Agent run limits: turn time, steps, tool calls and model calls.
 # ─────────────────────────────────────────────────────────────
 class AgentRunLimitsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -499,6 +499,7 @@ class AgentRunLimitsBody(BaseModel):
     turn_time_limit_s: Any
     step_limit: Any
     tool_call_limit: Any
+    model_call_limit: Any = None
     model_call_time_limit_s: Any = None
     expected_version: str = Field(min_length=1, max_length=64)
 
@@ -515,6 +516,7 @@ def _run_limits_view(raw: str | None) -> dict[str, Any]:
         "turn_time_limit_s": limits.turn_time_limit_s,
         "step_limit": limits.step_limit,
         "tool_call_limit": limits.tool_call_limit,
+        "model_call_limit": limits.model_call_limit,
         "model_call_time_limit_s": limits.model_call_time_limit_s,
         "wrap_up_reserve_s": limits.wrap_up_reserve_s,
         "is_default": raw is None,
@@ -523,12 +525,14 @@ def _run_limits_view(raw: str | None) -> dict[str, Any]:
             "turn_time_limit_s": run_limits.DEFAULT_LIMITS.turn_time_limit_s,
             "step_limit": run_limits.DEFAULT_LIMITS.step_limit,
             "tool_call_limit": run_limits.DEFAULT_LIMITS.tool_call_limit,
+            "model_call_limit": run_limits.DEFAULT_LIMITS.model_call_limit,
             "model_call_time_limit_s": run_limits.DEFAULT_LIMITS.model_call_time_limit_s,
         },
         "ranges": {
             "turn_time_limit_s": {"min": run_limits.MIN_TURN_TIME_LIMIT_S, "max": run_limits.MAX_TURN_TIME_LIMIT_S},
             "step_limit": {"min": 1, "max": run_limits.MAX_STEP_LIMIT},
             "tool_call_limit": {"min": 1, "max": run_limits.MAX_TOOL_CALL_LIMIT},
+            "model_call_limit": {"min": 1, "max": run_limits.MAX_MODEL_CALL_LIMIT},
             "model_call_time_limit_s": {"min": run_limits.MIN_MODEL_CALL_TIME_LIMIT_S, "max": run_limits.MAX_MODEL_CALL_TIME_LIMIT_S},
         },
     }
@@ -568,8 +572,11 @@ async def put_agent_run_limits(
 ) -> dict[str, Any]:
     before = await team_store.get(user.team_id, run_limits.SETTINGS_KEY)
     payload = body.model_dump(exclude={"expected_version"})
-    if "model_call_time_limit_s" not in body.model_fields_set:
-        payload["model_call_time_limit_s"] = run_limits.parse_stored(before).model_call_time_limit_s
+    # A client that predates a field leaves its stored value unchanged.
+    stored = run_limits.parse_stored(before)
+    for name in ("model_call_limit", "model_call_time_limit_s"):
+        if name not in body.model_fields_set:
+            payload[name] = getattr(stored, name)
     try:
         limits = run_limits.validate(payload)
     except run_limits.AgentRunLimitsInvalid as exc:

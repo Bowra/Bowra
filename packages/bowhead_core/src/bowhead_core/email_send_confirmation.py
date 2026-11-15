@@ -34,7 +34,7 @@ class EmailSendConfirmations(DeliveryConfirmations):
         subject: str,
         body: str,
         timeout_seconds: float | None = None,
-        attachments: list[dict[str, str | int]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         on_pending: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_resolved: Callable[[str], Awaitable[None]] | None = None,
     ) -> Decision:

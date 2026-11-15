@@ -32,6 +32,7 @@ import {
 import { invalidateSpaces, switchActiveSpace, useSpace } from "@/lib/use-space";
 import { toast } from "@/lib/use-toast";
 import { useCopyDiagnosticsToastAction } from "@/components/error-notice";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export function TeamSpacesAdmin() {
   const t = useTranslations("settings.workspaces");
@@ -90,8 +91,8 @@ export function TeamSpacesAdmin() {
           setPreviousCursors((current) => current.slice(0, -1));
         }
       })
-      .catch(() => {
-        if (!cancelled) setError(t("load_failed"));
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -202,7 +203,7 @@ export function TeamSpacesAdmin() {
       }
       toast({
         kind: "error",
-        text: t("archive_undo_failed", { name: archived.name }),
+        text: withHttpFailureReason(t("archive_undo_failed", { name: archived.name }), caught),
         action: copyDiagnosticsAction(caught, "settings"),
       });
       throw caught;

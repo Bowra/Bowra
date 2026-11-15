@@ -20,6 +20,7 @@ import {
   type FlushFailureReason,
 } from "./use-debounced-sync";
 import { extractTopLevelSectionOrder, ordersEqual } from "./section-order";
+import type { ReportSection } from "@/lib/types";
 
 vi.mock("@/lib/canvas-pm-adapter", () => ({
   pmDocToSections: vi.fn(),
@@ -207,6 +208,82 @@ describe("useDebouncedSync", () => {
     }));
     await act(async () => { await syncHook.result.current.flushNow(); });
     expect(patchCanvasSection).not.toHaveBeenCalled();
+  });
+
+  describe("sections the document does not hold (a chart shown through a figure anchor)", () => {
+    const CHART = {
+      id: "sec_chart", kind: "chart", rev: 3,
+      spec: { kind: "bar", title: "Primes", columns: [], rows: [] },
+    } as unknown as ReportSection;
+    const AREA = { kind: "area_stacked", title: "Primes", columns: [], rows: [] };
+    const renderSync = () => {
+      const editor = createEditorMock({
+        type: "doc",
+        content: [{ type: "section_narrative", attrs: { sectionId: "sec_1" } }],
+      });
+      vi.mocked(pmDocToSections).mockReturnValue([
+        { sectionId: "sec_1", kind: "narrative", changed: false, patch: {} },
+      ]);
+      const onSaved = vi.fn();
+      const hook = renderHook(() =>
+        useDebouncedSync({
+          editor: editor as never,
+          baseline: [{ id: "sec_1", kind: "narrative", markdown: "[figure:sec_chart]", rev: 7 }, CHART],
+          canvasId: "cv_1",
+          debounceMs: 100,
+          onSaved,
+        }),
+      );
+      return { hook, onSaved };
+    };
+
+    it("queues the edit as unsaved and saves it with the section's revision", async () => {
+      vi.mocked(patchCanvasSection).mockResolvedValueOnce({ ok: true, rev: 4 });
+      const { hook, onSaved } = renderSync();
+
+      let queued = false;
+      act(() => { queued = hook.result.current.patchReferencedSection("sec_chart", { spec: AREA } as never); });
+      expect(queued).toBe(true);
+      expect(hook.result.current.dirty).toEqual(["sec_chart"]);
+      expect(hook.result.current.referencedPatches.get("sec_chart")).toEqual({ spec: AREA });
+
+      let result;
+      await act(async () => { result = await hook.result.current.flushNow(); });
+      expect(result).toEqual({ ok: true, saved_revisions: { sec_chart: 4 } });
+      expect(patchCanvasSection).toHaveBeenCalledTimes(1);
+      expect(patchCanvasSection).toHaveBeenLastCalledWith("cv_1", "sec_chart", { spec: AREA }, 3);
+      expect(onSaved).toHaveBeenLastCalledWith("sec_chart", 4, { spec: AREA });
+      expect(hook.result.current.referencedPatches.size).toBe(0);
+      expect(hook.result.current.dirty).toEqual([]);
+      expect(hook.result.current.getSectionRev("sec_chart")).toBe(4);
+
+      await act(async () => { await hook.result.current.flushNow(); });
+      expect(patchCanvasSection).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a section the document holds, which saves from its own node", () => {
+      const { hook } = renderSync();
+      let queued = true;
+      act(() => { queued = hook.result.current.patchReferencedSection("sec_1", { markdown: "x" } as never); });
+      expect(queued).toBe(false);
+      expect(hook.result.current.referencedPatches.size).toBe(0);
+    });
+
+    it("keeps a conflicting edit for the conflict choice and drops it on discard", async () => {
+      vi.mocked(patchCanvasSection).mockResolvedValueOnce({ ok: false, status: "conflict", currentRev: 5 });
+      const { hook } = renderSync();
+      act(() => { hook.result.current.patchReferencedSection("sec_chart", { spec: AREA } as never); });
+
+      let result;
+      await act(async () => { result = await hook.result.current.flushNow(); });
+      expect(result).toMatchObject({ ok: false, reason: "revision_conflict", section_id: "sec_chart", current_rev: 5 });
+      expect(hook.result.current.conflict).toMatchObject({ sectionId: "sec_chart", localPatch: { spec: AREA } });
+      expect(hook.result.current.referencedPatches.get("sec_chart")).toEqual({ spec: AREA });
+
+      act(() => hook.result.current.discardLocalChanges());
+      expect(hook.result.current.referencedPatches.size).toBe(0);
+      expect(hook.result.current.dirty).toEqual([]);
+    });
   });
 
   it("does not cleanup-flush again after the debounce timer already fired", async () => {

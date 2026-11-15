@@ -90,6 +90,17 @@ async def skill_visible_by_grants(
         return not enforce
 
 
+def lead_can_read_skill(spec: Any) -> bool:
+    """A Skill the system Lead's index lists is one whose body it can read.
+
+    Peer-only Skills are working details of the Agent that runs them. A Skill
+    granted by a general Plugin belongs to the Agents that selected that Plugin.
+    """
+    from bowhead_core.system_plugins import general_plugin_skill_names
+
+    return getattr(spec, "audience", "all") != "peer" and str(getattr(spec, "name", "")) not in general_plugin_skill_names()
+
+
 class _FilteredCatalog:
     def __init__(self, specs: list[Any]) -> None:
         self._specs = specs
@@ -124,7 +135,7 @@ def render_lead_skill_index(catalog: Any) -> str:
     """
     from bowhead_skill import render_index
 
-    block = render_index(catalog, audience_view="lead").strip()
+    block = render_index(_FilteredCatalog([spec for spec in catalog.list_specs() if lead_can_read_skill(spec)]), audience_view="lead").strip()
     if not block:
         return ""
     return block + _LEAD_METHOD_SUMMARY

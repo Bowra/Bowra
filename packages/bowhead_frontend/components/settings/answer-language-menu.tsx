@@ -26,6 +26,7 @@ import {
   useLanguagePreferences,
 } from "@/lib/use-language-preferences";
 import { toast } from "@/lib/use-toast";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Display name of a stored or locked answer-language value. */
 export function useAnswerLanguageName(): (value: string) => string {
@@ -119,8 +120,8 @@ export function AnswerLanguageMenuButton({ labelledBy }: { labelledBy?: string }
     try {
       await prefs.saveAnswerLanguage(value);
       toast({ kind: "success", text: t("answer_saved") });
-    } catch {
-      toast({ kind: "error", text: t("answer_save_failed") });
+    } catch (cause) {
+      toast({ kind: "error", text: withHttpFailureReason(t("answer_save_failed"), cause) });
     } finally {
       setSaving(false);
     }

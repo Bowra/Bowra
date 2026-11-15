@@ -720,3 +720,72 @@ async def test_record_row_seq_ignores_payload_section_seq(tmp_path: Path) -> Non
     # Preserve section-order payload seq (frontend canvas-store upserts by it).
     assert rows[1].payload["seq"] == 0
     assert rows[2].payload["seq"] == 1
+
+
+def _impatient_connections(monkeypatch) -> None:
+    """Make each write attempt give up on a held writer lock after 50 ms instead of SQLite's 5 s."""
+    from contextlib import asynccontextmanager
+
+    from bowhead_core import turn_log_store
+
+    real_open = turn_log_store.open_shared_ctx
+
+    @asynccontextmanager
+    async def impatient(path):
+        async with real_open(path) as db:
+            await db.execute("PRAGMA busy_timeout=50")
+            yield db
+
+    monkeypatch.setattr(turn_log_store, "open_shared_ctx", impatient)
+
+
+async def test_event_write_waits_for_a_writer_lock_held_past_the_busy_timeout(tmp_path: Path, monkeypatch, caplog) -> None:
+    """Another Turn's completion can hold the writer lock longer than one busy timeout; the event must still persist."""
+    import logging
+    import sqlite3
+
+    store = TurnLogStore(db_path=str(tmp_path / "t.db"))
+    await store.initialize()
+    assert await store.record(turn_id="t_other", event_type="turn_started", payload={}) is not None
+    _impatient_connections(monkeypatch)
+    holder = sqlite3.connect(tmp_path / "t.db", isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+
+    async def release() -> None:
+        await asyncio.sleep(0.4)
+        holder.execute("COMMIT")
+
+    releasing = asyncio.create_task(release())
+    try:
+        with caplog.at_level(logging.INFO, logger="bowhead_core.turn_log_store"):
+            row = await store.record(turn_id="t_waiting", event_type="peer.iter", payload={"iter": 3})
+    finally:
+        await releasing
+        holder.close()
+    assert row is not None and row.seq == 1
+    assert [event.event_type for event in await store.list_events("t_waiting")] == ["peer.iter"]
+    assert "turn_log.record_waits_for_writer turn=t_waiting type=peer.iter" in caplog.text
+    assert "turn_log.record_writer_wait_ended turn=t_waiting" in caplog.text
+    assert "turn_log.record_failed" not in caplog.text
+
+
+async def test_event_write_stops_waiting_for_the_writer_lock_at_its_limit(tmp_path: Path, monkeypatch, caplog) -> None:
+    import logging
+    import sqlite3
+
+    from bowhead_core import turn_log_store
+
+    store = TurnLogStore(db_path=str(tmp_path / "t.db"))
+    await store.initialize()
+    _impatient_connections(monkeypatch)
+    monkeypatch.setattr(turn_log_store, "WRITER_WAIT_SECONDS", 0.3)
+    holder = sqlite3.connect(tmp_path / "t.db", isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        with caplog.at_level(logging.INFO, logger="bowhead_core.turn_log_store"):
+            assert await store.record(turn_id="t_waiting", event_type="peer.iter", payload={}) is None
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+    assert "turn_log.record_failed turn=t_waiting type=peer.iter" in caplog.text and "waited_ms=" in caplog.text
+    assert await store.list_events("t_waiting") == []

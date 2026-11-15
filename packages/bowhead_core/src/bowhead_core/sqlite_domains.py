@@ -456,6 +456,11 @@ TABLE_DOMAINS = {table: domain for domain, tables in DOMAIN_TABLES.items() for t
 APPENDED_TABLES: dict[str, tuple[str, str]] = {
     "notification_deliveries": ("notifications", "0226_notification_deliveries"),
 }
+# Columns appended to a table after the domain split exist only in the domain layout; the legacy
+# single-file schema stays frozen at the reviewed split revision.
+APPENDED_COLUMNS: dict[str, tuple[tuple[str, ...], str]] = {
+    "artifacts": (("version_of", "lineage_id", "version_no"), "0228_artifact_versions"),
+}
 
 
 def domain_tables_at(domain: str, reached: Callable[[str], bool]) -> frozenset[str]:

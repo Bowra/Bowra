@@ -163,3 +163,19 @@ def test_m1_resolution_golden_stays_stable_for_unmanaged_teams() -> None:
             "radius": "soft",
         },
     }
+
+
+@pytest.mark.unit
+def test_frame_options_keep_only_fields_changed_from_the_product_look() -> None:
+    from bowhead_core.theme_config import normalize_frame_options
+
+    assert normalize_frame_options({"corners": "square", "border": "standard", "elevation": "hard", "lineContrast": "strong"}) == {
+        "corners": "square",
+        "elevation": "hard",
+        "lineContrast": "strong",
+    }
+    assert normalize_frame_options({"border": "standard"}) == {}
+
+    for invalid in ({"border": "thick"}, {"shadow": "hard"}, {"corners": 0}, ["square"]):
+        with pytest.raises(ThemeConfigError):
+            normalize_frame_options(invalid)

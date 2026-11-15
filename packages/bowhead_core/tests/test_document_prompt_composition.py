@@ -71,26 +71,28 @@ async def test_composed_lead_document_guidance_matches_advertised_tools(monkeypa
     await run
     assert len(requests) == 1
     request = requests[0]
-    available = "template_document_submit" in {tool.name for tool in request.tools}
-    assert available == (availability == "available")
-    assert request.system.count(NATIVE_DOCUMENT_GUIDANCE) == int(available)
-    # The worker cannot query data, so its one route to live figures must stay advertised.
-    assert ("first delegate only retrieval to an available data-query Agent" in request.system) == available
-    assert ("The Lead calls the native Tool directly for template edits" in request.system) == available
+    # The system Lead is offered the document Tool only to revise an existing draft.
+    offered = "template_document_submit" in {tool.name for tool in request.tools}
+    assert offered == (revision and availability == "available")
+    assert request.system.count(NATIVE_DOCUMENT_GUIDANCE) == int(offered)
     assert ("This request explicitly revises the exact saved document draft" in request.system) == revision
-    assert ("Uploaded-template updates are not available in this task" in request.system) == (not available)
+    assert "first delegate only retrieval to an available data-query Agent" not in request.system
+    assert "Uploaded-template updates are not available in this task" not in request.system
+    assert "do not substitute scripts" not in request.system
     assert "reference-style new presentations" in request.system
-    assert "source-derived PDF" in request.system
     assert "ordinary PDF / Excel (xlsx) / Word (docx)" in request.system
     assert "produces a downloadable deck from the template" not in request.system
     assert "exports are rendered\nfrom the canvas" not in request.system
     if not deck_peer:
         assert "New PPT slide-deck post currently has no holder" in request.system
         assert "consultant" not in request.system
+    else:
+        assert "it does not change an existing file" in request.system
     if not compute_peer:
         assert "ordinary PDF / Excel (xlsx) / Word (docx) export post currently has no holder" in request.system
-        assert "This does not determine availability of a template draft's source-derived PDF" in request.system
         assert "compute" not in request.system
+    else:
+        assert "it can open an attached file (PPTX, Word, Excel, CSV) passed by artifact ID" in request.system
 
 
 @pytest.mark.integration

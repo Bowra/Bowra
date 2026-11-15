@@ -2582,7 +2582,7 @@
 :root:root .mset .model-editor-connection .medit-row {
   gap: 14px;
   padding: 16px;
-  border: 1px solid var(--c-separator);
+  border: var(--border-w, 1px) solid var(--c-separator);
   border-radius: var(--r-3);
   background: var(--c-surface-2);
 }
@@ -2606,7 +2606,7 @@
   gap: 10px 14px;
   margin-top: 2px;
   padding-top: 14px;
-  border-top: 1px solid var(--c-separator);
+  border-top: var(--rule-w, 1px) solid var(--c-separator);
 }
 :root:root .mset .model-editor-connection .medit-proto .mp-lab {
   min-width: 112px;

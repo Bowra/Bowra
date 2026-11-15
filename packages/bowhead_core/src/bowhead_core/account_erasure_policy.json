@@ -2877,7 +2877,10 @@
         "origin_query",
         "row_count",
         "workspace_id",
-        "knowledge_intent_json"
+        "knowledge_intent_json",
+        "version_of",
+        "lineage_id",
+        "version_no"
       ],
       "owner_columns": [
         "created_by"

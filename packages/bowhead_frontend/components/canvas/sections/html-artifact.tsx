@@ -137,6 +137,11 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
             <Database size={9} /> {t("injected_badge")}
           </span>
         )}
+        {data.version_no && data.version_no > 1 ? (
+          <span className="rc-badge neutral" data-testid="html-artifact-version">
+            {t("updated_version", { version: data.version_no })}
+          </span>
+        ) : null}
         <span className="rc-embed-spacer" />
         <button
           type="button"
@@ -214,6 +219,14 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
       )}
 
       {issue ? <div role="status" className="safe-html-preview-hint">{viewerT(`html_issue_${issue}`)}</div> : null}
+      {data.version_note?.reason === "too_large" ? (
+        <p className="rc-embed-note" role="note" data-testid="html-artifact-version-note">
+          {t("version_too_large", {
+            version: data.version_note.version_no,
+            size: formatByteSize(data.version_note.maximum_bytes),
+          })}
+        </p>
+      ) : null}
       <div className="rc-embed-foot">
         <span>{htmlMode.mode === "interactive" ? viewerT("html_offline") : t("footer_safe_static")}</span>
         <span className="rc-embed-foot-right">
@@ -224,6 +237,9 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
             : provenance.hasSources
               ? t("footer_computed_sources", { sources })
               : t("footer_computed_no_sources")}
+          {data.provenance_version_no && data.version_no && data.provenance_version_no !== data.version_no
+            ? ` · ${t("provenance_version", { version: data.provenance_version_no })}`
+            : null}
         </span>
       </div>
       {expanded ? (

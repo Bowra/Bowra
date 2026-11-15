@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import re
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -36,6 +38,33 @@ from bowhead_skill.catalog import builtin_catalog_dir
 _PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke", "read_report"})
 RETAINED_READ_TOOLS = frozenset(name for name, risk in TOOL_RISKS.items() if risk == "read") - _PROOF_BEARING_READS
 _SESSION_INPUT_CONTRACTS = frozenset(f"ordinary-lead-loop.v{version}" for version in range(10, 16))
+
+
+# Canvas Tools whose persistent effect is a revision of the current Session's
+# Canvas. The pause already binds that projection and this Turn's artifacts
+# (``canvas_evidence``) and resume refuses any change, so the observed result
+# is enough evidence. ``write_report`` stays out: it unhides other Turns'
+# figures without a revision, which the projection cannot see.
+RETAINED_CANVAS_TOOLS = frozenset(
+    {
+        "add_chart",
+        "edit_chart",
+        "add_image",
+        "canvas_add_insight",
+        "canvas_add_spec_block",
+        "canvas_add_html_artifact",
+        "canvas_add_external_iframe",
+    }
+)
+
+
+def retained_canvas_tool(name: str) -> bool:
+    return canonical_tool_name(name) in RETAINED_CANVAS_TOOLS
+
+
+def canvas_result_failed(result: object, error: str | None) -> bool:
+    """A failed Canvas call wrote nothing, so it needs no Canvas evidence."""
+    return error is not None or (isinstance(result, dict) and ("error" in result or result.get("ok") is False))
 
 
 def retained_read_tool(name: str, *, legacy_report: bool = False) -> bool:
@@ -259,6 +288,7 @@ async def artifact_evidence(
     prepared_pins: list[dict] | None = None,
     prepared_input_ids: tuple[str, ...] | None = None,
     retained_input: dict | None = None,
+    connection=None,
 ) -> dict:
     if retained_input is not None and (
         output
@@ -269,7 +299,7 @@ async def artifact_evidence(
         raise OrdinaryContinuationUnavailable()
     condition = "retained_input" if contract == "ordinary-lead-loop.v15" and retained_input is not None and not output else None
     store = ctx.artifact_store
-    art = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True)
+    art = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True, connection=connection)
     if art is None or art.status != "ready" or art.workspace_id != ctx.workspace_id or not 0 <= art.size <= 50 * 1024 * 1024:
         raise OrdinaryContinuationUnavailable(condition=condition)
     if art.created_by_turn != ctx.turn_id:
@@ -322,6 +352,23 @@ async def artifact_evidence(
     return evidence
 
 
+@asynccontextmanager
+async def _file_lookups(ctx, records: list[dict]):
+    """One store connection for every file lookup of a validation run.
+
+    Each lookup otherwise opens its own connection. A session's history can
+    retain well over a hundred files (160 on 116, 2026-11-15), where that cost
+    3.8 s per validation. The connection opens no transaction, so each lookup
+    still reads current rows, unlike a caller's adoption snapshot.
+    """
+    opener = getattr(getattr(ctx, "artifact_store", None), "open_reader", None)
+    if not callable(opener) or not any(record["kind"] in {"sandbox", "uncertain_sandbox"} and record["artifacts"] for record in records):
+        yield None
+        return
+    async with opener() as connection:
+        yield connection
+
+
 async def revalidate_tool_materials(
     ctx,
     records: list[dict],
@@ -331,32 +378,34 @@ async def revalidate_tool_materials(
     prepared_pins: list[dict] | None = None,
     prepared_input_ids: tuple[str, ...] | None = None,
 ) -> None:
-    for record in records:
-        # Prior-Turn observations retain original content under current source
-        # authority below. Current execution/resume still verifies exact bytes.
-        if not historical_skills:
-            await revalidate_skills(ctx, record["skills"])
-        if record["kind"] == "report_read":
-            from bowhead_core.report_read_material import validate_report_read
+    async with _file_lookups(ctx, records) as connection:
+        for record in records:
+            # Prior-Turn observations retain original content under current source
+            # authority below. Current execution/resume still verifies exact bytes.
+            if not historical_skills:
+                await revalidate_skills(ctx, record["skills"])
+            if record["kind"] == "report_read":
+                from bowhead_core.report_read_material import validate_report_read
 
-            await validate_report_read(ctx, record)
-        if record["kind"] == "attachment_read":
-            await _revalidate_attachment_read(ctx, record, contract=contract, read_bytes=True)
-        if record["kind"] in {"sandbox", "uncertain_sandbox"}:
-            for expected in record["artifacts"]:
-                if (
-                    await artifact_evidence(
-                        ctx,
-                        expected["artifact_id"],
-                        output=expected["output"],
-                        contract=contract,
-                        prepared_pins=prepared_pins,
-                        prepared_input_ids=prepared_input_ids,
-                        retained_input=expected if not expected["output"] and contract in _SESSION_INPUT_CONTRACTS else None,
-                    )
-                    != expected
-                ):
-                    raise OrdinaryContinuationUnavailable()
+                await validate_report_read(ctx, record)
+            if record["kind"] == "attachment_read":
+                await _revalidate_attachment_read(ctx, record, contract=contract, read_bytes=True)
+            if record["kind"] in {"sandbox", "uncertain_sandbox"}:
+                for expected in record["artifacts"]:
+                    if (
+                        await artifact_evidence(
+                            ctx,
+                            expected["artifact_id"],
+                            output=expected["output"],
+                            contract=contract,
+                            prepared_pins=prepared_pins,
+                            prepared_input_ids=prepared_input_ids,
+                            retained_input=expected if not expected["output"] and contract in _SESSION_INPUT_CONTRACTS else None,
+                            connection=connection,
+                        )
+                        != expected
+                    ):
+                        raise OrdinaryContinuationUnavailable()
 
 
 def retained_sandbox_inputs(helpers: list[dict]) -> dict[str, dict]:
@@ -376,6 +425,30 @@ def retained_sandbox_inputs(helpers: list[dict]) -> dict[str, dict]:
     return inputs
 
 
+def _canvas_artifact_ids(revisions: list[dict]) -> list[str]:
+    """Read standalone IDs from decoded ledger text, preserving Chinese adjacency."""
+    from bowhead_core.artifact_references import _ARTIFACT_ID_RE
+
+    token = re.compile(r"(?<![A-Za-z0-9_])(?:" + _ARTIFACT_ID_RE.pattern + r")(?![A-Za-z0-9_])")
+    pending = []
+    for revision in revisions:
+        for key, value in revision.items():
+            if key in {"prev_payload", "new_payload"} and isinstance(value, str):
+                value = json.loads(value)
+            pending.append(value)
+    identities = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            identities.update(token.findall(value))
+        elif isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return sorted(identities)
+
+
 async def canvas_evidence(ctx, *, contract: str = "ordinary-lead-loop.v3", tool_inputs: dict[str, dict] | None = None) -> dict | None:
     if ctx.canvas_store is None:
         return None
@@ -392,7 +465,7 @@ async def canvas_evidence(ctx, *, contract: str = "ordinary-lead-loop.v3", tool_
     # Reuse conservative dependency enumeration, then apply actual ownership
     # and source checks. A textual ID supplies no permission of its own.
     touched = [row for row in projection["revisions"] if row["by_turn_id"] == ctx.turn_id]
-    ids = sorted(set(_ARTIFACT_ID_RE.findall(canonical_json(touched))))
+    ids = _canvas_artifact_ids(touched) if contract == "ordinary-lead-loop.v15" else sorted(set(_ARTIFACT_ID_RE.findall(canonical_json(touched))))
     if len(ids) > 64:
         raise OrdinaryContinuationUnavailable()
     artifacts = [
@@ -557,10 +630,19 @@ class OrdinarySkillObserver:
         try:
             envelope = result.result_json
             execution = envelope["execution"]
+            # A script that exited non-zero is settled when the executor attests
+            # the removed container (executor 1.0.17+). Its partial outputs are
+            # retained and revalidated exactly like a successful run's.
+            settled_failure = (
+                envelope.get("ok") is False
+                and envelope.get("cause") == "execution_failed"
+                and type(envelope.get("exit_code")) is int
+                and envelope["exit_code"] > 0
+            )
             if (
                 not result.ok
                 or result.exit_code != 0
-                or envelope.get("ok") is not True
+                or (envelope.get("ok") is not True and not settled_failure)
                 or execution.get("contract") != "sandbox-execution.v1"
                 or execution.get("settled") is not True
                 or execution.get("runtime") not in {"runc", "runsc"}
@@ -571,6 +653,9 @@ class OrdinarySkillObserver:
             ):
                 raise OrdinaryContinuationUnavailable()
             record["execution"] = copy.deepcopy(execution)
+            if settled_failure:
+                # Run-local marker for finished(); never part of the retained record.
+                record["settled_failure"] = True
         except Exception:
             state.tool_materials.pop(key, None)
 
@@ -607,7 +692,8 @@ class OrdinarySkillObserver:
                 }
             record = state.tool_materials.get(key)
             if record is not None and record["kind"] == "sandbox":
-                if not isinstance(result, dict) or result.get("ok") is not True or "execution" not in record:
+                settled_failure = record.pop("settled_failure", False)
+                if not isinstance(result, dict) or result.get("ok") is not (not settled_failure) or "execution" not in record:
                     raise OrdinaryContinuationUnavailable()
                 if tool not in {"python_exec", "skill_invoke"} or (tool == "skill_invoke" and arguments.get("name") != "python_sandbox"):
                     raise OrdinaryContinuationUnavailable()
@@ -646,6 +732,15 @@ def retained_tool_materials(helper, state, *, collaboration: bool = False) -> li
         if record is None and retained_read_tool(child.tool_name) and child.ended_at:
             record = {
                 "kind": "read_result",
+                "skills": [],
+                "tool": child.tool_name,
+                "arguments_hash": content_hash(child.arguments),
+                "result_hash": content_hash(child.result),
+                "error": child.error,
+            }
+        if record is None and retained_canvas_tool(child.tool_name) and child.ended_at:
+            record = {
+                "kind": "canvas_result",
                 "skills": [],
                 "tool": child.tool_name,
                 "arguments_hash": content_hash(child.arguments),

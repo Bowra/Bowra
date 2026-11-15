@@ -8,8 +8,10 @@ reads `field=<argument>` only when the handler reports that argument as `path`.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from bowhead_core.delivered_files import CANVAS_WRITE_TOOLS
 from bowhead_core.published_diagnostics import publish_tool_failure
 from bowhead_core.subagent import SubagentResult, register_subagent_tool
 from bowhead_core.tool_outcome import classify_tool_outcome
@@ -21,9 +23,11 @@ pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 class _Runner:
     def __init__(self) -> None:
         self.called = False
+        self.kwargs: dict[str, Any] = {}
 
-    async def run(self, **kwargs):
+    async def run(self, **kwargs: Any) -> SubagentResult:
         self.called = True
+        self.kwargs = kwargs
         return SubagentResult(profile=str(kwargs.get("profile_name") or "compute"), subagent_id="sub_test", ok=True, final_answer="42")
 
 
@@ -101,3 +105,87 @@ async def test_missing_delegation_role_names_the_argument() -> None:
     result = await registry.get("subagent_spawn").handler({"profile": "compute", "task": "Analyze"}, ctx)
 
     assert _published_detail(result) == "field=delegation_role"
+
+
+async def test_incomplete_chat_lookup_dispatches_without_canvas_write_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    runner = _Runner()
+    ctx = _context(runner, with_report=True)
+    ctx.tool_view = registry
+    ctx.datarc_source_evidence = {"state": "selected"}
+    ctx.user_text = "OBU monthly sales volume"
+
+    result = await registry.execute(
+        "subagent_spawn",
+        {
+            "profile": "compute",
+            "task": "Query monthly OBU sales in Datarc.",
+            "delivery": "chat",
+            "data_hint": ["monthly sales", 12],
+            "extra_instructions": {"unexpected": "object"},
+        },
+        ctx,
+    )
+
+    assert result.result["ok"] and runner.called
+    assert runner.kwargs["parent_ctx"].required_web_sources == ()
+    assert runner.kwargs["tool_deny"] == CANVAS_WRITE_TOOLS
+    assert not hasattr(ctx.parent_bus, "_lead_canvas_mode")
+    assert "data_hint**: monthly sales" in runner.kwargs["extra_instructions"]
+    assert "unexpected" not in runner.kwargs["extra_instructions"]
+
+
+@pytest.mark.parametrize(
+    ("request_text", "task"),
+    [
+        ("Read https://example.com/sales before answering.", "Verify sales in Datarc."),
+        ("Read the official sales report before answering.", "Verify sales in the official report."),
+    ],
+)
+async def test_missing_source_with_ambiguous_or_linked_request_requires_correction(
+    monkeypatch: pytest.MonkeyPatch, request_text: str, task: str
+) -> None:
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "0")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    runner = _Runner()
+    ctx = _context(runner)
+    ctx.tool_view = registry
+    ctx.datarc_source_evidence = {"state": "selected"}
+    ctx.user_text = request_text
+    args = {"profile": "compute", "task": task, "delivery": "chat"}
+
+    refusal = await registry.execute("subagent_spawn", args, ctx)
+
+    assert not runner.called
+    assert _published_detail(refusal.result) == "field=required_source_urls"
+    ctx.required_web_sources = ("https://example.com/method",)
+    corrected = await registry.execute("subagent_spawn", args | {"required_source_urls": "https://example.com/sales"}, ctx)
+    assert corrected.result["ok"]
+    assert runner.kwargs["parent_ctx"].required_web_sources == ("https://example.com/method", "https://example.com/sales")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"task": {"query": "sales"}}, "task"),
+        ({"profile": ["compute"]}, "profile"),
+        ({"agent_id": ["agent"]}, "agent_id"),
+        ({"_args_parse_error": "private provider payload"}, "arguments"),
+        ({"revise_scope": {"chapter": 1}}, "revise_scope"),
+        ({"revise_scope": ["Sales"], "canvas_mode": None}, "canvas_mode"),
+    ],
+)
+async def test_invalid_dispatch_inputs_are_rejected_before_execution(monkeypatch: pytest.MonkeyPatch, overrides: dict[str, Any], field: str) -> None:
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    runner = _Runner()
+    args = {"profile": "compute", "task": "Inspect sales.", "delivery": "chat", "required_source_urls": []}
+
+    refusal = await registry.execute("subagent_spawn", args | overrides, _context(runner, with_report=True))
+
+    assert not runner.called
+    assert _published_detail(refusal.result) == f"field={field}"

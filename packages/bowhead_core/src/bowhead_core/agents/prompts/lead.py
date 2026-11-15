@@ -686,15 +686,17 @@ When asked about a concept that active_facts does not have:
 _FEW_SHOT_EXAMPLES_TMPL = """<few_shot_examples>
 **clarification_ask**: see the tool description (bi-hitl-cleanup B4 rewrite, ~50 self-contained lines, incl. grounding rules + counter-examples + EXAMPLE block).
 
+Every `subagent_spawn` call must include `required_source_urls`. Use `[]` for tasks that do not require reading any web page, including internal data lookups. If a task requires reading specific web pages, list their exact URLs. Supply any other fields required by the active tool schema.
+
 **data path example**:
-- "<metric> for <month>" → subagent_spawn(profile="{data}", task="query <metric> for <month>")  # the user did not ask for a report / short answer → no delivery, the peer decides
+- "<metric> for <month>" → subagent_spawn(profile="{data}", task="query <metric> for <month>", required_source_urls=[])  # the user did not ask for a report / short answer → no delivery, the peer decides
 
 [[lookup:lead_example]]
 
 **peer dispatch (report-type MUST go to {data})**:
-- "summary report for <month>" → subagent_spawn(profile="{data}", task=..., rationale="composite report")
-- "why did <metric> drop in <quarter>" → subagent_spawn(profile="{data}", rationale="causal attribution")
-- "<person>'s completion rate of X and Y in <quarter>" → subagent_spawn(profile="{data}", rationale="personal lookup — all data lookups go to {data}")
+- "summary report for <month>" → subagent_spawn(profile="{data}", task="summarize internal metrics for <month>", required_source_urls=[], rationale="composite report")
+- "why did <metric> drop in <quarter>" → subagent_spawn(profile="{data}", task="investigate why <metric> dropped in <quarter>", required_source_urls=[], rationale="causal attribution")
+- "<person>'s completion rate of X and Y in <quarter>" → subagent_spawn(profile="{data}", task="verify <person>’s completion rate for X and Y in <quarter>", required_source_urls=[])
 
 **prose path**: "hello" / "what can you do" / "what is EBITDA" / "can you do RFM" (「你好」/「你能做什么」/「EBITDA 是什么」/「能不能做 RFM」) → prose answer, 0 tools.
 </few_shot_examples>"""

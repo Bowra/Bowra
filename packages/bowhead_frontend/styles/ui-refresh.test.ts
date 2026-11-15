@@ -271,7 +271,6 @@ describe("第三批：浮层（菜单、弹窗、抽屉、Toast、Tooltip）", (
       ".files-main .modal",
       ".memory-modal-box",
       ".v29-modal",
-      ".personal-mcp-confirmation",
       ".settings-dialog-backdrop",
       ".settings-dialog--drawer",
       ".kb-drawer-panel",

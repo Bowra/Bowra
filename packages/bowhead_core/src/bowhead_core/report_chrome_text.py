@@ -149,6 +149,21 @@ for _locale, _message in {
     "fr-FR": "Certaines demandes restent inachevées ou non vérifiées. Consultez les étapes en échec avant de considérer le résultat comme complet.",
 }.items():
     _CHROME[_locale]["delivery_unverified"] = _message
+# Regression check N1: an incomplete delivery whose review names its gaps says what is missing instead of the generic notice.
+for _locale, _message in {
+    "en-US": "Not completed: {gaps}.",
+    "zh-CN": "未完成：{gaps}。",
+    "de-DE": "Nicht erledigt: {gaps}.",
+    "fr-FR": "Non réalisé : {gaps}.",
+}.items():
+    _CHROME[_locale]["delivery_gaps"] = _message
+
+
+def delivery_gaps_notice(gaps: list[str], lang: str) -> str:
+    """One sentence naming the unmet requirements, in the language ``chrome_text`` would use."""
+    resolved = lang if lang in _CHROME else "en-US"
+    items = [gap.rstrip("。.；;，, ") for gap in gaps]
+    return chrome_text("delivery_gaps", resolved, gaps=("；" if resolved == "zh-CN" else "; ").join(item for item in items if item))
 
 
 def chrome_text(key: str, lang: str, **fmt: Any) -> str:

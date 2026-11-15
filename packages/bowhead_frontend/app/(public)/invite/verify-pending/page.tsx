@@ -18,6 +18,7 @@ import { resendVerificationEmail } from "@/lib/auth-api";
 import { appPath } from "@/lib/base-path";
 import { readInvitePreview, readInviteResult, readInviteVerifyEmail } from "@/lib/invite-api";
 import { safeInternalPath } from "@/lib/safe-next-path";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export default function InviteVerifyPendingPage() {
   return (
@@ -53,8 +54,8 @@ function InviteVerifyPendingInner() {
     try {
       await resendVerificationEmail(resendEmail);
       setNotice(t("verify.sent"));
-    } catch {
-      setError(t("verify.send_failed"));
+    } catch (error) {
+      setError(withHttpFailureReason(t("verify.send_failed"), error));
     } finally {
       setBusy(false);
     }

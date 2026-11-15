@@ -29,6 +29,7 @@ import {
   type DecideOptions,
   type RequesterRequestView,
 } from "@/lib/access-requests-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Scope = "pending" | "history" | "mine";
 
@@ -137,7 +138,7 @@ export function AccessRequestsContent() {
           if (requestVersion === requestVersionRef.current) setItems(result.items);
         }
       } catch (e) {
-        if (requestVersion === requestVersionRef.current) setErr(t("error_load_failed"));
+        if (requestVersion === requestVersionRef.current) setErr(withHttpFailureReason(t("error_load_failed"), e, { read: true }));
       } finally {
         if (requestVersion === requestVersionRef.current) setLoading(false);
       }

@@ -355,6 +355,21 @@ describe("Typed configuration review", () => {
     expect(view.container.textContent).not.toContain("[object Object]");
   });
 
+  it("reviews a run-limit reset that includes model calls per turn", async () => {
+    mockHydrate();
+    applyLiteProposal({ ...PROPOSAL, form_id: "team_run_limits", rows: [
+      { field: "turn_time_limit_s", from: 3600, to: 1800, operation: "reset", reset_all: true, from_unset: false },
+      { field: "model_call_limit", from: null, to: 200, operation: "reset", reset_all: true, from_unset: false },
+      { field: "model_call_time_limit_s", from: 900, to: null, operation: "reset", reset_all: true, from_unset: false },
+    ] });
+    const view = renderIntl(<LiteConfirmConnected proposalId="ccd_p1" />);
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    expect(view.container.textContent).toContain("每轮模型调用次数");
+    expect(view.container.textContent).toContain("200");
+    expect(screen.getByText("不限制")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /应用|确认|Apply/ })).toBeTruthy();
+  });
+
   it("opens original model review and refreshes the confirmed receipt", async () => {
     mockHydrate();
     applyLiteProposal({ ...PROPOSAL, form_id: "team_model_config", rows: [{ field: "tiers", from: {}, to: { fast: { auto: true } }, from_unset: false }] });

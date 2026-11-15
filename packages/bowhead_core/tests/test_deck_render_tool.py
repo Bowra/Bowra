@@ -436,3 +436,29 @@ def test_unused_layout_placeholders_are_removed_from_a_user_template(tmp_path):
     result = module.render_deck(str(template), CONTENT["sections"], str(out), {})
     assert result["placeholder_leftovers"] == 0
     assert not any(shape.is_placeholder for slide in _Presentation(out).slides for shape in slide.shapes)
+
+
+async def test_a_revised_deck_is_recorded_as_the_next_version(deck_case):
+    """File versions W2: `revises` records the new PPTX as the deck's next version; an older target is refused."""
+    from importlib import import_module
+
+    import aiosqlite
+
+    ctx, store, render, _ = deck_case
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    async with aiosqlite.connect(store.db_path) as db:
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+            await db.execute(statement)
+        # Owned by migration 0046 in a real content domain.
+        await db.execute("CREATE TABLE IF NOT EXISTS artifact_purge_claims (artifact_id TEXT PRIMARY KEY)")
+        await db.commit()
+    first = await render(CONTENT, ctx)
+    assert first["ok"], first
+    second = await render({**CONTENT, "revises": first["artifact_id"]}, ctx)
+    assert second["ok"], second
+    stored = await store.get(second["artifact_id"])
+    assert (stored.version_of, stored.lineage_id, stored.version_no) == (first["artifact_id"], first["artifact_id"], 2)
+    stale = await render({**CONTENT, "expected_slides": 3, "revises": first["artifact_id"]}, ctx)
+    assert (stale["ok"], stale["error"], stale["latest_id"]) == (False, "version_target_not_latest", second["artifact_id"])

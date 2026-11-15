@@ -1,6 +1,9 @@
 import { appFetch as fetch } from "@/lib/base-path";
 import {
+  attachHttpCause,
   genericUserFacingErrorMessage,
+  HttpResponseFailure,
+  isHtmlErrorBody,
   safeUserFacingErrorMessage,
 } from "@/lib/user-facing-error";
 
@@ -113,7 +116,7 @@ export async function previewInvite(token: string): Promise<InvitePreviewRespons
     credentials: "include",
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw inviteApiError(response.status, data);
+  if (!response.ok) throw inviteApiError(response, data);
   return data as InvitePreviewResponse;
 }
 
@@ -161,7 +164,7 @@ export async function acceptInvite(token?: string): Promise<InviteAcceptResponse
     credentials: "include",
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw inviteApiError(response.status, data);
+  if (!response.ok) throw inviteApiError(response, data);
   return data as InviteAcceptResponse;
 }
 
@@ -213,11 +216,19 @@ function writeInviteJson(key: string, value: unknown): void {
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw inviteApiError(response.status, data);
+  if (!response.ok) throw inviteApiError(response, data);
   return data as T;
 }
 
-function inviteApiError(status: number, data: unknown): InviteApiError {
+function inviteApiError(response: Response, data: unknown): InviteApiError {
+  const error = inviteApiErrorFromBody(response.status, data);
+  return attachHttpCause(
+    error,
+    new HttpResponseFailure(response.status, error.code, isHtmlErrorBody("", response.headers.get("content-type"))),
+  );
+}
+
+function inviteApiErrorFromBody(status: number, data: unknown): InviteApiError {
   const detail = (
     data && typeof data === "object"
       ? (data as { detail?: unknown }).detail

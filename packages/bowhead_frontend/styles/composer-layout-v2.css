@@ -70,10 +70,10 @@
   width: max-content;
   max-width: min(280px, calc(100vw - 24px));
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   color: var(--c-surface);
   background: var(--c-ink);
-  box-shadow: 0 6px 22px rgba(24, 19, 15, 0.2);
+  box-shadow: var(--elev-raised, 0 6px 22px rgba(24, 19, 15, 0.2));
   font: 500 0.6875rem/1.35 var(--font-v2-sans);
   opacity: 0;
   pointer-events: none;
@@ -134,7 +134,7 @@
 .composer-v2__planning {
   box-sizing: border-box;
   min-width: 40px;
-  border: 1px solid transparent;
+  border: var(--border-w, 1px) solid transparent;
   background: transparent;
   display: inline-flex;
   align-items: center;
@@ -177,8 +177,8 @@
 
 .composer-v2__planning-menu {
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
-  border-radius: 12px;
+  border: var(--border-w, 1px) solid var(--c-line);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-float, 0 12px 32px -10px rgb(0 0 0 / 22%));
   padding: 5px;
   overflow-y: auto;
@@ -191,7 +191,7 @@
   gap: 9px;
   padding: 8px 9px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -324,8 +324,8 @@
   gap: 16px;
   margin: 0 auto 8px;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--c-accent, #ad3d1f) 28%, transparent);
-  border-radius: 12px;
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-accent, #ad3d1f) 28%, transparent);
+  border-radius: var(--radius-xl);
   background: var(--c-surface, #fff);
   color: var(--c-ink, #302b27);
   font-size: 0.8125rem;
@@ -360,8 +360,8 @@
 .composer-recovery-notice__actions button {
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--c-line, #ddd);
-  border-radius: 8px;
+  border: var(--border-w, 1px) solid var(--c-line, #ddd);
+  border-radius: var(--radius-lg);
   background: var(--c-surface, #fff);
   color: var(--c-ink, #302b27);
   font: 650 0.8125rem var(--font-v2-sans);
@@ -404,8 +404,8 @@
   min-width: 0;
   margin: 8px auto;
   padding: 10px 12px;
-  border: 1px solid var(--c-line, #ddd);
-  border-radius: 12px;
+  border: var(--border-w, 1px) solid var(--c-line, #ddd);
+  border-radius: var(--radius-xl);
   background: var(--c-bg, #fff);
   color: var(--c-ink, #2f2a24);
   font: 500 0.8125rem/1.45 var(--font-v2-sans);
@@ -422,8 +422,8 @@
 .reference-follow-up-queue button {
   min-height: 36px;
   padding: 0 10px;
-  border: 1px solid var(--c-line, #ddd);
-  border-radius: 8px;
+  border: var(--border-w, 1px) solid var(--c-line, #ddd);
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--c-accent, #ad3d1f);
   font: inherit;
@@ -446,7 +446,7 @@
 
 .reference-follow-up-queue__item {
   padding-top: 8px;
-  border-top: 1px solid var(--c-line, #ddd);
+  border-top: var(--rule-w, 1px) solid var(--c-line, #ddd);
 }
 
 .reference-follow-up-queue__content {
@@ -479,8 +479,8 @@
 .composer-reference-preview {
   margin: 8px 16px;
   padding: 12px;
-  border: 1px solid var(--c-line);
-  border-radius: 12px;
+  border: var(--border-w, 1px) solid var(--c-line);
+  border-radius: var(--radius-xl);
   color: var(--c-ink);
   background: var(--c-surface-2);
   font-size: 0.8125rem;
@@ -496,7 +496,7 @@
 }
 .composer-reference-preview__disclosure[open] > summary { margin-bottom: 8px; }
 .composer-reference-preview__document { white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
-.composer-reference-preview__reference { border-radius: 4px; background: var(--c-accent-tint); }
+.composer-reference-preview__reference { border-radius: var(--radius-md); background: var(--c-accent-tint); }
 .composer-reference-preview details { margin-top: 8px; }
 .composer-reference-preview summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .composer-reference-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; }
@@ -525,7 +525,7 @@
   min-height: 36px;
   padding: 0 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: transparent;
   font: inherit;
   cursor: pointer;
@@ -577,15 +577,15 @@
 
 
 /* Chat: unsaved edits in a hosted Coach editor blocked a send ("Save and continue", C6-e). */
-.v2-banner--actions { margin: 8px 16px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-radius: 10px; background: var(--c-warn-soft, var(--c-fill-1)); color: var(--c-ink); font-size: 0.8125rem; }
+.v2-banner--actions { margin: 8px 16px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-radius: var(--radius-xl); background: var(--c-warn-soft, var(--c-fill-1)); color: var(--c-ink); font-size: 0.8125rem; }
 .v2-banner--actions > span:first-child { flex: 1; min-width: 12rem; }
 .v2-banner-actions { display: flex; gap: 8px; }
-.v2-banner-actions button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--c-surface); color: var(--c-ink); font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); }
+.v2-banner-actions button { min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius-lg); background: var(--c-surface); color: var(--c-ink); font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); }
 .v2-banner-actions .v2-banner-primary { background: var(--c-accent); color: var(--c-accent-ink, #fff); box-shadow: none; }
 .v2-banner-actions button:disabled { opacity: 0.6; cursor: default; }
 
 /* Chat: receipt row for Coach's write to an Agent draft (C1, C6). */
-.coach-change-receipt { margin: 10px 0 4px; padding: 10px 12px; display: grid; gap: 2px; max-width: 520px; border-radius: 10px; background: var(--c-surface); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); font-size: 0.8125rem; }
+.coach-change-receipt { margin: 10px 0 4px; padding: 10px 12px; display: grid; gap: 2px; max-width: 520px; border-radius: var(--radius-xl); background: var(--c-surface); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); font-size: 0.8125rem; }
 .coach-change-receipt-head { display: flex; align-items: center; gap: 6px; }
 .coach-change-receipt[data-state="written"] .coach-change-receipt-head > svg { color: var(--c-pos-ink); }
 .coach-change-receipt-head > strong { flex: 1; min-width: 0; font-weight: 600; }

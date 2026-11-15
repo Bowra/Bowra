@@ -217,3 +217,30 @@ def test_trace_is_optional_and_does_not_change_verdict() -> None:
     a = verify_numbers_in_text("营业额 45.6 亿元", {980000000.0})
     b = verify_numbers_in_text("营业额 45.6 亿元", {980000000.0}, trace="t_x")
     assert a == b
+
+
+def test_a_decrease_word_states_the_sign_of_an_unsigned_number() -> None:
+    """Regression check L5 (the original regression): 「同比下降 1.57%」 restates a source of -0.01566 and is not flagged.
+
+    Like the real result, the source holds many small values (category shares), so -0.01566 is not among the 40
+    smallest values the derivation fallback reads (with a handful of values, tiny - (-0.01566) explains any sign).
+    The shares sit in a narrow band, so no pair of them derives 1.57 or 0.0157 by accident either.
+    """
+    row = {"营业额": 16342000000.0, "营业额同比": 0.0002, "订单量": 29748000, "订单量同比": -0.01566, "客单价": 549.36}
+    row |= {"客单价同比": 0.0161, "净利率": 0.1745, "净营业额": 13470000000.0, "门店数": 40, "品类数": 15, "退款额": 2872000000.0}
+    shares = [{"品类": f"c{i}", "占比": round(0.001 + i * 2.5e-7, 10)} for i in range(40)]
+    auth = build_authorized_numbers([_inv({"rows": [row], "shares": shares})])
+    assert verify_numbers_in_text("订单量同比下降 1.57%，量减价增。", auth) == []
+    assert verify_numbers_in_text("订单量同比 -1.57%。", auth) == []
+    assert verify_numbers_in_text("Orders declined by 1.57% year on year.", auth) == []
+    # Without a decrease word only the stated sign is matched: a reversed direction is flagged.
+    assert [raw for raw, _ in verify_numbers_in_text("订单量同比增长 1.57%。", auth)] == ["1.57"]
+
+
+def test_digits_inside_an_identifier_are_not_a_stated_number() -> None:
+    """Regression check the original regression: a figure anchor's section id surfaced as the unverified number 854594062."""
+    auth = {1987.2194188510252, 677.5390578048003}
+    text = "返回的 1,987 元/㎡（1 月）到 678 元/㎡（11 月）是全品类合计。\n\n[figure:sec_ebe854594062]\n\n数据文件 art_08ff26c309f0"
+    assert verify_numbers_in_text(text, auth) == []
+    # The same digits written as a number, after a space or a CJK character, are still checked.
+    assert [raw for raw, _ in verify_numbers_in_text("合计 854594062 元，另有854594062元", auth)] == ["854594062", "854594062"]

@@ -155,7 +155,9 @@ async def validate_context_dependencies(
                     source = await _read_chat_turn_user_source_in_tx(
                         db, turn_id=attachment.turn_id, expected_user_id=ctx.user_id, expected_workspace_id=ctx.workspace_id
                     )
-                    await validate_attachment_dependencies(source_ctx, db, source, attachment, read_bytes=read_bytes)
+                    await validate_attachment_dependencies(
+                        source_ctx, db, source, attachment, read_bytes=read_bytes, verified_bytes=validated_materials
+                    )
             except (ValueError, KeyError, TypeError, OSError) as exc:
                 if isinstance(exc, OrdinaryContinuationUnavailable):
                     raise
@@ -173,7 +175,17 @@ async def validate_context_dependencies(
                     material = MaterialContextDependencies.model_validate(json.loads(message.content))
                 if any(
                     record.get("kind")
-                    not in {"attachment_read", "skill_read", "skill_list", "sandbox", "uncertain_sandbox", "read_result", "report_read", "rejected"}
+                    not in {
+                        "attachment_read",
+                        "skill_read",
+                        "skill_list",
+                        "sandbox",
+                        "uncertain_sandbox",
+                        "read_result",
+                        "canvas_result",
+                        "report_read",
+                        "rejected",
+                    }
                     or not isinstance(record.get("skills"), list)
                     for record in material.tools
                 ):
@@ -256,7 +268,14 @@ class ContextSourceValidator:
     async def __call__(self, messages: list[Message]) -> None:
         await self.validate(messages, read_bytes=True)
 
-    async def validate(
+    async def validate(self, messages: list[Message], **options: Any) -> None:
+        """One pass over ``messages``; a report recorded many times in them is read once."""
+        from bowhead_core.report_read_material import report_read_validation_pass
+
+        with report_read_validation_pass():
+            await self._validate(messages, **options)
+
+    async def _validate(
         self,
         messages: list[Message],
         *,
@@ -415,6 +434,34 @@ class PreparedContextSourceValidator:
                 )
                 self.prepared_dependencies[message.name, message.content] = model.model_validate_json(message.content)
 
+    def manifest(self) -> list[Message]:
+        """Every dependency collected so far, deduplicated, in the stored formats.
+
+        A generation published with this manifest needs no older generation to
+        be read again: each source the conversation ever used is listed here.
+        """
+        result = []
+        if self.retained_sources:
+            sources = KnowledgeContextDependencies(knowledge_sources=dict(sorted(self.retained_sources.items())))
+            result.append(Message(role="user", name="context_source_dependencies_v1", content=sources.model_dump_json()))
+        if self.retained_navigation:
+            navigation = NavigationContextDependencies(knowledge_navigation=deepcopy(dict(sorted(self.retained_navigation.items()))))
+            result.append(Message(role="user", name="context_navigation_dependencies_v1", content=navigation.model_dump_json()))
+        materials: dict[str, dict[str, dict]] = {}
+        for message in self.authority_dependencies.values():
+            if message.name != "context_material_dependencies_v1":
+                result.append(deepcopy(message))
+                continue
+            # One Turn records its growing material list several times.
+            material = self.prepared_dependencies[message.name, message.content]
+            records = materials.setdefault(material.turn_id, {})
+            for record in material.tools:
+                records.setdefault(json.dumps(record, sort_keys=True, separators=(",", ":")), record)
+        for turn_id, records in materials.items():
+            material = MaterialContextDependencies(turn_id=turn_id, tools=deepcopy(list(records.values())))
+            result.append(Message(role="user", name="context_material_dependencies_v1", content=material.model_dump_json()))
+        return result
+
     async def __call__(self, messages: list[Message]) -> None:
         if not self._dependencies(messages).issubset(self.verified):
             raise ValueError("context_source_preparation_changed")
@@ -442,6 +489,29 @@ class PreparedContextSourceValidator:
             if not self._source_messages(messages).issubset(self.verified_messages):
                 # Changed Tool provenance keeps the original current reader.
                 await self.original.validate(messages, read_bytes=False, validated_materials=validated_materials, connection=connection)
+
+        return validate
+
+    async def verify_for_adoption(self, bodies: list[list[Message]]) -> Callable[[list[Message]], Awaitable[None]]:
+        """Check current authority for ``bodies`` before the writer lock is taken.
+
+        The check reads reports, files and knowledge metadata, most of it from other databases, so the
+        execution writer lock does not make it any more current; held inside the lock it only kept every
+        other Turn from writing (12 s on 116, 2026-11-15). The returned validator is for the write
+        transaction: for the bodies checked here it compares digests and reads nothing. Anything else
+        falls back to the full check inside the transaction.
+        """
+        full = self.for_adoption(None)
+        accepted: set[str] = set()
+        for body in bodies:
+            await full(body)
+            accepted.update(self._source_messages(body))
+
+        async def validate(messages: list[Message]) -> None:
+            if not self._dependencies(messages).issubset(self.verified):
+                raise ValueError("context_source_preparation_changed")
+            if not self._source_messages(messages).issubset(self.verified_messages | accepted):
+                await self.for_adoption(None)(messages)
 
         return validate
 

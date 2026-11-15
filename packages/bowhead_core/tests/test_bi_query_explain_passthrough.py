@@ -77,7 +77,8 @@ async def test_prose_message_is_backend_only() -> None:
     out = await _run({"queries": ["上个月 各品牌 营业额"]}, ctx)
     assert out["_debug_explain_message"].startswith("生效模型")
     assert "_debug_explain_message" not in project_tool_result("bi_query", out)
-    assert project_tool_result("bi_query", out)["query_explain"] == _EXPLAIN
+    # The model view states the absent filter explicitly; the stored report above stays verbatim.
+    assert project_tool_result("bi_query", out)["query_explain"] == {**_EXPLAIN, "filters": []}
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""One owner-only view of every waiting tool call (FEATURE_INLINE_TOOL_CONFIRMATION)."""
+"""One owner-only view of every tool call waiting for its requester."""
 
 from __future__ import annotations
 
@@ -90,9 +90,23 @@ def _team_call(**overrides):
     return team_mod.default_team_tool_confirmations().request(**values)
 
 
+_ATTACHMENT = {
+    "artifact_id": "art_deck",
+    "filename": "销售报告.pptx",
+    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "size": 2048,
+}
+
+
 def _email_call():
     return email_mod.default_email_send_confirmations().request(
-        owner_user_id="usr_owner", turn_id="t_2", session_id="s_2", to="a@example.com", subject="Weekly update", body="private body"
+        owner_user_id="usr_owner",
+        turn_id="t_2",
+        session_id="s_2",
+        to="a@example.com",
+        subject="Weekly update",
+        body="private body",
+        attachments=[_ATTACHMENT],
     )
 
 
@@ -122,13 +136,15 @@ async def test_owner_lists_every_kind_as_labels_and_reads_one_preview(app):
         team_id = items["team_mcp"]["id"]
         detail = (await owner.get(f"{_BASE}/{team_id}")).json()
         assert detail["item"]["arguments"] == {"text": "hello"}
+        assert "schema_digest" not in detail["item"]
         assert detail["category"] == "external_write"
         assert detail["choices"] == ["reject", "approve", "approve_session"]
         assert (await other.get(f"{_BASE}/{team_id}")).status_code == 404
         assert (await owner.get(f"{_BASE}/xyz_unknown")).json()["detail"] == {"code": "tool_confirmation_not_found"}
 
         email_id = items["email_send"]["id"]
-        assert (await owner.get(f"{_BASE}/{email_id}")).json()["item"]["body"] == "private body"
+        email_item = (await owner.get(f"{_BASE}/{email_id}")).json()["item"]
+        assert (email_item["body"], email_item["attachments"]) == ("private body", [_ATTACHMENT])
         refused = await owner.post(f"{_BASE}/{email_id}/decision", json={"decision": "approve_session"})
         assert refused.status_code == 422
         foreign = await other.post(f"{_BASE}/{email_id}/decision", json={"decision": "approve"})
@@ -141,6 +157,34 @@ async def test_owner_lists_every_kind_as_labels_and_reads_one_preview(app):
     assert await team == "approved"
     # The session approval covers the same tool afterwards.
     assert await _team_call() == "approved"
+
+
+@pytest.mark.asyncio
+async def test_email_approval_releases_the_waiting_tool_once(app):
+    waiting = asyncio.create_task(_email_call())
+    async with _client(app, "usr_owner") as owner:
+        (item,) = await _listed(owner, 1)
+        path = f"{_BASE}/{item['id']}/decision"
+        assert (await owner.post(path, json={"decision": "approve"})).status_code == 200
+        assert (await owner.post(path, json={"decision": "reject"})).status_code == 404
+    assert await waiting == "approved"
+
+
+@pytest.mark.asyncio
+async def test_team_session_approval_is_exact_and_a_changed_tool_asks_again(app):
+    first = asyncio.create_task(_team_call())
+    async with _client(app, "usr_owner") as owner:
+        (item,) = await _listed(owner, 1)
+        assert (await owner.post(f"{_BASE}/{item['id']}/decision", json={"decision": "approve_session"})).status_code == 200
+        assert await first == "approved"
+        assert await _team_call() == "approved"
+
+        changed = asyncio.create_task(_team_call(schema_digest="digest-2"))
+        (item,) = await _listed(owner, 1)
+        path = f"{_BASE}/{item['id']}/decision"
+        assert (await owner.post(path, json={"decision": "reject"})).status_code == 200
+        assert (await owner.post(path, json={"decision": "approve"})).status_code == 404
+    assert await changed == "rejected"
 
 
 @pytest.mark.asyncio

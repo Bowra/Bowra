@@ -29,6 +29,7 @@ from bowhead_core.clarification_store import (
 from bowhead_core.events import OrchestratorEvent, get_event_registry
 from bowhead_core.language_context import RESUME_LANGUAGE_KEY, resume_language_context, resume_viewer_time_zone
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.types import ScheduledRunRef
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
@@ -412,6 +413,14 @@ async def scheduled_run_for_turn(app: Any, turn_id: str) -> Any | None:
     except Exception as exc:
         logger.exception("clarify.scheduled_origin_lookup_failed turn=%s", turn_id)
         raise RuntimeError("scheduled clarification ownership unavailable") from exc
+
+
+def _resumed_scheduled_run(job: Any | None, *, turn_id: str, session_id: str) -> ScheduledRunRef | None:
+    if job is None:
+        return None
+    from bowhead_gateway._scheduled_runner import scheduled_run_ref
+
+    return scheduled_run_ref(job, run_id=turn_id, session_id=session_id)
 
 
 def _record_stale_resolve(source: str) -> None:
@@ -2623,6 +2632,8 @@ async def resume_turn(
             # Scheduled entry always False by discipline (types.py: Feishu/scheduled/plans stay False);
             # resume must not add a configuration-copilot channel absent from the first half.
             config_lite_supported=_sched_job is None,
+            # The same scheduled run continues: it can still alert its owner after the answer.
+            scheduled_run=_resumed_scheduled_run(_sched_job, turn_id=pre.turn_id, session_id=rc_session_id),
         )
 
         # Reinject the bound saved workflow for resume. **Read authoritative ref freshly from job row**, not potentially stale

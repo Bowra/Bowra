@@ -13,7 +13,7 @@ from bowhead_core.agents.clarification_tool import register_clarification_tool
 from bowhead_core.ordinary_lead_continuation import read_ordinary_card_in_tx, reopen_ordinary_checkpoint
 from bowhead_core.subagent import PROFILES
 from bowhead_gateway.routes import clarifications
-from test_ordinary_lead_question_http import call, response
+from test_ordinary_lead_question_http import assert_restarted, call, response, review_round
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
@@ -59,6 +59,7 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
     case.client.headers["Content-Type"] = "application/json"
     profile = "compute" if agent_source == "system" else case.fixture.case.args["reference_start"].profile_name
     lead_calls, helper_calls = [], []
+    review_calls = []
     question = {"question": "Should I explain the retained facts?", "type": "free_text", "options": []}
 
     if boundary == "terminal_write_failed":
@@ -72,6 +73,9 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "clarification_ask" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             index = len(lead_calls)
             if index == 1:
@@ -147,9 +151,13 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
                 assert '"execution_outcome": "unknown"' in earlier["content"]
             return
         if boundary == "terminal_write_failed":
+            # An unsettled helper cannot be saved for a later answer. Asking does not
+            # fail the Turn: the question is refused and Lead continues live.
             assert cards == []
             assert len(helper_calls) == 1
-            assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "failed"
+            assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"
+            refusal = next(message for message in lead_calls[-1]["messages"] if message.get("tool_call_id") == "original-question")
+            assert "clarification_capture_unavailable" in refusal["content"]
             return
         assert len(cards) == 1, [(row["status"], row["error"]) for row in rows(case, "turns") if row["id"] == turn_id]
         card = cards[0]
@@ -172,7 +180,7 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
         async with open_shared_ctx(case.path) as db:
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card["request_id"]))
-        assert checkpoint.contract == "ordinary-lead-loop.v12"
+        assert checkpoint.contract == "ordinary-lead-loop.v15"
         outcome = checkpoint.helper_materials()[0]["outcome"]
         assert outcome["reason"] == ("model_failure" if boundary == "refused" else "model_unknown")
         assert checkpoint.invocations()[0].result["ok"] is False
@@ -205,11 +213,12 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
                 f"/api/v1/clarifications/{card['request_id']}/resolve",
                 json={"answers": [{"question": question["question"], "source": "custom", "answer": "Explain"}]},
             )
-            assert reply.status_code == 409
-            saved = next(row for row in rows(case, "clarification_requests") if row["request_id"] == card["request_id"])
-            assert saved["injected_at"] is None
-            assert len(helper_calls) == 1 and len(lead_calls) == 2
-            assert helper_receipts() == receipts
+            # The helper is no longer authorized, so the exact checkpoint is refused and
+            # Lead restarts with the answer instead of leaving the Turn waiting.
+            assert reply.status_code == 200, reply.text
+            await settled(turn_id)
+            assert_restarted(case, turn_id, card["request_id"])
+            assert len(helper_calls) == 1 and helper_receipts() == receipts
             return
         # Disabling new captures must not disable the original card reader.
         monkeypatch.setenv("FEATURE_CHAT_MULTI_HELPER_QUESTION", "0")

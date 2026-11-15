@@ -70,6 +70,12 @@ export interface CanvasContextValue {
   getSectionRev?: (sectionId: string) => number | undefined;
   /** Accept a full section returned by a server-side action that bypassed debounced PATCH. */
   acceptServerSection?: (section: ReportSection) => void;
+  /**
+   * Save an edit to a section the editor document does not contain, such as a chart a narrative shows through
+   * a figure anchor. The edit shows at once and saves with the other report edits. Returns false when the
+   * section cannot be saved this way (not editing, or the document holds the section).
+   */
+  patchReferencedSection?: (sectionId: string, patch: Partial<ReportSection>) => boolean;
   /** W11-5 / #42: section actions (delete / merge); null hides chrome menu. */
   onDeleteSection?: (sectionId: string) => Promise<void> | void;
   onMergeWithPrev?: (sectionId: string) => Promise<void> | void;
@@ -187,6 +193,7 @@ export interface CanvasContextProviderProps {
   registerPresentationOverride?: CanvasContextValue["registerPresentationOverride"];
   getSectionRev?: CanvasContextValue["getSectionRev"];
   acceptServerSection?: CanvasContextValue["acceptServerSection"];
+  patchReferencedSection?: CanvasContextValue["patchReferencedSection"];
   onDeleteSection?: CanvasContextValue["onDeleteSection"];
   onMergeWithPrev?: CanvasContextValue["onMergeWithPrev"];
   onMergeWithNext?: CanvasContextValue["onMergeWithNext"];
@@ -214,6 +221,7 @@ export function CanvasContextProvider({
   registerPresentationOverride,
   getSectionRev,
   acceptServerSection,
+  patchReferencedSection,
   onDeleteSection,
   onMergeWithPrev,
   onMergeWithNext,
@@ -326,6 +334,7 @@ export function CanvasContextProvider({
       registerPresentationOverride,
       getSectionRev,
       acceptServerSection,
+      patchReferencedSection,
       onDeleteSection,
       onMergeWithPrev,
       onMergeWithNext,
@@ -336,7 +345,7 @@ export function CanvasContextProvider({
     }),
     [
       sections, chartLookup, imageLookup, sourceLookup, numberedSources, isEditMode, isStreaming, readOnly, canvasId, sessionId, currentTurnId, dispatchPatch,
-      flushPendingEdits, registerPresentationOverride, getSectionRev, acceptServerSection, onDeleteSection, onMergeWithPrev, onMergeWithNext,
+      flushPendingEdits, registerPresentationOverride, getSectionRev, acceptServerSection, patchReferencedSection, onDeleteSection, onMergeWithPrev, onMergeWithNext,
       onSplitAtCursor, canSplitAtCursor, onMoveSection, onEditBlockWithAI,
     ],
   );

@@ -51,6 +51,7 @@ import {
 import { appPath } from "@/lib/base-path";
 import { copyTextWithFallback } from "@/lib/clipboard";
 import { withoutNextRouterHistoryMarkers } from "@/lib/url-session-nav";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const MEMBER_EMAIL_RE = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
 const DEFAULT_PAGE_SIZE = 25;
@@ -261,7 +262,7 @@ export function SettingsPeople() {
         }
       })
       .catch((reason) => {
-        if (!cancelled) setError(t("err_generic"));
+        if (!cancelled) setError(withHttpFailureReason(t("err_generic"), reason, { read: true }));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -464,9 +465,9 @@ export function SettingsPeople() {
         return t("err_rate_limited");
       }
       if (e.code === "feature_disabled") return t("err_feature_disabled");
-      return t("err_generic");
+      return withHttpFailureReason(t("err_generic"), e);
     }
-    return t("err_generic");
+    return withHttpFailureReason(t("err_generic"), e);
   }
 
   async function sendInvite() {

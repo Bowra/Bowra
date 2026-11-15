@@ -231,3 +231,40 @@ async def test_fallback_recovery_measures_the_already_trimmed_input_at_its_actua
     assert recovered.trimmed_messages > first.trimmed_messages
     assert execution.view.project(case.request.messages) == case.request.messages
     assert case.sent == []
+
+
+async def test_execution_restores_from_a_generation_that_records_only_its_manifest(collab):
+    from bowhead_core._db import open_shared_ctx
+    from bowhead_core.context_store import ContextOrigin, ContextStoreError, _ancestry_rows, write_context_in_tx
+    from bowhead_router.context_policy import ContextPolicy
+
+    async def write(db, expected, text, **options):
+        return await write_context_in_tx(
+            db,
+            worker=collab.worker,
+            execution_id=collab.lead,
+            lane="ordinary",
+            expected_generation=expected,
+            messages=[Message(role="user", content=text)],
+            policy=ContextPolicy(),
+            origin=ContextOrigin(provider="synthetic", model="synthetic"),
+            cipher=collab.store.cipher,
+            validate_sources=AsyncMock(),
+            **options,
+        )
+
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        working = await write(db, None, "Working view during the Turn.")
+        with pytest.raises(ContextStoreError, match="context_source_references_invalid"):
+            # Only a publication may record fewer references than it validated.
+            await write(db, working, "Manifest.", stored_refs=())
+        with pytest.raises(ContextStoreError, match="context_source_references_invalid"):
+            await write(db, working, "Manifest.", for_publication=True, stored_refs=("mcg_" + "0" * 32,))
+        manifest = await write(db, working, "Manifest.", for_publication=True, stored_refs=())
+        published = await write(db, manifest, "Published view.", for_publication=True, stored_refs=(manifest,))
+        assert set(await _ancestry_rows(db, collab.worker.session_id, published)) == {published, manifest}
+        await db.commit()
+    restored = owner(collab, execution_id=collab.lead)
+    await restored.restore()
+    assert restored.generation == published

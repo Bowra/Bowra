@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Literal
 
 from bowhead_core.notification_service import space_assignment_action_url
@@ -50,14 +49,6 @@ def normalize_notification_priority(value: str | None) -> str:
     return value if value in _NOTIFICATION_PRIORITIES else "p2"
 
 
-def notification_reach_enabled() -> bool:
-    """FEATURE_NOTIFICATION_REACH (default off): Team labels, panel actions, browser candidates.
-
-    Rollout and rollback: docs/灰度功能清单.md.
-    """
-    return os.environ.get("FEATURE_NOTIFICATION_REACH", "0").strip().lower() in {"1", "true", "yes"}
-
-
 def _api_metric(action: str, outcome: str) -> None:
     try:
         from bowhead_core import metrics as _m
@@ -87,7 +78,7 @@ def _store(request: Request) -> NotificationStore:
 
 async def _team_names(user: User, users: UserStore) -> dict[str, str]:
     """Names of the user's Teams, only when items can come from more than one of them."""
-    if not notification_reach_enabled() or not _multi_team_authz_enabled():
+    if not _multi_team_authz_enabled():
         return {}
     teams = await users.list_active_teams_for_user(user.id)
     if len(teams) < 2:
@@ -183,7 +174,7 @@ async def unread_count(
     user: User = Depends(_current_user),
 ) -> NotificationCountDTO:
     counts = await store.notification_count(user_id=user.id)
-    latest = await store.latest_browser_candidate_at(user_id=user.id, types=BROWSER_TYPES) if notification_reach_enabled() else None
+    latest = await store.latest_browser_candidate_at(user_id=user.id, types=BROWSER_TYPES)
     _api_metric("unread_count", "success")
     return NotificationCountDTO(
         actionRequired=counts.action_required,
@@ -202,10 +193,8 @@ async def browser_candidates(
 ) -> NotificationListDTO:
     """Unread urgent items delivered after ``since`` that the open app may announce (at most 5).
 
-    Only what the localized copy needs; the same authentication and switches as the list.
+    Only what the localized copy needs; the same authentication as the list.
     """
-    if not notification_reach_enabled():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "notification reach disabled")
     items = await store.list_browser_candidates(user_id=user.id, types=BROWSER_TYPES, since=since, limit=5)
     _api_metric("browser_candidates", "success")
     team_names = await _team_names(user, users)

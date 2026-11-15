@@ -100,8 +100,8 @@ def test_p21_silent_drop_anti_example_preserved() -> None:
     """Unknown terms require scope inspection instead of accepting fallback rows."""
     src = _peer_prompt_source()
     assert "If a requested item cannot be delivered, name it and the reason" in src, "Missing requested items must be explained."
-    block = src.split("- **🔴 每条 result 的 `_parse` 必看**", 1)[1].split("\n- `half_match_values`", 1)[0]
-    assert "`unknown_words` 非空" in block
+    block = src.split("- **🔴 每条 result 的 `_parse.unknown_words` 必看**", 1)[1].split("\n- `half_match_values`", 1)[0]
+    assert "非空 = datarc 没认出这些词" in block
     assert "返回未过滤的数据" in block
     assert "按字面进了查询却一行都匹配不到" in block
     assert "先核对返回的维度值是不是用户问的范围" in block

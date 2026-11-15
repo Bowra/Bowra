@@ -318,8 +318,13 @@ async def write_context_in_tx(
     for_publication: bool = False,
     prepared_messages: PreparedContextMessages | None = None,
     prepared_ancestry: PreparedContextAncestry | None = None,
+    stored_refs: tuple[str, ...] | None = None,
 ) -> str:
     """Insert an immutable view and move only its exact execution/lane head.
+
+    ``stored_refs`` is for a publication whose dependencies are carried by a
+    cumulative manifest: every input is still validated here, but only the
+    listed references are recorded, so later readers stop at the manifest.
 
     The caller commits before adopting this ID in memory or emitting completion.
     A compact operation first records its original input with this same writer;
@@ -333,6 +338,8 @@ async def write_context_in_tx(
     origin = ContextOrigin.model_validate(origin.model_dump())
     policy_json = _policy_json(policy)
     references = tuple(dict.fromkeys((*source_refs, *((expected_generation,) if expected_generation else ()))))
+    if stored_refs is not None and (not for_publication or completion is not None or any(value not in references for value in stored_refs)):
+        raise ContextStoreError("context_source_references_invalid")
     head = await _row(
         db, "SELECT generation_id FROM model_context_heads WHERE session_id=? AND execution_id=? AND lane=?", (worker.session_id, execution_id, lane)
     )
@@ -485,7 +492,7 @@ async def write_context_in_tx(
             worker.generation,
             "compact" if completion else "checkpoint",
             current,
-            _json(references),
+            _json(references if stored_refs is None else stored_refs),
             snapshot.model_dump_json(),
             policy_json,
             origin.model_dump_json(),

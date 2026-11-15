@@ -414,7 +414,7 @@ _BAIL_MESSAGE_CAP = 300
 def _bail_message(envelope: object) -> str:
     """从 bail 信封里取**给人看的**那句话。
 
-    ★2026-08-14 116 dogfood：此前 bail 只带 kind，用户在计划卡上看到的字面是
+    ★2026-08-14 Regression check：此前 bail 只带 kind，用户在计划卡上看到的字面是
     「Failed: transient: transient」（`TaskFailureError.__str__` 把 kind 拼了两遍），
     而真因（BI 查询下载超时 60s）在 UI 上根本不存在。信封契约**本来就要求**这句话
     （`analysis_payload` 校验：`error.message missing/empty (need 1-2 sentence reason)`）。
@@ -791,7 +791,18 @@ def make_legacy_agent_runner_fn(
             # Reset peer ContextVar regardless of outcome (P0 #5 cleanup)
             reset_current_peer_name(peer_token)
 
-        if not result.ok:
+        partial = None
+        if (
+            not result.ok
+            and getattr(result, "completion", "complete") == "partial"
+            and getattr(result, "partial_reported", False)
+            and (getattr(result, "partial_done", None) or "").strip()
+        ):
+            # A helper stopped at a run limit and reported what it finished and what remains. The step
+            # keeps that work, and the report names the rest as a gap; failing it blocked the whole plan
+            # (116 t_78ba5d3b1429: three such steps, 27 written sections, Turn failed as plan_blocked).
+            partial = {"stop_reason": result.stop_reason or "", "remaining": (result.partial_remaining or "").strip()[:2000]}
+        elif not result.ok:
             # SubagentRunner failure → raise for LocalTaskRunner wrapping as TaskFailureError.
             err_msg = result.error or "unknown subagent failure"
             await _mark_exact_terminal("failed", "agent_peer_failed")
@@ -858,6 +869,8 @@ def make_legacy_agent_runner_fn(
         # Without payload but with final_answer Markdown, wrap SubagentResult as dict.
         if not payload and result.final_answer:
             payload = {"fallback_markdown": result.final_answer[:8000]}
+        if partial is not None:
+            payload = {**payload, "partial_completion": partial}
 
         # graph-mode S6 false-negative fix (dogfood F-D2): web-research peers routinely omit sources[]
         # (unreliable LLM emission; schema description added, backend fallback still required); deterministically
@@ -883,7 +896,11 @@ def make_legacy_agent_runner_fn(
             if _plan_bag is not None:
                 _plan_bag.extend(result.tool_invocations or [])
 
-        await _mark_exact_terminal("completed")
+        if partial is not None:
+            # A partial run did not finish its assignment, as in ordinary delegation; its step still keeps the work.
+            await _mark_exact_terminal("failed", "agent_peer_failed")
+        else:
+            await _mark_exact_terminal("completed")
 
         return payload, result.tokens_input, result.tokens_output
 

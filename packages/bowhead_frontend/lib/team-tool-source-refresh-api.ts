@@ -10,6 +10,7 @@
  */
 
 import { apiFetch, readApiError } from "./api-client";
+import { attachHttpCause } from "./user-facing-error";
 import type { ResourceUsageSummary } from "./resource-usage";
 import { TeamToolApiError } from "./team-tool-sources-api";
 
@@ -63,7 +64,7 @@ export interface ToolSourceRefreshResult extends ToolSourceRefreshDiff {
 async function _ok(response: Response): Promise<Response> {
   if (response.ok) return response;
   const error = await readApiError(response);
-  throw new TeamToolApiError(error.status, error.message, error.code, error.requestId);
+  throw attachHttpCause(new TeamToolApiError(error.status, error.message, error.code, error.requestId), error);
 }
 
 export async function previewToolSourceRefresh(sourceId: string): Promise<ToolSourceRefreshPreview> {

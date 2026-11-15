@@ -43,6 +43,25 @@ def response(body, message, finish):
     )
 
 
+def review_round(body):
+    """Lead's scope review after a successful delegation returns its closing answer once (1bab80070)."""
+    messages = body.get("messages") or []
+    return (
+        len(messages) > 1
+        and messages[-2].get("role") == "assistant"
+        and not messages[-2].get("tool_calls")
+        and "delivery_review" in json.dumps(messages[-1].get("content"))
+    )
+
+
+def assert_restarted(case, turn_id, card_id):
+    """A refused exact checkpoint restarts Lead with the answer; the card is used once."""
+    turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
+    assert turn["status"] == "completed", turn["error"]
+    card = next(row for row in rows(case, "clarification_requests") if row["request_id"] == card_id)
+    assert card["injected_at"] is not None and card["continuation_generation"] == 2
+
+
 def call(call_id, name, arguments):
     return {
         "role": "assistant",
@@ -60,6 +79,7 @@ def call(call_id, name, arguments):
         "partial",
         "skip",
         "lost_key",
+        "restart",
         "reused_call",
         "second_question",
         "legacy_window_guard",
@@ -77,6 +97,7 @@ def call(call_id, name, arguments):
         "no_tools",
         "unclassified_return",
         "capture_internal",
+        "worker_lost",
         "changed_return",
         "reused_child",
         "reused_rejection",
@@ -123,6 +144,17 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             raise RuntimeError("Internal capture implementation failed: password=raw-secret")
 
         monkeypatch.setattr(ordinary_lead_runtime, "capture_ordinary_lead_loop", fail_capture)
+    if mode == "worker_lost":
+        from bowhead_core.ordinary_lead_continuation import OrdinaryWorkerUnavailable
+
+        from bowhead_core import ordinary_lead_runtime
+
+        async def lose_worker(**kwargs):
+            # Cancellation or a moved lease still stops the live loop.
+            capture_buses.append(kwargs["bus"])
+            raise OrdinaryWorkerUnavailable()
+
+        monkeypatch.setattr(ordinary_lead_runtime, "capture_ordinary_lead_loop", lose_worker)
     case.client.headers["Content-Type"] = "application/json"
     enable_lead_writer(case, monkeypatch)
     monkeypatch.setenv("BOWHEAD_WS_MEMBERSHIP_ENFORCE", "1")
@@ -131,18 +163,12 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
         monkeypatch.setenv("BOWHEAD_LEAD_CANVAS_AUTOCHOP", "1")
     repair = mode in {"repair", "hard_reject", "narrative", "unclassified_return", "changed_return", "reused_child", "reused_rejection"}
     rejection_count = 5 if mode == "narrative" else 1
-    refused_capture = mode in {"unclassified_return", "changed_return", "reused_child"}
+    # A helper prefix this run cannot prove is refused as an optional question:
+    # the live Lead keeps its results and completes without a card.
+    capture_fallback = mode in {"unclassified_return", "changed_return", "reused_child"}
     capture_buses = []
-    if refused_capture:
-        from bowhead_core import ordinary_lead_runtime
-
-        capture = ordinary_lead_runtime.capture_ordinary_lead_loop
-
-        async def observe_capture(**kwargs):
-            capture_buses.append(kwargs["bus"])
-            return await capture(**kwargs)
-
-        monkeypatch.setattr(ordinary_lead_runtime, "capture_ordinary_lead_loop", observe_capture)
+    if capture_fallback:
+        caplog.set_level("INFO", logger="bowhead_core.subagent")
     if mode in {"unclassified_return", "changed_return"}:
         from bowhead_core import ordinary_lead_runtime
 
@@ -226,11 +252,15 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
     }
     questions = ([{"question": "Which date?", "options": [], "type": "free_text"}] if mode == "partial" else []) + [question]
     lead_calls, helper_calls = [], []
+    review_calls = []
 
     def respond(request):
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             index = len(lead_calls)
             if mode in {"mixed_prefix", "question_batch", "capture_size"}:
@@ -247,6 +277,8 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
                 return response(body, {"role": "assistant", "content": text}, "stop")
             if protocol_repair and index > 2:
                 index -= 1
+            if capture_fallback and index == 3:
+                return response(body, {"role": "assistant", "content": "The inspection is complete; the audience is still unspecified."}, "stop")
             if index == 1:
                 message = call(
                     "helper-native",
@@ -394,9 +426,36 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             assert terminal["diagnostics"]["retryable"] is True
             assert "raw-secret" not in str(terminal)
             return
-        if refused_capture:
+        expected_helper_calls = 4 if mode in {"unclassified_return", "changed_return"} else 2 if mode == "reused_child" else 1
+        if capture_fallback:
+            from bowhead_core.ordinary_lead_continuation import CAPTURE_REFUSED_NOTE
+
             assert cards == []
-            expected_helper_calls = 4 if mode in {"unclassified_return", "changed_return"} else 2
+            # The existing scope review after delegation returns the first closing answer once (1bab80070).
+            assert len(lead_calls) == 3 and len(review_calls) == 1 and len(helper_calls) == expected_helper_calls
+            turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
+            assert turn["status"] == "completed", turn["error"]
+            refusal = json.loads(
+                next(message for message in lead_calls[-1]["messages"] if message.get("tool_call_id") == "question-native")["content"]
+            )
+            assert refusal["error_kind"] == "clarification_capture_unavailable"
+            assert refusal["note"] == CAPTURE_REFUSED_NOTE
+            persisted = [
+                json.loads(row["payload_json"]) for row in rows(case, "turn_events") if row["turn_id"] == turn_id and row["event_type"] == "step_done"
+            ]
+            question_steps = [payload for payload in persisted if payload.get("call_id") == "question-native"]
+            assert len(question_steps) == 1 and question_steps[0]["error"]["type"] == "clarification_capture_unavailable"
+            assert not [row for row in rows(case, "turn_events") if row["turn_id"] == turn_id and row["event_type"] == "turn_failed"]
+            with anyio.fail_after(5):
+                replay = await case.client.get(accepted.json()["stream_url"])
+            assert "clarification_required" not in replay.text
+            diagnostics = [record.getMessage() for record in caplog.records if "ordinary_lead.question_capture_unavailable" in record.getMessage()]
+            assert len(diagnostics) == 1
+            assert "failure_site=bowhead_core." in diagnostics[0]
+            assert original not in diagnostics[0] and question["question"] not in diagnostics[0]
+            return
+        if mode == "worker_lost":
+            assert cards == []
             assert len(lead_calls) == 2 and len(helper_calls) == expected_helper_calls
             turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
             assert turn["status"] == "failed" and turn["error"] == "clarification_resume_unavailable"
@@ -462,6 +521,18 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             answer_payload = {"answers": [{"question": question["question"], "source": "custom", "answer": "Board members"}]}
         if mode == "lost_key":
             monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+        if mode == "restart":
+            from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+            from bowhead_core import ordinary_lead_runtime
+
+            async def refuse_retained(*args, **kwargs):
+                # Retained work changed during the pause, as after a deleted output or a prompt release.
+                raise OrdinaryContinuationUnavailable(condition="retained_input")
+
+            monkeypatch.setattr(ordinary_lead_runtime, "validate_ordinary_retained_materials", refuse_retained)
+            caplog.set_level("INFO", logger="bowhead_gateway.turn_service")
+            caplog.set_level("INFO", logger="bowhead_core.ordinary_lead_runtime")
         if mode == "race":
             concurrent = await asyncio.gather(*[case.client.post(f"/api/v1/clarifications/{card_id}/resolve", json=answer_payload) for _ in range(2)])
             assert all(result.status_code in {200, 409} for result in concurrent)
@@ -475,6 +546,24 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
         assert answered.status_code == 200, answered.text
         assert answered.json()["resume_turn_id"] == turn_id
         await settled(turn_id)
+        if mode == "restart":
+            # The exact checkpoint is refused, so Lead restarts from the original
+            # request with the saved answer instead of leaving the Turn waiting.
+            turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
+            assert turn["status"] == "completed", turn["error"]
+            assert len(lead_calls) == 4 and len(helper_calls) == 1
+            restarted = lead_calls[2]["messages"]
+            assert any(original in str(m.get("content")) and '"original_request"' in str(m.get("content")) for m in restarted)
+            responses = [m for m in restarted if m.get("role") == "user" and "clarification_responses" in str(m.get("content"))]
+            assert len(responses) == 1 and "Board members" in responses[0]["content"]
+            assert not [m for m in restarted if m.get("tool_call_id") in {"helper-native", "question-native"}]
+            card = next(row for row in rows(case, "clarification_requests") if row["request_id"] == card_id)
+            assert card["injected_at"] is not None and card["continuation_generation"] == 2
+            messages = [record.getMessage() for record in caplog.records]
+            assert any("ordinary_lead.question_restart" in message and "OrdinaryContinuationUnavailable" in message for message in messages)
+            assert any("ordinary_lead.question_restarted" in message for message in messages)
+            assert original not in " ".join(message for message in messages if "question_restart" in message)
+            return
         if mode == "streamed":
             all_sections = [
                 json.loads(row["payload_json"])["section_id"]

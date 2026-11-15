@@ -24,14 +24,14 @@ In **My Connections → My Agent tools**, or in the Agent's tool area, select to
 
 ## Approve every call
 
-Remote calls require confirmation by default. Review the Agent, connection, tool, operation summary, and full parameters, especially data that will leave Bowra.
+Remote calls require confirmation by default. The request appears in the conversation under the waiting step. Review the Agent, connection, tool, operation summary, and full parameters, especially data that will leave Bowra.
 
 - **Allow this call** permits one execution with the current parameters.
 - **Always allow in this session** permits later calls to the same tool only in this session; it expires when the session ends, refreshes, or the connection is disabled.
 - **Deny and skip** does not run the call.
 - Calls expire after three minutes without a decision.
 
-If your deployment turns on inline confirmation, the request appears in the conversation under the step that is waiting instead of in a dialog, and afterwards stays there as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
+After you decide, the request stays in the conversation as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
 
 External services can make irreversible changes. Personal ownership does not permit sending team-sensitive data outside the team policy.
 

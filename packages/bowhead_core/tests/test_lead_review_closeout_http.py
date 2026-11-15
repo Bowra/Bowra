@@ -1,10 +1,12 @@
-"""A delivery-review correction never turns Lead's question into unapproved work.
+"""A delivery-review correction keeps Lead's question for the user.
 
 116 t_7edbc155f8d8: a chart edit failed, Lead asked the user how to continue, delivery
 review bounced that reply with a user-role message, and Lead read it as the answer: it
 started an alternative the user had not approved while the streamed question stayed
-visible. The correction is now a runtime note, new work waits for the user, and the
-bounced narrative is superseded identically live, persisted and on replay.
+visible. The correction is now a runtime note whose wording leaves the choice to the
+user, and the bounced narrative is superseded identically live, persisted and on replay.
+The correction refuses nothing: a refuse-only gate left the original regression spinning
+until the user cancelled; repeated refusals are bounded separately.
 """
 
 import json
@@ -72,7 +74,6 @@ async def test_review_correction_keeps_the_question_for_the_user(http_start: Sim
     )
     monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("recolor_chart", "clarification_ask")))
     calls = []
-    refusals = []
 
     def respond(request):
         body = json.loads(request.content)
@@ -91,10 +92,7 @@ async def test_review_correction_keeps_the_question_for_the_user(http_start: Sim
             note = guidance[0][guidance[0].index("Fix requirement scope") - len(RUNTIME_CORRECTION_PREFIX) :]
             assert note.startswith(RUNTIME_CORRECTION_PREFIX), guidance[0]
             assert "do not dispatch, retry or start other work" in note
-            # The unapproved alternative the model chose in 116.
-            return response(body, call("edit-2", "recolor_chart", {"color": "green", "as_image": True}), "tool_calls")
-        if len(calls) == 4:
-            refusals.extend(m["content"] for m in body["messages"] if m["role"] == "tool" and m.get("tool_call_id") == "edit-2")
+            assert "keep the question in your answer or ask it with clarification_ask" in note
             guidance = next(m["content"] for m in body["messages"] if m["role"] == "user" and RUNTIME_CORRECTION_PREFIX in m["content"])
             failed = json.loads(guidance.split("review_context (JSON data): ", 1)[1])["failed_calls"][0]["call_id"]
             review = {
@@ -116,9 +114,8 @@ async def test_review_correction_keeps_the_question_for_the_user(http_start: Sim
         await settled(turn_id)
     turn = await case.fixture.case.store.get_turn(turn_id)
     assert turn.status == "completed", turn.error
-    assert len(calls) == 5
-    assert edits == [{"color": "green"}], "The correction must not run work the user has not approved"
-    assert refusals and refusals[0].startswith("Not executed."), refusals
+    assert len(calls) == 4
+    assert edits == [{"color": "green"}]
     assert projected_notes and all(note.role == "user" for note in projected_notes), "The note keeps its private runtime identity"
     assert turn.final_answer.startswith(QUESTION), "The question stays the user's; partial delivery is disclosed after it"
     events = [row for row in rows(case, "turn_events") if row["turn_id"] == turn_id]

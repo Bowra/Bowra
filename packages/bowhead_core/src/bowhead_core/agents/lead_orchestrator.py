@@ -34,9 +34,12 @@ from typing import TYPE_CHECKING, Any
 
 from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 from bowhead_core.agent_run_limits import (
+    TurnModelCallBudget,
     TurnToolCallBudget,
+    reset_model_call_budget,
     reset_run_limits,
     reset_tool_call_budget,
+    set_model_call_budget,
     set_run_limits,
     set_tool_call_budget,
 )
@@ -74,7 +77,7 @@ from .clarification_tool import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from bowhead_core.delta.registered_fact_store import RegisteredFactStore
     from bowhead_core.subagent import SubagentRunner
@@ -101,6 +104,7 @@ _PUBLIC_TURN_FAILURE_CODES = frozenset(
     {
         "agent_step_limit",
         "agent_tool_call_limit",
+        "agent_model_call_limit",
         "agent_stalled",
         "wallclock_exceeded",
         "hop_cap_exceeded",
@@ -135,6 +139,7 @@ _PUBLIC_TURN_FAILURE_CODES = frozenset(
 _LEGACY_RESULT_ERROR_PREFIX_TO_PUBLIC_CODE = {
     "run_limit_step_limit": "agent_step_limit",
     "run_limit_tool_call_limit": "agent_tool_call_limit",
+    "run_limit_model_call_limit": "agent_model_call_limit",
     "run_limit_time_limit": "wallclock_exceeded",
     "run_limit_agent_stalled": "agent_stalled",
     "peer_no_commit_force_bail": "peer_dispatch_network_error",
@@ -659,12 +664,20 @@ def _lead_spawn_delivery(invocations: Any) -> str | None:
     （R3：不确定时偏向出报告——漏报告比多报告伤害大）。无有效值 → None
     （落到证据驱动默认）。
     """
+    from bowhead_core.delivered_files import revision_targets_enabled
+
+    file_targets = revision_targets_enabled()
     saw_chat = False
     for inv in invocations or []:
         if (getattr(inv, "tool_name", "") or "") != "subagent_spawn":
             continue
         args = getattr(inv, "arguments", {}) or {}
         if not isinstance(args, dict):
+            continue
+        if file_targets and args.get("revise_files"):
+            # Revision targets: a file revision never writes the Canvas report, whatever delivery it
+            # passed; the handler applies the same rule (the original regression review P0-1).
+            saw_chat = True
             continue
         d = str(args.get("delivery") or "").strip().lower()
         if d == "report":
@@ -872,6 +885,7 @@ async def _resolve_terminal_response_kind(
     """
     bus._terminal_surface_decision = None  # type: ignore[attr-defined]
     bus._terminal_report_kept = None  # type: ignore[attr-defined]
+    bus._terminal_canvas_changed = None  # type: ignore[attr-defined]
     store = getattr(bus, "_d6_canvas_store", None)
     artifact_store = getattr(bus, "_d6_artifact_store", None)
     if store is None and artifact_store is None:
@@ -930,6 +944,9 @@ async def _resolve_terminal_response_kind(
                     _revised_prior_ids = [s.id for s in _revised_secs]
         except Exception:  # noqa: S110 — best-effort: unavailable → classify appended (old behavior)
             pass
+        if store is not None and getattr(bus, "_file_revision_dispatched", False):
+            # Revision-target design §9: read only on Turns that revised a file, for the pointer correction.
+            bus._terminal_canvas_changed = await _changed_canvas_this_turn(bus, store, materialized_turn_id, sections)  # type: ignore[attr-defined]
         has_deliverable = False
         # delivery-surface C3: plan delivery kind (_run_plan_execution_turn attaches to bus
         # after loading Plan row; missing → None → is_report_worthy treats as REPORT = old behavior).
@@ -1240,15 +1257,21 @@ _CLAUSE_SPLIT_RE = re.compile(r"([，、；。！？\n.,!?;])")
 # deletes the chat-bubble summary's data for such customers. The residual non-"见" gap stays a
 # known, non-blocking backstop miss — the primary defenses are the softened prompt + the
 # deterministic "见画布" append + reconcile/F5 recovering the actual report.
-_PHANTOM_CLAUSE_RE = re.compile(
-    r"报告已(?:生成|完成)"
-    r"|(?:完整报告|报告|详|请)见画布"
+_CANVAS_POINTER_PATTERN = (
+    r"(?:完整报告|报告|详|请)见画布"
     r"|见\s*canvas"
     r"|(?<![可看預预遇瞧望罕])见画布(?![一-鿿])"
     # chrome-i18n: canonical en pointer (same sentence family as chrome_text("canvas_pointer")).
     # Match canonical sentences only—WP-6 lesson: broad matching deletes entire real-data clauses.
     r"|(?i:(?:the\s+)?(?:full|complete)\s+report\s+is\s+(?:now\s+)?on\s+the\s+canvas)"
 )
+_PHANTOM_CLAUSE_RE = re.compile(r"报告已(?:生成|完成)|" + _CANVAS_POINTER_PATTERN)
+# Revision-target design §9: on a file-revision Turn only the pointer to the Canvas is retracted. There
+# "报告已生成" usually names the new file version ("第 8 版 HTML 报告已生成"), which Lead is told to write.
+_CANVAS_POINTER_CLAUSE_RE = re.compile(_CANVAS_POINTER_PATTERN)
+# Sections that record how the work was done rather than report content: python_exec streams a code_block
+# into the Canvas on every run, and sources are re-resolved, so they do not mean the Turn changed the report.
+_CANVAS_AUXILIARY_KINDS = frozenset({"code_block", "sources", "meta", "eyebrow"})
 
 
 # "见 canvas" may straddle a newline, and \n is a clause separator — so normalize this ONE
@@ -1267,25 +1290,27 @@ def _effective_lang(*, bus: Any = None, language_context: Any = None) -> str:
     return effective_output_language(bus=bus, language_context=language_context)
 
 
-def _claims_canvas_pointer(text: str | None) -> bool:
+def _claims_canvas_pointer(text: str | None, *, canvas_only: bool = False) -> bool:
     if not text:
         return False
+    pattern = _CANVAS_POINTER_CLAUSE_RE if canvas_only else _PHANTOM_CLAUSE_RE
     norm = _PTR_CANVAS_NL.sub("见canvas", text)
-    return any(_PHANTOM_CLAUSE_RE.search(c) for c in _CLAUSE_SPLIT_RE.split(norm))
+    return any(pattern.search(c) for c in _CLAUSE_SPLIT_RE.split(norm))
 
 
-def _strip_canvas_pointer(text: str | None) -> str:
+def _strip_canvas_pointer(text: str | None, *, canvas_only: bool = False) -> str:
     """Drop clauses that claim a report exists / point at the canvas; KEEP data findings.
     Clause-based so a comma-joined finding survives AND a two-clause phantom is fully
     removed (no residual claim that would re-persist). See REPORT_WRITING.md + test_m2."""
     if not text:
         return ""
+    pattern = _CANVAS_POINTER_CLAUSE_RE if canvas_only else _PHANTOM_CLAUSE_RE
     parts = _CLAUSE_SPLIT_RE.split(_PTR_CANVAS_NL.sub("见canvas", text))  # [clause, sep, ...]
     out: list[str] = []
     for i in range(0, len(parts), 2):
         clause = parts[i]
         sep = parts[i + 1] if i + 1 < len(parts) else ""
-        if clause and _PHANTOM_CLAUSE_RE.search(clause):
+        if clause and pattern.search(clause):
             continue  # drop the phantom clause AND its trailing separator
         out.append(clause + sep)
     return "".join(out).strip(" ，、；\n")
@@ -1300,7 +1325,7 @@ def _prepared_canvas_pointer_correction(
     if not getattr(bus, "_canvas_pointer_claimed", False):
         return None
     if not (status == "clarification_pending" or not report_kept):
-        return None
+        return _file_revision_pointer_correction(bus)
     stripped = _strip_canvas_pointer(
         getattr(bus, "_lead_chat_text", "") or "",
     )
@@ -1311,6 +1336,46 @@ def _prepared_canvas_pointer_correction(
     from bowhead_core.report_chrome_text import chrome_text as _chrome_text
 
     return _chrome_text("no_report_this_turn", _effective_lang(bus=bus))
+
+
+def _file_revision_pointer_correction(bus: Any) -> str | None:
+    """Retract Lead's own pointer to the Canvas after a file revision left the Canvas unchanged (revision-target design §9).
+
+    A file the user revises is its own report (the maintainer, 2026-11-14), so "完整报告见画布" points at a report
+    this Turn did not change. All evidence must agree: the Turn resolved ``revise_files``, the terminal read found
+    no report section appended or revised (``None`` when it could not tell), and no embedded HTML section of this
+    session's Canvas followed the new version. Only the Canvas clause is removed; when nothing else remains
+    there is no correction, since "no canvas report this turn" would mislead on a Turn that delivered a file.
+    """
+    if not getattr(bus, "_file_revision_dispatched", False):
+        return None
+    if getattr(bus, "_terminal_canvas_changed", None) is not False or getattr(bus, "_canvas_followed_file_version", False):
+        return None
+    text = getattr(bus, "_lead_chat_text", "") or ""
+    if not _claims_canvas_pointer(text, canvas_only=True):
+        return None
+    stripped = _strip_canvas_pointer(text, canvas_only=True)
+    return stripped or None
+
+
+async def _changed_canvas_this_turn(bus: Any, store: Any, turn_id: str, appended: list[Any]) -> bool | None:
+    """Whether this Turn appended or revised a report section of the Canvas; None when that cannot be read (§9)."""
+    try:
+        if any(str(getattr(section, "kind", "")) not in _CANVAS_AUXILIARY_KINDS for section in appended):
+            return True
+        auxiliary = {getattr(section, "id", None) for section in appended}
+        touched = set(await store.section_ids_touched_by_turn(turn_id)) - auxiliary
+        if not touched:
+            return False
+        canvas = await store.get_canvas_by_session(getattr(bus, "_d6_session_id", None) or "")
+        if canvas is None:
+            return None
+        kinds = {section.id: str(getattr(section, "kind", "")) for section in await store.list_sections(canvas.id, include_hidden=True)}
+        # A touched section that is no longer listed counts as a change: the mark only keeps a pointer.
+        return any(kinds.get(section_id, "") not in _CANVAS_AUXILIARY_KINDS for section_id in touched)
+    except Exception:
+        logger.warning("terminal.canvas_change_unreadable turn=%s", turn_id, exc_info=True)
+        return None
 
 
 async def _reconcile_canvas_pointer(
@@ -1325,7 +1390,8 @@ async def _reconcile_canvas_pointer(
     sections / no sections), emit a corrective ``final_answer`` with the pointer
     stripped. It OVERWRITES the phantom chat bubble (FE ``runner.answer``). Returns
     True iff it emitted. Idempotent (clears the flag so a done re-emit won't re-fire).
-    Never fires when a report is genuinely kept.
+    With a report kept it fires only on a file-revision Turn that left the Canvas unchanged,
+    and then removes only the Canvas clause (``_file_revision_pointer_correction``).
     """
     fixed = _prepared_canvas_pointer_correction(bus, status, report_kept)
     if fixed is None:
@@ -1722,7 +1788,7 @@ async def run_turn(
     # ContextVar: fact_store for δ wire #2 (adapter reads from here)
     fact_store_token = set_lead_fact_store(runtime.fact_store)
 
-    # feedback-triage-2026-08-26 (116 dogfood: **zero citations registered** on report turns since 08-20):
+    # feedback-triage-2026-08-26 (Regression check: **zero citations registered** on report turns since 08-20):
     # Initialize citation registry on **real** parent_ctx; do not wait for lazy initialization elsewhere.
     #
     # Cause: peer dispatch uses copy.copy(ctx) (subagent.py dispatch_ctx).
@@ -1863,7 +1929,10 @@ async def run_turn(
         runtime.parent_ctx._ordinary_lead_deadline = _turn_deadline
         _deadline_token = set_turn_deadline(_turn_deadline)
         _run_limits_token = set_run_limits(_run_limits)
-        _tool_budget_token = set_tool_call_budget(TurnToolCallBudget(_run_limits.tool_call_limit))
+        _tool_budget = TurnToolCallBudget(_run_limits.tool_call_limit)
+        _tool_budget_token = set_tool_call_budget(_tool_budget)
+        _model_budget = TurnModelCallBudget(_run_limits.model_call_limit)
+        _model_budget_token = set_model_call_budget(_model_budget)
         try:
             from bowhead_core.execution_limits import execution_limits_scope
 
@@ -1876,6 +1945,15 @@ async def run_turn(
             reset_turn_deadline(_deadline_token)
             reset_run_limits(_run_limits_token)
             reset_tool_call_budget(_tool_budget_token)
+            reset_model_call_budget(_model_budget_token)
+            logger.info(
+                "agent_run_limits.turn_usage turn=%s model_calls=%s model_limit=%s tool_calls=%s tool_limit=%s",
+                getattr(runtime.parent_ctx, "turn_id", None),
+                _model_budget.used,
+                "unlimited" if _model_budget.limit is None else _model_budget.limit,
+                _tool_budget.used,
+                _tool_budget.limit,
+            )
         return result
 
     except InvocationOutcomeUnknownError:
@@ -2733,6 +2811,30 @@ def _peer_handles_bi_plan_steps(peer: Any) -> bool:
     return not primary or primary in {"cap_data_query", "cap_analysis"}
 
 
+_PARTIAL_STEP_REASONS = {
+    "step_limit": "达到了单个任务步数上限",
+    "time_limit": "达到了单轮时长上限",
+    "tool_call_limit": "达到了每轮工具调用上限",
+    "model_call_limit": "达到了每轮模型调用上限",
+    "no_progress": "连续几步没有产生新结果",
+    "budget": "可用额度已用完",
+    "agent_stalled": "本地执行停滞",
+}
+
+
+def _plan_step_partial(step: Any) -> dict | None:
+    """The partial completion a done plan step kept (agent_runner_adapter), or None."""
+    import json as _pjson
+
+    raw = getattr(step, "payload_json", None)
+    try:
+        payload = _pjson.loads(raw) if raw else None
+    except (ValueError, TypeError):
+        return None
+    partial = payload.get("partial_completion") if isinstance(payload, dict) else None
+    return partial if isinstance(partial, dict) else None
+
+
 def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
     """FIX-2 (2026-06-25 prod incident): "data gap" caveats for a PARTIAL plan report.
 
@@ -2766,6 +2868,16 @@ def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
             # graph-mode batch1 (review C9): channel structurally excludes done steps—verify
             # unmet(partial/shadow-fail) is sole done-step gap source; connect here.
             if st == "done":
+                _partial = _plan_step_partial(s)
+                if _partial is not None:
+                    _why_partial = _PARTIAL_STEP_REASONS.get(str(_partial.get("stop_reason") or ""), "达到了运行上限")
+                    _left = str(_partial.get("remaining") or "").strip()[:200]
+                    out.append(
+                        _GAP
+                        + f"「{getattr(s, 'agent_name', '?')}」这步只完成了一部分（{_why_partial}）"
+                        + (f"，未完成：{_left}" if _left else "")
+                        + "。本报告只包含它已完成的部分。"
+                    )
                 from bowhead_core.plan_verify import outcome_from_json as _vfrom
 
                 _vo = _vfrom(getattr(s, "verify_json", None))
@@ -3212,7 +3324,7 @@ async def _run_plan_execution_turn(
         if getattr(bus, "_lead_canvas_mode", None) is not None:
             logger.info("lead.canvas_mode_reset turn=%s reason=plan_execution was=%s", sctx.turn_id, getattr(bus, "_lead_canvas_mode", None))
             bus._lead_canvas_mode = None
-    # canvas-elements 116 dogfood (1.2.32, s_bb40f9cf41b6): _d6_is_plan_execution set only at turn entry from
+    # canvas-elements Regression check (1.2.32, s_bb40f9cf41b6): _d6_is_plan_execution set only at turn entry from
     # sctx.plan_execution_id; Auto auto_run executes **within proposal turn**, before sctx has plan id ⇒ remains
     # False: every leg eagerly persists chapter_mode=False (N legs = N complete docs with h1/byline/KPI/recommendations/limits);
     # α folding, revision finalizer, is_report_worthy also treat as nonplan. Sole criterion for plan execution:
@@ -3815,7 +3927,7 @@ async def _run_plan_execution_turn(
                         tout += sum(u[1] for u in _compose_usage)
                 _content_kinds = [k for k in composer_emitted_kinds if k != "meta"]
                 if not _content_kinds and getattr(bus, "_psi_compose_done", False):
-                    # ★116 dogfood 1.0.93 P1 (t_d4be37936054 / t_4c9c5997643a, reproduced twice):
+                    # ★Regression check 1.0.93 P1 (t_d4be37936054 / t_4c9c5997643a, reproduced twice):
                     # After default card authorship, ψ-E persisted report **during step execution**; final composer correctly
                     # skipped via _psi_compose_done (avoid duplicate compose) → kinds always empty → subsequent
                     # success copy falsely claims report content not generated, demotes completed plan to
@@ -3883,13 +3995,15 @@ async def _run_plan_execution_turn(
     except Exception:
         logger.exception("plan_exec.report_compose_failed plan=%s turn=%s", plan_id, sctx.turn_id)
 
+    # Done steps that kept only part of their work (a helper stopped at a run limit); never presented as complete.
+    _partial_steps = [_s for _s in _final if str(getattr(_s, "status", "")) == "done" and _plan_step_partial(_s) is not None]
     if outcome.status == "completed":
         if _plan_answer_mode and not _content_kinds:
             # delivery-surface C3: ANSWER plan delivers chat answer; zero canvas sections is
             # **success**, not failure. Never enter plan_report_empty below (demotes successful
             # turn BLOCKED + reports content not generated, while user explicitly requested
             # no report).
-            # ★116 dogfood 1.0.93 P1 (t_cde94266cbf4): DF-04 excluded short-answer payload
+            # ★Regression check 1.0.93 P1 (t_cde94266cbf4): DF-04 excluded short-answer payload
             # from aggregate → main prose chain falls to user_text → final echoes user request,
             # gives no brand profits (steps ✓Verified). **Step output** is answer authority:
             # trust prose-chain output only if not echo; otherwise read done legs'
@@ -3908,9 +4022,18 @@ async def _run_plan_execution_turn(
                 text = "\n\n".join(_leg_answers)
             else:
                 text = _extra or f"计划执行完成:{outcome.done} 步成功。"
+            if _partial_steps:
+                from bowhead_core.analysis_payload import PLAN_GAP_CAVEAT_PREFIX
+
+                # An answer plan has no report to carry the gap caveats; state them in the answer.
+                text = text.rstrip() + "\n\n" + "\n".join(c.removeprefix(PLAN_GAP_CAVEAT_PREFIX) for c in _plan_report_gap_caveats(_partial_steps))
             done_status, resp_kind, ts, err, ek = ("completed", "chat", TurnStatus.COMPLETED, None, None)
         elif (not _pv2()) or _content_kinds:
-            text = f"计划执行完成:{outcome.done} 步成功,报告已生成在 canvas。"
+            text = (
+                f"计划执行完成:{outcome.done - len(_partial_steps)} 步完成,{len(_partial_steps)} 步只完成了一部分(缺口见报告末尾),报告已生成在 canvas。"
+                if _partial_steps
+                else f"计划执行完成:{outcome.done} 步成功,报告已生成在 canvas。"
+            )
             done_status, resp_kind, ts, err, ek = ("completed", "canvas", TurnStatus.COMPLETED, None, None)
         elif _prior_report_exists:
             # review P2 (WP-5): retry/fallback already rendered—report on canvas from prior turn;
@@ -4473,7 +4596,7 @@ async def _maybe_propose_plan(
         # workspace—previous FE localStorage could differ from hook1 persisted sctx.workspace_id
         # (dev-stub: persisted "" vs localStorage "1" →404).
         "workspace_id": sctx.workspace_id,
-        # ★116 dogfood 1.0.93 P2: completed ANSWER plan FE still said Report ready +
+        # ★Regression check 1.0.93 P2: completed ANSWER plan FE still said Report ready +
         # View report (no report this turn)—card carries delivery kind, FE gates report surface.
         "deliverable_kind": str(getattr(plan, "deliverable_kind", "") or "report"),
         "steps": [
@@ -4746,7 +4869,7 @@ async def _compose_turn_output_unchecked(
     # 3 had h1>=2, all 4 peers), smaller trigger surface (89% only 2 legs).
     # Slot = spawn order; same reorder_canvas_by_slots primitive as plan, different slot source.
     # Gate: single-leg spawn_order_slots empty ⇒skip block, zero ordinary-turn impact.
-    # canvas-update-turn batch B0 (116 dogfood R3): revise/append creates no new document; peer sections are
+    # canvas-update-turn batch B0 (Regression check R3): revise/append creates no new document; peer sections are
     # chapter after old report—slot order moves it before old heading (_spawn_order includes Lead
     # so even single-peer turns trigger). Skip both modes; keep chapters at append tail (B1 inserts before recommendations).
     from bowhead_core.canvas_revise import no_document_chrome as _no_chrome_slots
@@ -6391,7 +6514,7 @@ async def _lead_loop(
                     _revise_hint = _revise_on_hint() and await _has_prior_report(
                         getattr(getattr(runtime, "parent_ctx", None), "canvas_store", None), getattr(sctx, "session_id", None), sctx.turn_id
                     )
-                    # ⚠ Reverted (116 dogfood s_f3f23fd0a472 turn7): gave recent digest key_facts to overclaim guard as sources;
+                    # ⚠ Reverted (Regression check s_f3f23fd0a472 turn7): gave recent digest key_facts to overclaim guard as sources;
                     # Lead copied prior July–August numbers into January–March revision chat (canvas correct, chat wrong);
                     # numbers were in prior key_facts ⇒guard admitted own supplied source. Prior sourced numbers **not current evidence**;
                     # history encourages restating prior numbers, exactly what guard must stop. Same [[feedback_payload_content_not_tool_proof]].
@@ -6859,7 +6982,7 @@ async def _lead_loop(
         stream_abort_cb = _stream_boundary
 
     # ─── graph-mode: deterministic fallback for batch dispatch of ≥2 distinct peers in one tool-call round ─
-    # Three 116 dogfood rounds: model simply never calls plan_propose (instruction present, judgment correct,
+    # Three Regression check rounds: model simply never calls plan_propose (instruction present, judgment correct,
     # reproduced across two models/three prompt positions). Criterion **server-observable**, stop relying
     # on voluntary model behavior—see multi_peer_sentinel docstring.
     #
@@ -7037,10 +7160,10 @@ async def _lead_loop(
                 return _bounce("clarification_protocol_text") if _final_bounce_count["n"] < _FINAL_BOUNCE_MAX else None
             _pending_protocol = None
         if profile_name == "lead" and not _unraised_alert_corrected["done"]:
-            from bowhead_core.routine_notify_tool import unraised_alert_note
+            from bowhead_core.routine_notify_tool import alert_already_raised, unraised_alert_note
 
             _alert_note = unraised_alert_note(runtime.parent_ctx, invocations, (runtime.parent_ctx.tool_view or runtime.tool_registry).list_names())
-            if _alert_note is not None:
+            if _alert_note is not None and not await alert_already_raised(runtime.parent_ctx):
                 _unraised_alert_corrected["done"] = True
                 _reject_final_narrative()
                 with contextlib.suppress(Exception):
@@ -9048,6 +9171,25 @@ _LEAD_TOOL_DENY: frozenset[str] = frozenset({"bi_query", "subagent_return"})
 _CONTINUE_INSTRUCTION = "The user clicked Continue: finish the unfinished part of this task."
 
 
+async def _add_delivered_files_block(ctx: Any, turn_id: str, add_block: Callable[..., None], *, checkpoints: Sequence[Any]) -> None:
+    """Revision targets: list this session's earlier deliverables so Lead can name them (FEATURE_REVISION_TARGETS)."""
+    from bowhead_core.delivered_files import list_delivered_files, render_delivered_files_block, revision_targets_enabled
+
+    store = getattr(ctx, "artifact_store", None)
+    if not revision_targets_enabled() or store is None:
+        return
+    try:
+        files = await list_delivered_files(
+            store, session_id=str(getattr(ctx, "session_id", "") or ""), user_id=str(getattr(ctx, "user_id", "") or ""), exclude_turn_id=turn_id
+        )
+    except Exception as exc:  # noqa: BLE001 — without the list, Lead revises files as before
+        logger.warning("delivered_files.prepare_failed turn=%s err=%s", turn_id, type(exc).__name__)
+        return
+    block = render_delivered_files_block(files, checkpoints=checkpoints)
+    if block:
+        add_block(block, zero_evidence=False)
+
+
 async def _prepare_subagent_resume(runtime: Any, turn_id: str, add_block: Callable[..., None]) -> list[Any]:
     """List resumable runs in Lead's turn tail; return the resume calls a Continue click requested.
 
@@ -9069,10 +9211,13 @@ async def _prepare_subagent_resume(runtime: Any, turn_id: str, add_block: Callab
         resumable = await sr.list_resumable(db_path, session_id=session_id, user_id=user_id, exclude_turn_id=turn_id)
     except Exception as exc:  # noqa: BLE001 — without the list, Lead dispatches as before
         logger.warning("subagent_resume.prepare_failed turn=%s err=%s", turn_id, exc)
+        await _add_delivered_files_block(ctx, turn_id, add_block, checkpoints=())
         return []
     listed = [checkpoint for checkpoint in resumable if checkpoint.id not in requested]
     if listed:
         add_block(sr.render_resumable_block(listed), zero_evidence=False)
+    # Runs a Continue click requested are not offered again, so they never name a file's producer.
+    await _add_delivered_files_block(ctx, turn_id, add_block, checkpoints=listed)
     if requested:
         add_block(
             "<continue_request>The user clicked Continue. The server dispatched the stopped helper runs first; their results "
@@ -9545,6 +9690,13 @@ def _file_type_label(filename: str, mime: str) -> str:
     return "FILE"
 
 
+def _inline_version_fields(art: Any) -> dict[str, Any]:
+    """The delivered version's file identity, so a later projection finds its newest version (file-versions R3)."""
+    lineage_id = getattr(art, "lineage_id", None)
+    version_no = getattr(art, "version_no", None)
+    return {"lineage_id": lineage_id, "version_no": version_no} if isinstance(lineage_id, str) and lineage_id else {}
+
+
 async def _deliverable_inline_artifact(art_store: Any, art: Any, *, require_deliverable_kind: bool = True) -> dict[str, Any] | None:
     """Build a ``{kind:"file", ...}`` inline download chip for ANY downloadable
     deliverable artifact — .pptx / .xlsx / .docx / .html / .pdf / .csv / … — or
@@ -9582,6 +9734,7 @@ async def _deliverable_inline_artifact(art_store: Any, art: Any, *, require_deli
             "download_url": f"/api/v1/files/{art.id}",
             "alt": fn,
             "size_bytes": getattr(art, "size", None),
+            **_inline_version_fields(art),
         }
     file_type = _file_type_label(fn, mime)
     chip: dict[str, Any] = {
@@ -9592,6 +9745,7 @@ async def _deliverable_inline_artifact(art_store: Any, art: Any, *, require_deli
         "mime": mime,
         "download_url": f"/api/v1/files/{art.id}",
         "size_bytes": getattr(art, "size", None),
+        **_inline_version_fields(art),
     }
     # slide_count is meaningful only for .pptx decks; skip the byte read otherwise.
     # Size-cap it: reading the blob just to count slides is a full in-memory GET on
@@ -9669,7 +9823,7 @@ def _inline_image_artifact(sec: Any) -> dict[str, Any] | None:
         # But [figure:] anchors use **canvas section** namespace (sec_*, same as report path),
         # so also include section_id alias to target image figure.
         # Without it, listed sec_* cannot match bubble art_* ⇒anchor necessarily misses
-        # (116 dogfood t_6787e8159e94: list sec_3b2fd54d1c2d / bubble art_a25c9105b3cb).
+        # (Regression check t_6787e8159e94: list sec_3b2fd54d1c2d / bubble art_a25c9105b3cb).
         "section_id": str(getattr(sec, "id", "") or ""),
         "filename": str(payload.get("caption") or "")[:200] or f"{aid}.png",
         "mime": "image/png",
@@ -9743,8 +9897,13 @@ async def _collect_inline_artifacts(
                         superseded = superseded_deliverable_ids(identities, [(event.event_type, event.payload) for event in events])
                     except Exception:
                         logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
+                # File versions (R3): a later version of the same file written in this Turn replaces its card.
+                newest_in_turn: dict[str, int] = {}
                 for _d in _delivs:
-                    if _d.id in superseded:
+                    root = getattr(_d, "lineage_id", None) or _d.id
+                    newest_in_turn[root] = max(newest_in_turn.get(root, 0), getattr(_d, "version_no", None) or 1)
+                for _d in _delivs:
+                    if _d.id in superseded or (getattr(_d, "version_no", None) or 1) < newest_in_turn[getattr(_d, "lineage_id", None) or _d.id]:
                         continue
                     _chip = await _deliverable_inline_artifact(_art_store, _d)
                     if _chip is not None:

@@ -136,6 +136,7 @@ export class AdminMembersError extends Error {
     this.requestId = source?.requestId;
     this.diagnostics = source?.diagnostics;
     this.validationIssues = source?.validationIssues;
+    if (source) this.cause = source;
   }
 }
 

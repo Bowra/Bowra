@@ -307,3 +307,46 @@ def test_no_preview_keys_when_no_sample_rows() -> None:
     for e in reg.sources:
         assert "preview_rows" not in e and "preview_columns" not in e
         assert "total_rows" not in e
+
+
+# ── revise/append turns: restated sources add no row ─────────
+_PRIOR_PYTHON_SOURCE = {
+    "label": "Python 沙箱质数计算（试除法 + 暴力法复核）",
+    "tool": "python_sandbox",
+    "artifact_id": None,
+    "query": "1-2000 质数按 200 区间计数",
+}
+_CHART_EDIT_RUN = [
+    _Inv("c1", "read_chart", {"section_id": "sec_chart"}, {"ok": True}),
+    _Inv("c2", "edit_chart", {"section_id": "sec_chart", "changes": {"kind": "area_stacked"}}, {"ok": True}),
+]
+
+
+def test_revision_ingest_drops_sources_a_presentation_edit_did_not_fetch() -> None:
+    """116 1.7.32 dogfood D2 and the HEX recheck: a type or color edit ran only read_chart/edit_chart, yet its
+    payload restated the report's source in new words and cited the chart it read; each became another row."""
+    reg = TurnSourcesRegistry()
+    reg.seed([dict(_PRIOR_PYTHON_SOURCE)])
+    restated = [
+        {
+            "label": "primes_by_interval.csv（1-2000 每 200 一档质数个数，Python 计算产出）",
+            "tool": "python_sandbox",
+            "query": "1-2000 质数按每 200 区间计数",
+        },
+        {"label": "画布报告中的「各区间质数个数」图（来源数据）", "tool": "read_chart"},
+    ]
+    reg.ingest_payload_sources(restated, _CHART_EDIT_RUN, revision=True)
+    assert [s["label"] for s in reg.sources] == [_PRIOR_PYTHON_SOURCE["label"]]
+
+
+def test_revision_ingest_keeps_sources_the_run_fetched_or_named_by_artifact() -> None:
+    reg = TurnSourcesRegistry()
+    reg.seed([dict(_PRIOR_PYTHON_SOURCE)])
+    recompute_run = [*_CHART_EDIT_RUN, _Inv("c3", "python_exec", {"code": "print(1)"}, {"stdout": "1"})]
+    fetched = [
+        {"label": "Python 重新计算 1-3000 质数", "tool": "python_sandbox", "query": "1-3000 质数按 500 区间计数"},
+        {"label": "BI 门店营收", "tool": "bi_query", "artifact_id": "art_9"},
+        {"label": "用户在对话中提供的数值"},
+    ]
+    reg.ingest_payload_sources(fetched, recompute_run, revision=True)
+    assert [s["label"] for s in reg.sources] == [_PRIOR_PYTHON_SOURCE["label"], *(e["label"] for e in fetched)]

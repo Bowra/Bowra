@@ -232,7 +232,7 @@ async def prepare_deck_render_inputs(
                 "## New editable PPTX delivery\n"
                 "Use the native render_deck Tool. Its server-bound template is a style reference, not an in-place edit. "
                 "Do not read renderer source files or pass local paths to python_sandbox/skill_invoke. "
-                "Read-only inspection and existing-template edits retain their original workflows.\n"
+                "This Tool creates new slides and does not change an existing file.\n"
                 "For confirmed content, preserve the requested slide count, facts and order; do not load analytical methods or query BI. "
                 "Existing Canvas material is optional supporting input, not a reason to enlarge the task.\n"
                 "Call render_deck(sections=[{kind:'eyebrow',payload:{text:'subtitle'}},"
@@ -257,7 +257,7 @@ async def prepare_deck_render_inputs(
         )
         return (
             "## New presentation rendering from a style reference\n"
-            "This method creates new slides, not an in-place template update or a private document draft. "
+            "This method creates new slides and does not change an existing file. "
             "Use it only when a new presentation is requested; read-only inspection must not generate files.\n"
             "生成一份可下载 .pptx, 板式继承用户模板, 内容来自下面的 canvas truth。\n"
             "**可用输入** (作为 python_sandbox 的 inputs):\n"

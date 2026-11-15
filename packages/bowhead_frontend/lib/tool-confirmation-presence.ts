@@ -98,9 +98,43 @@ export function focusConfirmationCard(id: string): boolean {
   return true;
 }
 
+/**
+ * Where the notice docks. A visible chat column offers a slot right above its composer so the
+ * notice never covers Send or Stop (116 dogfood 2026-11-15: the bottom-right notice sat on the
+ * composer's Stop button). The latest registered slot wins; without one (home, settings, a
+ * maximized Results pane) the notice floats at the bottom right.
+ */
+const slots: HTMLElement[] = [];
+const slotListeners = new Set<() => void>();
+
+function publishSlot(): void {
+  for (const listener of slotListeners) listener();
+}
+
+export function registerConfirmationNoticeSlot(element: HTMLElement): () => void {
+  slots.push(element);
+  publishSlot();
+  return () => {
+    const index = slots.lastIndexOf(element);
+    if (index >= 0) slots.splice(index, 1);
+    publishSlot();
+  };
+}
+
+function subscribeSlot(listener: () => void): () => void {
+  slotListeners.add(listener);
+  return () => slotListeners.delete(listener);
+}
+
+export function useConfirmationNoticeSlot(): HTMLElement | null {
+  return useSyncExternalStore(subscribeSlot, () => slots[slots.length - 1] ?? null, () => null);
+}
+
 /** Test helper. */
 export function _resetConfirmationPresenceForTesting(): void {
   visible.clear();
   focusRequest = null;
+  slots.length = 0;
   publish();
+  publishSlot();
 }

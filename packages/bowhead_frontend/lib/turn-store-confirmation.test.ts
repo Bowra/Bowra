@@ -118,7 +118,6 @@ describe("confirmation_requested", () => {
       category: "unknown",
       choices: ["reject", "approve", "approve_session"],
       expiresAt: "2026-11-08T10:03:00Z",
-      timeoutSeconds: 180,
     });
     expect(confirmationOf()?.outcome).toBeUndefined();
     expect(getTurnSnapshot(T)?.steps).toHaveLength(1);

@@ -786,9 +786,11 @@
     "credits_badge": "Credits",
     "credits_low": "{pct}% left · {balance}",
     "credits_critical": "Almost out · {balance}",
+    "credits_exhausted": "Out of credits",
     "credits_button_aria": "Credits: {value}",
     "credits_plan": "{plan} plan",
     "credits_left": "<num>{balance}</num> left",
+    "credits_over": "<num>{amount}</num> over this period's allowance",
     "credits_usage_label": "Credits used this period",
     "credits_usage_value": "{used} of {quota} used ({pct}%)",
     "credits_used_of": "{used} of {quota} used",
@@ -796,7 +798,7 @@
     "credits_resets_on": "Resets on {date}",
     "credits_state_low": "Running low: {pct}% of this period's allowance is left.",
     "credits_state_critical": "Almost out: {pct}% of this period's allowance is left.",
-    "credits_state_empty": "No credits left.",
+    "credits_state_exhausted": "This period's credits are used up. New requests can start after the reset, or an administrator can add credits.",
     "credits_view_details": "View usage details",
     "navigation_drawer": "Navigation drawer",
     "close_drawer": "Close drawer",
@@ -7416,7 +7418,8 @@
         "turn_time_limit_s": "Turn time limit (seconds)",
         "step_limit": "Steps per task",
         "tool_call_limit": "Tool calls per turn",
-        "model_call_time_limit_s": "Model call limit (seconds)",
+        "model_call_limit": "Model calls per turn",
+        "model_call_time_limit_s": "Model call time limit (seconds)",
         "max_retries": "Model retries",
         "providers": "Connections and model declarations",
         "tiers": "Model assignments",
@@ -7491,6 +7494,9 @@
         },
         "model_call_time_limit_s": {
           "null": "Automatic"
+        },
+        "model_call_limit": {
+          "null": "Unlimited"
         }
       },
       "eyebrow": "Settings suggestion",
@@ -7604,6 +7610,11 @@
       "tool_calls_desc": "Total tool calls by all agents in one turn; every tool counts the same.",
       "tool_calls_hint": "{min} – {max} calls",
       "unit_calls": "calls",
+      "model_calls_title": "Model calls per turn",
+      "model_calls_desc": "Total model calls by Lead and all helpers in one turn. Helpers stop 2 calls early so Lead can write the answer.",
+      "model_calls_input_label": "Maximum model calls per turn",
+      "model_calls_hint": "{min} – {max} calls. At 1 or 2, helpers cannot run.",
+      "model_calls_reset": "Model calls per turn return to {calls}.",
       "footer": "A limit stops unfinished work and preserves known results. Continue is available only for supported saved runs.",
       "error_range": "{field} must be between {min} and {max}.",
       "invalid_count": "{count, plural, one {# value is out of range. Fix it to save.} other {# values are out of range. Fix them to save.}}",
@@ -7770,6 +7781,10 @@
     "bundle_file_count": "{count, plural, one {# file} other {# files}}",
     "bundle_more_indexed": "{count} more indexed",
     "file_pages": "{count, plural, one {# page} other {# pages}}",
+    "file_updated_version": "Updated to version {version}",
+    "file_this_version": "Download version {version}",
+    "file_this_version_failed": "Version {version} failed to download · Retry",
+    "file_this_version_pruned": "Version {version} was cleaned up; only the three newest versions are kept",
     "duplicate": "This file is already attached",
     "bundle_done": "Done"
   },
@@ -8120,7 +8135,10 @@
         "parse_failed": "Parsing failed"
       },
       "preview_source_missing": "The original file was not found during processing, so a preview is unavailable. If it has been restored, retry parsing.",
-      "preview_processing_failed": "Processing failed, so a preview is unavailable. Check the failure reason above."
+      "preview_processing_failed": "Processing failed, so a preview is unavailable. Check the failure reason above.",
+      "newer_version_title": "A newer version (version {version}) of this file exists",
+      "newer_version_body": "This entry still uses the version that was added. To use the newer version, add it from Files, then remove this entry.",
+      "newer_version_open_files": "Open Files"
     },
     "files_view": {
       "deep_link_failed": "Couldn't open this file. It may have been deleted, or you don't have access to its space.",
@@ -8157,7 +8175,8 @@
       "load_failed_title": "Couldn't load the file list",
       "search_failed_title": "Couldn't finish the deep search",
       "load_retry": "Retry",
-      "refresh_failed": "The list couldn't be refreshed; it shows the last loaded results. {error}"
+      "refresh_failed": "The list couldn't be refreshed; it shows the last loaded results. {error}",
+      "newer_version": "Newer version {version} available"
     },
     "errors": {
       "empty_file": "File is empty",
@@ -9261,7 +9280,9 @@
       "purge_failed": "The file could not be permanently deleted. Refresh Trash and try again.",
       "preview_failed": "A preview could not be generated. You can still download the original file or try again later.",
       "category_failed": "The file category could not be changed. Refresh the file details and try again.",
-      "usages_failed": "The file references could not be loaded. Try again later."
+      "usages_failed": "The file references could not be loaded. Try again later.",
+      "file_in_document": "A document draft still uses this file or one of its versions. Finish or remove that draft, then delete the file.",
+      "file_in_document_version": "A document draft still uses version {n} of this file. Finish or remove that draft, then delete the file."
     },
     "table": {
       "filename": "Filename",
@@ -9387,6 +9408,8 @@
     "kb_col": {
       "added": "Added · {status}",
       "added_plain": "Added",
+      "older_version": "Uses an older version",
+      "add_this_version": "Add version {version}",
       "not_added": "Not added",
       "view_in_kb": "View in knowledge base",
       "view_progress": "View progress",
@@ -9451,7 +9474,8 @@
       "restored": "Restored {name}",
       "restored_n": "Restored {count} files",
       "purged": "Permanently deleted {count} files",
-      "purged_partial": "Permanently deleted {count} · {blocked} kept (knowledge base)"
+      "purged_partial": "Permanently deleted {count} · {blocked} kept (knowledge base)",
+      "deleted_versions": "Deleted {name} and its {count} earlier versions"
     },
     "use_in_chat": "Use in a New Conversation",
     "upload_uploading": "Uploading…",
@@ -9464,7 +9488,9 @@
       "toolRun": "Agent run output"
     },
     "upload_failed": "Upload failed · {reason}",
-    "usage_split": "Assets {assets} · Run data {run}"
+    "usage_split": "Assets {assets} · Run data {run}",
+    "version_badge": "v{n}",
+    "version_title": "Version {n} of this file ({count} versions kept)"
   },
   "results_workspace": {
     "choose_result_title": "Choose a result",
@@ -9600,7 +9626,17 @@
     "unsupported_feedback_recorded": "This format request has been recorded",
     "download_current_version": "Download current version",
     "download_this_version": "Download this version",
-    "explorer_retry_locate": "Retry list positioning"
+    "explorer_retry_locate": "Retry list positioning",
+    "quick_version": "Version {number} of {count}",
+    "file_versions_title": "Versions",
+    "file_versions_scope": "Newest first · the three newest are kept",
+    "file_versions_close": "Close",
+    "file_versions_failed": "The versions could not be loaded.",
+    "file_versions_retry": "Retry",
+    "file_versions_empty": "No versions are available.",
+    "file_version_label": "Version {number}",
+    "file_version_current": "Current",
+    "file_version_download": "Download version {number}"
   },
   "data_files": {
     "empty_no_session": "Once you start chatting, generated data files appear here.",
@@ -9753,6 +9789,9 @@
   "html_artifact": {
     "open_raw": "Open raw HTML in new tab",
     "reload": "Reload HTML",
+    "updated_version": "Updated to version {version}",
+    "provenance_version": "data notes recorded for version {version}",
+    "version_too_large": "Version {version} of this file exceeds the Team's {size} HTML limit, so this section still shows the earlier version. Reduce the file or ask a Team administrator to raise the limit.",
     "loading": "Loading HTML artifact…",
     "computed_badge": "Static content unchecked",
     "injected_badge": "Generation data attached",
@@ -10479,6 +10518,8 @@
       "agent_step_limit_body": "The task reached its effective model-decision ceiling. Review retained results and narrow the remaining work or ask an administrator to adjust the limit.",
       "agent_tool_call_limit_title": "Tool-call limit reached",
       "agent_tool_call_limit_body": "This turn used its tool-call budget. Review completed results before starting the remaining work.",
+      "agent_model_call_limit_title": "Model-call limit reached",
+      "agent_model_call_limit_body": "This turn used the Team's model-call limit. Review completed results before starting the remaining work. A Team owner or admin can raise the limit in Team settings › Agents › Run limits.",
       "agent_stalled_title": "Task stopped after a local stall",
       "agent_stalled_body": "No active operation or local execution state advanced. Review retained results before starting the remaining work.",
       "step_usage": "Model decisions: {used} / {limit}."
@@ -10496,6 +10537,7 @@
         "step_limit": "reached the Team's step limit",
         "time_limit": "reached this turn's time limit",
         "tool_call_limit": "reached this turn's tool-call limit",
+        "model_call_limit": "reached this turn's model-call limit",
         "no_progress": "stopped after several steps produced no new results",
         "budget": "stopped because credit ran out; add credit first",
         "other": "reached a run limit"
@@ -12033,6 +12075,8 @@
     "band_handoff": "Handed off from {from}",
     "band_elapsed_sec": "{count}s",
     "band_paused": "Still waiting on the model",
+    "band_waiting_confirmation": "Waiting for your confirmation",
+    "band_waiting_requester": "Waiting for the requester to confirm",
     "band_model_retry_timeout": "Model reply timed out, retrying ({retry}/{max})",
     "band_model_retry_network": "Connection to the model service was interrupted, retrying ({retry}/{max})",
     "band_model_retry_unavailable": "Model service temporarily unavailable, retrying ({retry}/{max})",
@@ -12085,6 +12129,7 @@
       "iteration_limit_exceeded": "This agent used all the steps it has for one turn before finishing, so it stopped. Reply \"continue\" to let it pick up from here, or split the task into smaller steps. The agent's owner or a team administrator can also raise its step limit in the agent settings.",
       "tool_failure_limit_exceeded": "This analysis agent stopped after repeated tool failures. Please try again later.",
       "tool_call_limit_exceeded": "This analysis agent stopped because this turn reached the Team's tool-call limit. Continue the task, or ask a Team admin to raise the limit.",
+      "model_call_limit_exceeded": "This analysis agent stopped because this turn reached the Team's model-call limit. Continue the task, or ask a Team admin to raise the limit.",
       "credit_exhausted": "This analysis agent stopped because the available credit ran out. Add credit, then continue the task."
     },
     "collab_errors": {
@@ -12105,6 +12150,7 @@
       "step_limit": "Partially completed: reached the effective model-step ceiling. Review the retained results before further work.",
       "time_limit": "Partially completed: reached this turn's time limit. The finished part is in the answer, and you can continue it.",
       "tool_call_limit": "Partially completed: this turn reached the Team's tool-call limit. The finished part is in the answer, and you can continue it.",
+      "model_call_limit": "Partially completed: this turn reached the Team's model-call limit. The finished part is in the answer, and you can continue it.",
       "no_progress": "Partially completed: stopped after several steps produced no new results. The finished part is in the answer, and you can continue it.",
       "budget": "Partially completed: the available credit ran out. Add credit, then continue it.",
       "other": "Partially completed. Review the retained results, outstanding work, and suggested next steps.",
@@ -13363,13 +13409,11 @@
     }
   },
   "emailSendConfirmation": {
-    "title": "Confirm email",
+    "attachment_newer_version": "a newer version {version} of this file exists",
     "warning": "Bowhead will send the email below through your team's email service. Sent email cannot be recalled, so check the recipient and body, especially any numbers.",
     "to": "To: {to}",
     "attachments": "Attachments",
     "subject": "Subject: {subject}",
-    "expires": "Decide before {time}. Otherwise the email will not be sent.",
-    "decisionError": "Your decision was not submitted, or this confirmation has expired. Check the conversation for the result.",
     "reject": "Don't send",
     "approve": "Send"
   },
@@ -13435,10 +13479,7 @@
     "noPrivateAgents": "No published Agent you own is available in this team yet.",
     "saveBinding": "Save Personal Tool Bindings",
     "removeBindings": "Remove All Personal Bindings",
-    "confirmTitle": "Confirm Personal Tool Call",
     "confirmWarning": "Confirming sends the complete arguments below to this external service. The action may modify or delete data and may not be reversible. Check both the information being sent and the intended action.",
-    "expires": "Decide before {time}. An expired call is skipped.",
-    "decisionError": "Your choice was not submitted, or this call is no longer available. Refresh the confirmation status and try again.",
     "reject": "Reject and Skip",
     "approveOnce": "Allow This Call",
     "approveSession": "Always Allow in This Session",
@@ -14202,6 +14243,7 @@
       "document_candidate_invalid": "The presentation failed its file-structure check. No files were published. Check the original template or ask in chat for a corrected draft.",
       "agent_step_limit": "Task step limit reached. The task reached its effective model-decision ceiling. Review retained results and narrow the remaining work or ask an administrator to adjust the limit.",
       "agent_tool_call_limit": "Tool-call limit reached. This turn used its tool-call budget. Review completed results before starting the remaining work.",
+      "agent_model_call_limit": "Model-call limit reached. This turn used the Team's model-call limit. Review completed results before starting the remaining work. A Team owner or admin can raise the limit in Team settings › Agents › Run limits.",
       "agent_stalled": "Task stopped after a local stall. No active operation or local execution state advanced. Review retained results before starting the remaining work.",
       "tool_arguments_invalid": "This step was rejected because its inputs do not match the required format or data fields. The agent must correct the inputs before trying again.",
       "tool_resource_unavailable": "The selected source is unavailable. Check access or select an available source before continuing.",
@@ -14934,7 +14976,6 @@
     "content_plugin_created": "Content Plugin created. Select it in the Agent editor; each update requires your review."
   },
   "shopifyContentConfirmation": {
-    "title": "Review Shopify content update",
     "notice": "Review the exact changes before applying them to your store. Coordinate with other editors before updating the same content.",
     "product": "Product",
     "page": "Page",
@@ -14942,8 +14983,6 @@
     "after": "After",
     "defaultValue": "Uses the Shopify default",
     "emptyValue": "Empty",
-    "expires": "Review expires at {time}",
-    "decisionError": "Could not record your decision. The update will not proceed without confirmation.",
     "reject": "Reject update",
     "approve": "Apply these changes",
     "fields": {
@@ -14955,13 +14994,9 @@
     }
   },
   "teamToolConfirmation": {
-    "title": "Confirm Team Tool Call",
-    "notice": "An Agent working on your request wants to call this Team tool. The call uses the account your Team connected, and the complete arguments below are sent to the external service.",
     "riskExternalWrite": "This tool is classified as changing data in the external service.",
     "riskDestructive": "This tool is classified as possibly deleting or overwriting data, and the action may not be reversible.",
     "riskUnknown": "Neither the service nor your Team has said what this tool does. Check the arguments before you allow it.",
-    "expires": "Decide before {time}. An expired call is skipped.",
-    "decisionError": "Your choice was not submitted, or this call is no longer available. Check the conversation for the result.",
     "reject": "Reject and Skip",
     "approveOnce": "Allow This Call",
     "approveSession": "Always Allow in This Session",
@@ -15165,6 +15200,7 @@
     "d_27b8e6893601fe368074": "Typed sampling, output-token and parallel-tool controls.",
     "d_27dc921e4033ccff1b93": "Evaluation uses an explicit model or automatic selection.",
     "d_2cf8d0308a2b5339e860": "Custom Messages API path for an Anthropic-compatible connection. An absent path uses the adapter default.",
+    "d_31ae8f16122466d147cf": "Maximum model calls shared by Lead and all helpers in one turn; null removes the limit. The step limit separately bounds each agent run.",
     "d_323d611aa6d6e259e132": "Exact remote model identifier exposed by the provider.",
     "d_3423322a477c897adfce": "Model context preferences. Omission or reset enables automatic compaction with automatic token targets; explicit off and saved numeric preferences survive unrelated edits.",
     "d_37d82cf26c6b5a5d5176": "Optional assignments explicitly turned off. Connection changes and verification must not enable them. Source descriptions remain off by default even when absent here.",

@@ -13,6 +13,7 @@ import { beginSlackInstall, fetchSlackAdminConfig, type SlackAdminConfig, update
 import { withUiHooks } from "./ui-hook-classes";
 import rawStyles from "./integration-pages.module.css";
 import { CharIcon, CharIconText } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Append a global ui-integ-* hook to each class (new appearance in styles/ui-refresh-pages-settings.css).
 const styles = withUiHooks(rawStyles, "ui-integ");
@@ -62,7 +63,7 @@ export function SlackIntegrationDetail() {
           leave();
           return;
         }
-        setError(t("load_failed"));
+        setError(withHttpFailureReason(t("load_failed"), reason, { read: true }));
         setLoading(false);
       });
     return () => { cancelled = true; };
@@ -84,12 +85,12 @@ export function SlackIntegrationDetail() {
         ...(signingSecret ? { signing_secret: signingSecret } : {}),
       });
       setConfig(next); setClientSecret(""); setSigningSecret("");
-    } catch { setError(t("save_failed")); } finally { setSaving(false); }
+    } catch (cause) { setError(withHttpFailureReason(t("save_failed"), cause)); } finally { setSaving(false); }
   };
   const install = async () => {
     setInstalling(true); setError("");
     try { window.location.assign((await beginSlackInstall()).install_url); }
-    catch { setError(t("install_failed")); setInstalling(false); }
+    catch (cause) { setError(withHttpFailureReason(t("install_failed"), cause)); setInstalling(false); }
   };
 
   return <div className={styles.page}>

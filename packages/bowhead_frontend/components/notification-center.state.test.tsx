@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/api", () => api);
 vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => ({ push: api.push }) }));
 import { NotificationCenter } from "./notification-center";
+import { publishNotificationCount, registerAttentionRefresh } from "@/lib/attention-loop";
 
 function item(id: string, actionRequired = false): NotificationItemDTO {
   return { id, actionRequired, type: "test.update", teamId: "team", category: "test", priority: "p2", title: id,
@@ -25,6 +26,8 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+/** A failure line starts with the surface's own sentence; an uncoded status adds its reason after it. */
+function startsWith(sentence: string) { return (text: string) => text.startsWith(sentence); }
 function failure(status: number) { return new HttpStatusError("notification", new Response("{}", { status })); }
 const page = (items: NotificationItemDTO[], nextCursor: string | null = null) => ({ items, nextCursor });
 async function open() {
@@ -35,7 +38,10 @@ function mount() { return renderIntl(<NotificationCenter />, { locale: "en-US" }
 function rows() { return [...document.querySelectorAll(".notification-row")]; }
 
 beforeEach(() => {
+  // The page language (as Gateway writes <html lang>) also selects the failure reason's language.
+  document.documentElement.lang = "en-US";
   vi.resetAllMocks();
+  registerAttentionRefresh(null); // forget the count an earlier test published
   api.fetchNotificationCount.mockResolvedValue({ actionRequired: 0, updatesUnread: 0, totalBadge: 0 });
   api.fetchNotifications.mockResolvedValue(page([]));
   api.markNotificationRead.mockResolvedValue(undefined);
@@ -45,9 +51,9 @@ beforeEach(() => {
 
 describe("notification presentation from server facts", () => {
   it.each([[0, 0], [0, 3], [2, 0], [2, 3]])("shows the correct badge for %i actions and %i updates", async (actionRequired, updatesUnread) => {
-    api.fetchNotificationCount.mockResolvedValue({ actionRequired, updatesUnread, totalBadge: actionRequired });
     mount();
-    await waitFor(() => expect(api.fetchNotificationCount).toHaveBeenCalled());
+    // The attention loop polls the count and publishes it to the bell.
+    act(() => publishNotificationCount({ ok: true, counts: { actionRequired, updatesUnread, totalBadge: actionRequired } }));
     await waitFor(() => expect(!!document.querySelector(".notification-bell__dot")).toBe(actionRequired === 0 && updatesUnread > 0));
     expect(!!document.querySelector(".notification-bell__badge")).toBe(actionRequired > 0);
   });
@@ -65,7 +71,9 @@ describe("notification read and mutation failures", () => {
   it.each([503, 500, 502])("keeps unavailable list %i retryable", async (status) => {
     api.fetchNotifications.mockRejectedValueOnce(failure(status)).mockResolvedValue(page([item("Recovered")]));
     mount(); await open();
-    expect(await screen.findByText("Couldn't load notifications. Try again later.")).toBeVisible();
+    // The surface sentence stays first; the kind of server failure follows it.
+    expect(await screen.findByText(startsWith("Couldn't load notifications. Try again later."))).toBeVisible();
+    expect(document.body.textContent).toContain("Try again shortly");
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Recovered")).toBeVisible();
@@ -78,16 +86,15 @@ describe("notification read and mutation failures", () => {
     api.fetchNotificationCount.mockResolvedValue({ actionRequired: 2, updatesUnread: 0, totalBadge: 2 });
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("2 pending · 0 unread updates")).toBeVisible();
-    api.fetchNotificationCount.mockRejectedValue(failure(503));
-    fireEvent.focus(window);
-    expect(await screen.findByText("Couldn't refresh notification counts. Retry to check the current counts.")).toBeVisible();
+    act(() => publishNotificationCount({ ok: false, error: failure(503) }));
+    expect(await screen.findByText(startsWith("Couldn't refresh notification counts. Retry to check the current counts."))).toBeVisible();
     expect(screen.getByText("2 pending · 0 unread updates")).toBeVisible();
   });
   it.each([404, 500, 503])("keeps a failed row-read %i from navigating or hiding the center", async (status) => {
     api.fetchNotifications.mockResolvedValue(page([item("Read target")]));
     api.markNotificationRead.mockRejectedValue(failure(status));
     mount(); await open(); fireEvent.click(await screen.findByText("Read target"));
-    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : "Couldn't mark this notification as read. Try again later.");
+    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't mark this notification as read. Try again later."));
     expect(api.push).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     if (status !== 404) expect(rows()[0]).toHaveClass("unread");
@@ -97,7 +104,7 @@ describe("notification read and mutation failures", () => {
     api.archiveNotification.mockRejectedValue(failure(status));
     mount(); await open(); await screen.findByText("Archive target");
     fireEvent.click(screen.getByRole("button", { name: "Archive notification" }));
-    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : "Couldn't archive this notification. Try again later.");
+    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't archive this notification. Try again later."));
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     if (status !== 404) expect(rows()).toHaveLength(1);
   });
@@ -110,7 +117,7 @@ describe("notification read and mutation failures", () => {
     fireEvent.click(button); fireEvent.click(button);
     expect(api.markAllNotificationsRead).toHaveBeenCalledTimes(1);
     await act(async () => write.reject(failure(503)));
-    expect(await screen.findByText("Couldn't mark all notifications as read. Try again.")).toBeVisible();
+    expect(await screen.findByText(startsWith("Couldn't mark all notifications as read. Try again."))).toBeVisible();
     expect(rows()[0]).toHaveClass("unread");
     expect(button).not.toBeDisabled();
     fireEvent.click(button);
@@ -142,7 +149,7 @@ describe("notification asynchronous view ownership", () => {
   it("ignores stale count responses", async () => {
     const old = deferred<{ actionRequired: number; updatesUnread: number; totalBadge: number }>();
     api.fetchNotificationCount.mockReturnValueOnce(old.promise).mockResolvedValue({ actionRequired: 2, updatesUnread: 0, totalBadge: 2 });
-    mount(); await open();
+    mount(); await open(); fireEvent.click(screen.getByRole("tab", { name: "Updates" }));
     await screen.findByText("2 pending · 0 unread updates");
     await act(async () => old.resolve({ actionRequired: 9, updatesUnread: 0, totalBadge: 9 }));
     expect(screen.getByText("2 pending · 0 unread updates")).toBeVisible();
@@ -215,7 +222,8 @@ describe("notification replacement and pagination controls", () => {
   it("ignores an obsolete count failure after a successful newer read", async () => {
     const old = deferred<never>();
     api.fetchNotificationCount.mockReturnValueOnce(old.promise).mockResolvedValue({ actionRequired: 1, updatesUnread: 0, totalBadge: 1 });
-    mount(); await open(); await screen.findByText("1 pending · 0 unread updates");
+    mount(); await open(); fireEvent.click(screen.getByRole("tab", { name: "Updates" }));
+    await screen.findByText("1 pending · 0 unread updates");
     await act(async () => old.reject(failure(404)));
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
   });

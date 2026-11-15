@@ -289,8 +289,13 @@ export function DataTabFiles({
   const items = useProvidedItems ? artifactItems : fetched.items;
   const err = useProvidedItems ? artifactItemsError : fetched.error;
   const retryItems = useProvidedItems ? onArtifactItemsRetry : fetched.retry;
+  // The viewer shows the file its route names. An earlier selection must not
+  // stand in for a file that is missing from the list, or Download would
+  // fetch a different file than the one the user opened.
   const visibleSelected =
-    selected && items?.some((item) => item.id === selected.id)
+    selected
+    && items?.some((item) => item.id === selected.id)
+    && (!viewerOnly || !focusArtifactId || selected.id === focusArtifactId)
       ? selected
       : null;
   const reportedOpenFailureRef = useRef<string | null>(null);

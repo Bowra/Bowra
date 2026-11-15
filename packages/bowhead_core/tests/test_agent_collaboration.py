@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -12,6 +14,7 @@ import pytest
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_collaboration import CollaborationPolicy, CollaborationStore, CollaborationUnavailable, EvidenceReference, OperationIdentity
 from bowhead_core.agent_execution_binding import AgentExecutionBindingError, AgentExecutionBindingStore, ExactAgentExecutionBinding
+from bowhead_core.agent_run_limits import AgentRunLimits
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.session_store import SessionStore
@@ -373,6 +376,85 @@ async def test_admission_retry_does_not_reset_deadline_or_change_policy(collab):
         await collab.ask()
 
 
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, UTC).isoformat()
+
+
+async def _lead_question_card(collab, *, created_at: float, status: str = "pending", ordinary: bool = True) -> str:
+    # Real v4 cards are admitted only through Lead's capture triggers; the
+    # continuation lookup also recognizes the ordinary-Lead marker, which lets
+    # this storage test control the card's timestamps directly.
+    request_id = f"clar_{ordinary}_{status}_{int(created_at)}"
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute(
+            "INSERT INTO clarification_requests (request_id,turn_id,user_id,workspace_id,token,rationale,candidates_json,status,"
+            "created_at,kind,multi_select,session_id,resume_context_json) VALUES (?,?,?,?,'','','[]',?,?,'ambiguous_turn',0,?,?)",
+            (
+                request_id,
+                collab.worker.turn_id,
+                collab.worker.user_id,
+                collab.worker.workspace_id,
+                status,
+                _iso(created_at),
+                collab.worker.session_id,
+                json.dumps({"__schema_version": 2, **({"continuation": {"kind": "ordinary_lead"}} if ordinary else {})}),
+            ),
+        )
+        await db.commit()
+    return request_id
+
+
+async def _consume_answer(collab, request_id: str) -> None:
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute("UPDATE clarification_requests SET status='resolved',injected_at=? WHERE request_id=?", (_iso(collab.clock[0]), request_id))
+        await db.commit()
+
+
+async def _reserve_model_attempt(collab, step: str) -> None:
+    await collab.store.reserve_attempt(collab.worker, identity=collab.identity(collab.lead, step=step), kind="model")
+
+
+async def _reauthorize_retained_exchange(collab) -> dict:
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute("BEGIN")
+        return await collab.store.retained_operations_in_connection(db, collab.worker, execution_id=collab.lead, authorize=collab.authorize)
+
+
+async def test_waiting_for_the_users_answer_does_not_spend_the_task_deadline(collab):
+    # 116 t_5449b0d64780: an answer given 47 minutes after Lead asked could
+    # never continue, because the 900 s task deadline kept running while the
+    # Turn waited for its user.
+    start = collab.clock[0]
+    collab.clock[0] += 100
+    card = await _lead_question_card(collab, created_at=collab.clock[0])
+    collab.clock[0] += 3600
+    await _reauthorize_retained_exchange(collab)
+    await _consume_answer(collab, card)
+    await _reserve_model_attempt(collab, "after-answer")
+    collab.clock[0] += 799
+    await _reserve_model_attempt(collab, "last-second")
+    assert await collab.store.next_deadline(collab.worker, execution_id=collab.lead) == pytest.approx(start + 900 + 3600)
+    collab.clock[0] += 2
+    with pytest.raises(CollaborationUnavailable, match="task_unavailable"):
+        await _reserve_model_attempt(collab, "after-limit")
+
+
+@pytest.mark.parametrize("card", ["dismissed", "asked_after_deadline", "other_card"])
+async def test_only_an_open_or_consumed_lead_question_pauses_the_task_deadline(collab, card):
+    start = collab.clock[0]
+    if card == "dismissed":
+        await _lead_question_card(collab, created_at=start + 100, status="dismissed")
+    elif card == "asked_after_deadline":
+        await _lead_question_card(collab, created_at=start + 901)
+    else:
+        await _lead_question_card(collab, created_at=start + 100, ordinary=False)
+    collab.clock[0] = start + 4000
+    with pytest.raises(CollaborationUnavailable, match="task_unavailable"):
+        await _reauthorize_retained_exchange(collab)
+    with pytest.raises(CollaborationUnavailable, match="task_unavailable"):
+        await _reserve_model_attempt(collab, "late")
+
+
 async def test_followups_keep_the_original_family_deadline_and_limit(collab):
     original = await collab.ask(required=False)
     first = await collab.ask(identity=collab.identity(step="follow-one"), required=False, follow_up_to=original["operation_id"])
@@ -464,3 +546,50 @@ async def test_answer_identity_cannot_be_rewritten_or_reopened(collab):
             with pytest.raises(aiosqlite.IntegrityError, match="operation identity is immutable"):
                 await db.execute(f"UPDATE agent_collaboration_operation SET {assignment} WHERE id=?", (question["operation_id"],))
             await db.rollback()
+
+
+async def _attempt_counters(collab) -> tuple[str, int, int]:
+    async with (
+        open_shared_ctx(collab.path) as db,
+        db.execute(
+            "SELECT policy_json,model_attempts,tool_attempts FROM agent_collaboration_turn WHERE turn_id=?", (collab.worker.turn_id,)
+        ) as cursor,
+    ):
+        return tuple(await cursor.fetchone())
+
+
+@pytest.mark.parametrize("collab", [CollaborationPolicy.for_run_limits(AgentRunLimits(turn_time_limit_s=3600))], indirect=True)
+async def test_a_turn_under_team_run_limits_keeps_holds_as_receipts_without_counting(collab):
+    # 116 t_6b624c829346: a long analysis failed when a helper hit the fixed 100
+    # model attempts. New Turns leave call counting to the Team run limits, and
+    # the counter columns keep their original CHECK bounds untouched.
+    start = collab.clock[0]
+    for step in range(101):
+        await _reserve_model_attempt(collab, f"model-{step}")
+    for step in range(257):
+        await collab.store.reserve_attempt(collab.worker, identity=collab.identity(collab.recipient, step=f"tool-{step}"), kind="tool")
+    policy, model_attempts, tool_attempts = await _attempt_counters(collab)
+    assert (model_attempts, tool_attempts) == (0, 0)
+    assert json.loads(policy) == CollaborationPolicy(task_seconds=3600, max_model_attempts=None, max_tool_attempts=None).model_dump()
+    # Holds are not collaboration operations, so questions still fit afterwards.
+    await collab.ask()
+    # The task lasts the Team turn time, and Lead's question wait is still excluded.
+    collab.clock[0] += 1000
+    card = await _lead_question_card(collab, created_at=collab.clock[0])
+    collab.clock[0] += 7200
+    await _reauthorize_retained_exchange(collab)
+    await _consume_answer(collab, card)
+    assert await collab.store.next_deadline(collab.worker, execution_id=collab.lead) == pytest.approx(start + 3600 + 7200)
+    collab.clock[0] += 2599
+    await _reserve_model_attempt(collab, "last-second")
+    collab.clock[0] += 2
+    with pytest.raises(CollaborationUnavailable, match="task_unavailable"):
+        await _reserve_model_attempt(collab, "after-limit")
+
+
+async def test_a_turn_admitted_with_fixed_effort_limits_still_refuses_at_them(collab):
+    for step in range(100):
+        await _reserve_model_attempt(collab, f"model-{step}")
+    with pytest.raises(CollaborationUnavailable, match="collaboration_effort_exhausted"):
+        await _reserve_model_attempt(collab, "model-100")
+    assert (await _attempt_counters(collab))[1] == 100

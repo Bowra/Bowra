@@ -28,6 +28,7 @@ def test_owned_prompt_loads_the_selected_language_template(locale: str) -> None:
         if not name.startswith("lead_"):
             assert text in rendered
     assert rules["lead_scope"].strip() in build_lead_system_prompt("ws_lookup", facts=[], output_language=locale)
+    assert "required_source_urls=[]" in rules["lead_example"]
     for token in ("subagent_return", "exec_summary", "caveats[]", "columns", "{data}"):
         assert token in "\n".join(rules.values())
     if locale == "en-US":

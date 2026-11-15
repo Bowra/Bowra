@@ -18,7 +18,7 @@ from bowhead_router.invocation import PhysicalInvocationSpec, canonical_transpor
 from bowhead_router.types import LLMRequest, TokenUsage
 from bowhead_router.usage import current_usage_context
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, wait_for_writer
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.rate_card import ModelCreditRates, ModelTokenUsage, ModelUsageLine
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
@@ -132,77 +132,81 @@ class PhysicalUsageObserver:
         now = datetime.now(UTC)
         sources, _fragments, exact = source_fragments(request, body, family)
         privacy_scope = " AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=s.user_id)" if domain_layout_active(self.db_path) else ""
-        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
-            db.row_factory = aiosqlite.Row
-            await db.execute("BEGIN IMMEDIATE")
-            try:
-                async with db.execute(
-                    "SELECT t.execution_generation,s.id AS session_id FROM turns t JOIN sessions s ON s.id=t.session_id "
-                    "JOIN workspaces w ON w.id=s.workspace_id WHERE t.id=? AND s.user_id=? AND s.workspace_id=? AND w.team_id=? AND t.execution_generation=?"
-                    + privacy_scope,
-                    (ctx.turn_id, ctx.user_id, ctx.workspace_id, ctx.team_id, self.generation),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                if row is None:
-                    raise ValueError("physical_usage_scope_unavailable")
-                source_turn_id = getattr(spec.input_receipt, "turn_id", None) or ctx.turn_id
-                if self.plan_id is not None:
+
+        async def _write() -> None:
+            async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
+                db.row_factory = aiosqlite.Row
+                await db.execute("BEGIN IMMEDIATE")
+                try:
                     async with db.execute(
-                        "SELECT spec_json FROM plans WHERE id=? AND session_id=? AND user_id=? AND workspace_id=?",
-                        (self.plan_id, row["session_id"], ctx.user_id, ctx.workspace_id),
+                        "SELECT t.execution_generation,s.id AS session_id FROM turns t JOIN sessions s ON s.id=t.session_id "
+                        "JOIN workspaces w ON w.id=s.workspace_id WHERE t.id=? AND s.user_id=? AND s.workspace_id=? AND w.team_id=? AND t.execution_generation=?"
+                        + privacy_scope,
+                        (ctx.turn_id, ctx.user_id, ctx.workspace_id, ctx.team_id, self.generation),
                     ) as cursor:
-                        plan = await cursor.fetchone()
-                    if plan is not None and plan["spec_json"]:
-                        reference = json.loads(plan["spec_json"]).get("reference")
-                        if isinstance(reference, dict) and isinstance(reference.get("source_turn_id"), str):
-                            source_turn_id = reference["source_turn_id"]
-                receipt = {
-                    "contract": "physical-usage.v1",
-                    "source_turn_id": source_turn_id,
-                    "request_digest": spec.request_digest,
-                    "adapter_contract_key": spec.adapter_contract_key,
-                    "generation": row["execution_generation"],
-                    "context_id": getattr(spec.input_receipt, "context_id", None),
-                    "execution_id": getattr(spec.input_receipt, "execution_id", None) or (request.invocation_execution_id if request else None),
-                    "subagent_id": request.invocation_subagent_id if request else None,
-                    "sources": sources,
-                    "source_coverage": "exact" if exact else "partial",
-                }
-                from bowhead_core.rate_card import ModelCreditRates
+                        row = await cursor.fetchone()
+                    if row is None:
+                        raise ValueError("physical_usage_scope_unavailable")
+                    source_turn_id = getattr(spec.input_receipt, "turn_id", None) or ctx.turn_id
+                    if self.plan_id is not None:
+                        async with db.execute(
+                            "SELECT spec_json FROM plans WHERE id=? AND session_id=? AND user_id=? AND workspace_id=?",
+                            (self.plan_id, row["session_id"], ctx.user_id, ctx.workspace_id),
+                        ) as cursor:
+                            plan = await cursor.fetchone()
+                        if plan is not None and plan["spec_json"]:
+                            reference = json.loads(plan["spec_json"]).get("reference")
+                            if isinstance(reference, dict) and isinstance(reference.get("source_turn_id"), str):
+                                source_turn_id = reference["source_turn_id"]
+                    receipt = {
+                        "contract": "physical-usage.v1",
+                        "source_turn_id": source_turn_id,
+                        "request_digest": spec.request_digest,
+                        "adapter_contract_key": spec.adapter_contract_key,
+                        "generation": row["execution_generation"],
+                        "context_id": getattr(spec.input_receipt, "context_id", None),
+                        "execution_id": getattr(spec.input_receipt, "execution_id", None) or (request.invocation_execution_id if request else None),
+                        "subagent_id": request.invocation_subagent_id if request else None,
+                        "sources": sources,
+                        "source_coverage": "exact" if exact else "partial",
+                    }
+                    from bowhead_core.rate_card import ModelCreditRates
 
-                receipt["credit_rates"] = ModelCreditRates.from_config(
-                    dict(spec.credit_rates or self.model_credit_rates.get((spec.provider, spec.model), {}))
-                    if spec.credit_rates is not None or (spec.provider, spec.model) in self.model_credit_rates
-                    else None
-                ).as_json()
-                receipt["usage_family"] = spec.usage_family or family
-                await db.execute(
-                    "INSERT INTO llm_usage_events(id,team_id,user_id,workspace_id,turn_id,reason,agent_type,provider,model,streamed,created_at,"
-                    "receipt_json,receipt_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending')",
-                    (
-                        identity,
-                        ctx.team_id,
-                        ctx.user_id,
-                        ctx.workspace_id,
-                        ctx.turn_id,
-                        ctx.reason,
-                        request.invocation_agent_type if request else "unknown",
-                        spec.provider,
-                        spec.model,
-                        int(spec.mode == "stream"),
-                        now.isoformat(),
-                        _json(receipt),
-                    ),
-                )
-                from bowhead_core.documents.continuation import current_document_call, link_physical_receipt_in_tx
+                    receipt["credit_rates"] = ModelCreditRates.from_config(
+                        dict(spec.credit_rates or self.model_credit_rates.get((spec.provider, spec.model), {}))
+                        if spec.credit_rates is not None or (spec.provider, spec.model) in self.model_credit_rates
+                        else None
+                    ).as_json()
+                    receipt["usage_family"] = spec.usage_family or family
+                    await db.execute(
+                        "INSERT INTO llm_usage_events(id,team_id,user_id,workspace_id,turn_id,reason,agent_type,provider,model,streamed,created_at,"
+                        "receipt_json,receipt_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending')",
+                        (
+                            identity,
+                            ctx.team_id,
+                            ctx.user_id,
+                            ctx.workspace_id,
+                            ctx.turn_id,
+                            ctx.reason,
+                            request.invocation_agent_type if request else "unknown",
+                            spec.provider,
+                            spec.model,
+                            int(spec.mode == "stream"),
+                            now.isoformat(),
+                            _json(receipt),
+                        ),
+                    )
+                    from bowhead_core.documents.continuation import current_document_call, link_physical_receipt_in_tx
 
-                document_call = current_document_call()
-                if document_call is not None:
-                    await link_physical_receipt_in_tx(db, call=document_call, spec=spec, receipt_id=identity)
-                await db.commit()
-            except BaseException:
-                await db.rollback()
-                raise
+                    document_call = current_document_call()
+                    if document_call is not None:
+                        await link_physical_receipt_in_tx(db, call=document_call, spec=spec, receipt_id=identity)
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+
+        await wait_for_writer("physical_usage.begin", _write)
         return _UsageAttempt(self, identity)
 
 
@@ -220,20 +224,24 @@ class _UsageAttempt:
             usage.output_tokens if usage else 0,
             usage.cached_tokens if usage else 0,
         )
-        async with open_shared_ctx(domain_database_path(self.observer.db_path, "execution")) as db:
-            await db.execute(
-                "UPDATE llm_usage_events SET receipt_state=?,outcome_code=?,response_digest=?,tokens_input=?,tokens_output=?,tokens_cached=?,settled_at=? "
-                "WHERE id=? AND receipt_state='pending'",
-                (*expected, datetime.now(UTC).isoformat(), self.identity),
-            )
-            await db.commit()
-            async with db.execute(
-                "SELECT receipt_state,outcome_code,response_digest,tokens_input,tokens_output,tokens_cached FROM llm_usage_events WHERE id=?",
-                (self.identity,),
-            ) as cursor:
-                row = await cursor.fetchone()
-            if row is None or tuple(row) != expected:
-                raise ValueError("physical_usage_settlement_conflict")
+
+        async def _write() -> None:
+            async with open_shared_ctx(domain_database_path(self.observer.db_path, "execution")) as db:
+                await db.execute(
+                    "UPDATE llm_usage_events SET receipt_state=?,outcome_code=?,response_digest=?,tokens_input=?,tokens_output=?,tokens_cached=?,settled_at=? "
+                    "WHERE id=? AND receipt_state='pending'",
+                    (*expected, datetime.now(UTC).isoformat(), self.identity),
+                )
+                await db.commit()
+                async with db.execute(
+                    "SELECT receipt_state,outcome_code,response_digest,tokens_input,tokens_output,tokens_cached FROM llm_usage_events WHERE id=?",
+                    (self.identity,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None or tuple(row) != expected:
+                    raise ValueError("physical_usage_settlement_conflict")
+
+        await wait_for_writer("physical_usage.settle", _write)
         return True
 
     async def confirmed_not_applied(self, *, evidence_code: str, evidence_digest: str) -> bool:

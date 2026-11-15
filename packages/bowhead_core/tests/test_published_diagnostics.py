@@ -340,6 +340,12 @@ def test_chat_llm_fallback_failure_uses_invoke_terminal_reason() -> None:
             False,
         ),
         (
+            "run_limit_model_call_limit",
+            "peer_model_call_limit_exceeded",
+            "limit",
+            False,
+        ),
+        (
             "peer_total_failures=8; Authorization: Bearer raw-secret",
             "peer_tool_failure_limit_exceeded",
             "limit",
@@ -1119,7 +1125,7 @@ def test_terminal_llm_diagnostics_rescreen_provider_message_without_losing_http_
     assert diagnostics.republish_chat_llm_diagnostics(wire, reason_code="lead_internal_error") is None
 
 
-@pytest.mark.parametrize("reason", ["agent_step_limit", "agent_tool_call_limit", "agent_stalled"])
+@pytest.mark.parametrize("reason", ["agent_step_limit", "agent_tool_call_limit", "agent_model_call_limit", "agent_stalled"])
 def test_runtime_stop_preserves_bounded_usage_in_the_terminal_projection(reason):
     failure = diagnostics.build_chat_turn_failure(reason_code=reason, turn_id="t_runtime", step_usage={"used": 14, "limit": 14})
     assert failure.reason_code == reason

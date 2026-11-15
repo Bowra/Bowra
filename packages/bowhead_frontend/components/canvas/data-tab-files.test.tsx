@@ -222,6 +222,44 @@ describe("DataTabFiles runtime path prefix", () => {
     );
   });
 
+  it("does not keep showing the previous file when the routed file is missing from the list", async () => {
+    const first: ArtifactItem = {
+      id: "art_report_v1",
+      filename: "report.html",
+      mime: "text/plain",
+      size: 24,
+      source: "python_sandbox",
+      created_at: "2026-11-13T00:00:00Z",
+      preview_available: true,
+      kind: "deliverable",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/representations/details")) return detailsResponse(url.split("/").at(-3)!);
+        if (url.includes("/preview")) {
+          return new Response(JSON.stringify({
+            family: "text", representation: "preview", revision: "preview-1", mode: "text", text: "first version",
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const view = render(
+      <DataTabFiles sessionId="s_versions" focusArtifactId={first.id} viewerOnly artifactItems={[first]} />,
+    );
+    await waitFor(() => expect(screen.getByText("first version")).toBeInTheDocument());
+
+    view.rerender(
+      <DataTabFiles sessionId="s_versions" focusArtifactId="art_report_v2" viewerOnly artifactItems={[first]} />,
+    );
+
+    expect(screen.getByText("focused_missing")).toBeInTheDocument();
+    expect(screen.queryByText("first version")).not.toBeInTheDocument();
+    expect(document.querySelector(`a[href*="${first.id}"]`)).toBeNull();
+  });
+
   it("offers exact-list retry when a deep focused artifact is not in the catalog", () => {
     const retry = vi.fn();
     render(

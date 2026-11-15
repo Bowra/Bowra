@@ -1228,6 +1228,13 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
                             )
                         except Exception as _e:  # noqa: BLE001 - TTL failures must not break GC.
                             log.warning("artifact_gc.run_data_ttl_failed", error=str(_e))
+                    # File versions B4: the nightly repeat of after-write pruning (fails closed without the KB check).
+                    try:
+                        from bowhead_gateway.file_versions_pruning import prune_file_versions
+
+                        await prune_file_versions(app)
+                    except Exception as _e:  # noqa: BLE001 - pruning failures must not break GC.
+                        log.warning("artifact_gc.file_version_prune_failed", error=str(_e))
                     stats = await artifact_store.hard_delete_old_soft_deleted(days=30)
                     log.info("artifact_gc.done", **stats)
                 await asyncio.sleep(86400)  # 24h
@@ -1489,7 +1496,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     from bowhead_gateway._scheduled_runner import routine_result_email_reaches_owner, send_routine_alert_email
 
-    # FEATURE_ROUTINE_NOTIFY: a scheduled run may flag its result for the task owner (registered only with the switch on).
+    # A scheduled run may flag its result for the task owner (registered while the notification center is on).
     register_routine_notify_tool(
         tool_registry,
         service_provider=lambda: getattr(app.state, "notification_service", None),
@@ -2406,18 +2413,16 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         user_store=user_store,
         user_memory_store=memory_store,
     )
-    notification_enabled = os.environ.get("BOWHEAD_NOTIFICATION_CENTER", "1").strip() != "0"
     from bowhead_core.approval_gate import ApprovalGate
-    from bowhead_core.notification_service import NotificationService
+    from bowhead_core.notification_service import NotificationService, notification_center_enabled
 
-    from bowhead_gateway.notification_delivery_worker import notification_delivery_enabled
-
+    notification_enabled = notification_center_enabled()
     notification_service = NotificationService(
         store=notification_store,
         user_store=user_store,
         enabled=notification_enabled,
-        # FEATURE_NOTIFICATION_DELIVERY: escalations and configured emails become recorded deliveries.
-        delivery_enabled=notification_enabled and notification_delivery_enabled(),
+        # Escalations and configured emails become recorded deliveries.
+        delivery_enabled=notification_enabled,
     )
     approval_gate = ApprovalGate(
         approval_store=approval_store,
@@ -3394,7 +3399,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         log.info("notification_sweeper.enabled")
 
-    # FEATURE_NOTIFICATION_DELIVERY: send recorded notification emails (one worker per gateway).
+    # Send recorded notification emails (one worker per gateway).
     _notification_delivery_task: asyncio.Task | None = None
     if notification_service.delivery_enabled:
         from bowhead_gateway.notification_delivery_worker import env_interval_s as delivery_interval_s
@@ -4082,22 +4087,8 @@ def create_app() -> FastAPI:
             prefix="/api/v1/admin/email-config",
             tags=["admin"],
         )
-    # Initiators confirm each send_email before sending (tool and confirmation endpoints always registered).
-    from bowhead_gateway.routes import email_send_confirmations as email_send_confirmation_routes
-
-    app.include_router(
-        email_send_confirmation_routes.router,
-        prefix="/api/v1/email-send-confirmations",
-        tags=["chat"],
-    )
-    from bowhead_gateway.routes import shopify_content_confirmations as shopify_content_confirmation_routes
-
-    app.include_router(shopify_content_confirmation_routes.router, prefix="/api/v1/shopify-content-confirmations", tags=["chat"])
-    # Requesters confirm non-read team MCP calls when FEATURE_TEAM_TOOL_CONFIRMATION is on (the queue is empty otherwise).
-    from bowhead_gateway.routes import team_tool_confirmations as team_tool_confirmation_routes
-
-    app.include_router(team_tool_confirmation_routes.router, prefix="/api/v1/team-tool-confirmations", tags=["chat"])
-    # One owner-only view of every waiting tool call, used by the inline confirmation cards.
+    # One owner-only view of every tool call waiting for its requester (personal MCP, send_email,
+    # Shopify content update, Team MCP), read and decided by the confirmation cards in the conversation.
     from bowhead_gateway.routes import tool_confirmations as tool_confirmation_routes
 
     app.include_router(tool_confirmation_routes.router, prefix="/api/v1/tool-confirmations", tags=["chat"])

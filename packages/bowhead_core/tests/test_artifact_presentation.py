@@ -210,6 +210,9 @@ async def test_retained_file_reuse_is_durable_idempotent_and_snapshot_bounded(pr
     assert not old_page.entries
     assert [entry.artifact.id for entry in new_page.entries] == [artifact.id]
     assert [a.id for a in await ctx.artifact_store.list_for_session(session_id=ctx.session_id, user_id=ctx.user_id)] == [artifact.id]
+    # A file that only a presentation receipt ties to this Session is still a member of it one file at a time.
+    single = await ctx.artifact_store.list_for_session(session_id=ctx.session_id, user_id=ctx.user_id, artifact_id=artifact.id, limit=1)
+    assert [a.id for a in single] == [artifact.id]
     with sqlite3.connect(ctx.artifact_store.db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] == count_before
 
@@ -502,3 +505,39 @@ async def test_failed_handoff_recovers_only_native_authorized_files(presentation
     assert await retained_failure_artifacts([ToolInvocation("external", {}, result=dict(native))], ctx) == []
     ctx.user_id = "u_denied"
     assert await retained_failure_artifacts(invocations, ctx) == []
+
+
+async def test_presenting_an_older_version_states_the_newer_one(presentation):
+    """File versions R6: the result names the newer version; the presented file is not replaced."""
+    from importlib import import_module
+
+    import aiosqlite
+
+    ctx, _ = presentation
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    async with aiosqlite.connect(ctx.artifact_store.db_path) as db:
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+            await db.execute(statement)
+        await db.commit()
+    ctx.artifact_store._version_cols_present = None
+    fields = {
+        "content": b"<html></html>",
+        "filename": "report.html",
+        "mime": "text/html",
+        "source": "python_sandbox",
+        "created_by": ctx.user_id,
+        "workspace_id": ctx.workspace_id,
+        "session_id": ctx.session_id,
+        "kind": "deliverable",
+        "created_by_turn": ctx.turn_id,
+    }
+    first = await ctx.artifact_store.put_bytes(**fields)
+    second = await ctx.artifact_store.put_bytes(**{**fields, "content": b"<html>revised</html>"}, version_of_target=first.id)
+    assert second.version_no == 2
+    older = await present_artifacts({"artifacts": [{"artifact_id": first.id}]}, ctx)
+    assert older["output_artifacts"][0]["artifact_id"] == first.id
+    assert older["output_artifacts"][0]["newer_version"] == {"id": second.id, "version": 2}
+    latest = await present_artifacts({"artifacts": [{"artifact_id": second.id}]}, ctx)
+    assert "newer_version" not in latest["output_artifacts"][0]

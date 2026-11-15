@@ -21,7 +21,7 @@ import { makeAtomicSectionNode } from "../schema";
 import { useCanvasContext } from "../canvas-context";
 import { InlineEditableText } from "./inline-text";
 import { SectionChrome } from "./section-chrome";
-import { ChartSourceLine } from "@/components/canvas/sections/chart-source-line";
+import { ChartSourceLine, type DataSourceRef } from "@/components/canvas/sections/chart-source-line";
 import { DialogShell } from "@/components/ui/dialog";
 import { flattenCanvasDesign } from "@/lib/api";
 import { appPath } from "@/lib/base-path";
@@ -504,39 +504,43 @@ export const InsightCardExtension = makeAtomicSectionNode({
   nodeViewComponent: InsightCardWrapper,
 });
 
-// chart NodeView: P3.6 top source row + inline title/subtitle in edit mode + W12-4 ⚙ settings modal + ChartBlock
-function ChartEditNodeView({ node, updateAttributes }: NodeViewProps) {
-  const t = useTranslations("chart_settings");
-  const { isEditMode, readOnly, isStreaming } = useCanvasContext();
+/**
+ * The chart frame shared by a standalone chart section and a chart a narrative shows through a figure anchor:
+ * P3.6 inline title/subtitle in edit mode, W12-4 ⚙ settings, the type button and the source line at the bottom.
+ * The host decides where an edited spec is stored (`onSpecChange`); with `canEdit` false it renders for reading.
+ */
+export function EditableChartFrame({
+  spec, sectionId, rootRevision, dataSource, captionText, canEdit, onSpecChange,
+}: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const payload = (node.attrs.payload ?? {}) as { spec?: any; data_source?: any; rev?: number };
-  const sectionId = node.attrs.sectionId as string;
-  const spec = payload.spec;
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+  spec: any;
+  sectionId: string;
+  rootRevision?: number;
+  dataSource?: DataSourceRef | null;
+  captionText?: string | null;
+  canEdit: boolean;
+  onSpecChange: (next: ChartSpec) => void;
+}) {
+  const t = useTranslations("chart_settings");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editError, setEditError] = useState(false);
-  const canEdit = isEditMode && !readOnly && !isStreaming;
-  const evidencePlan = evidencePlanForViewer(spec?.presentation_plan);
-  const canEditCopy = canEdit && (!spec?.presentation_plan || (evidencePlan?.dataset.availability === "available" && evidencePlan.evidence_notes.every((note) => note.availability === "available")));
+  const evidencePlan = evidencePlanForViewer(spec.presentation_plan);
+  const canEditCopy = canEdit && (!spec.presentation_plan || (evidencePlan?.dataset.availability === "available" && evidencePlan.evidence_notes.every((note) => note.availability === "available")));
   // In edit mode, pass modified spec to ChartBlock to blank its built-in title (avoid duplicate inline editing above)
   //
   // review R6-1: memoization is required. Previously a fresh object was built inline on every render; this component
   // rerenders on setSettingsOpen and any useCanvasContext change, causing ChartBlock
   // effectiveSpec/tableSpec recomputation and ChartTable reset-on-spec-change effect,
   // so clicking ⚙ settings in edit mode collapsed a 98-row expanded table to 10 rows and lost sorting.
-  // ★ useMemo goes **before** if (!spec) return null; hooks after early returns caused
-  // two failures this sprint (batch 3 summary row, batch 2 reference lines); chart-block.test.tsx guards deterministically.
-  // eslint-disable-next-line react-hooks/rules-of-hooks, @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const specForChild: any = useMemo(
-    () => (spec && canEdit ? { ...spec, title: "", subtitle: undefined } : spec),
+    () => (canEdit ? { ...spec, title: "", subtitle: undefined } : spec),
     [spec, canEdit],
   );
-  if (!spec) return null;
   const onSpecPatch = (patch: EditableChartPatch, target: ChartEditTarget = { scope: "root" }): boolean => {
     if (!canEdit) return false;
     try {
-      const changed = applyChartEdit(spec, target, patch);
-      updateAttributes({ payload: { ...payload, spec: changed } });
+      onSpecChange(applyChartEdit(spec, target, patch));
       setEditError(false);
       return true;
     } catch {
@@ -545,7 +549,7 @@ function ChartEditNodeView({ node, updateAttributes }: NodeViewProps) {
     }
   };
   return (
-    <NodeViewWrapper contentEditable={false} data-section-id={sectionId} data-drag-handle>
+    <>
       {canEdit && (
         <div style={{ padding: "0 4px", marginBottom: 4, display: "flex", alignItems: "flex-start", gap: 8 }}>
           <div style={{ flex: 1 }}>
@@ -584,14 +588,15 @@ function ChartEditNodeView({ node, updateAttributes }: NodeViewProps) {
         key={`${sectionId}:${spec.data_artifact_id || ""}`}
         spec={specForChild}
         sectionId={sectionId}
-        rootRevision={typeof payload.rev === "number" ? payload.rev : undefined}
+        rootRevision={rootRevision}
+        captionText={captionText}
         onKindChange={canEdit ? (kind) => { onSpecPatch({ kind }); } : undefined}
         onViewKindChange={canEdit ? (viewId, kind) => { onSpecPatch({ kind }, { scope: "view", viewId }); } : undefined}
       />
       {/* P3.6 PRD R5 → report-refactor P1 (design D8): source line moved to block bottom;
           without source, render the none state ("source not recorded" is an actual state and must not be omitted). */}
       {/* Batch 2/c10: section payload Datarc workspace provenance (historical placeholder when absent). */}
-      <ChartSourceLine source={spec.source_meta ?? null} dataSource={payload.data_source ?? null}
+      <ChartSourceLine source={spec.source_meta ?? null} dataSource={dataSource ?? null}
         notes={evidencePlan?.evidence_notes}
         measureLabels={Object.fromEntries([spec, ...(spec.views?.map((view: { spec: ChartSpec }) => view.spec) ?? [])]
           .flatMap((chart: ChartSpec) => (chart.columns ?? []).map((column) => [column.key, column.header])))} />
@@ -602,6 +607,27 @@ function ChartEditNodeView({ node, updateAttributes }: NodeViewProps) {
           onCancel={() => setSettingsOpen(false)}
         />
       )}
+    </>
+  );
+}
+
+// chart NodeView: a standalone chart section stores its edits in the node's payload.
+function ChartEditNodeView({ node, updateAttributes }: NodeViewProps) {
+  const { isEditMode, readOnly, isStreaming } = useCanvasContext();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const payload = (node.attrs.payload ?? {}) as { spec?: any; data_source?: any; rev?: number };
+  const sectionId = node.attrs.sectionId as string;
+  if (!payload.spec) return null;
+  return (
+    <NodeViewWrapper contentEditable={false} data-section-id={sectionId} data-drag-handle>
+      <EditableChartFrame
+        spec={payload.spec}
+        sectionId={sectionId}
+        rootRevision={typeof payload.rev === "number" ? payload.rev : undefined}
+        dataSource={payload.data_source ?? null}
+        canEdit={isEditMode && !readOnly && !isStreaming}
+        onSpecChange={(next) => updateAttributes({ payload: { ...payload, spec: next } })}
+      />
     </NodeViewWrapper>
   );
 }

@@ -6,6 +6,7 @@ import {
   parseEffectiveChartStyleV2,
   type EffectiveChartStyleV2,
 } from "./chart/chart-style-export";
+import { normalizeFrameOptions, type ThemeFrameOptions } from "./frame-options";
 
 export type Theme = "light" | "dark";
 export type ThemeMode = Theme | "system";
@@ -134,6 +135,8 @@ export interface EffectiveChartStyle {
 
 export interface EffectiveThemeResponse {
   schemaVersion?: 2;
+  /** Team frame options; present only when the Team's theme sets one. */
+  frame?: ThemeFrameOptions;
   brand?: EffectiveBrand;
   effective: ThemeConfig & { colorScheme?: EffectiveColorScheme };
   locks: Partial<Record<"colorProfile" | "colorScheme", boolean>>;
@@ -421,6 +424,7 @@ export function parseEffectiveThemeResponse(
       "userConfig",
       "team",
       ...(raw.chartStyle === undefined ? [] : ["chartStyle"]),
+      ...(raw.frame === undefined ? [] : ["frame"]),
     ],
     "effective theme response",
   );
@@ -444,8 +448,10 @@ export function parseEffectiveThemeResponse(
   const colorScheme = parseEffectiveColorScheme(effectiveRaw.colorScheme);
   const brand = normalizeBrand(raw.brand);
   const team = normalizeV2Team(raw.team);
+  const frame = normalizeFrameOptions(raw.frame);
   return {
     schemaVersion: 2,
+    ...(Object.keys(frame).length > 0 ? { frame } : {}),
     brand,
     effective: { ...effective, colorScheme },
     locks,

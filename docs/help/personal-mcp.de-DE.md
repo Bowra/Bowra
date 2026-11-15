@@ -24,14 +24,14 @@ Wählen Sie die Tools unter **Meine Verbindungen → Tools für private Agents**
 
 ## Jeden Aufruf genehmigen
 
-Entfernte Aufrufe müssen standardmäßig bestätigt werden. Prüfen Sie den Agent, die Verbindung, das Tool, die Zusammenfassung des Vorgangs und alle Parameter genau, insbesondere Daten, die Bowra verlassen.
+Entfernte Aufrufe müssen standardmäßig bestätigt werden. Die Anfrage erscheint in der Unterhaltung unter dem wartenden Schritt. Prüfen Sie den Agent, die Verbindung, das Tool, die Zusammenfassung des Vorgangs und alle Parameter genau, insbesondere Daten, die Bowra verlassen.
 
 - **Diesen Aufruf zulassen** führt den Aufruf einmal mit den aktuellen Parametern aus.
 - **In dieser Sitzung immer zulassen** erlaubt weitere Aufrufe desselben Tools nur in dieser Sitzung. Die Freigabe endet, wenn die Sitzung beendet oder aktualisiert oder die Verbindung deaktiviert wird.
 - **Ablehnen und überspringen** führt den Aufruf nicht aus.
 - Aufrufe laufen ab, wenn innerhalb von drei Minuten keine Entscheidung getroffen wird.
 
-Wenn Ihre Bereitstellung die Bestätigung im Chat aktiviert, erscheint die Anfrage in der Unterhaltung unter dem wartenden Schritt statt in einem Dialog und bleibt danach als einzeiliger Vermerk Ihrer Entscheidung stehen. Sind Sie auf einer anderen Seite, führt ein Hinweis zur Unterhaltung, und der Titel des Browser-Tabs zeigt, wie viele Aktionen warten.
+Nach Ihrer Entscheidung bleibt die Anfrage als einzeiliger Vermerk Ihrer Entscheidung in der Unterhaltung stehen. Sind Sie auf einer anderen Seite, führt ein Hinweis zur Unterhaltung, und der Titel des Browser-Tabs zeigt, wie viele Aktionen warten.
 
 Externe Dienste können nicht rückgängig zu machende Änderungen vornehmen. Dass die Verbindung Ihnen gehört, erlaubt nicht, vertrauliche Teamdaten entgegen den Teamrichtlinien nach außen zu senden.
 

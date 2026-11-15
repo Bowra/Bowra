@@ -47,16 +47,48 @@ def test_field_names_uses_primary_name() -> None:
     assert field_names(items) == {1: "营业额"}
 
 
-def test_model_view_hides_raw_cut_props_and_task_uid() -> None:
+def test_model_view_shows_what_ran_instead_of_the_cut() -> None:
+    """116 on 1.7.43: the cut bound 女装 to 种类大类 while the executed query on 门店表 applied no filter.
+
+    The cut is Datarc's separate word-level parse, made before a model is chosen, so the model reads only what ran.
+    """
+    report = {"models": ["门店表"], "measures": ["月坪效"], "dimensions": ["每月"]}
     result = {
         "rows": [],
-        "_parse": {"tokens": [{"word": "销售额", "kind": "measure", "field": "营业额"}]},
-        "_debug_cut_props": [{"word": "销售额", "prop": "m1"}],
+        "_parse": {
+            "tokens": [{"word": "女装", "kind": "dimension_value", "field": "种类大类", "value": "女装"}],
+            "unknown_words": [],
+            "half_match_values": [],
+            "fields_not_in_report": {"dimensions": ["种类大类"]},
+        },
+        "query_explain": report,
+        "_preflight_hint": "note",
+        "_debug_cut_props": [{"word": "女装", "prop": "d55=5aWz6KOF"}],
         "_debug_task_uid": "task-1",
     }
     batch = {"results": [dict(result)]}
     for shown in (model_view.project_tool_result("bi_query", result), model_view.project_tool_result("bi_query", batch)["results"][0]):
         assert "_debug_cut_props" not in shown and "_debug_task_uid" not in shown
-        assert shown["_parse"] == result["_parse"]
-    # The stored result keeps the raw props for audit.
-    assert result["_debug_cut_props"] == [{"word": "销售额", "prop": "m1"}]
+        assert shown["_parse"] == {"unknown_words": [], "half_match_values": []}
+        assert list(shown)[:2] == ["_preflight_hint", "query_explain"]
+        assert shown["query_explain"] == {**report, "filters": []}
+    # The stored result keeps the cut and the verbatim report: the hint, the trimmer and the audit read them.
+    assert result["_parse"]["tokens"][0]["field"] == "种类大类"
+    assert result["query_explain"] == report
+    assert result["_debug_cut_props"] == [{"word": "女装", "prop": "d55=5aWz6KOF"}]
+
+
+@pytest.mark.parametrize(
+    ("report_key", "report"),
+    [
+        # A filter that took effect is shown as reported.
+        ("query_explain", {"models": ["门店品牌品类表"], "filters": ["种类大类为女装"], "measures": ["营业额"]}),
+        # Instances that return only the prose sentence keep it as reported, ahead of the rows.
+        ("query_explain_text", "生效模型为「门店表」；查询指标为「月坪效」。"),
+    ],
+)
+def test_model_view_leads_with_the_report_as_reported(report_key: str, report: object) -> None:
+    result = {"rows": [{"每月": "2026年1月"}], "query_text": "q", report_key: report}
+    shown = model_view.project_tool_result("bi_query", result)
+    assert next(iter(shown)) == report_key
+    assert shown[report_key] == report

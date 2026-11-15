@@ -26,6 +26,7 @@ import {
   type TeamRole,
   changeTeamRole,
 } from "@/lib/admin-members-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 
 const ROLE_OPTIONS: { value: TeamRole; labelKey: string; descKey: string }[] = [
@@ -122,7 +123,7 @@ export function PromoteModal({
           ? t("err_invalid_request")
           : t(ROLE_ERROR_KEY[e.code] ?? "err_generic")
         : t("err_generic");
-      setError(msg);
+      setError(withHttpFailureReason(msg, e));
     } finally {
       setSubmitting(false);
     }

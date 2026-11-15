@@ -51,7 +51,7 @@
    PLAN CARD
    ════════════════════════════════════════════════════════════════ */
 .pcard {
-  align-self: stretch; background: var(--c-surface); border: 1px solid var(--c-line);
+  align-self: stretch; background: var(--c-surface); border: var(--border-w, 1px) solid var(--c-line);
   border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-2); container-type: inline-size;
   font-family: var(--f-sans);
 }
@@ -61,7 +61,7 @@
 /* header band */
 .pc-head {
   display: flex; flex-direction: column; gap: 9px; padding: 14px 18px 13px;
-  border-bottom: 1px solid var(--c-line-2); background: var(--c-surface-2)
+  border-bottom: var(--rule-w, 1px) solid var(--c-line-2); background: var(--c-surface-2)
 }
 .pcard.is-proposed .pc-head { background: var(--c-accent-tint) }
 .pcard.is-running .pc-head { background: var(--c-surface-2) }
@@ -79,7 +79,7 @@
 .pc-sp { flex: 1 }
 .pc-modetag {
   display: inline-flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 0.625rem;
-  color: var(--c-ink-3); background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-pill);
+  color: var(--c-ink-3); background: var(--c-surface); border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--r-pill);
   padding: 2px 9px; flex: none
 }
 .pc-modetag b { color: var(--c-accent); font-weight: 600 }
@@ -138,29 +138,29 @@
 .pjoin b { color: var(--c-ink-3); font-weight: 600 }
 
 /* ─── step row ─── */
-.pstep { display: flex; gap: 11px; padding: 11px 4px; border-top: 1px solid var(--c-line-2); position: relative }
+.pstep { display: flex; gap: 11px; padding: 11px 4px; border-top: var(--rule-w, 1px) solid var(--c-line-2); position: relative }
 .prail .pstep:first-of-type, .pstep.is-final { border-top: none }
 .pstep.is-final { padding: 12px 6px }
 
 /* include checkbox (editable) */
 .pstep-chk {
-  flex: none; width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--c-ink-4);
+  flex: none; width: 18px; height: 18px; border-radius: var(--radius-md); border: 1.5px solid var(--c-ink-4);
   background: var(--c-surface); display: grid; place-items: center; margin-top: 5px; cursor: pointer;
-  transition: background-color .14s var(--ease), border-color .14s var(--ease); color: #fff
+  transition: background-color .14s var(--ease), border-color .14s var(--ease); color: var(--c-accent-ink)
 }
 .pstep-chk svg { opacity: 0; transform: scale(.5); transition: opacity .14s var(--ease), transform .14s var(--ease) }
 .pstep-chk.on { background: var(--c-accent); border-color: var(--c-accent) }
 .pstep-chk.on svg { opacity: 1; transform: scale(1) }
 
 /* role icon chip */
-.pstep-ic { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; margin-top: 1px }
+.pstep-ic { flex: none; width: 30px; height: 30px; border-radius: var(--radius-lg); display: grid; place-items: center; margin-top: 1px }
 
 .pstep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px }
 .pstep-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .pstep-name { font-size: 0.84375rem; font-weight: 600; color: var(--c-ink); letter-spacing: -.002em }
 .pstep-deliv {
   display: inline-flex; align-items: center; gap: 4px; font-family: var(--f-mono); font-size: 0.625rem;
-  color: var(--c-ink-3); background: var(--c-surface-2); border-radius: 5px; padding: 1px 7px; white-space: nowrap; flex: none
+  color: var(--c-ink-3); background: var(--c-surface-2); border-radius: var(--radius-md); padding: 1px 7px; white-space: nowrap; flex: none
 }
 .pstep-deliv .dk { color: var(--c-ink-4) }
 .pstep-goal { font-size: 0.78125rem; color: var(--c-ink-3); line-height: 1.5; text-wrap: pretty }
@@ -169,7 +169,7 @@
 /* small meta badges */
 .pbadge {
   display: inline-flex; align-items: center; gap: 4px; font-family: var(--f-mono); font-size: 0.625rem;
-  letter-spacing: .01em; border-radius: var(--r-pill); padding: 2px 8px; border: 1px solid var(--c-line);
+  letter-spacing: .01em; border-radius: var(--r-pill); padding: 2px 8px; border: var(--border-w, 1px) solid var(--c-line);
   color: var(--c-ink-4); background: var(--c-surface)
 }
 .pbadge svg { width: 11px; height: 11px; flex: none }
@@ -183,7 +183,7 @@
 /* step tail — controls + status */
 .pstep-tail { flex: none; display: flex; align-items: flex-start; gap: 4px; margin-top: 2px }
 .pstep-ctl {
-  width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent; background: transparent;
+  width: 26px; height: 26px; border-radius: var(--radius-md); border: var(--border-w, 1px) solid transparent; background: transparent;
   color: var(--c-ink-4); cursor: pointer; display: grid; place-items: center; transition: color .14s var(--ease), background-color .14s var(--ease), border-color .14s var(--ease)
 }
 .pstep-ctl:hover { border-color: var(--c-line); color: var(--c-ink-2); background: var(--c-surface) }
@@ -213,13 +213,13 @@
 .pstep.off .pstep-name { text-decoration: line-through; text-decoration-color: var(--c-ink-4) }
 .pstep.running-now { background: var(--c-accent-tint) }
 .pstep.blocked-now { background: var(--c-warn-tint) }
-.pstep.dragging { background: var(--c-accent-tint); box-shadow: var(--shadow-2); border-radius: 10px; border-top-color: transparent }
+.pstep.dragging { background: var(--c-accent-tint); box-shadow: var(--shadow-2); border-radius: var(--radius-xl); border-top-color: transparent }
 
 /* inline goal editor (editing state — M2) */
 .pgoal-edit {
-  border: 1.5px solid var(--c-accent); border-radius: 8px; background: var(--c-surface);
+  border: 1.5px solid var(--c-accent); border-radius: var(--radius-lg); background: var(--c-surface);
   padding: 7px 9px; font-family: var(--f-sans); font-size: 0.78125rem; color: var(--c-ink); line-height: 1.5;
-  box-shadow: 0 0 0 3px rgba(176, 74, 42, .14); position: relative
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-accent) 14%, transparent); position: relative
 }
 .pgoal-edit .car {
   display: inline-block; width: 1.5px; height: 1.05em; background: var(--c-accent);
@@ -231,52 +231,52 @@
 /* needs-corpus inline warning block (proposed) */
 .pwarn {
   display: flex; align-items: flex-start; gap: 9px; margin: 2px 0 4px 41px; padding: 9px 12px;
-  border-radius: 9px; background: var(--c-err-tint); border: 1px solid var(--c-err-soft)
+  border-radius: var(--radius-lg); background: var(--c-err-tint); border: var(--border-w, 1px) solid var(--c-err-soft)
 }
 .pwarn .wi { flex: none; color: var(--c-err); margin-top: 1px }
 .pwarn-tx { flex: 1; font-size: 0.75rem; color: var(--c-ink-2); line-height: 1.45 }
 .pwarn-tx b { color: var(--c-err); font-weight: 600 }
 .pwarn-act {
   flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 0.71875rem; font-weight: 600;
-  padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--c-err); background: var(--c-surface);
+  padding: 5px 11px; border-radius: var(--r-pill); border: var(--border-w, 1px) solid var(--c-err); background: var(--c-surface);
   color: var(--c-err); cursor: pointer; white-space: nowrap
 }
-.pwarn-act:hover { background: var(--c-err); color: #fff }
+.pwarn-act:hover { background: var(--c-err); color: var(--c-err-on) }
 
 /* AI-proposed new step (editing — M2) */
-.pstep.ghost { border: 1px dashed var(--c-accent); border-radius: 10px; margin: 6px 2px; background: var(--c-accent-tint); border-top: 1px dashed var(--c-accent) }
+.pstep.ghost { border: var(--border-w, 1px) dashed var(--c-accent); border-radius: var(--radius-xl); margin: 6px 2px; background: var(--c-accent-tint); border-top: var(--rule-w, 1px) dashed var(--c-accent) }
 .pstep.ghost .pstep-name { color: var(--c-accent-hover) }
 .ghost-tag {
   font-family: var(--f-mono); font-size: 0.5625rem; letter-spacing: .05em; color: var(--c-accent);
-  border: 1px solid var(--c-accent-soft); background: var(--c-surface); border-radius: var(--r-pill); padding: 1px 7px; font-weight: 600
+  border: var(--border-w, 1px) solid var(--c-accent-soft); background: var(--c-surface); border-radius: var(--r-pill); padding: 1px 7px; font-weight: 600
 }
 
 /* Batch 3: revise/replan preview panel (reuse pblock's inline visual language) */
-.previse { margin: 8px 0 8px 41px; padding: 10px 12px; border: 1px dashed var(--c-accent-soft); border-radius: 10px; background: var(--c-surface); display: flex; flex-direction: column; gap: 8px }
+.previse { margin: 8px 0 8px 41px; padding: 10px 12px; border: var(--border-w, 1px) dashed var(--c-accent-soft); border-radius: var(--radius-xl); background: var(--c-surface); display: flex; flex-direction: column; gap: 8px }
 .previse .prv-title { font-size: 0.75rem; display: flex; align-items: center; gap: 8px }
 .previse .prv-diff { color: var(--c-text-3); font-size: 0.6875rem }
 .previse .prv-row { display: flex; align-items: center; gap: 8px; font-size: 0.78125rem }
 .previse .prv-obj { flex: 1; min-width: 0 }
 .previse .prv-crit { margin: 0; padding-left: 18px; font-size: 0.71875rem; color: var(--c-text-2) }
-.previse .prv-warn { font-size: 0.71875rem; color: var(--c-warn); border: 1px solid var(--c-warn-soft, var(--c-line)); border-radius: 8px; padding: 5px 8px }
+.previse .prv-warn { font-size: 0.71875rem; color: var(--c-warn); border: var(--border-w, 1px) solid var(--c-warn-soft, var(--c-line)); border-radius: var(--radius-lg); padding: 5px 8px }
 
 /* completed-step output peek */
-.ppeek { margin: 0 0 8px 41px; border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; background: var(--c-surface) }
+.ppeek { margin: 0 0 8px 41px; border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-xl); overflow: hidden; background: var(--c-surface) }
 .ppeek-h {
   display: flex; align-items: center; gap: 7px; padding: 7px 11px; background: var(--c-surface-2);
-  border-bottom: 1px solid var(--c-line-2); font-size: 0.6875rem; color: var(--c-ink-3); font-weight: 600
+  border-bottom: var(--rule-w, 1px) solid var(--c-line-2); font-size: 0.6875rem; color: var(--c-ink-3); font-weight: 600
 }
 .ppeek-h .sp { flex: 1 }
 .ppeek-h .vlink { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-accent); display: inline-flex; align-items: center; gap: 3px }
 .ppeek-b { padding: 9px 11px }
 .ppeek table { width: 100%; border-collapse: collapse; font-family: var(--f-mono); font-size: 0.6875rem }
-.ppeek th { text-align: left; font-weight: 500; color: var(--c-ink-4); padding: 3px 8px 5px 0; border-bottom: 1px solid var(--c-line-2) }
-.ppeek td { padding: 4px 8px 4px 0; color: var(--c-ink-2); border-bottom: 1px solid var(--c-line-2) }
+.ppeek th { text-align: left; font-weight: 500; color: var(--c-ink-4); padding: 3px 8px 5px 0; border-bottom: var(--rule-w, 1px) solid var(--c-line-2) }
+.ppeek td { padding: 4px 8px 4px 0; color: var(--c-ink-2); border-bottom: var(--rule-w, 1px) solid var(--c-line-2) }
 .ppeek td.r, .ppeek th.r { text-align: right }
 .ppeek td.neg { color: var(--c-err) }
 
 /* ─── blocked detail block ─── */
-.pblock { margin: 0 2px 8px 41px; border: 1px solid var(--c-warn-soft); border-radius: 10px; background: var(--c-warn-tint); overflow: hidden }
+.pblock { margin: 0 2px 8px 41px; border: var(--border-w, 1px) solid var(--c-warn-soft); border-radius: var(--radius-xl); background: var(--c-warn-tint); overflow: hidden }
 .pblock-r { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px }
 .pblock-r .bi { flex: none; color: var(--c-warn); margin-top: 1px }
 .pblock-tx { flex: 1; font-size: 0.78125rem; color: var(--c-ink-2); line-height: 1.5 }
@@ -285,10 +285,10 @@
 .pblock-acts { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 13px 12px 13px }
 .bact {
   display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; padding: 7px 13px;
-  border-radius: var(--r-pill); cursor: pointer; border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
+  border-radius: var(--r-pill); cursor: pointer; border: var(--border-w, 1px) solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
 }
 .bact svg { width: 13px; height: 13px }
-.bact.primary { background: var(--c-accent); border-color: transparent; color: #fff }
+.bact.primary { background: var(--c-accent); border-color: transparent; color: var(--c-accent-ink) }
 .bact.primary:hover { background: var(--c-accent-hover) }
 .bact.warn { border-color: var(--c-warn); color: var(--c-warn) }
 .bact:hover:not(.primary) { border-color: var(--c-ink-3); color: var(--c-ink) }
@@ -298,9 +298,9 @@
 /* ─── NL modify input (M2) ─── */
 .pnl {
   margin: 8px 14px 4px; display: flex; align-items: center; gap: 9px; padding: 9px 11px;
-  border: 1px solid var(--c-line); border-radius: 11px; background: var(--c-surface)
+  border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-xl); background: var(--c-surface)
 }
-.pnl.focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(176, 74, 42, .13) }
+.pnl.focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-accent) 13%, transparent) }
 .pnl .pen { flex: none; color: var(--c-ink-4) }
 .pnl .pen.on { color: var(--c-accent) }
 .pnl-tx { flex: 1; font-size: 0.78125rem; color: var(--c-ink-4); min-width: 0 }
@@ -310,10 +310,10 @@
   vertical-align: -2px; margin-left: 1px; animation: pc-blink 1s steps(1) infinite
 }
 .pnl-send {
-  flex: none; width: 28px; height: 28px; border-radius: 8px; border: none; cursor: pointer;
+  flex: none; width: 28px; height: 28px; border-radius: var(--radius-lg); border: none; cursor: pointer;
   display: grid; place-items: center; background: var(--c-surface-2); color: var(--c-ink-4)
 }
-.pnl-send.on { background: var(--c-accent); color: #fff }
+.pnl-send.on { background: var(--c-accent); color: var(--c-accent-ink) }
 /* ④b (bug 0708): amend input feedback — grey the input + send while an amend is
    in flight, and spin the send glyph. `busy` (=amendBusy) spans the REST call
    that produces the new plan, so this covers exactly "until the new plan lands". */
@@ -327,7 +327,7 @@
 /* ─── card footer ─── */
 .pfoot {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 13px 18px 15px;
-  border-top: 1px solid var(--c-line-2); margin-top: 6px
+  border-top: var(--rule-w, 1px) solid var(--c-line-2); margin-top: 6px
 }
 .pfoot-meta { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-ink-4); letter-spacing: .03em }
 .pfoot-meta code { color: var(--c-ink-3) }
@@ -338,17 +338,17 @@
   border: none; background: none
 }
 .pbtn svg { width: 15px; height: 15px }
-.pbtn.ghost { border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-3) }
+.pbtn.ghost { border: var(--border-w, 1px) solid var(--c-line); background: var(--c-surface); color: var(--c-ink-3) }
 .pbtn.ghost:hover { border-color: var(--c-ink-3); color: var(--c-ink) }
-.pbtn.primary { border: none; background: var(--c-accent); color: #fff; box-shadow: var(--shadow-1) }
+.pbtn.primary { border: none; background: var(--c-accent); color: var(--c-accent-ink); box-shadow: var(--shadow-1) }
 .pbtn.primary:hover { background: var(--c-accent-hover) }
 .pbtn.pos { border: none; background: var(--c-pos); color: #fff }
 .pbtn:disabled { opacity: .55; cursor: default }
 
 /* ─── mode selector (segmented switch, lives in the composer toolbar) ─── */
-.pmode { display: inline-flex; background: var(--c-surface-2); border-radius: 9px; padding: 2px; gap: 2px; flex: none }
+.pmode { display: inline-flex; background: var(--c-surface-2); border-radius: var(--radius-lg); padding: 2px; gap: 2px; flex: none }
 .pmode button {
-  font-family: var(--f-sans); font-size: 0.71875rem; font-weight: 600; padding: 4px 11px; border-radius: 7px;
+  font-family: var(--f-sans); font-size: 0.71875rem; font-weight: 600; padding: 4px 11px; border-radius: var(--radius-md);
   border: none; background: transparent; color: var(--c-ink-4); cursor: pointer; display: inline-flex; align-items: center; gap: 5px
 }
 .pmode button svg { width: 12px; height: 12px }
@@ -358,43 +358,43 @@
 .plan-mode-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
 
 /* mobile completed report-open affordance */
-.m-report { margin-top: 10px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-surface); overflow: hidden; box-shadow: var(--shadow-1) }
+.m-report { margin-top: 10px; border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-xl); background: var(--c-surface); overflow: hidden; box-shadow: var(--shadow-1) }
 .m-report .rh { display: flex; align-items: center; gap: 9px; padding: 11px 13px }
-.m-report .ric { width: 30px; height: 30px; border-radius: 8px; background: var(--c-accent-tint); color: var(--c-accent); display: grid; place-items: center; flex: none }
+.m-report .ric { width: 30px; height: 30px; border-radius: var(--radius-lg); background: var(--c-accent-tint); color: var(--c-accent); display: grid; place-items: center; flex: none }
 .m-report .rt { flex: 1; min-width: 0 }
 .m-report .rt .t { font-size: 0.8125rem; font-weight: 600; color: var(--c-ink); line-height: 1.3 }
 .m-report .rt .s { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-ink-4); margin-top: 2px }
 .m-report .open {
   flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 0.71875rem; font-weight: 600;
-  color: var(--c-accent); background: var(--c-accent-tint); border: 1px solid var(--c-accent-soft);
+  color: var(--c-accent); background: var(--c-accent-tint); border: var(--border-w, 1px) solid var(--c-accent-soft);
   border-radius: var(--r-pill); padding: 5px 11px
 }
 
 /* ─── A (editable) form-control resets + amend preview bar ─── */
 textarea.pgoal-edit { width: 100%; resize: vertical; min-height: 2.4em; outline: none; font-family: var(--f-sans) }
 .pstep-goal.editable { cursor: text }
-.pstep-goal.editable:hover { background: var(--c-surface-2); border-radius: 5px }
+.pstep-goal.editable:hover { background: var(--c-surface-2); border-radius: var(--radius-md) }
 input.pnl-tx { border: none; background: transparent; outline: none; font-family: var(--f-sans); padding: 0 }
 .pstep[draggable="true"] { cursor: default }
 .pstep.dragover { box-shadow: inset 0 2px 0 var(--c-accent) }
 .pamend {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 14px 0; padding: 9px 12px;
-  border-radius: 10px; background: var(--c-accent-tint); border: 1px solid var(--c-accent-soft)
+  border-radius: var(--radius-xl); background: var(--c-accent-tint); border: var(--border-w, 1px) solid var(--c-accent-soft)
 }
 .pamend .pa-tx { flex: 1; font-size: 0.75rem; color: var(--c-ink-2); min-width: 120px }
 .pamend .pa-tx b { color: var(--c-accent-hover); font-weight: 600 }
 .pamend .pa-btn {
   font-family: var(--f-sans); font-size: 0.75rem; font-weight: 600; padding: 6px 13px; border-radius: var(--r-1);
-  cursor: pointer; white-space: nowrap; border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
+  cursor: pointer; white-space: nowrap; border: var(--border-w, 1px) solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
 }
-.pamend .pa-btn.confirm { border: none; background: var(--c-accent); color: #fff }
+.pamend .pa-btn.confirm { border: none; background: var(--c-accent); color: var(--c-accent-ink) }
 
 /* ════════════════════════════════════════════════════════════════
    narrow-card adaptation (board's `.frame.is-mobile X` rules, ported to
    container queries — keyed on the card's own inline width)
    ════════════════════════════════════════════════════════════════ */
 @container (max-width: 460px) {
-  .pcard { border-radius: 15px }
+  .pcard { border-radius: var(--radius-2xl) }
   .pc-head { padding: 13px 14px 12px }
   .pc-body { padding: 6px 10px 4px }
   .prail { margin-left: 2px; padding-left: 14px }
@@ -431,9 +431,9 @@ input.pnl-tx { border: none; background: transparent; outline: none; font-family
   gap: 3px;
   margin: 8px 0 10px;
   padding: 10px 13px;
-  border: 1px solid var(--c-warn);
+  border: var(--border-w, 1px) solid var(--c-warn);
   border-left-width: 3px;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background: var(--c-warn-soft);
   color: var(--c-ink);
   font-size: 0.8125rem;

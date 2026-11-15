@@ -59,7 +59,7 @@ def _file_count(text: str, ledger: DeliverableLedger) -> int:
 
 # Each claim also needs an artifact noun; verb alone insufficient ("分析已完成" is no file claim).
 #
-# ⚠ report **excluded** (116 dogfood 2026-08-05 false positive): export-only answer said
+# ⚠ report **excluded** (Regression check 2026-08-05 false positive): export-only answer said
 # "PDF **已生成**好了……完整覆盖了**画布**上的标题"; file completion verb plus incidental
 # "画布" became a false report-generated claim despite normal export sections=0.
 # Tests missed cross-kind contamination by supplying only isolated single-kind text.
@@ -111,6 +111,17 @@ _FMT_NOUN: dict[str, re.Pattern[str]] = {
     ".webm": re.compile(_lat("webm"), re.I),
     ".mov": re.compile(_lat("mov"), re.I),
 }
+
+# Regression check L4 (the original regression): "单文件 HTML 网页已生成（…内联 CSS 与 SVG、零外部依赖…）" says what the HTML
+# contains; it claims no SVG file, yet the check reported "SVG 未生成". A format named as embedded content
+# is not a delivered format, so it is removed before formats are read (erring toward no flag, like the rest).
+_EMBED_WORD = r"(?:内联|内嵌|嵌入|嵌在|inline|inlined|embedded)"
+_EMBEDDABLE = r"(?<![A-Za-z])(?:svg|png|jpe?g|gif|webp|json|csv)(?![A-Za-z])"
+_EMBEDDED_FORMAT = re.compile(
+    rf"{_EMBED_WORD}[^，。,;；\n（）()]{{0,16}}?{_EMBEDDABLE}(?:\s*(?:与|和|及|、|/|&|,|and)\s*{_EMBEDDABLE})*"
+    rf"|{_EMBEDDABLE}[^，。,;；\n（）()]{{0,12}}?{_EMBED_WORD}",
+    re.I,
+)
 
 _FILE_COUNT = re.compile(r"(?P<count>\d+|[零〇一二两三四五六七八九十]+)\s*(?:个|份)\s*文件")
 _CLAIM_SEGMENT_SPLIT = re.compile(r"(?<=[。！？!?；;])|\n+")
@@ -300,7 +311,7 @@ def claimed_file_formats(text: str | None) -> frozenset[str]:
     """
     if not text:
         return frozenset()
-    segments = _file_claim_segments(text)
+    segments = [_EMBEDDED_FORMAT.sub(" ", segment) for segment in _file_claim_segments(text)]
     return frozenset(ext for ext, noun in _FMT_NOUN.items() if any(noun.search(segment) for segment in segments))
 
 

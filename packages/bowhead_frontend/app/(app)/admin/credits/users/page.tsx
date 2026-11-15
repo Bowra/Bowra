@@ -30,6 +30,7 @@ import type { CreditCapabilities, MeUser } from "@/lib/auth-api";
 import { useAuthRedirect } from "@/lib/auth/use-auth-redirect";
 import { useAppRouter } from "@/lib/use-app-router";
 import { CharIcon, CharIconText } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /**
  * Static-export friendly: replace dynamic route /admin/credits/users/[user_id] with
@@ -89,7 +90,7 @@ function CreditUserDrilldownInner() {
           if (!cancelled) setError(t("user_not_found"));
           return;
         }
-        if (!cancelled) setError(t(adminCreditsErrorKey(e)));
+        if (!cancelled) setError(withHttpFailureReason(t(adminCreditsErrorKey(e)), e, { read: true }));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

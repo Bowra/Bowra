@@ -8,7 +8,7 @@ import pytest
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.context_history import load_conversation_context
 from bowhead_core.context_store import ContextStoreError
-from bowhead_core.session_store import SessionStore
+from bowhead_core.session_store import SessionStore, completion_write_open
 from cryptography.fernet import Fernet
 from test_agent_collaboration import collab as collaboration_fixture
 from test_context_execution import owner, prepare
@@ -73,6 +73,137 @@ async def test_completed_turn_atomically_publishes_the_exact_compacted_native_vi
     assert any(message.role == "tool" and message.tool_call_id == "c1" for message in restored.messages)
 
 
+async def test_a_head_with_a_refused_source_falls_back_to_turn_summaries_and_is_marked_for_replacement(collab, context_case, monkeypatch):
+    from bowhead_core.chat_reference_storage import ReferenceCipher
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+    from bowhead_core import context_history
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+    collab.store.cipher = ReferenceCipher(key)
+    execution = owner(collab, execution_id=collab.lead)
+    await prepare(execution, context_case)
+    store = SessionStore(collab.path)
+    assert await store.mark_completed(**completion(collab, await execution.conversation_publication(context_case.request.messages)))
+    await store.finalize_turn(session_id=collab.worker.session_id, current_turn_id=collab.worker.turn_id, next_turn_id=None)
+    ctx = await next_context(collab)
+    published = await load_conversation_context(ctx)
+    assert published.generation_id and published.replaced_generation_id is None
+
+    async def refuse(ctx, source, **_):
+        # A file an earlier Turn read was deleted, changed or lost its authorization.
+        raise OrdinaryContinuationUnavailable(condition="retained_input")
+
+    monkeypatch.setattr(context_history, "validate_context_dependencies", refuse)
+    rebuilt = await load_conversation_context(ctx)
+    # The conversation continues from Turn summaries; nothing is inherited from the head.
+    assert rebuilt.generation_id is None and rebuilt.replaced_generation_id == published.generation_id
+    assert rebuilt.through_seq == published.through_seq
+    assert any(message.content == "Verified final answer." for message in rebuilt.messages)
+    assert not any(message.role == "tool" and message.tool_call_id == "c1" for message in rebuilt.messages)
+
+
+async def test_one_load_shares_verified_source_evidence_across_every_generation_of_the_chain(collab, context_case, monkeypatch):
+    from bowhead_core.chat_reference_storage import ReferenceCipher
+
+    from bowhead_core import context_history
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+    collab.store.cipher = ReferenceCipher(key)
+    execution = owner(collab, execution_id=collab.lead)
+    await prepare(execution, context_case)
+    store = SessionStore(collab.path)
+    assert await store.mark_completed(**completion(collab, await execution.conversation_publication(context_case.request.messages)))
+    await store.finalize_turn(session_id=collab.worker.session_id, current_turn_id=collab.worker.turn_id, next_turn_id=None)
+    ctx = await next_context(collab)
+    shared = []
+
+    async def record(ctx, source, *, validated_materials=None, **_):
+        shared.append(validated_materials)
+
+    monkeypatch.setattr(context_history, "validate_context_dependencies", record)
+    await load_conversation_context(ctx)
+    # Sources repeated by several generations are verified once per load.
+    assert len(shared) > 1 and shared[0] is not None and all(value is shared[0] for value in shared)
+    await load_conversation_context(ctx)
+    # The evidence is never carried into a later load.
+    assert shared[-1] is not shared[0]
+
+
+async def test_published_head_carries_every_earlier_dependency_and_references_only_its_manifest(collab, context_case, monkeypatch):
+    from bowhead_core.chat_reference_storage import ReferenceCipher
+    from bowhead_core.context_dependencies import ContextSourceObservations, ContextSourceValidator, capture_context_dependencies
+    from bowhead_core.context_execution import ExecutionContextView
+    from bowhead_core.context_store import _ancestry_rows
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+    from bowhead_core import ordinary_lead_material
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+    collab.store.cipher = ReferenceCipher(key)
+    readable = True
+    checked = []
+    record = {"kind": "sandbox", "skills": [], "artifacts": [], "tool": "python_exec"}
+
+    async def read(ctx, tools, *, contract, historical_skills=False):
+        if not readable:
+            raise OrdinaryContinuationUnavailable(condition="retained_input")
+        checked.extend(tools)
+
+    monkeypatch.setattr(ordinary_lead_material, "revalidate_tool_materials", read)
+    monkeypatch.setattr(ordinary_lead_material, "revalidate_material_authority_in_connection", AsyncMock())
+    source_ctx = SimpleNamespace(
+        turn_id=collab.worker.turn_id,
+        session_id=collab.worker.session_id,
+        session_store=SimpleNamespace(db_path=collab.path),
+        knowledge_scope=None,
+        knowledge_source_uses={},
+        knowledge_source_ancestors=(),
+        ordinary_lead_state=None,
+        context_source_observations=ContextSourceObservations(tool_materials={"call": record}),
+    )
+    execution = ExecutionContextView(
+        db_path=collab.path,
+        worker=collab.worker,
+        execution_id=collab.lead,
+        lane="ordinary",
+        cipher=collab.store.cipher,
+        validate_sources=ContextSourceValidator(source_ctx),
+        activity=AsyncMock(),
+        source_dependencies=lambda: capture_context_dependencies(source_ctx),
+    )
+    await prepare(execution, context_case)
+    # The material is recorded only by a generation written during the Turn;
+    # the Turn's final dependencies no longer mention it.
+    source_ctx.context_source_observations = None
+    publication = await execution.conversation_publication(context_case.request.messages)
+    assert publication.dependencies == []
+    store = SessionStore(collab.path)
+    assert await store.mark_completed(**completion(collab, publication))
+    await store.finalize_turn(session_id=collab.worker.session_id, current_turn_id=collab.worker.turn_id, next_turn_id=None)
+    async with open_shared_ctx(collab.path) as db:
+        async with db.execute("SELECT generation_id FROM model_context_conversation_heads WHERE session_id=?", (collab.worker.session_id,)) as cursor:
+            head = (await cursor.fetchone())[0]
+        chain = await _ancestry_rows(db, collab.worker.session_id, head)
+        async with db.execute("SELECT COUNT(*) FROM model_context_generations WHERE session_id=?", (collab.worker.session_id,)) as cursor:
+            stored = (await cursor.fetchone())[0]
+    # Only the published view and its manifest are reachable, however many
+    # generations the Turn wrote.
+    assert len(chain) == 2 and stored > 2
+    assert json.loads(chain[head]["source_refs_json"]) == [identity for identity in chain if identity != head]
+    ctx = await next_context(collab)
+    checked.clear()
+    restored = await load_conversation_context(ctx)
+    assert restored.generation_id == head and checked == [record]
+    # A source that only an unreachable generation recorded still refuses the head.
+    readable = False
+    rebuilt = await load_conversation_context(ctx)
+    assert rebuilt.generation_id is None and rebuilt.replaced_generation_id == head
+
+
 async def test_compaction_counts_request_supplement_without_publishing_it_as_history(collab, context_case, monkeypatch):
     from dataclasses import replace
 
@@ -115,6 +246,19 @@ async def test_compaction_counts_request_supplement_without_publishing_it_as_his
     assert outgoing.messages == [*canonical, note]
 
 
+async def test_completion_publishes_inside_a_write_the_lease_monitor_can_recognise(collab):
+    """The dispatch lease monitor must not take a long completion for a lost owner."""
+    seen = []
+
+    async def publication(_db, _final_answer):
+        seen.append(completion_write_open(collab.worker.turn_id))
+
+    assert not completion_write_open(collab.worker.turn_id)
+    assert await SessionStore(collab.path).mark_completed(**completion(collab, publication))
+    assert seen == [True]
+    assert not completion_write_open(collab.worker.turn_id)
+
+
 async def test_terminal_failure_rolls_back_conversation_head_and_keeps_previous_execution_view(collab, context_case, monkeypatch):
     execution = owner(collab, execution_id=collab.lead)
     await prepare(execution, context_case)
@@ -122,6 +266,7 @@ async def test_terminal_failure_rolls_back_conversation_head_and_keeps_previous_
     monkeypatch.setattr(store, "_rollup_session_usage", AsyncMock(side_effect=OSError("injected_terminal_failure")))
     with pytest.raises(OSError, match="injected_terminal_failure"):
         await store.mark_completed(**completion(collab, await execution.conversation_publication(context_case.request.messages)))
+    assert not completion_write_open(collab.worker.turn_id)
     async with open_shared_ctx(collab.path) as db:
         async with db.execute("SELECT COUNT(*) FROM model_context_conversation_heads") as cursor:
             assert (await cursor.fetchone())[0] == 0

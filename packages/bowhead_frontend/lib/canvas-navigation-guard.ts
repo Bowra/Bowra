@@ -5,6 +5,7 @@ import { requestConfirm } from "./confirm-dialog-store";
 import { staticTranslator } from "./locale-messages";
 import { toast } from "./use-toast";
 import { BEFORE_APP_NAVIGATION_EVENT, type AppNavigationDetail } from "./use-app-router";
+import { withHttpFailureReason } from "./user-facing-error";
 
 type CanvasNavigationGuard = {
   hasUnsaved: () => boolean;
@@ -106,7 +107,7 @@ export async function confirmCanvasNavigation(
       && participants.every((guard) => draftGuards.has(guard) && !guard.hasUnsaved?.())
       && [...draftGuards].every((guard) => participants.includes(guard));
   } catch (e) {
-    const detail = reportSaveFailureMessage(e);
+    const detail = withHttpFailureReason(reportSaveFailureMessage(e), e);
     toast({ kind: "error", text: t("save_failed", { detail }) });
     return false;
   }

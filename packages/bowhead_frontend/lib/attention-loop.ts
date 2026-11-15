@@ -2,9 +2,8 @@
  * Shared pieces of the client attention loop: polling cadence, the one browser-notification
  * permission offer, and the notification count the loop publishes to the bell.
  *
- * Without FEATURE_NOTIFICATION_REACH the turn-completion notifier and the bell keep their own
- * timers and only share the permission helpers. With it, `AttentionLoop` runs one timer for turn
- * completions, the notification count and urgent items, and the bell reads the count from here.
+ * `AttentionLoop` runs one timer for turn completions, the notification count and urgent items,
+ * and the bell reads the count from here.
  */
 
 import type { NotificationCountDTO } from "@/lib/api";
@@ -16,6 +15,16 @@ export const HIDDEN_POLL_MS = 60_000;
 export const OFFER_KEY = "bowhead.completion-notifications.offer";
 export const TURN_CHANNEL = "bowhead-turn-completions";
 export const NOTIFICATION_CHANNEL = "bowhead-notification-alerts";
+export const TURN_COMPLETIONS_URL = "/api/v1/sessions/turn-completions";
+
+/** A turn of one of this user's sessions that ended since the last check. */
+export interface TurnCompletion {
+  turn_id: string;
+  session_id: string;
+  title: string;
+  outcome: "completed" | "partial" | "failed" | "cancelled";
+  ended_at: string;
+}
 
 /** The session the user is looking at, when the chat page is in the foreground. */
 export function viewedSessionId(): string | null {

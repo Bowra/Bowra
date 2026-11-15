@@ -41,6 +41,7 @@ import { quotedToolNames } from "./agent-eval-point-verdicts";
 import { gateReasonKey, listedToolNames } from "./agent-version-validation";
 import { TOOL_NOT_RUN_CODE, TOOL_NOT_RUN_FAILURE_CODES, attemptFailureReason, attemptReasonDetail, modelRoleLabel, storedAttemptFailure } from "@/lib/agent-eval-attempt-failure";
 import { AgentEvalConversationPicker } from "./agent-eval-conversation-picker";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // The server accepts up to 200 cases per suite revision.
 const MAX_SUITE_CASES = 200;
@@ -200,7 +201,7 @@ function AgentEvalPanelContent({
         setAvailable(false);
         return;
       }
-      setError({ message: t("eval_load_failed"), cause, retry: () => void load() });
+      setError({ message: withHttpFailureReason(t("eval_load_failed"), cause, { read: true }), cause, retry: () => void load() });
     }
   }, [agentId, t]);
 
@@ -255,7 +256,7 @@ function AgentEvalPanelContent({
           runs: [run, ...current.runs.filter((item) => item.run_id !== run.run_id)],
         } : current);
         if (run.status !== "queued" && run.status !== "running") void load();
-      }).catch((cause) => setError({ message: t("eval_refresh_failed"), cause }));
+      }).catch((cause) => setError({ message: withHttpFailureReason(t("eval_refresh_failed"), cause, { read: true }), cause }));
     }, 1800);
     return () => window.clearTimeout(timer);
   }, [activeRun, agentId, load, t]);

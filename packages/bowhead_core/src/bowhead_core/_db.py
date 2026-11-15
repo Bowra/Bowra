@@ -11,7 +11,7 @@ This module exposes:
   creates the `_phase0_probe` table used by `phase0_self_test`. Idempotent.
 - `open_shared_ctx(path)` — async context manager. All shared-db writers must
   route through this. Sets the full PRAGMA triple per-connection:
-  `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=ON`,
+  `busy_timeout` (``WRITER_BUSY_TIMEOUT_MS``, one minute), `synchronous=NORMAL`, `foreign_keys=ON`,
   `secure_delete=ON`. Drop-in for `async with diagnostic_connect(path) as db:`.
 - `phase0_self_test(path, store_names)` — boot-time probe that each store path
   can connect + write + delete. uvicorn exits non-zero on failure (per
@@ -146,7 +146,7 @@ async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
     """Drop-in replacement for `async with diagnostic_connect(path) as db:`.
 
     Applies per-connection PRAGMAs:
-    - `busy_timeout=5000` — wait up to 5s for retryable SQLite contention.
+    - `busy_timeout` = ``WRITER_BUSY_TIMEOUT_MS`` — wait up to one minute for the writer lock.
       Snapshot-upgrade and application authority conflicts can fail immediately.
     - `synchronous=NORMAL` — WAL-mode-friendly (FULL is per-write fsync).
     - `foreign_keys=ON` — artifact_store precedent; reserve for FK CASCADE.
@@ -200,6 +200,51 @@ async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[a
             if time.monotonic() >= deadline:
                 raise
             delay = min(delay * 2, 0.1)
+
+
+#: How long a write waits for a database's writer lock before it fails. With the earlier 5 s, one long
+#: transaction of another Turn (10 s and 12 s completion writes on 116, 2026-11-15) failed unrelated
+#: writes that had not started. A waiting write holds no lock, so the wait costs only its own caller's
+#: time; the maintainer set it to one minute. Read-write pool connections use it as their SQLite busy
+#: timeout, so every write through ``open_shared_ctx`` waits this long without a retry of its own.
+WRITER_WAIT_SECONDS = 60.0
+WRITER_BUSY_TIMEOUT_MS = int(WRITER_WAIT_SECONDS * 1000)
+
+
+def writer_busy(error: BaseException) -> bool:
+    """Whether a write found the writer lock held (any SQLITE_BUSY code)."""
+    code = getattr(error, "sqlite_errorcode", None)
+    return isinstance(error, sqlite3.OperationalError) and isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_BUSY
+
+
+async def wait_for_writer[T](label: str, attempt: Callable[[], Awaitable[T]]) -> T:
+    """Repeat a write that found the writer lock held, for up to ``WRITER_WAIT_SECONDS``.
+
+    ``attempt`` must write nothing when it fails busy: one transaction that begins with
+    ``BEGIN IMMEDIATE`` and rolls back on error, or one autocommit statement. It opens its own
+    connection each time, so no lock or snapshot is kept while waiting.
+    """
+    started = time.monotonic()
+    delay = 0.05
+    waiting = False
+    while True:
+        try:
+            result = await attempt()
+        except sqlite3.OperationalError as error:
+            waited = time.monotonic() - started
+            if not writer_busy(error) or waited >= WRITER_WAIT_SECONDS:
+                if waiting:
+                    _logger.warning("sqlite.writer_wait_failed label=%s waited_ms=%d", label, waited * 1000)
+                raise
+            if not waiting:
+                waiting = True
+                _logger.warning("sqlite.waits_for_writer label=%s", label)
+            await anyio.sleep(delay)
+            delay = min(delay * 2, 0.5)
+            continue
+        if waiting:
+            _logger.info("sqlite.writer_wait_ended label=%s waited_ms=%d", label, (time.monotonic() - started) * 1000)
+        return result
 
 
 # ── Connection pools ──────────────────────────────────────────────────────
@@ -322,7 +367,7 @@ class _TrackedConnection(DomainConnection):
 # connection starts with. ``query_only`` / ``foreign_keys=OFF`` / ``synchronous=FULL`` /
 # ``legacy_alter_table`` are all set by some caller in this codebase.
 _SHARED_BASELINE = (
-    "PRAGMA busy_timeout=5000;"
+    f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS};"
     "PRAGMA main.synchronous=NORMAL;"
     "PRAGMA foreign_keys=ON;"
     "PRAGMA main.secure_delete=ON;"
@@ -369,7 +414,7 @@ async def _open_pooled_shared(path: str) -> aiosqlite.Connection:
     _daemonize(conn)
     await conn
     try:
-        await conn.execute("PRAGMA busy_timeout=5000")
+        await conn.execute(f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS}")
         await conn.execute("PRAGMA main.synchronous=NORMAL")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.execute("PRAGMA main.secure_delete=ON")

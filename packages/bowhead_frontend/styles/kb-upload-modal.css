@@ -30,7 +30,7 @@
 .kb-upload .md-bd { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .kb-upload .md-ft {
   padding: 13px 20px;
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
   display: flex;
   gap: 10px;
   justify-content: flex-end;
@@ -61,7 +61,7 @@
   margin-left: auto;
   width: 74px;
   height: 14px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--c-bg-3);
   flex: none;
 }
@@ -89,9 +89,9 @@
 .kb-upload .filecard.bad .st { color: var(--c-err); font-weight: 500; }
 
 .kb-upload .alert { padding: 11px 12px; font-size: 0.75rem; line-height: 1.6; }
-.kb-upload .alert.err { background: var(--c-err-soft); border: 1px solid var(--c-err-line); }
+.kb-upload .alert.err { background: var(--c-err-soft); border: var(--border-w, 1px) solid var(--c-err-line); }
 .kb-upload .alert.err b { color: var(--c-err); font-weight: 600; }
-.kb-upload .alert.info { border: 1px solid var(--c-line); }
+.kb-upload .alert.info { border: var(--border-w, 1px) solid var(--c-line); }
 
 .kb-upload .bar { height: 5px; border-radius: 999px; background: var(--c-bg-3); overflow: hidden; }
 .kb-upload .bar > span { display: block; height: 100%; background: var(--c-blue); border-radius: 999px; transition: width 0.4s ease; }
@@ -100,7 +100,7 @@
 /* Google Drive import: secondary entry under the drop zone and per-file results. */
 .kb-upload .kb-up-drive { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.75rem; color: var(--c-ink-3); }
 .kb-upload .kb-up-drive-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.kb-upload .kb-up-drive-results li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--c-line); border-radius: 8px; font-size: 0.8125rem; color: var(--c-ink-2); }
+.kb-upload .kb-up-drive-results li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-lg); font-size: 0.8125rem; color: var(--c-ink-2); }
 .kb-upload .kb-up-drive-results li.bad { border-color: var(--c-err-line); background: var(--c-err-soft); }
 .kb-upload .kb-up-drive-results li.bad .st { color: var(--c-err); }
 .kb-upload .kb-up-drive-results .nm { min-width: 0; overflow-wrap: anywhere; }

@@ -288,12 +288,12 @@ async def test_known_and_missing_usage_do_not_create_duplicate_statistics(case):
     assert recorder.stats["buffered"] == 0
 
 
-async def test_failed_receipt_does_not_poison_independent_calls_or_replay_the_request(case, monkeypatch):
+async def test_a_storage_error_at_settlement_keeps_the_answer_and_settles_the_receipt_later(case, monkeypatch):
+    import asyncio
     from contextlib import asynccontextmanager
 
-    from bowhead_router.invocation import InvocationOutcomeUnknownError
-
     from bowhead_core import physical_usage
+    from bowhead_router import invocation
 
     original = physical_usage.open_shared_ctx
     fail_settlement = True
@@ -318,18 +318,20 @@ async def test_failed_receipt_does_not_poison_independent_calls_or_replay_the_re
                 db.execute = execute
 
     monkeypatch.setattr(physical_usage, "open_shared_ctx", connection)
+    monkeypatch.setattr(invocation, "_LATE_SETTLEMENT_DELAYS", (0.0, 0.0))
     adapter = adapter_for("openai")
     obs = observer(case)
     try:
         with context(case), physical_observation_scope(obs), respx.mock() as mock:
             route = mock.post(url__regex=r"https://api\.example\.com/.*").mock(return_value=success("openai", "invoke"))
-            with pytest.raises(InvocationOutcomeUnknownError):
-                await call(router_for(adapter), request(), "invoke")
+            # The provider answered; the receipt could not be written. The answer is used and the request is not sent again.
+            await call(router_for(adapter), request(), "invoke")
             assert route.call_count == 1
+            await asyncio.gather(*invocation._LATE_SETTLEMENTS)
             await call(router_for(adapter), request(), "invoke")
             assert route.call_count == 2
     finally:
         await adapter.close()
     saved = rows(case)
-    assert [row["receipt_state"] for row in saved] == ["unknown", "completed"]
-    assert saved[0]["outcome_code"] == "durable_settlement_failed"
+    assert [row["receipt_state"] for row in saved] == ["completed", "completed"]
+    assert all(row["tokens_input"] for row in saved)

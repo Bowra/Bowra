@@ -30,6 +30,9 @@ class ConversationContext:
     through_seq: int
     messages: list[Message]
     incomplete_turns: int
+    # A published head this Turn replaces without inheriting, because a source
+    # it depends on is deleted, changed or no longer authorized.
+    replaced_generation_id: str | None = None
 
 
 def context_history_available(ctx, router) -> bool:
@@ -115,17 +118,23 @@ async def load_conversation_context(ctx) -> ConversationContext:
     store = ctx.session_store
     messages: list[Message] = []
     generation = None
+    replaced = None
     through = 0
     source_validator = (
         ContextSourceValidator(ctx) if callable(getattr(getattr(ctx, "kb_file_authorizer", None), "history_validation", None)) else None
     )
 
+    # Every generation of the chain is checked inside this one read. Exact
+    # material records and stored file bytes repeat across generations, so they
+    # are verified once per load; nothing here outlives the load.
+    validated_materials: set[str] = set()
+
     async def authorize(source):
         if source_validator is not None:
-            await source_validator.validate(source, read_bytes=True, connection=db)
+            await source_validator.validate(source, read_bytes=True, validated_materials=validated_materials, connection=db)
             return
         await validate_source_messages(ctx, source)
-        await validate_context_dependencies(ctx, source)
+        await validate_context_dependencies(ctx, source, validated_materials=validated_materials)
 
     async with open_pooled_read_ctx(store.db_path) as db:
         await db.execute("BEGIN")
@@ -143,17 +152,36 @@ async def load_conversation_context(ctx) -> ConversationContext:
             generation, through = head
             if through >= before:
                 raise ContextStoreError("context_history_cursor_changed")
-            graph = await read_context_graph_in_tx(
-                db,
-                worker=worker,
-                execution_id=None,
-                lane="ordinary",
-                generation_id=generation,
-                cipher=ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", "")),
-                validate_sources=authorize,
-                projection_only=True,
-            )
-            messages.extend(graph[generation].messages)
+            from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+            try:
+                graph = await read_context_graph_in_tx(
+                    db,
+                    worker=worker,
+                    execution_id=None,
+                    lane="ordinary",
+                    generation_id=generation,
+                    cipher=ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", "")),
+                    validate_sources=authorize,
+                    projection_only=True,
+                )
+            except OrdinaryContinuationUnavailable as exc:
+                # A source an earlier Turn used is deleted, changed or no longer
+                # authorized. Its content must not reach the model, but the
+                # conversation continues: rebuild history from Turn summaries and
+                # let this Turn's publication replace the head without inheriting it.
+                from bowhead_core.ordinary_lead_runtime import capture_failure_site
+
+                logging.getLogger(__name__).info(
+                    "context_history.head_unavailable session=%s turn=%s condition=%s failure_site=%s",
+                    worker.session_id,
+                    worker.turn_id,
+                    exc.condition,
+                    capture_failure_site(exc),
+                )
+                replaced, generation, through = generation, None, 0
+            else:
+                messages.extend(graph[generation].messages)
         await db.rollback()
     incomplete = sum(
         "[clarification_pending:" in message.content or any(marker in message.content for marker in INCOMPLETE_TURN_MARKERS.values())
@@ -199,4 +227,4 @@ async def load_conversation_context(ctx) -> ConversationContext:
         if byte_count > MAX_CONTEXT_BYTES:
             raise ContextStoreError("context_history_storage_limit")
         through = turns[-1].seq
-    return ConversationContext(generation, through, messages, incomplete)
+    return ConversationContext(generation, through, messages, incomplete, replaced)

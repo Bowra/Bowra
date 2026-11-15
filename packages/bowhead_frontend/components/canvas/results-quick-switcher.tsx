@@ -467,6 +467,9 @@ function itemContext(
       count: context.duplicate_count,
     }));
   }
+  if (item.lineage) {
+    pieces.push(t("quick_version", { number: item.lineage.number, count: item.lineage.count }));
+  }
   if (context.occurred_at) {
     const occurredAt = formatTime(context.occurred_at, locale, { seconds: true });
     if (occurredAt) pieces.push(occurredAt);

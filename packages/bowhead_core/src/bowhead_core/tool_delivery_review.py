@@ -25,6 +25,15 @@ _REQUIRED_GAP_GUIDANCE = (
     "Keep the original requested outcome as the requirement; never replace it with explaining why it is missing. "
     "Reporting that required work was not delivered is not delivery of that work. "
 )
+# Regression check N1 (docs/sprints/partial-delegation-review-2026-11-15): a helper that delivered most of the work
+# and stated a gap returns a partial spawn. It is evidence for what it delivered, never for its own gaps.
+_CITABLE_DELEGATION_GUIDANCE = (
+    "A failed_calls entry marked citable is a helper that delivered part of the work and listed what it did not complete: "
+    "cite it only for requirements it delivered, list each of its unfulfilled items as an unfulfilled requirement, and resolve "
+    "its issue as unfulfilled. "
+)
+_MAX_GAPS = 8
+_MAX_GAP_CHARS = 300
 _DELIVERY_REPLY_GUIDANCE = (
     "Describe the delivered results and any limitations that affect their use. State unmet requirements and needed user action when delivery is incomplete. "
     "Keep recovered, covered and optional failed attempts with no remaining impact in the internal execution record. "
@@ -43,7 +52,7 @@ _DELIVERY_SCOPE_GUIDANCE = (
     "positive-data requirements. Return that observation as normal chat delivery, not an error/bail envelope; do not fabricate report "
     "evidence. This proves the requested failure observation, never successful business delivery. Other fulfilled success requirements "
     "must cite exact IDs from review_context.successful_calls. A partial call is not positive evidence for its successful subset or proof "
-    "that dispatch failed. For mixed BI, verify the required retained value with an already granted artifact reader when the user permits "
+    "that dispatch failed, except a failed_calls entry marked citable (a partial helper delegation) for the requirements it delivered. For mixed BI, verify the required retained value with an already granted artifact reader when the user permits "
     'reading. If python_exec is granted, read the original BI _ref_artifact_id through inputs={"rows":{"artifact_id":"<original '
     "reference>\"}} and INPUTS['rows']['path']; print retained values without querying BI again or creating files. Cite that successful "
     "read's exact current-run call ID for the business requirement and resolution covered. Keep a merely optional refusal in that issue's "
@@ -72,6 +81,24 @@ def delivery_review_enabled() -> bool:
     return os.environ.get("FEATURE_TOOL_DELIVERY_REVIEW", "1") == "1"
 
 
+def is_revision_scope_question(inv: Any) -> bool:
+    """A native dispatch refused because the named report part needs the user's choice.
+
+    No helper ran. The refusal asks Lead to let the user choose, so an answer that asks
+    in prose is the expected ending, not undelivered work. Only the native spawn handler
+    produces ``subagent_spawn`` results, so the reason code cannot come from other Tools.
+    """
+    result = invocation_result(inv)
+    return (
+        getattr(inv, "tool_name", None) == "subagent_spawn"
+        and not getattr(inv, "nested", None)
+        and inv.error is None
+        and isinstance(result, dict)
+        and result.get("error_kind") == "invalid_args"
+        and result.get("reason_code") == "revise_scope_unresolved"
+    )
+
+
 def failed_calls(invocations: Sequence[Any]) -> dict[str, Any]:
     """Retain every failed attempt; a different same-name success proves no recovery."""
     return {
@@ -80,6 +107,7 @@ def failed_calls(invocations: Sequence[Any]) -> dict[str, Any]:
         if getattr(inv, "call_id", None)
         and classify_tool_outcome(invocation_result(inv), inv.error).state in {"failure", "partial"}
         and (inv.error is not None or not isinstance(invocation_result(inv), TerminalCorrectionRefusal))
+        and not is_revision_scope_question(inv)
     }
 
 
@@ -88,6 +116,53 @@ def requires_delivery_review(invocations: Sequence[Any]) -> bool:
     return bool(failed_calls(invocations)) or any(
         inv.tool_name == "subagent_spawn" and isinstance(invocation_result(inv), ReviewedDeliveryResult) for inv in invocations
     )
+
+
+def reviewed_gaps(review: Any) -> list[str]:
+    """The unfulfilled requirement texts of a review, one line each, deduplicated and bounded."""
+    requirements = review.get("requirements") if isinstance(review, dict) else None
+    gaps: dict[str, None] = {}
+    for item in requirements if isinstance(requirements, list) else []:
+        if isinstance(item, dict) and item.get("status") == "unfulfilled" and isinstance(item.get("requirement"), str):
+            text = " ".join(item["requirement"].split())[:_MAX_GAP_CHARS]
+            if text:
+                gaps[text] = None
+    return list(gaps)[:_MAX_GAPS]
+
+
+def is_citable_delegation(inv: Any) -> bool:
+    """A partial helper delegation whose own review was accepted (the spawn handler stamps ``partial_delivery``)."""
+    result = invocation_result(inv)
+    return (
+        getattr(inv, "tool_name", None) == "subagent_spawn"
+        and inv.error is None
+        and isinstance(result, dict)
+        and result.get("ok") is True
+        and isinstance(result.get("partial_delivery"), dict)
+        and classify_tool_outcome(result, inv.error).state == "partial"
+    )
+
+
+def delegation_gaps(inv: Any) -> list[str]:
+    gaps = invocation_result(inv)["partial_delivery"].get("unfulfilled")
+    return [gap for gap in gaps if isinstance(gap, str)][:_MAX_GAPS] if isinstance(gaps, list) else []
+
+
+def named_delivery_gaps(review: Any, invocations: Sequence[Any]) -> list[str]:
+    """Gaps an incomplete accepted review can name in place of the generic notice.
+
+    Only when every issue left unfulfilled is a citable delegation, or none is: an unfulfilled failed
+    call may have an unknown effect (a send that may have happened), which "not completed" would misstate.
+    """
+    if not isinstance(review, dict) or not isinstance(review.get("issues"), list):
+        return []
+    citable = {inv.call_id for inv in invocations if is_citable_delegation(inv)}
+    if any(
+        isinstance(issue, dict) and issue.get("resolution") == "unfulfilled" and str(issue.get("call_id")) not in citable
+        for issue in review["issues"]
+    ):
+        return []
+    return reviewed_gaps(review)
 
 
 def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
@@ -99,6 +174,7 @@ def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
             "tool": inv.tool_name,
             "state": classify_tool_outcome(invocation_result(inv), inv.error).state,
             "failure_code": classify_tool_outcome(invocation_result(inv), inv.error).code,
+            **({"citable": True, "unfulfilled": delegation_gaps(inv)} if is_citable_delegation(inv) else {}),
         }
         for inv in failed_calls(calls).values()
     ]
@@ -159,7 +235,9 @@ def review_guidance(
         + "[{requirement,status:fulfilled|unfulfilled,expected_outcome:success|failure,evidence_call_ids:[...]}] and issues "
         "[{call_id,resolution:recovered|covered|expected|unfulfilled,evidence_call_ids:[...],explanation}]. "
         "Use review_context.successful_calls for successful delivery evidence and review_context.failed_calls "
-        "for failed attempts or explicitly requested negative tests. Artifact reference numbers, artifact IDs "
+        "for failed attempts or explicitly requested negative tests. "
+        + (_CITABLE_DELEGATION_GUIDANCE if any(is_citable_delegation(inv) for inv in invocations) else "")
+        + "Artifact reference numbers, artifact IDs "
         "and section IDs are not call IDs. "
         "These call IDs are only for delivery_review, never artifact inputs. Coverage is your assessment, "
         "not an execution receipt. Native closeout corrections are not business failures or delivery evidence. "
@@ -170,6 +248,21 @@ def review_guidance(
     if include_call_context:
         guidance += "review_context (JSON data): " + json.dumps(_review_call_context(invocations), ensure_ascii=False)
     return guidance
+
+
+def repeated_review_guidance(review_tool: str | None) -> str:
+    """A later correction in a run that already carries ``review_guidance``.
+
+    The rules do not change between corrections, so repeating them only grows
+    the transcript. The submission shape stays in the Tool's own schema.
+    """
+    submission = (
+        f"call {review_tool} alone again with the corrected payload.delivery_review" if review_tool else "return the corrected delivery_review"
+    )
+    return (
+        f"Correct only the problems above and {submission}. The delivery-review rules given earlier in this run still apply. "
+        "Use the review_context of this result for current call IDs and the unfulfilled items of a citable entry. Do not repeat confirmed writes."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +288,8 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
         and not isinstance(invocation_result(inv), TerminalCorrectionRefusal)
         and inv.tool_name != LeadDeliveryReview.name
     }
+    delegations = {inv.call_id: inv for inv in invocations if is_citable_delegation(inv)}
+    cited_delegations: set[str] = set()
     requirements, issues = review.get("requirements"), review.get("issues")
     if not isinstance(requirements, list) or not requirements or not isinstance(issues, list):
         return DeliveryReview(False, False, ("requirements and issues must be nonempty review lists",))
@@ -206,12 +301,17 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
     invalid_evidence_fields: list[str] = []
     expected_failures: set[str] = set()
 
-    def evidence(item: dict[str, Any], *, field: str, failed_id: str | None = None) -> None:
+    def evidence(item: dict[str, Any], *, field: str, failed_id: str | None = None, delegated: bool = False) -> None:
         ids = item.get("evidence_call_ids")
-        if not isinstance(ids, list) or not ids or any(not isinstance(cid, str) or cid not in successes for cid in ids):
-            problems.append("fulfilled coverage requires actual successful evidence_call_ids from this run")
+        allowed = successes.keys() | (delegations.keys() if delegated else set())
+        if not isinstance(ids, list) or not ids or any(not isinstance(cid, str) or cid not in allowed for cid in ids):
+            problems.append(
+                "fulfilled coverage requires actual successful evidence_call_ids from this run"
+                + (" (a fulfilled requirement may also cite a failed_calls entry marked citable)" if delegations else "")
+            )
             invalid_evidence_fields.append(field)
             return
+        cited_delegations.update(cid for cid in ids if cid in delegations)
         if failed_id is not None and item.get("resolution") == "recovered":
             original = failures[failed_id]
             if not any(
@@ -251,7 +351,7 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
                 else:
                     expected_failures.update(ids)
             else:
-                evidence(item, field=f"requirements[{index}].evidence_call_ids")
+                evidence(item, field=f"requirements[{index}].evidence_call_ids", delegated=True)
         elif item.get("status") == "unfulfilled":
             complete = False
         else:
@@ -287,6 +387,12 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
             problems.append(f"{cid}: unknown resolution")
     if seen != set(failures):
         problems.append("every failed call must be accounted for")
+    resolutions = {item["call_id"]: item.get("resolution") for item in issues if isinstance(item, dict) and isinstance(item.get("call_id"), str)}
+    for cid in sorted(cited_delegations):
+        if resolutions.get(cid) != "unfulfilled":
+            problems.append(f"{cid}: a partial delegation supports only what its helper delivered; resolve its issue as unfulfilled")
+        if delegation_gaps(delegations[cid]) and not any(isinstance(item, dict) and item.get("status") == "unfulfilled" for item in requirements):
+            problems.append(f"{cid}: list each item of its unfulfilled as an unfulfilled requirement")
     return DeliveryReview(complete and not problems, not problems, tuple(dict.fromkeys(problems)), tuple(dict.fromkeys(invalid_evidence_fields)))
 
 
@@ -297,8 +403,13 @@ def review_terminal_payload(
     language: str = "en-US",
     evidence_problem: str | None = None,
     review_tool: str | None = None,
+    guidance_given: bool = False,
 ) -> dict[str, Any] | None:
-    """Return correction feedback, or annotate accepted partial delivery in place."""
+    """Return correction feedback, or annotate accepted partial delivery in place.
+
+    ``guidance_given`` means this run's transcript already carries the review
+    rules, so a further refusal states only its own problems and refers to them.
+    """
     if not delivery_review_enabled():
         return None
     if isinstance(payload.get("error"), dict) and payload["error"].get("kind") == "needs_user_input":
@@ -314,7 +425,13 @@ def review_terminal_payload(
             return DeliveryReviewRefusal(
                 ok=False,
                 error_kind=_REVIEW_ERROR,
-                error=" ".join(review.problems) + "\n" + review_guidance(invocations, include_call_context=False, review_tool=review_tool),
+                error=" ".join(review.problems)
+                + "\n"
+                + (
+                    repeated_review_guidance(review_tool)
+                    if guidance_given
+                    else review_guidance(invocations, include_call_context=False, review_tool=review_tool)
+                ),
                 review_context={**_review_call_context(invocations), "invalid_evidence_fields": list(review.invalid_evidence_fields)},
                 retryable=False,
             )
@@ -374,7 +491,7 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
             "evidence_call_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "For fulfilled success, copy exact IDs from review_context.successful_calls, never a partial receipt. For an explicitly requested negative test, cite its actual known failed ID with expected_outcome failure. Unfulfilled requirements may use an empty list.",
+                "description": "For fulfilled success, copy exact IDs from review_context.successful_calls, never a partial receipt except a failed_calls entry marked citable for what it delivered. For an explicitly requested negative test, cite its actual known failed ID with expected_outcome failure. Unfulfilled requirements may use an empty list.",
             },
         },
         "required": ["requirement", "status", "evidence_call_ids"],
@@ -488,6 +605,9 @@ class LeadDeliveryReview:
         self.reader_available = reader_available
         self.payload: dict[str, Any] | None = None
         self.call_ids: tuple[str, ...] = ()
+        # True once this run's transcript carries the review rules, from the
+        # Runner's closeout correction or from an earlier refusal of this Tool.
+        self.guidance_given = False
 
     @staticmethod
     def _business_ids(invocations: Sequence[Any]) -> tuple[str, ...]:
@@ -528,6 +648,7 @@ class LeadDeliveryReview:
 
     def tool_spec(self) -> ToolSpec:
         from bowhead_core.agents._lead_context import run_invocations
+        from bowhead_core.context_hygiene import history_hygiene_enabled
         from bowhead_core.effective_language import effective_output_language
         from bowhead_core.terminal_effect_contract import EffectClass, ToolEffectIdempotency, ToolEffectSpec
         from bowhead_core.tool_registry import ToolSchema, ToolSpec
@@ -566,8 +687,11 @@ class LeadDeliveryReview:
                 language=effective_output_language(bus=getattr(ctx, "parent_bus", None), language_context=getattr(ctx, "language_context", None)),
                 evidence_problem=await review_evidence_availability(payload["delivery_review"], invocations, ctx),
                 review_tool=self.name,
+                guidance_given=self.guidance_given and history_hygiene_enabled(),
             )
             if failure is not None:
+                if isinstance(failure, DeliveryReviewRefusal):
+                    self.guidance_given = True
                 return failure
             self.payload = payload
             self.call_ids = self._business_ids(invocations)

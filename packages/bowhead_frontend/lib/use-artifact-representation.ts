@@ -30,6 +30,7 @@ export interface ArtifactRepresentation extends PreviewLike {
     source: string;
     created_at: string;
     kind?: string;
+    producer_kind?: string | null;
   };
 }
 

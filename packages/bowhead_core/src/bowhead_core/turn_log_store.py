@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,13 +32,29 @@ from typing import Any
 from uuid import uuid4
 
 import aiosqlite
+import anyio
 
+from bowhead_core import _db
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
+
+#: How long an event write waits for the execution writer lock: the shared limit of every write.
+#: The dispatch heartbeat tolerates a busy writer for the same time (turn_service lease monitor).
+WRITER_WAIT_SECONDS = _db.WRITER_WAIT_SECONDS
+
+
+class _WriterBusy(Exception):
+    """An attempt found the writer lock held and wrote nothing."""
+
+
+def _writer_busy(error: BaseException) -> bool:
+    code = getattr(error, "sqlite_errorcode", None)
+    return isinstance(error, sqlite3.OperationalError) and isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_BUSY
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS turn_events (
@@ -171,8 +189,43 @@ class TurnLogStore:
     ) -> TurnEventRow | None:
         """追加一条事件；失败返 None（主流程不能因持久化 hang）.
 
-        用 per-instance lock 串行化并发写，避免 MAX(seq)+1 race → UNIQUE 冲突.
+        A writer lock held by another transaction is waited for up to
+        ``WRITER_WAIT_SECONDS``; nothing was written by an attempt that found it
+        busy, so the whole write repeats.
         """
+        started = time.monotonic()
+        delay = 0.05
+        waiting = False
+        while True:
+            try:
+                row = await self._record_once(turn_id=turn_id, event_type=event_type, payload=payload, occurred_at=occurred_at, event_id=event_id)
+            except _WriterBusy as busy:
+                waited = time.monotonic() - started
+                if waited >= WRITER_WAIT_SECONDS:
+                    logger.warning("turn_log.record_failed turn=%s type=%s err=%s waited_ms=%d", turn_id, event_type, busy, waited * 1000)
+                    return None
+                if not waiting:
+                    waiting = True
+                    logger.warning("turn_log.record_waits_for_writer turn=%s type=%s", turn_id, event_type)
+                await anyio.sleep(delay)
+                delay = min(delay * 2, 0.5)
+                continue
+            if waiting:
+                logger.info(
+                    "turn_log.record_writer_wait_ended turn=%s type=%s waited_ms=%d", turn_id, event_type, (time.monotonic() - started) * 1000
+                )
+            return row
+
+    async def _record_once(
+        self,
+        *,
+        turn_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        occurred_at: str | None,
+        event_id: str | None,
+    ) -> TurnEventRow | None:
+        """One write attempt. 用 per-instance lock 串行化并发写，避免 MAX(seq)+1 race → UNIQUE 冲突."""
         if self._write_lock is None:
             self._write_lock = asyncio.Lock()
         async with self._write_lock:
@@ -284,6 +337,8 @@ class TurnLogStore:
                         await db.execute("ROLLBACK")
                         raise
             except Exception as e:
+                if _writer_busy(e):
+                    raise _WriterBusy(str(e)) from e
                 logger.warning("turn_log.record_failed turn=%s type=%s err=%s", turn_id, event_type, e)
                 return None
 

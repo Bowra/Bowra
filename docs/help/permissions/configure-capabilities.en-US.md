@@ -44,6 +44,7 @@ Team owners and Team admins set limits for every agent in the Team, built-in and
 - **Single model call time**: defaults to **Follow turn time**, using the Agent's remaining time. Choose **At most** for a shorter ceiling of 30–36,000 seconds. It cannot extend the turn, and the model connection's own timeout still applies.
 - **Step limit per task**: how many steps one agent may take on one task. The Team default is **Unlimited**. When an effective deployment policy is displayed, the shorter finite Team/deployment ceiling applies to Lead and each helper separately. A step is one model decision; several tool calls in that decision do not count as several model steps. The displayed local stall interval protects waits with no active operation or progress; model and tool waits have their own timeouts.
 - **Tool calls per turn**: total tool calls by all agents in one turn. The default is 300; every tool counts the same.
+- **Model calls per turn**: total model calls by Lead and all helpers in one turn, including their coordination and the drafting of documents. The default is **At most 200**; you can choose **Unlimited** or 1–10,000. Helpers stop 2 calls before the limit so Lead can still write the answer from their results; at 1 or 2, helpers cannot run. This differs from **Step limit per task**, which bounds each agent separately.
 
 1. Open **Team settings › Agents** and choose the **Run limits** tab.
 2. Change the values you need. A value out of range shows the allowed range under the field, and Save stays unavailable.

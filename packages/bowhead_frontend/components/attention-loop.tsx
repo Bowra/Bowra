@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * One attention loop (FEATURE_NOTIFICATION_REACH): a single timer for everything that may need the
+ * One attention loop: a single timer for everything that may need the
  * user while they are elsewhere.
  *
- * Each tick polls the turns that ended since the last check (the same announcements as
- * `TurnCompletionNotifier`), then the notification count, which it publishes to the bell. When
+ * Each tick polls the turns that ended since the last check, then the notification count, which it publishes to the bell. When
  * the count reports a newer urgent item, it fetches those items and announces each once: an
  * in-app toast with Open, plus a browser notification while the tab is in the background and
  * permission is granted. Nothing that arrived before the page loaded is announced; the badge
@@ -29,6 +28,8 @@ import {
   publishNotificationCount,
   registerAttentionRefresh,
   TURN_CHANNEL,
+  TURN_COMPLETIONS_URL,
+  type TurnCompletion,
   VISIBLE_POLL_MS,
   viewedSessionId,
   writeOffer,
@@ -37,7 +38,6 @@ import { localizeNotification } from "@/lib/notification-copy";
 import { openAnnouncedNotification } from "@/lib/notification-open";
 import { toast, type ToastKind } from "@/lib/use-toast";
 import { useAppRouter } from "@/lib/use-app-router";
-import { TURN_COMPLETIONS_URL, type TurnCompletion } from "@/components/turn-completion-notifier";
 
 const centerDisabled = () => process.env.NEXT_PUBLIC_BOWHEAD_NOTIFICATION_CENTER === "0";
 

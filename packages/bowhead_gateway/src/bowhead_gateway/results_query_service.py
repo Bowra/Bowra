@@ -16,7 +16,6 @@ from bowhead_core.artifact_store import ResultsArtifactEntry, ResultsArtifactSna
 from bowhead_core.results_read_model import (
     RESULTS_SORT_VERSION_V1,
     ProjectedResult,
-    artifact_search_rank,
     compare_sort_tuples,
     latest_occurred_at,
     normalize_results_query,
@@ -43,6 +42,7 @@ from bowhead_gateway.results_contracts import (
     ResultArtifactMetadataV1,
     ResultDisplayContextV1,
     ResultItemDTOV1,
+    ResultLineageV1,
     ResultsEffectiveCapabilityV1,
     ResultsFiltersV1,
     ResultsGroupCountsV1,
@@ -357,6 +357,7 @@ def _to_dto(item: ProjectedResult) -> ResultItemDTOV1:
         position=item.position,
         version=None,
         artifact_metadata=artifact_metadata,
+        lineage=ResultLineageV1(number=item.lineage[0], count=item.lineage[1]) if item.lineage else None,
     )
 
 
@@ -453,6 +454,21 @@ def _position_artifacts(
             report_only=report_only,
             relation_roles=report_relations.roles_for(entry.artifact.id),
         )
+        # File versions: the store's grouped key and sort tuple are authoritative (key = the file, route = the shown version).
+        number = entry.artifact.version_no or 1
+        lineage = (number, max(entry.lineage_count, number)) if number > 1 or entry.lineage_count > 1 else None
+        projected = replace(
+            projected,
+            key=str(entry.sort_tuple[-1]),
+            sort_tuple=entry.sort_tuple,
+            lineage=lineage,
+            # The owner can list and download the file's versions; a shared report shows only its version.
+            capabilities=(
+                (*projected.capabilities, "view_history")
+                if lineage and lineage[1] > 1 and not report_only and "view_history" not in projected.capabilities
+                else projected.capabilities
+            ),
+        )
         synthetic_before = sum(compare_sort_tuples(item.sort_tuple, projected.sort_tuple) < 0 for item in synthetics)
         out.append(replace(projected, position=entry.position + synthetic_before))
     return out
@@ -470,14 +486,6 @@ def _synthetics_after_boundary(
         for item in items
         if (compare_sort_tuples(item.sort_tuple, boundary) > 0 if direction == "next" else compare_sort_tuples(item.sort_tuple, boundary) < 0)
     ]
-
-
-def _artifact_within_snapshot(artifact: Any, snapshot: ResultsArtifactSnapshot) -> bool:
-    if snapshot.high_water_created_at is None:
-        return False
-    if artifact.created_at < snapshot.high_water_created_at:
-        return True
-    return artifact.created_at == snapshot.high_water_created_at and artifact.id <= snapshot.high_water_artifact_id
 
 
 async def _resolve_authorized_key(
@@ -501,30 +509,9 @@ async def _resolve_authorized_key(
         return synthetic
     if not key.startswith("artifact:"):
         return None
-    exact = await artifact_store.get_result_artifact_for_scope(
+    # File versions: any version's key anchors its file; the store applies every fence and filter in one query.
+    entry = await artifact_store.result_entry_for_artifact(
         artifact_id=key.removeprefix("artifact:"),
-        session_id=session_id,
-        user_id=user_id,
-        authorized_artifact_ids=authorized_artifact_ids,
-    )
-    if exact is None or not _artifact_within_snapshot(exact, snapshot):
-        return None
-    candidate = project_artifact_result(
-        exact,
-        query,
-        writable=writable,
-        report_only=report_only,
-        relation_roles=report_relations.roles_for(exact.id),
-    )
-    if artifact_search_rank(
-        exact,
-        query,
-        relation_roles=report_relations.roles_for(exact.id),
-    ) is None or not _matches_filters(candidate, filters):
-        return None
-    if filters.lens == "current_report" and exact.id not in report_relations.direct_ids:
-        return None
-    before_probe = await artifact_store.query_results_for_session(
         session_id=session_id,
         user_id=user_id,
         snapshot=snapshot,
@@ -535,16 +522,9 @@ async def _resolve_authorized_key(
         direct_report_artifact_ids=report_relations.direct_ids,
         relation_search_artifact_ids=relation_search_artifact_ids,
         report_direct_only=filters.lens == "current_report",
-        cursor_sort_tuple=candidate.sort_tuple,
-        direction="previous",
-        limit=1,
     )
-    artifact_position = before_probe.entries[-1].position + 1 if before_probe.entries else 1
-    entry = ResultsArtifactEntry(
-        artifact=exact,
-        position=artifact_position,
-        sort_tuple=candidate.sort_tuple,
-    )
+    if entry is None:
+        return None
     return _position_artifacts(
         (entry,),
         synthetics,
@@ -754,6 +734,9 @@ async def _query_results(
         relation_search_artifact_ids=relation_search_artifact_ids,
     )
 
+    # File versions (design R2): a locate anchored on any version of a file
+    # resolves to that file's entry, and the entry's key is echoed back.
+    resolved_anchor_key: str | None = None
     if request_body.surface == "locate":
         anchor_key = request_body.anchor_key or ""
         anchor_item = next(
@@ -762,68 +745,29 @@ async def _query_results(
         )
         anchor_entry: ResultsArtifactEntry | None = None
         if anchor_item is None and anchor_key.startswith("artifact:"):
-            artifact_id = anchor_key.removeprefix("artifact:")
-            exact = await artifact_store.get_result_artifact_for_scope(
-                artifact_id=artifact_id,
+            # File versions: a card's version ID anchors its file's entry (fences and filters applied in the store).
+            anchor_entry = await artifact_store.result_entry_for_artifact(
+                artifact_id=anchor_key.removeprefix("artifact:"),
                 session_id=scope.session_id,
                 user_id=scope.artifact_owner_id,
+                snapshot=artifact_snapshot,
+                normalized_query=query,
+                primary=filters.primary,
+                secondary=filters.secondary,
                 authorized_artifact_ids=scope.authorized_artifact_ids,
+                direct_report_artifact_ids=projection.report_relations.direct_ids,
+                relation_search_artifact_ids=relation_search_artifact_ids,
+                report_direct_only=filters.lens == "current_report",
             )
-            if exact is not None and _artifact_within_snapshot(
-                exact,
-                artifact_snapshot,
-            ):
-                candidate = project_artifact_result(
-                    exact,
+            if anchor_entry is not None:
+                anchor_item = _position_artifacts(
+                    (anchor_entry,),
+                    positioned_synthetics,
                     query,
                     writable=writable,
                     report_only=scope.report_only,
-                    relation_roles=projection.report_relations.roles_for(
-                        exact.id,
-                    ),
-                )
-                direct_match = filters.lens == "all" or exact.id in projection.report_relations.direct_ids
-                if (
-                    artifact_search_rank(
-                        exact,
-                        query,
-                        relation_roles=projection.report_relations.roles_for(
-                            exact.id,
-                        ),
-                    )
-                    is not None
-                    and _matches_filters(candidate, filters)
-                    and direct_match
-                ):
-                    before_probe = await artifact_store.query_results_for_session(
-                        session_id=scope.session_id,
-                        user_id=scope.artifact_owner_id,
-                        snapshot=artifact_snapshot,
-                        normalized_query=query,
-                        primary=filters.primary,
-                        secondary=filters.secondary,
-                        authorized_artifact_ids=scope.authorized_artifact_ids,
-                        direct_report_artifact_ids=projection.report_relations.direct_ids,
-                        relation_search_artifact_ids=relation_search_artifact_ids,
-                        report_direct_only=filters.lens == "current_report",
-                        cursor_sort_tuple=candidate.sort_tuple,
-                        direction="previous",
-                        limit=1,
-                    )
-                    artifact_position = before_probe.entries[-1].position + 1 if before_probe.entries else 1
-                    anchor_entry = ResultsArtifactEntry(
-                        artifact=exact,
-                        position=artifact_position,
-                        sort_tuple=candidate.sort_tuple,
-                    )
-                    anchor_item = _position_artifacts(
-                        (anchor_entry,),
-                        positioned_synthetics,
-                        query,
-                        writable=writable,
-                        report_only=scope.report_only,
-                        report_relations=projection.report_relations,
-                    )[0]
+                    report_relations=projection.report_relations,
+                )[0]
         if anchor_item is None:
             raise ResultsQueryError("results_anchor_not_in_view")
         before_page = await artifact_store.query_results_for_session(
@@ -876,6 +820,7 @@ async def _query_results(
         )
         if anchor_index < 0:
             raise ResultsQueryError("results_anchor_not_in_view")
+        resolved_anchor_key = anchor_item.key
         start = max(0, anchor_index - page_size // 2)
         start = min(start, max(0, len(candidates) - page_size))
         selected = candidates[start : start + page_size]
@@ -1073,6 +1018,13 @@ async def _query_results(
     )
     selected_keys = {item.key for item in selected}
     resolved_current = request_body.current_key if request_body.current_key in selected_keys else None
+    if (
+        resolved_current is None
+        and resolved_anchor_key in selected_keys
+        and request_body.current_key is not None
+        and request_body.current_key == request_body.anchor_key
+    ):
+        resolved_current = resolved_anchor_key
     return ResultsQueryResponseV1(
         capability=ResultsEffectiveCapabilityV1(scale_nav=scale_nav),
         snapshot_token=snapshot_token,

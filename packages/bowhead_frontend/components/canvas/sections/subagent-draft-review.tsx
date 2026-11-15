@@ -44,6 +44,7 @@ import { ResourcePluginPicker, ResourceSkillPicker, pluginsFromCatalog } from "@
 import { CharIcon } from "@/components/char-icon";
 import { registerSubagentDraftNavigationGuard } from "@/lib/canvas-navigation-guard";
 import { requestConfirm } from "@/lib/confirm-dialog-store";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Props = {
   draftId: string;
@@ -174,9 +175,12 @@ export function SubagentDraftReview({
   const showFailure = useCallback((cause: unknown) => {
     // A dependency block names each Skill or Tool and its reason instead of the generic validation copy.
     const blocked = cause instanceof SubagentDraftApiError ? parseBlockedItems(cause.details) : [];
+    const key = subagentDraftFailureKey(cause);
     const message = blocked.length
-      ? blockedItemLines(blocked, (key, values) => tMarketRef.current(key as never, values as never)).join("\n")
-      : tRef.current(subagentDraftFailureKey(cause));
+      ? blockedItemLines(blocked, (name, values) => tMarketRef.current(name as never, values as never)).join("\n")
+      : key === "draft_failed_plain"
+        ? withHttpFailureReason(tRef.current(key), cause)
+        : tRef.current(key);
     setErrorState(shownError(message, cause));
   }, []);
   const [conflict, setConflict] = useState(false);
@@ -398,7 +402,7 @@ export function SubagentDraftReview({
       })
       .catch((caught: unknown) => {
         // Saved resources are kept as they are; the picker says so and offers a retry.
-        if (active) setPickerLoadError(shownError(tPicker("catalog_failed_title"), caught));
+        if (active) setPickerLoadError(shownError(withHttpFailureReason(tPicker("catalog_failed_title"), caught, { read: true }), caught));
       });
     return () => { active = false; };
   }, [pickerReload, tPicker]);

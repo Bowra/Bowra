@@ -63,7 +63,7 @@ async def test_open_shared_ctx_applies_pragmas(tmp_db_path: str) -> None:
         cur = await conn.execute("PRAGMA busy_timeout")
         row = await cur.fetchone()
         assert row is not None
-        assert row[0] == 5000, f"busy_timeout should be 5000, got {row[0]}"
+        assert row[0] == 60000, f"busy_timeout should be 60000, got {row[0]}"
 
         cur = await conn.execute("PRAGMA synchronous")
         row = await cur.fetchone()
@@ -186,3 +186,82 @@ async def test_pragma_table_info_with_param(tmp_db_path: str) -> None:
         cur = await conn.execute("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", ("foo", "z"))
         row = await cur.fetchone()
         assert row is None
+
+
+def _impatient_insert(path: str, value: int):
+    """A write that gives up on a held writer lock after 50 ms instead of SQLite's 5 s."""
+    import sqlite3
+
+    async def attempt() -> int:
+        connection = sqlite3.connect(path, timeout=0.05, isolation_level=None)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("INSERT INTO notes(value) VALUES (?)", (value,))
+            connection.execute("COMMIT")
+        finally:
+            connection.close()
+        return value
+
+    return attempt
+
+
+def _notes_database(tmp_path) -> str:
+    import sqlite3
+
+    path = str(tmp_path / "writer.db")
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("CREATE TABLE notes(value INTEGER)")
+    connection.commit()
+    connection.close()
+    return path
+
+
+async def test_wait_for_writer_repeats_a_write_until_the_writer_lock_is_free(tmp_path) -> None:
+    import sqlite3
+
+    import anyio
+    from bowhead_core._db import wait_for_writer
+
+    path = _notes_database(tmp_path)
+    holder = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+
+    async def release() -> None:
+        await anyio.sleep(0.3)
+        holder.execute("COMMIT")
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(release)
+        assert await wait_for_writer("test", _impatient_insert(path, 7)) == 7
+    holder.close()
+
+    assert sqlite3.connect(path).execute("SELECT value FROM notes").fetchall() == [(7,)]
+
+
+async def test_wait_for_writer_fails_after_its_limit_and_passes_other_errors_through(tmp_path, monkeypatch) -> None:
+    import sqlite3
+
+    import pytest
+
+    from bowhead_core import _db
+
+    path = _notes_database(tmp_path)
+    monkeypatch.setattr(_db, "WRITER_WAIT_SECONDS", 0.2)
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        await _db.wait_for_writer("test", _impatient_insert(path, 1))
+    holder.execute("ROLLBACK")
+    holder.close()
+
+    calls = 0
+
+    async def missing_table() -> None:
+        nonlocal calls
+        calls += 1
+        sqlite3.connect(path).execute("INSERT INTO absent VALUES (1)")
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        await _db.wait_for_writer("test", missing_table)
+    assert calls == 1

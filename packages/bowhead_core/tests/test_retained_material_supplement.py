@@ -198,6 +198,25 @@ async def test_both_history_scan_and_complete_request_appendix_are_bounded(retai
     assert "history_scan_budget" in note.references.coverage.reasons
 
 
+@pytest.mark.parametrize("retained_case", [{"sections": 48, "older_turns": MAX_RETAINED_TURNS + 4}], indirect=True)
+async def test_incomplete_references_that_fit_only_without_the_guidance_still_reach_the_request(retained_case, monkeypatch):
+    """The references fit the budget alone but not with the guidance; the appendix must shrink, not vanish."""
+    from bowhead_core import result_material_history, result_materials
+
+    full = await load_retained_material_supplement(retained_case.ctx, readers=("read_report",))
+    assert full is not None and full.references.coverage.references == "unknown"
+    budget = len(full.message.content.encode()) - 1
+    monkeypatch.setattr(result_materials, "MAX_BYTES", budget)
+    monkeypatch.setattr(result_material_history, "MAX_BYTES", budget)
+    note = await load_retained_material_supplement(retained_case.ctx, readers=("read_report",))
+    assert note is not None, "an incomplete projection one byte over the budget must not disable the appendix"
+    assert len(note.message.content.encode()) <= budget
+    assert len(note.references.items) < len(full.references.items)
+    coverage = json.loads(note.message.content)["material_refs"]["coverage"]
+    assert coverage["references"] == "unknown" and "omitted_count" not in coverage
+    assert "budget" in coverage["reasons"]
+
+
 async def test_event_only_history_does_not_get_an_extra_retained_appendix(retained_case):
     ctx = retained_case.ctx
     ctx._model_context_history = replace(ctx._model_context_history, generation_id=None)

@@ -37,6 +37,7 @@ from bowhead_core.sandbox_inputs_normalize import (
     candidate_prior_filenames,
     describe_bindings,
     normalize_sandbox_tool_args,
+    skill_invoke_field_conflicts,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,9 +74,11 @@ def _wrap_skill_read_with_cache(
             return await handler(args, ctx)
         # args replace $ARGUMENTS and must enter the key, or changing args within a turn returns old substitutions (audit #16).
         raw_args = args.get("args") or ""
-        # ⚠ Key omits role: skill resolution currently depends only on user_id/team_id (stable within a turn). Future
-        # role-based skill visibility requires adding role to the key (same constraint at the tool_registry field).
-        cache_key = f"{skill_name}|{ref}|{file}|{raw_args!r}"
+        # Skill resolution depends on user_id/team_id (stable within a turn). The system Lead reads only the Skills
+        # in its own index, so its reads use their own keys and never return a body cached by a peer.
+        from bowhead_core.agents._lead_context import is_system_lead_run
+
+        cache_key = f"{'lead' if is_system_lead_run() else 'peer'}|{skill_name}|{ref}|{file}|{raw_args!r}"
         # Cache is a **construction-time field** of ToolExecutionContext (default_factory=dict), so peer dispatch's
         # copy.copy(ctx) aliases the same dict, propagating copied-context writes to the parent. The lazy setattr
         # fallback below serves only non-dataclass contexts (test stubs / old paths), which
@@ -144,6 +147,9 @@ def _wrap_sandbox_inputs_normalization(tool_name: str, handler: Any) -> Any:
     """
 
     async def _wrapped(args: dict[str, Any], ctx: Any) -> Any:
+        conflict = skill_invoke_field_conflicts(tool_name, args)
+        if conflict is not None:
+            return {"error": conflict}
         try:
             args = normalize_sandbox_tool_args(tool_name, args, ctx)
         except Exception:  # noqa: BLE001 — normalization is best-effort; never break valid calls
@@ -311,9 +317,21 @@ def register_skill_tools(
 
     from bowhead_core.html_static_check import HTML_STATIC_CHECK_GUIDANCE
     from bowhead_core.ordinary_lead_material import OrdinarySkillObserver
+    from bowhead_core.pptx_result_view import PPTX_RESULT_VIEW_GUIDANCE
 
     observer = OrdinarySkillObserver(catalog)
-    defs = build_skill_tools(catalog, runtime, authorize_invoke=authorize_invoke, material_observer=observer)
+
+    def authorize_read(spec: Any, _ctx: Any) -> dict[str, Any] | None:
+        from bowhead_skill.runtime_scope import skill_unavailable
+
+        from bowhead_core.agents._lead_context import is_system_lead_run
+        from bowhead_core.skill_access import lead_can_read_skill
+
+        if is_system_lead_run() and not lead_can_read_skill(spec):
+            return skill_unavailable(str(spec.name), "read", "not_granted", cause="lead_index")
+        return None
+
+    defs = build_skill_tools(catalog, runtime, authorize_invoke=authorize_invoke, authorize_read=authorize_read, material_observer=observer)
 
     def record_material(tool_name, handler):
         @wraps(handler)
@@ -339,6 +357,17 @@ def register_skill_tools(
             from bowhead_core.artifact_presentation import normalize_producer_declaration
 
             result = await handler(args, ctx)
+            try:
+                from bowhead_core.canvas_file_versions import follow_new_versions_on_canvas
+
+                # File versions R4: report sections embedding an older version follow the new one.
+                await follow_new_versions_on_canvas(result, ctx)
+            except Exception:
+                logger.warning("canvas.html_section_follow_failed tool=%s", tool_name, exc_info=True)
+            from bowhead_core.pptx_result_view import attach_result_views
+
+            # Advisory facts about every presentation or HTML file this call wrote, work files included.
+            result = await attach_result_views(result, ctx)
             try:
                 return await normalize_producer_declaration(tool_name, args, result, ctx)
             except Exception:
@@ -379,7 +408,10 @@ def register_skill_tools(
             ToolSpec(
                 schema=ToolSchema(
                     name=d.name,
-                    description=d.description + (" " + HTML_STATIC_CHECK_GUIDANCE if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL) else ""),
+                    description=d.description
+                    + (
+                        " " + HTML_STATIC_CHECK_GUIDANCE + " " + PPTX_RESULT_VIEW_GUIDANCE if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL) else ""
+                    ),
                     input_schema=d.input_schema,
                 ),
                 handler=handler,

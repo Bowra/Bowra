@@ -150,6 +150,8 @@ class ProjectedResult:
     occurred_at: str | None
     sort_tuple: tuple[int | str | None, ...]
     position: int = 1
+    # File versions: (displayed version number, matching versions) when the file has more than one version.
+    lineage: tuple[int, int] | None = None
 
 
 def normalize_results_query(value: str | None) -> str:

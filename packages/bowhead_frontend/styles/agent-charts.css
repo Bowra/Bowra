@@ -17,7 +17,7 @@
 .ac-card { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-4); padding: 24px 18px 18px; }
 .ac-rank { position: absolute; top: 18px; left: 16px; font-size: var(--fs-xl); font-weight: 500; line-height: 1; color: var(--c-ink-3); font-variant-numeric: tabular-nums; }
 .ac-card-main { display: flex; flex-direction: column; align-items: center; min-width: 0; width: 100%; color: var(--c-ink); text-align: center; }
-.ac-artwork { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 14px; margin-bottom: 15px; background: var(--c-accent-tint); color: var(--c-accent); font-size: calc(var(--fs-base) + 0.25rem); font-weight: 600; flex: 0 0 auto; }
+.ac-artwork { width: 56px; height: 56px; display: grid; place-items: center; border-radius: var(--radius-2xl); margin-bottom: 15px; background: var(--c-accent-tint); color: var(--c-accent); font-size: calc(var(--fs-base) + 0.25rem); font-weight: 600; flex: 0 0 auto; }
 .ac-card-copy { min-width: 0; }
 .ac-card h2 { margin: 0; font-size: var(--fs-lg); line-height: 1.45; font-weight: 600; overflow-wrap: anywhere; }
 .ac-card-main:hover h2 { color: var(--c-accent); }
@@ -52,7 +52,7 @@
   .ac-card-main { flex-direction: row; align-items: start; text-align: left; gap: 13px; grid-column: 2; }
   .ac-card:not(:has(.ac-rank)) { grid-template-columns: minmax(0, 1fr); }
   .ac-card:not(:has(.ac-rank)) .ac-card-main, .ac-card:not(:has(.ac-rank)) .ac-signal, .ac-card:not(:has(.ac-rank)) .ac-details { grid-column: 1; }
-  .ac-artwork { width: 48px; height: 48px; border-radius: 12px; margin: 0; font-size: var(--fs-lg); }
+  .ac-artwork { width: 48px; height: 48px; border-radius: var(--radius-xl); margin: 0; font-size: var(--fs-lg); }
   .ac-signal { grid-column: 2; padding-top: 0; padding-left: 61px; text-align: left; }
   .ac-growth { justify-content: start; }
   .ac-details { grid-column: 2; justify-self: start; margin-top: 0; margin-left: 61px; }

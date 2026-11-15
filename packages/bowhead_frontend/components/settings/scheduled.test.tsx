@@ -505,7 +505,7 @@ describe("SettingsScheduled 绑定固化流程选择器", () => {
   });
 });
 
-describe("SettingsScheduled run deliveries (FEATURE_NOTIFICATION_DELIVERY)", () => {
+describe("SettingsScheduled run deliveries", () => {
   it("shows what happened to each run's email and how to fix a failure", async () => {
     fetchScheduledJobsMock.mockResolvedValue({ items: [JOB] });
     fetchScheduledJobRunsMock.mockResolvedValue({
@@ -536,7 +536,7 @@ describe("SettingsScheduled run deliveries (FEATURE_NOTIFICATION_DELIVERY)", () 
   });
 });
 
-describe("SettingsScheduled delivery mode (FEATURE_ROUTINE_NOTIFY)", () => {
+describe("SettingsScheduled delivery mode", () => {
   const delivering = { ...JOB, notify_channels: { email: [], deliver_on_success: true } };
 
   it("offers only-when-flagged delivery and saves it", async () => {

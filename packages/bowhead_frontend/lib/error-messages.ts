@@ -19,6 +19,7 @@ export const REASON_CODE_LIST = [
   "tool_delivery_review_required",
   "agent_step_limit",
   "agent_tool_call_limit",
+  "agent_model_call_limit",
   "agent_stalled",
   "wallclock_exceeded",
   "hop_cap_exceeded",
@@ -132,6 +133,7 @@ export type PeerFailureReasonCode =
   | "peer_iteration_limit_exceeded"
   | "peer_tool_failure_limit_exceeded"
   | "peer_tool_call_limit_exceeded"
+  | "peer_model_call_limit_exceeded"
   | "peer_credit_exhausted";
 
 const PEER_FAILURE_CODES = new Set<PeerFailureReasonCode>([
@@ -144,6 +146,7 @@ const PEER_FAILURE_CODES = new Set<PeerFailureReasonCode>([
   "peer_iteration_limit_exceeded",
   "peer_tool_failure_limit_exceeded",
   "peer_tool_call_limit_exceeded",
+  "peer_model_call_limit_exceeded",
   "peer_credit_exhausted",
 ]);
 

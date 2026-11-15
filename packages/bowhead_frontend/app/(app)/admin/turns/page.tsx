@@ -17,6 +17,7 @@ import {
   type MemoryPackSnapshotDTO,
   type TurnEventDTO,
 } from "@/lib/api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export default function TurnsPage() {
   const tT = useTranslations("admin_turns");
@@ -49,7 +50,7 @@ export default function TurnsPage() {
 
   useEffect(() => {
     if (auth.status !== "authed") return;
-    fetchTurnIds(200).then(setIds).catch((e) => setErr(shownError(tT("list_failed_notice"), e)));
+    fetchTurnIds(200).then(setIds).catch((e) => setErr(shownError(withHttpFailureReason(tT("list_failed_notice"), e, { read: true }), e)));
     // tT changes with language; fetch the list here only once when authentication becomes ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.status]);

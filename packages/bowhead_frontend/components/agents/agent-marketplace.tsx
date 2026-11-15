@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type SourceFilter = "all" | "team" | "system";
 type CatalogFilters = {
@@ -589,7 +590,7 @@ export function AgentMarketplace() {
       setHireSuccess({ name: displayName(item) });
       await refresh({ mutationSucceeded: true, preserve: true });
     } catch (cause) {
-      setError(t("hire_failed"));
+      setError(withHttpFailureReason(t("hire_failed"), cause));
     } finally {
       setPendingId(null);
     }

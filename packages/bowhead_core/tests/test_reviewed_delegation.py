@@ -239,3 +239,86 @@ def test_checkpoint_codec_does_not_restore_current_native_review_authority():
     replayed = ToolInvocation("subagent_spawn", {}, call_id=restored[-1].tool_call_id, result=replayed_result)
     assert not isinstance(invocation_result(replayed), ReviewedDeliveryResult)
     assert not requires_delivery_review([replayed])
+
+
+@pytest.mark.parametrize("valid", [True, False], ids=["accepted_review", "rejection_limit"])
+async def test_a_partial_helper_carries_the_gaps_of_its_accepted_review(collab, monkeypatch, valid):
+    """Regression check N1: only a review the runner can revalidate yields gaps the caller may cite."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    requests = 0
+
+    async def probe(args, ctx):
+        # The fixture's helper may call only "probe": one call is rejected, the other returns the table.
+        return {"ok": False, "error_kind": "invalid_input"} if args.get("province") else {"ok": True, "rows": [[4200]]}
+
+    async def provider(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="rejected", name="probe", arguments={"province": True}), ToolCall(id="table", name="probe", arguments={})],
+            )
+        payload = {"delivery_surface": "chat", "exec_summary": "The store table is delivered; the province order is not.", "completion": "partial"}
+        context = next((item["review_context"] for item in _json_receipts(request) if "review_context" in item), None)
+        if context is not None:
+            failed = context["failed_calls"][0]["call_id"]
+            success = [item["call_id"] for item in context["successful_calls"] if item["tool"] == "probe"]
+            payload["delivery_review"] = {
+                "requirements": [
+                    {"requirement": "Store table", "status": "fulfilled", "evidence_call_ids": success if valid else [failed]},
+                    {"requirement": "Sort stores by province", "status": "unfulfilled", "evidence_call_ids": []},
+                ],
+                "issues": [{"call_id": failed, "resolution": "unfulfilled", "evidence_call_ids": [], "explanation": "No province field."}],
+            }
+        return LLMResponse(content="", tool_calls=[ToolCall(id=f"return-{requests}", name="subagent_return", arguments={"payload": payload})])
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("probe", probe)
+    register_subagent_return_tool(harness.registry)
+    result = await harness.run(collab.requester)
+    assert not harness.provider.failures, harness.provider.failures
+    assert result.ok and result.completion == "partial"
+    assert result.reviewed_gaps == (("Sort stores by province",) if valid else None)
+
+
+@pytest.mark.parametrize("case", ["citable", "unreviewed", "complete"])
+async def test_the_spawn_result_names_a_partial_helper_gaps_and_is_not_delivered_directly(case):
+    class Child:
+        async def run(self, **kwargs):
+            return SubagentResult(
+                profile="compute",
+                subagent_id="sub_child",
+                ok=True,
+                final_answer="The store table is delivered.",
+                payload={"delivery_surface": "chat", "exec_summary": "The store table is delivered."},
+                completion="complete" if case == "complete" else "partial",
+                ordinary_completion_reason="completed",
+                reviewed_gaps=("Sort stores by province",) if case == "citable" else None,
+                tool_invocations=[],
+            )
+
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    context = ToolExecutionContext(
+        workspace_id="ws_test", member_uid="m", user_id="u", turn_id="t", datarc=None, subagent_runner=Child(), parent_bus=SimpleNamespace(emit=_emit)
+    )
+    invocation = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Store table", "delegation_role": "primary"}, context)
+    assert invocation.error is None
+    assert invocation.result.get("partial_delivery") == ({"unfulfilled": ["Sort stores by province"]} if case == "citable" else None)
+    assert ("partial_delivery.unfulfilled" in invocation.result.get("directive", "")) is (case == "citable")
+    assert ("_chat_direct_delivery" in invocation.result) is (case == "complete"), "Lead reviews a partial helper answer"
+
+
+def _json_receipts(request):
+    """Tool results that are JSON objects; plain-text tool messages are skipped."""
+    items = []
+    for message in request.messages:
+        if message.role == "tool":
+            try:
+                item = json.loads(message.content)
+            except ValueError:
+                continue
+            if isinstance(item, dict):
+                items.append(item)
+    return items

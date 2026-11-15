@@ -12,7 +12,6 @@ from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadCapture, OrdinaryLeadCheckpoint, capture_message_prefix
 from bowhead_core.ordinary_lead_continuation import (
     OrdinaryContinuationUnavailable,
-    OrdinaryQuestionUnavailable,
     canonical_json,
     consume_ordinary_resume_in_tx,
     read_ordinary_card_in_tx,
@@ -33,15 +32,20 @@ QUESTION = {"question": "Which title?", "type": "free_text", "options": []}
 ANSWER = {"question": QUESTION["question"], "source": "custom", "answer": "Quarterly review", "skipped": False, "option_index": None}
 
 
-async def test_rejected_revision_scope_can_fall_back_to_a_text_question():
+async def test_question_after_a_refused_revision_scope_ignores_that_dispatch():
+    """A dispatch refused before any helper ran never decides whether a question can pause.
+
+    the original regression: the refusal told Lead to ask, but its question was refused because
+    the refused dispatch had no helper binding, and Lead spun on refused dispatches.
+    """
     from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadRunState
-    from bowhead_core.ordinary_lead_runtime import capture_ordinary_lead_loop
+    from bowhead_core.ordinary_lead_continuation import content_hash
+    from bowhead_core.ordinary_lead_runtime import blocked_before_work, capture_ordinary_lead_loop
 
     state = OrdinaryLeadRunState()
     context = SimpleNamespace(ordinary_lead_state=state, collaboration_execution=None)
-    rejected = ToolInvocation(
-        tool_name="subagent_spawn", arguments={}, result={"error_kind": "invalid_args", "reason_code": "revise_scope_unresolved"}
-    )
+    refusal = {"error_kind": "invalid_args", "reason_code": "revise_scope_unresolved"}
+    rejected = ToolInvocation(tool_name="subagent_spawn", arguments={}, result=dict(refusal), call_id="revise-1")
     question = ToolInvocation(tool_name="clarification_ask", arguments={}, result={})
     kwargs = {
         "ctx": context,
@@ -62,20 +66,20 @@ async def test_rejected_revision_scope_can_fall_back_to_a_text_question():
         "overflow_retried": False,
         "deadline_retried": False,
     }
-    with pytest.raises(OrdinaryQuestionUnavailable):
-        await capture_ordinary_lead_loop(**kwargs)
-    completed = ToolInvocation(tool_name="subagent_spawn", arguments={}, result={"ok": True, "subagent_id": "peer"})
-    state.helper_bindings.append({"subagent_id": "peer"})
-    kwargs["invocations"] = [completed, rejected, question]
-    with pytest.raises(OrdinaryQuestionUnavailable) as exc:
-        await capture_ordinary_lead_loop(**kwargs)
-    assert "Preserve confirmed earlier results" in exc.value.note
-    state.helper_bindings.clear()
-    kwargs["invocations"] = [rejected, question]
-    rejected.result = {"error_kind": "invalid_args"}
+    # Unrecorded, it is a dispatch without a retained helper: no safe pause exists.
     with pytest.raises(OrdinaryContinuationUnavailable) as exc:
         await capture_ordinary_lead_loop(**kwargs)
     assert type(exc.value) is OrdinaryContinuationUnavailable
+    # Recorded as refused before work, the question follows the effect-free contract.
+    state.blocked_calls["revise-1"] = content_hash({"tool": "subagent_spawn", "arguments": {}, "result": refusal})
+    assert blocked_before_work(state, rejected)
+    assert await capture_ordinary_lead_loop(**kwargs) is None
+    # Only the exact recorded refusal is exempt.
+    rejected.result = {**refusal, "error": "changed"}
+    assert not blocked_before_work(state, rejected)
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        await capture_ordinary_lead_loop(**kwargs)
+    assert not blocked_before_work(None, rejected)
 
 
 async def test_budget_extension_widens_counters_without_changing_legacy_bytes_or_material(ctx, monkeypatch):
@@ -276,7 +280,7 @@ async def test_ordinary_lead_engages_only_for_a_current_member(ctx, monkeypatch,
 
 async def test_ordinary_lead_does_not_engage_for_a_turn_without_a_chat_source(ctx):
     # Scheduled runs and IM Turns do not come through /chat/send, so they have no chat source to retain.
-    # Engaging anyway made a question after a helper fail the whole Turn at capture (116 dogfood N1).
+    # Engaging anyway made a question after a helper fail the whole Turn at capture (Regression check N1).
     assert await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_doc", owner_id="ordinary-producer", lease_seconds=600) == "claimed"
     await _sql(ctx, "DELETE FROM chat_turn_user_sources WHERE turn_id=?", ("t_doc",))
     lead = SimpleNamespace(

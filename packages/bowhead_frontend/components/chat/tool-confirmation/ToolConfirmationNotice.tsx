@@ -12,9 +12,11 @@
  *
  * Items whose card is on screen are skipped; the rest are grouped by session with
  * a View action. The tab title carries "(n) " while anything waits. A polite live
- * region, no modal, no focus trap.
+ * region, no modal, no focus trap. In a visible chat column the notice docks above
+ * the composer (`ToolConfirmationNoticeSlot`); elsewhere it floats at the bottom right.
  */
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
 import { viewedSessionId } from "@/lib/attention-loop";
@@ -23,7 +25,9 @@ import { setTitleAttentionCount } from "@/lib/page-title-store";
 import { listToolConfirmations, type ToolConfirmationSummary } from "@/lib/tool-confirmation-api";
 import {
   focusConfirmationCard,
+  registerConfirmationNoticeSlot,
   requestConfirmationFocus,
+  useConfirmationNoticeSlot,
   useVisibleConfirmationIds,
 } from "@/lib/tool-confirmation-presence";
 import {
@@ -55,6 +59,7 @@ export function ToolConfirmationNotice() {
   const storePending = usePendingConfirmations();
   const anyActiveStep = useHasAnyActiveStep();
   const visibleIds = useVisibleConfirmationIds();
+  const slot = useConfirmationNoticeSlot();
   const [server, setServer] = useState<{ items: ToolConfirmationSummary[]; startedAt: number }>({
     items: [],
     startedAt: 0,
@@ -127,8 +132,8 @@ export function ToolConfirmationNotice() {
     router.push(`/?session=${encodeURIComponent(group.sessionId)}`);
   };
 
-  return (
-    <div className="tcf-notice" role="status" aria-label={t("noticeLabel")}>
+  const notice = (
+    <div className={slot ? "tcf-notice is-docked" : "tcf-notice"} role="status" aria-label={t("noticeLabel")}>
       {groups.map((group) => (
         <div className="tcf-notice-row" key={group.sessionId ?? "current"}>
           <span className="tcf-notice-text">
@@ -143,4 +148,20 @@ export function ToolConfirmationNotice() {
       ))}
     </div>
   );
+  return slot ? createPortal(notice, slot) : notice;
+}
+
+/**
+ * The place above a chat composer where the notice docks. Render it only where the composer
+ * is; `active` is false while the chat column is hidden (a maximized Results pane), so the
+ * notice floats instead of disappearing with it.
+ */
+export function ToolConfirmationNoticeSlot({ active }: { active: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!active || !element) return;
+    return registerConfirmationNoticeSlot(element);
+  }, [active]);
+  return <div ref={ref} className="tcf-notice-slot" data-testid="tool-confirmation-notice-slot" />;
 }

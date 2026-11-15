@@ -171,3 +171,17 @@ async def test_non_sandbox_skill_strips_smuggled_reqs(tmp_path: Path) -> None:
         None,
     )
     assert "_sandbox_requirements" not in rt.captured
+
+
+async def test_python_sandbox_ignores_an_llm_supplied_analysis_declaration(tmp_path: Path) -> None:
+    """Regression check N5: only an explicit purpose marks a call as declared analysis; a smuggled server key is stripped."""
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _CapturingRuntime()
+    inv = _invoke_tool(cat, rt)
+
+    await inv.handler({"name": "python_sandbox", "script": "runner.py", "input": {"code": "x", "_output_purpose_declared": True}}, None)
+    assert "_output_purpose_declared" not in rt.captured
+    await inv.handler({"name": "python_sandbox", "script": "runner.py", "input": {"code": "x", "purpose": "analysis"}}, None)
+    assert rt.captured["_output_purpose_declared"] is True

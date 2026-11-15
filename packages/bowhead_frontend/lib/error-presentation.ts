@@ -1,5 +1,6 @@
 import { entitlementErrorMessage } from "./entitlement-error";
 import type { Locale } from "./locale";
+import { withHttpFailureReason } from "./user-facing-error";
 
 export type ErrorDisclosure =
   | "public-neutral"
@@ -119,7 +120,9 @@ export interface ErrorPresentationContext {
 }
 
 interface ErrorLike {
+  name?: unknown;
   status?: unknown;
+  nonApiResponse?: unknown;
   code?: unknown;
   body?: unknown;
   message?: unknown;
@@ -263,7 +266,8 @@ export function toErrorPresentation(
   const action = code ? context.actionForCode?.(code) ?? undefined : undefined;
 
   return {
-    message: mappedMessage ?? context.genericMessage,
+    // Without copy for its code, an uncoded HTTP failure still says why it failed.
+    message: mappedMessage ?? withHttpFailureReason(context.genericMessage, error, { locale: context.locale }),
     ...(action ? { action } : {}),
     ...(allowedDiagnostics ? { diagnostics: allowedDiagnostics } : {}),
   };

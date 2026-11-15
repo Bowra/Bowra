@@ -141,6 +141,169 @@ async def test_disabled_review_preserves_tool_recovery_guidance(monkeypatch: pyt
     assert "v2" in result.final_answer
 
 
+async def test_tool_success_clears_failure_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failure gates count failures in a row, so a run whose tools keep working again is not cut off."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
+    attempted: list[str] = []
+
+    async def validate(args: dict, _ctx: ToolExecutionContext) -> dict:
+        attempted.append(args["revision"])
+        return {"ok": True, "revision": "v2"} if args["revision"] == "good" else {"ok": False, "error": "document_revision_missing"}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(schema=ToolSchema(name="document_validate", description="document_validate", input_schema={"type": "object"}), handler=validate)
+    )
+    # Eight failures, never three in a row: neither the per-tool gate nor the cross-tool cap of eight applies.
+    revisions = ["a", "b", "good", "c", "d", "good", "e", "f", "good", "g", "h", "good"]
+    router = _ScriptedRouter(
+        *[
+            LLMResponse(content="", tool_calls=[ToolCall(id=f"call_{index}", name="document_validate", arguments={"revision": revision})])
+            for index, revision in enumerate(revisions)
+        ],
+        LLMResponse(content="The current document revision is v2."),
+    )
+    profile = _profile(monkeypatch, ("document_validate",))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Validate the document revision.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+
+    assert result.ok, result.error
+    assert attempted == revisions
+
+
+@pytest.mark.parametrize("parallel", ["1", "0"], ids=["parallel", "sequential"])
+async def test_failures_in_one_batch_count_as_one_attempt(monkeypatch: pytest.MonkeyPatch, parallel: str) -> None:
+    """116 t_78ba5d3b1429: three add_chart calls of one batch failed on their arguments, the gate counted three
+    failures in a row, and the corrected calls of the next decision were refused unseen."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
+    monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", parallel)
+    attempted: list[str] = []
+
+    async def validate(args: dict, _ctx: ToolExecutionContext) -> dict:
+        attempted.append(args["revision"])
+        return {"ok": True, "revision": "v2"} if args["revision"].startswith("good") else {"ok": False, "error": "document_revision_missing"}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(schema=ToolSchema(name="document_validate", description="document_validate", input_schema={"type": "object"}), handler=validate)
+    )
+
+    def batch(step: int, revisions: list[str]) -> LLMResponse:
+        return LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id=f"call_{step}_{index}", name="document_validate", arguments={"revision": revision})
+                for index, revision in enumerate(revisions)
+            ],
+        )
+
+    router = _ScriptedRouter(
+        batch(0, ["a", "b", "c"]),
+        batch(1, ["d", "e"]),
+        batch(2, ["good-1", "good-2", "good-3"]),
+        LLMResponse(content="The current document revision is v2."),
+    )
+    profile = _profile(monkeypatch, ("document_validate",))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Validate the document revision.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+
+    assert result.ok, result.error
+    # Two failed decisions stay below the gate of three in a row, so every call of the third decision runs.
+    assert sorted(attempted) == ["a", "b", "c", "d", "e", "good-1", "good-2", "good-3"]
+
+
+async def test_skill_invoke_fields_beside_input_are_recorded_and_run_inside_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 t_78ba5d3b1429: `inputs` written beside `input` reached the runner as no inputs. The loop moves it
+    before the call is recorded, so history, retained material and the runner see one call."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
+    received: list[dict] = []
+
+    async def invoke(args: dict, _ctx: ToolExecutionContext) -> dict:
+        received.append(args)
+        return {"ok": True, "stdout": "rows=12"}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(schema=ToolSchema(name="skill_invoke", description="skill_invoke", input_schema={"type": "object"}), handler=invoke))
+    flattened = {
+        "name": "python_sandbox",
+        "script": "runner.py",
+        "input": {"code": "print(len(INPUTS))"},
+        "inputs": {"rows": {"artifact_id": "art_0123456789ab"}},
+    }
+    router = _ScriptedRouter(
+        LLMResponse(content="", tool_calls=[ToolCall(id="call_0", name="skill_invoke", arguments=flattened)]),
+        LLMResponse(content="There are 12 rows."),
+    )
+    profile = _profile(monkeypatch, ("skill_invoke",))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Count the rows.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+
+    assert result.ok, result.error
+    expected = {
+        "name": "python_sandbox",
+        "script": "runner.py",
+        "input": {"code": "print(len(INPUTS))", "inputs": {"rows": {"artifact_id": "art_0123456789ab"}}},
+    }
+    assert received == [expected]
+    assert result.tool_invocations[0].arguments == expected
+    history = [call.arguments for message in router.requests[-1].messages for call in (message.tool_calls or [])]
+    assert history == [expected]
+
+
+async def test_failures_in_a_row_end_with_a_report_of_done_and_remaining(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eight failed Tool calls in a row stop the Tool work; the helper still reports what it has and what remains."""
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
+    attempted: list[str] = []
+
+    def failing(name: str):
+        async def handler(_args: dict, _ctx: ToolExecutionContext) -> dict:
+            attempted.append(name)
+            return {"ok": False, "error": "source_unavailable"}
+
+        return handler
+
+    names = ("source_a", "source_b", "source_c")
+    registry = ToolRegistry()
+    for name in names:
+        registry.register(ToolSpec(schema=ToolSchema(name=name, description=name, input_schema={"type": "object"}), handler=failing(name)))
+    calls = ["source_a"] * 3 + ["source_b"] * 3 + ["source_c"] * 2
+    router = _ScriptedRouter(
+        *[
+            LLMResponse(content="", tool_calls=[ToolCall(id=f"call_{index}", name=name, arguments={"attempt": index})])
+            for index, name in enumerate(calls)
+        ],
+        LLMResponse(content="Done: nothing verified yet\nRemaining: all three sources failed; retry once a source is reachable."),
+    )
+    profile = _profile(monkeypatch, names)
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Read the three sources.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+
+    assert attempted == calls
+    assert (result.completion, result.stop_reason) == ("partial", "no_progress"), result.error
+    assert result.partial_remaining == "all three sources failed; retry once a source is reachable."
+    assert router.requests[-1].tool_choice == "none"
+
+
 @pytest.mark.parametrize(
     ("tool_name", "registered", "visible", "unconfigured", "expect_constraint"),
     [

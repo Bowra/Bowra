@@ -1972,3 +1972,54 @@ async def test_unknown_invocation_retains_provider_diagnosis_without_resending(f
     assert failure.upstream_message == "Synthetic upstream unavailable"
     assert observer.attempts[0].outcomes == ["unknown:provider_response_unclassified"]
     assert [attempt.outcomes for attempt in hook.attempts] == ([["unknown:provider_response_unclassified"]] if durable else [])
+
+
+class _FlakyUsageRow:
+    """A usage row whose settlement fails with ``failures`` storage errors before it is written."""
+
+    identity = "lu_test"
+
+    def __init__(self, failures: int, error: Exception) -> None:
+        self.failures, self.error, self.settled = failures, error, []
+
+    async def complete(self, *, usage, response_digest) -> bool:
+        if self.failures:
+            self.failures -= 1
+            raise self.error
+        self.settled.append((usage.input_tokens, response_digest))
+        return True
+
+    async def unknown(self, *, reason_code: str) -> None:
+        self.settled.append(reason_code)
+
+
+@pytest.mark.asyncio
+async def test_a_storage_error_at_usage_settlement_keeps_the_response_and_settles_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+
+    from bowhead_router.types import TokenUsage
+
+    from bowhead_router import invocation
+
+    monkeypatch.setattr(invocation, "_LATE_SETTLEMENT_DELAYS", (0.0, 0.0, 0.0))
+    row = _FlakyUsageRow(2, sqlite3.OperationalError("database is locked"))
+    attempt = invocation._ObservedAttempt(row, None)
+
+    await invocation.complete_physical_invocation(attempt, usage=TokenUsage(input_tokens=7, output_tokens=3), response={"id": "r"})
+    assert row.settled == []
+    await asyncio.gather(*invocation._LATE_SETTLEMENTS)
+    assert [tokens for tokens, _digest in row.settled] == [7]
+
+
+@pytest.mark.asyncio
+async def test_a_settlement_conflict_still_leaves_the_call_outcome_unknown() -> None:
+    from bowhead_router.types import TokenUsage
+
+    from bowhead_router import invocation
+
+    row = _FlakyUsageRow(1, ValueError("physical_usage_settlement_conflict"))
+    with pytest.raises(InvocationOutcomeUnknownError):
+        await invocation.complete_physical_invocation(
+            invocation._ObservedAttempt(row, None), usage=TokenUsage(input_tokens=7, output_tokens=3), response={"id": "r"}
+        )
+    assert row.settled == ["durable_settlement_failed"]

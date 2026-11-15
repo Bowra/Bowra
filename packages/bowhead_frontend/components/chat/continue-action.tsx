@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import type { PeerTerminal } from "@/lib/turn-store";
 import { agentDisplayName } from "./step-list/agent-meta";
 
-const STOP_REASONS = new Set(["step_limit", "time_limit", "tool_call_limit", "no_progress", "budget"]);
+const STOP_REASONS = new Set(["step_limit", "time_limit", "tool_call_limit", "model_call_limit", "no_progress", "budget"]);
 
 export interface ContinueTarget {
   checkpointId: string;

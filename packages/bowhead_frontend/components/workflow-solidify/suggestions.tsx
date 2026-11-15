@@ -54,7 +54,7 @@ function SuggestBody({ compact }: { compact?: boolean }) {
       React.createElement("div", { style: { maxWidth: 620, margin: compact ? "18px auto 0" : "22px auto 0", display: "flex", alignItems: "center", gap: 10,
         padding: "13px 16px", border: "1px solid var(--c-line)", borderRadius: "var(--r-3)", background: "var(--c-surface)", boxShadow: "var(--shadow-2)" } },
         React.createElement("span", { style: { fontSize: "0.875rem", color: "var(--c-ink-4)", flex: 1, fontStyle: "italic" } }, t("placeholder")),
-        React.createElement("span", { style: { width: 32, height: 32, borderRadius: "var(--r-1)", background: "var(--c-ink)", color: "#fff", display: "grid", placeItems: "center", flex: "0 0 auto" } },
+        React.createElement("span", { style: { width: 32, height: 32, borderRadius: "var(--r-1)", background: "var(--c-ink)", color: "var(--c-surface)", display: "grid", placeItems: "center", flex: "0 0 auto" } },
           React.createElement(WfIcon, { name: "arrowUpRight", s: 16, stroke: 2 })))),
     React.createElement("div", { style: { maxWidth: 720, margin: "0 auto", width: "100%" } },
       React.createElement(PartLabel, { icon: "crystal", accent: true, hint: t("pinned_hint") }, t("pinned_label")),

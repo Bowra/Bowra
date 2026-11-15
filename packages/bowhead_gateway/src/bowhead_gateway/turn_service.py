@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from bowhead_core.reference_mcp_metadata import ReferenceMcpMetadataIndex
     from bowhead_core.skill_read_resolution import SkillReadSourceResolver
 
+from bowhead_core._db import WRITER_WAIT_SECONDS, writer_busy
 from bowhead_core.clarification_store import (
     RESUME_CONTEXT_SCHEMA_VERSION,
     resume_context_is_readable,
@@ -49,6 +50,7 @@ from bowhead_core.events import (
     get_event_registry,
     make_steer_ack_event,
 )
+from bowhead_core.session_store import completion_write_open
 from bowhead_core.types import (
     LEGACY_TURN_WORKER_SETTLED_STATUSES,
     normalize_legacy_turn_status,
@@ -56,6 +58,10 @@ from bowhead_core.types import (
 
 _log = logging.getLogger("bowhead_gateway.turn_service")
 _CHAT_DISPATCH_LEASE_SECONDS = 30.0
+#: After its lease deadline, how long a worker may stay inside its own completion
+#: transaction before the monitor treats it as owner loss. That transaction holds the
+#: execution writer lock, so a hung one would block every other Turn's writes.
+_COMPLETION_WRITE_GRACE_SECONDS = 120.0
 LEGACY_CLARIFICATION_SETTLEMENT_WAIT_SECONDS = 7.0
 LEGACY_CLARIFICATION_SETTLEMENT_POLL_SECONDS = 0.05
 
@@ -1608,6 +1614,31 @@ async def spawn_turn(
                         # healthy turn on the first failed heartbeat.
                         if loop.time() < lease_deadline:
                             continue
+                        # While the writer lock is busy nobody can write, so no other owner or
+                        # recovery can have taken the dispatch over either. Keep retrying for as
+                        # long as any write waits for the writer.
+                        if writer_busy(exc) and loop.time() < lease_deadline + WRITER_WAIT_SECONDS - _CHAT_DISPATCH_LEASE_SECONDS:
+                            continue
+                        # The worker's own completion transaction holds the
+                        # execution writer lock: no other owner or recovery can
+                        # take the dispatch over until it ends, so cancelling it
+                        # would only discard a delivered answer.
+                        if completion_write_open(turn_req.turn_id):
+                            if loop.time() < lease_deadline + _COMPLETION_WRITE_GRACE_SECONDS:
+                                _log.warning(
+                                    "turn.dispatch_heartbeat_waits_for_completion turn=%s owner=%s",
+                                    turn_req.turn_id,
+                                    owner_id,
+                                )
+                                continue
+                            # Bounded: a completion transaction this long is hung, and it
+                            # blocks every other Turn's writes; cancelling rolls it back.
+                            _log.error(
+                                "turn.dispatch_completion_write_exceeded_grace turn=%s owner=%s grace_s=%d",
+                                turn_req.turn_id,
+                                owner_id,
+                                _COMPLETION_WRITE_GRACE_SECONDS,
+                            )
                         heartbeat = "lost"
                         recover_expired_after_cancel = True
                     if heartbeat is True:
@@ -2332,6 +2363,62 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
         raise ValueError("clarification_resume_unavailable")
 
 
+async def _restart_ordinary_question_inputs(orchestrator: Any, turn_req: Any) -> None:
+    """Restart Lead from the original request and the saved answers.
+
+    Used when the exact checkpoint cannot continue. It needs only the answered
+    card, the original chat source and current access to its attachments; the
+    checkpoint and its retained helper material are not reopened, so later Lead
+    work may repeat earlier reads. Answers grant no file or operation authority.
+    """
+    import json
+
+    from bowhead_core._db import open_shared_ctx
+    from bowhead_core.ordinary_lead_continuation import require_ordinary_pause_in_tx, typed_answer
+    from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+
+    from bowhead_gateway.chat_attachment_access import validate_chat_attachment_access
+
+    async with open_shared_ctx(orchestrator.session_store.db_path) as db:
+        await db.execute("BEGIN")
+        record = await require_ordinary_pause_in_tx(db, card_id=turn_req.ordinary_clarification_id, answered=True)
+        if (turn_req.team_id, turn_req.user_id, turn_req.workspace_id, turn_req.session_id, turn_req.turn_id) != (
+            record.snapshot.team_id,
+            record.snapshot.user_id,
+            record.snapshot.workspace_id,
+            record.snapshot.session_id,
+            record.snapshot.turn_id,
+        ):
+            raise ValueError("clarification_resume_unavailable")
+        source = await _read_chat_turn_user_source_in_tx(
+            db, turn_id=turn_req.turn_id, expected_user_id=turn_req.user_id, expected_workspace_id=turn_req.workspace_id
+        )
+        if source is None or source.session_id != turn_req.session_id:
+            raise ValueError("clarification_resume_unavailable")
+    answers = list(typed_answer(record).answers)
+    if source.attachment_ids:
+        # The same fence as sending the original message again.
+        await validate_chat_attachment_access(
+            artifact_store=orchestrator.artifact_store,
+            refs=source.attachment_refs,
+            runtime_ids=source.attachment_ids,
+            user_id=turn_req.user_id,
+            workspace_id=turn_req.workspace_id,
+            session_id=turn_req.session_id,
+        )
+    response = {
+        "clarification_id": record.card.request_id,
+        "answers": answers,
+        "skipped": all(answer.get("source") == "skip" for answer in answers),
+        "legacy_selected_values": [],
+    }
+    turn_req.text = source.user_text
+    turn_req.attachments = list(source.attachment_ids)
+    turn_req.ordinary_lead_checkpoint = None
+    turn_req.ordinary_restart = True
+    turn_req.resume_answer_context = json.dumps({"clarification_responses": [response]}, ensure_ascii=False, separators=(",", ":"))
+
+
 async def spawn_resume_turn(
     orchestrator: Any,
     turn_req: Any,
@@ -2413,7 +2500,22 @@ async def spawn_resume_turn(
 
             await hydrate_document_resume_request(session_store, turn_req)
         if getattr(turn_req, "ordinary_clarification_id", None):
-            await _restore_ordinary_question_inputs(orchestrator, turn_req)
+            try:
+                await _restore_ordinary_question_inputs(orchestrator, turn_req)
+            except ValueError as exc:
+                # The exact checkpoint cannot continue (changed or missing retained
+                # work, a released prompt change, a paused deadline). Restart with
+                # the answer instead of leaving the Turn waiting; only a failure of
+                # the restart itself is reported to the user.
+                from bowhead_core.ordinary_lead_runtime import capture_failure_site
+
+                _log.info(
+                    "ordinary_lead.question_restart turn=%s cause=%s failure_site=%s",
+                    turn_req.turn_id,
+                    type(exc).__name__,
+                    capture_failure_site(exc),
+                )
+                await _restart_ordinary_question_inputs(orchestrator, turn_req)
         reference_inputs = await _prepare_reference_bi_resume(orchestrator, turn_req)
         await _restore_bounded_question_inputs(orchestrator, turn_req)
         generation = await advance_generation(

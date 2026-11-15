@@ -13,7 +13,7 @@ from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.skill_bridge import register_skill_tools
 from bowhead_core.subagent import PROFILES
 from bowhead_gateway.routes import clarifications, files
-from test_ordinary_lead_question_http import call, response
+from test_ordinary_lead_question_http import assert_restarted, call, response, review_round
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
@@ -51,7 +51,6 @@ pytestmark = [
         "canvas_changed",
         "output_race",
         "canvas_race",
-        "budget",
     ],
 )
 @pytest.mark.parametrize("helper_count", [1, 2, 3])
@@ -74,7 +73,7 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
         replace(
             PROFILES["lead"],
             tool_whitelist=("subagent_spawn", "clarification_ask", "skill_list"),
-            max_iterations=helper_count + 1 if boundary == "budget" else 8,
+            max_iterations=8,
         ),
     )
     if boundary in {"mixed_failure", "script_recovery"}:
@@ -167,6 +166,8 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
                 "exit_code": 1 if failed else 0,
                 "error": error if failed else None,
                 "stderr": error if failed else "",
+                # The executor's classification: a script error, or a lost reply.
+                "cause": ("execution_failed" if boundary == "script_recovery" else "executor_transport_error") if failed else None,
                 "input_artifacts": input_evidence,
                 "execution": {
                     "contract": "sandbox-execution.v1",
@@ -185,12 +186,16 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
     monkeypatch.setattr(runtime, "run", run)
     register_skill_tools(orch.tool_registry, orch.skill_catalog, runtime)
     lead_calls, helper_calls, closeout_calls = [], [], []
+    review_calls = []
     question = {"question": "Which audience?", "options": [], "type": "free_text"}
 
     async def respond(request):
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             index = len(lead_calls)
             if index <= helper_count:
@@ -203,6 +208,7 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
                         else case.fixture.case.args["reference_start"].profile_name,
                         "task": f"Read the method and calculate twice for inspection {index}.",
                         "delegation_role": "helper",
+                        "required_source_urls": [],
                     },
                 )
             elif index == helper_count + 1:
@@ -230,6 +236,62 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
             closeout_calls.append(body)
             return response(body, {"role": "assistant", "content": ""}, "stop")
         if "subagent_return" in names:
+            if review_round(body):
+                # The helper's own delivery review after a failed call.
+                review_calls.append(body)
+                if boundary == "bundle_rejection":
+                    # Account for the natively rejected bundle read, as a real helper must, so it settles complete.
+                    review = {
+                        "requirements": [
+                            {
+                                "requirement": "Read the method and calculate twice",
+                                "status": "fulfilled",
+                                "expected_outcome": "success",
+                                "evidence_call_ids": ["read-original", "sandbox-original-3", "sandbox-original-4"],
+                            }
+                        ],
+                        "issues": [
+                            {
+                                "call_id": "denied-original",
+                                "resolution": "covered",
+                                "evidence_call_ids": ["read-original"],
+                                "explanation": "The method was read through its granted bundle instead.",
+                            }
+                        ],
+                    }
+                    payload = {"delivery_surface": "chat", "exec_summary": body["messages"][-2]["content"], "delivery_review": review}
+                    return response(body, call("helper-review", "subagent_return", {"payload": payload}), "tool_calls")
+                if (
+                    boundary == "script_recovery"
+                    and asks_after_recovery
+                    and not any("sandbox-original-3" in json.dumps(item) for item in review_calls[:-1] if "subagent_return" in json.dumps(item))
+                ):
+                    # As on 116: the helper accounts for its failed run with the retry, so it completes.
+                    review = {
+                        "requirements": [
+                            {
+                                "requirement": "Read the method and calculate twice",
+                                "status": "fulfilled",
+                                "expected_outcome": "success",
+                                "evidence_call_ids": ["read-original", "sandbox-original-4"],
+                            }
+                        ],
+                        "issues": [
+                            {
+                                "call_id": "sandbox-original-3",
+                                "resolution": "covered",
+                                "evidence_call_ids": ["sandbox-original-4"],
+                                "explanation": "A corrected script produced the calculation.",
+                            }
+                        ],
+                    }
+                    payload = {"delivery_surface": "chat", "exec_summary": body["messages"][-2]["content"], "delivery_review": review}
+                    return response(body, call("helper-review", "subagent_return", {"payload": payload}), "tool_calls")
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
+            if "subagent_return has not been called" in json.dumps(body["messages"][-1].get("content")):
+                # ce9390072: a helper that worked and then closed in prose is told once that it has returned
+                # no result. This helper keeps its prose answer.
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             helper_calls.append(body)
             index = (len(helper_calls) - 1) % 5 + 1
             if index == 1:
@@ -290,6 +352,38 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
         assert accepted.status_code == 200, accepted.text
         turn_id = accepted.json()["turn_id"]
         await settled(turn_id)
+        if boundary == "script_recovery" and asks_after_recovery:
+            # The failed script ran in a container the executor attests as removed,
+            # so the attempt and its partial output are retained like a success.
+            cards = [row for row in rows(case, "clarification_requests") if row["turn_id"] == turn_id]
+            assert len(cards) == 1, [row for row in rows(case, "turns") if row["id"] == turn_id]
+            from bowhead_core._db import open_shared_ctx
+            from bowhead_core.ordinary_lead_continuation import read_ordinary_card_in_tx, reopen_ordinary_checkpoint
+
+            async with open_shared_ctx(case.path) as db:
+                await db.execute("BEGIN")
+                checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=cards[0]["request_id"]))
+            first = checkpoint.helper_materials()[0]["tools"]
+            assert [(item["call_id"], item["kind"]) for item in first] == [
+                ("read-original", "skill_read"),
+                ("sandbox-original-3", "sandbox"),
+                ("sandbox-original-4", "sandbox"),
+            ]
+            assert first[1]["execution"]["settled"] is True and "settled_failure" not in first[1]
+            assert [item["artifact_id"] for item in first[1]["artifacts"] if item["output"]] == [outputs[0].id]
+            answered = await case.client.post(
+                f"/api/v1/clarifications/{cards[0]['request_id']}/resolve",
+                json={"answers": [{"question": question["question"], "source": "custom", "answer": "Board members"}]},
+            )
+            assert answered.status_code == 200, answered.text
+            await settled(turn_id)
+            turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
+            assert turn["status"] == "completed", turn["error"]
+            # Resumed in place: no helper or sandbox call ran again.
+            assert len(executions) == 2 * helper_count
+            assert len(helper_calls) == 5 * helper_count
+            assert len(lead_calls) == helper_count + 3
+            return
         if boundary in {"script_recovery", "receipt_recovery"}:
             turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
             assert turn["status"] == "completed", turn["error"]
@@ -343,7 +437,7 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
         assert len(denied) == 1
         assert ("skill_file_kind_invalid" if boundary == "bundle_rejection" else "isn't included in this Agent") in denied[0]["content"]
         helpers = checkpoint.helper_materials()
-        assert checkpoint.contract == "ordinary-lead-loop.v9"
+        assert checkpoint.contract == "ordinary-lead-loop.v15"
         if boundary in {"settled_failure", "settled_failure_recreated", "mixed_failure"}:
             assert all(helper["outcome"]["status"] == "failed" for helper in helpers)
             assert all(item.result["ok"] is False for item in checkpoint.invocations())
@@ -450,8 +544,14 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
             "classification_race",
             "output_race",
             "canvas_race",
-            "budget",
         }
+        if boundary in {"canvas_changed", "output_deleted", "skill_changed"}:
+            # Changed retained material refuses the exact checkpoint; Lead restarts with the answer.
+            assert answered.status_code == 200, answered.text
+            await settled(turn_id)
+            assert_restarted(case, turn_id, card["request_id"])
+            assert len(executions) == 2 * helper_count and len(helper_calls) == 5 * helper_count
+            return
         assert answered.status_code == (200 if accepted_resume else 409), answered.text
         if accepted_resume:
             await settled(turn_id)
@@ -474,7 +574,10 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
             assert failure["code"] == "clarification_resume_unavailable"
             assert failure["recovery_action"] == "copy_diagnostics"
             assert failure["diagnostics"]["retryable"] is False
-            assert failure["diagnostics"]["safe_detail"] == "phase=clarification_resume_preflight; failure_class=state"
+            # A deleted retained output names its typed cause (0c3747e6c).
+            assert failure["diagnostics"]["safe_detail"] == "phase=clarification_resume_preflight; failure_class=state" + (
+                "; condition=retained_input" if boundary == "output_deleted" else ""
+            )
             assert answered.json()["detail"]["error"]["diagnostics"]["safe_detail"] == failure["diagnostics"]["safe_detail"]
             assert retained["injected_at"] is None and retained["continuation_generation"] is None
             paused = next(row for row in rows(case, "turns") if row["id"] == turn_id)
@@ -495,13 +598,8 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
                 "classification",
                 "classification_race",
             }
-            else 2
-            if boundary == "budget"
             else 1
         )
-        if boundary == "budget":
-            turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
-            assert turn["status"] == "failed"
         if boundary in {"output_race", "canvas_race"}:
             retained = next(row for row in rows(case, "clarification_requests") if row["request_id"] == card["request_id"])
             assert retained["continuation_generation"] is None

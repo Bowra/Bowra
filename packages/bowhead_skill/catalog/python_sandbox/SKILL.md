@@ -77,6 +77,12 @@ data = pd.read_csv(INPUTS["sales"]["path"])
 
 `INPUTS["sales"]["path"]` is an expression, not a literal filename. Do not put the expression itself inside another quoted string. Only declared inputs are staged; files from a previous invocation do not persist. To reuse a previous output, declare its returned `artifact_id` as an input to the next invocation.
 
+- `work_outputs` (default empty): top-level filenames that are work in progress, for example a half-edited
+  `deck.pptx` or `book.xlsx`. A listed file is kept, is returned with an `artifact_id` like any other output, and can
+  be passed to a later call through `inputs`. It is not shown to the user as a result file. Each call starts with an
+  empty `/workdir`, so this is how a file is carried from one call to the next. A `.pptx`, `.xlsx`, `.docx`, `.pdf`
+  or `.html` written at the top level and not listed here becomes a result file.
+
 ## Input schema (π K)
 
 With schema previews enabled, inspect `INPUTS["<input_name>"]` before using a table. `<input_name>` is the key you chose; it is not necessarily `rows` or `sales`.

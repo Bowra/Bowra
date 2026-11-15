@@ -1,4 +1,4 @@
-"""Confirmation cards attached to the waiting tool step (FEATURE_INLINE_TOOL_CONFIRMATION)."""
+"""Confirmation cards attached to the waiting tool step."""
 
 from __future__ import annotations
 
@@ -63,8 +63,7 @@ def _callbacks(ctx: ToolExecutionContext):
 
 
 @pytest.mark.asyncio
-async def test_queue_announces_once_and_reports_each_outcome(monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
+async def test_queue_announces_once_and_reports_each_outcome() -> None:
     for decide, outcome in (
         (lambda q, i: q.decide("usr_a", i, True), "approved"),
         (lambda q, i: q.decide("usr_a", i, True, for_session=True), "approved_session"),
@@ -95,8 +94,7 @@ async def test_queue_announces_once_and_reports_each_outcome(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_expiry_is_reported_and_cancellation_or_refusal_emits_nothing_more(monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
+async def test_expiry_is_reported_and_cancellation_or_refusal_emits_nothing_more() -> None:
     bus = _Bus()
     on_pending, on_resolved = _callbacks(_ctx(bus))
     queue = DeliveryConfirmations(id_prefix="esc", timeout_seconds=0.05)
@@ -131,9 +129,8 @@ async def test_expiry_is_reported_and_cancellation_or_refusal_emits_nothing_more
 
 
 @pytest.mark.asyncio
-async def test_no_card_without_the_switch_a_step_or_a_working_bus(monkeypatch) -> None:
-    for switch, ctx in (("0", _ctx(_Bus())), ("1", _ctx()), ("1", _ctx(_Bus(fail=True)))):
-        monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", switch)
+async def test_no_card_without_a_step_or_a_working_bus() -> None:
+    for ctx in (_ctx(), _ctx(_Bus(fail=True))):
         on_pending, on_resolved = _callbacks(ctx)
         queue = DeliveryConfirmations(id_prefix="esc", timeout_seconds=5)
         waiting = asyncio.create_task(
@@ -165,7 +162,6 @@ def _mcp(name: str, annotations: dict) -> object:
 @pytest.mark.asyncio
 async def test_team_mcp_card_follows_the_waiting_call(monkeypatch) -> None:
     monkeypatch.setenv("FEATURE_TEAM_TOOL_CONFIRMATION", "1")
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
     queue = TeamToolConfirmations(timeout_seconds=5)
     monkeypatch.setattr(confirmation_mod, "_default", queue)
     entries = [_mcp("lookup", {"readOnlyHint": True}), _mcp("create_note", {"readOnlyHint": False, "destructiveHint": False})]

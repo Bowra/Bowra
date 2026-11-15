@@ -59,6 +59,25 @@ _UNIT_MAP = {
     "B": 1e9,
     "T": 1e12,
 }
+# Regression check L5 (the original regression): "订单量……同比下降 1.57%" states the sign with a word, the source holds -0.01566,
+# and the report flagged a correct number. A decrease word right before an unsigned number also lets it match the
+# negative value. Without such a word only the stated sign is matched, so a reversed direction ("增长 1.57%") is not.
+_DECREASE_BEFORE = re.compile(r"(?:下降|下滑|下跌|减少|降低|回落|缩小|缩减|萎缩|decreased?|declined?|dropped|fell|down)(?:了|约|約|近|by|\s)*$", re.I)
+
+
+def _inside_identifier(text: str, start: int) -> bool:
+    """True when a match begins right after an ASCII letter or underscore, i.e. inside an identifier.
+
+    Regression check (the original regression): a narrative's figure anchor `[figure:sec_ebe854594062]` showed
+    "854594062" as a number not found in the data. Digits glued to an identifier are not a stated
+    number; `report_writer_loop._MARK_NUM_RE` already excludes them ("art_123").
+    """
+    if start <= 0:
+        return False
+    prev = text[start - 1]
+    return prev == "_" or (prev.isascii() and prev.isalpha())
+
+
 # Ignore years, small integers (top N rankings / step numbers), and integer percentages, e.g. "3 条".
 _YEAR_LO, _YEAR_HI = 1900, 2100
 _IGNORE_INT_LE = 100
@@ -152,6 +171,8 @@ def verify_numbers_in_text(
     unauth: list[tuple[str, float]] = []
     contexts: list[str] = []
     for m in _NUM_RE.finditer(text):
+        if _inside_identifier(text, m.start()):
+            continue
         raw = m.group(0)
         try:
             v = float(raw.replace(",", ""))
@@ -187,11 +208,14 @@ def verify_numbers_in_text(
             # ⇒ Fixed tolerances by magnitude fail at both ends; judge written precision instead.
             # The old rel_tol=0.05 was too loose (9.99亿 vs 9.80亿, a 1.94% difference, passed),
             # yet the spacing bug above accidentally restored some rejection; fix both issues in the same batch.
-            ok = any(is_faithful_rounding(v, a) or is_faithful_rounding(scaled, a) for a in authorized)
+            stated = (v, scaled)
+            if v > 0 and _DECREASE_BEFORE.search(text[max(0, m.start() - 16) : m.start()]):
+                stated = (v, scaled, -v, -scaled)
+            ok = any(is_faithful_rounding(value, a) for value in stated for a in authorized)
             # Derived-number fallback: accept simple derivations from two authorized values (a/b-1, a-b, a×b%).
             # For example, a year-over-year rate of 0.08 can derive from 60.50亿/60.45亿-1.
             if not ok:
-                ok = _is_derivable(v, authorized) or _is_derivable(scaled, authorized)
+                ok = any(_is_derivable(value, authorized) for value in stated)
         else:
             ok = False  # No tool data means no numbers.
         if not ok:

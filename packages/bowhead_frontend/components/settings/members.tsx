@@ -18,6 +18,7 @@ import { Notice } from "@/components/ui/notice";
 import { ListRow, ListRows, useListRowsLayout } from "@/components/ui/list-rows";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { TableFrame } from "@/components/ui/table-frame";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Role = "admin" | "member" | "viewer";
 type Member = { user_id: string; role: Role; joined_at: string; email?: string; display_name?: string | null };
@@ -90,7 +91,7 @@ export function SettingsMembers() {
       if (revision !== loadRevision.current || currentSpace.current !== selectedWs) return;
       const key = spaceMemberErrorKey(caught);
       setErrorCause(caught);
-      setError(key === "err_generic" ? t("load_failed", { err: "" }) : t(key));
+      setError(key === "err_generic" ? withHttpFailureReason(t("load_failed", { err: "" }), caught, { read: true }) : t(key));
     }
   }, [ready, selectedWs, t]);
   useEffect(() => { void load(); }, [load]);

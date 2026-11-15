@@ -81,10 +81,6 @@ class BindingInput(BaseModel):
     version: int = Field(ge=0)
 
 
-class DecisionInput(BaseModel):
-    decision: Literal["approve", "approve_session", "reject"]
-
-
 @router.get("/capabilities")
 async def capabilities(request: Request, user: User = Depends(_current_user)) -> dict[str, bool]:
     enabled = await feature_license_checker(request.app, "mcp")(user.team_id)
@@ -270,15 +266,6 @@ async def bind(
         raise _error(exc) from None
 
 
-@router.get("/calls/confirmations", dependencies=[Depends(_enabled)])
-async def pending(response: Response, user: User = Depends(_current_user), registry: PersonalMcpStore = Depends(_registry)) -> dict[str, Any]:
-    response.headers["Cache-Control"] = "private, no-store"
-    try:
-        return {"confirmations": await registry.pending(user.id)}
-    except PersonalMcpError as exc:
-        raise _error(exc) from None
-
-
 @router.get("/calls/history", dependencies=[Depends(_enabled)])
 async def history(response: Response, user: User = Depends(_current_user), registry: PersonalMcpStore = Depends(_registry)) -> dict[str, Any]:
     response.headers["Cache-Control"] = "private, no-store"
@@ -295,10 +282,14 @@ async def history(response: Response, user: User = Depends(_current_user), regis
     return {"calls": calls}
 
 
-@router.post("/calls/{invocation_id}/decision", dependencies=[Depends(_enabled)])
-async def decide(
-    invocation_id: str, body: DecisionInput, user: User = Depends(_current_user), registry: PersonalMcpStore = Depends(_registry)
+async def decide_call(
+    invocation_id: str, decision: Literal["approve", "approve_session", "reject"], *, user: User, registry: PersonalMcpStore
 ) -> dict[str, Any]:
+    """Decide one of the owner's pending calls; ``/api/v1/tool-confirmations`` is the only caller.
+
+    Approval revalidates the binding and the tool against the Turn's manifest first; a failed
+    revalidation denies the call.
+    """
     await registry.expire(user.id)
     rows = await registry.rows("SELECT * FROM personal_mcp_invocation WHERE id=? AND owner_user_id=?", (invocation_id, user.id))
     if not rows:
@@ -307,7 +298,7 @@ async def decide(
     if row["status"] != "pending":
         raise HTTPException(409, "personal_mcp_confirmation_unavailable")
     try:
-        if body.decision in {"approve", "approve_session"}:
+        if decision in {"approve", "approve_session"}:
             manifests = await registry.rows(
                 "SELECT * FROM personal_mcp_manifest WHERE turn_id=? AND execution_id=? AND owner_user_id=?",
                 (row["turn_id"], row["execution_id"], user.id),
@@ -335,13 +326,13 @@ async def decide(
                 datarc=None,
             )
             await registry.revalidate(user.id, manifest, tool, ctx)
-        if body.decision == "approve_session":
+        if decision == "approve_session":
             success = await registry.approve_for_session(user.id, invocation_id, scope["id"])
         else:
-            success = await registry.transition(user.id, invocation_id, "pending", "approved" if body.decision == "approve" else "rejected")
+            success = await registry.transition(user.id, invocation_id, "pending", "approved" if decision == "approve" else "rejected")
         if not success:
             raise HTTPException(409, "personal_mcp_confirmation_unavailable")
-        return {"id": invocation_id, "status": "approved" if body.decision in {"approve", "approve_session"} else "rejected"}
+        return {"id": invocation_id, "status": "approved" if decision in {"approve", "approve_session"} else "rejected"}
     except PersonalMcpError as exc:
         await registry.transition(user.id, invocation_id, "pending", "denied")
         raise _error(exc) from None

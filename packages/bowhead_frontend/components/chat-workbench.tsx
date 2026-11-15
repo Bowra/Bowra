@@ -46,6 +46,7 @@ import { SteerMessage, formatSteerTime } from "./chat/step-list/SteerMessage";
 import { TurnStream } from "./chat/turn-stream";
 import { V2Composer } from "./chat/v2-composer";
 import { ComposerRecoveryNotice } from "./chat/composer-recovery-notice";
+import { ToolConfirmationNoticeSlot } from "./chat/tool-confirmation/ToolConfirmationNotice";
 import { PinnedAttachmentsStrip } from "./pinned-attachments";
 import { SplitPane } from "./shell/SplitPane";
 import { FileDown, Maximize, Minimize, MoreH, Trash, X, Caret, Chat, Doc } from "./icons";
@@ -66,6 +67,7 @@ import {
 import { useReportSurfaceSections, useVisibleSections } from "@/lib/use-canvas-derived-sections";
 import { useCanvasExport } from "@/lib/use-canvas-export";
 import { ExportMenu, ExportMenuItems, ExportToast, ExportsDrawer } from "@/components/canvas/export-ui";
+import { FileVersionsDrawer } from "@/components/canvas/file-versions-drawer";
 import { ActiveReportStatusMenuItems } from "@/components/canvas/report-status";
 import {
   MenuFloating,
@@ -106,6 +108,11 @@ import {
 import { useResultsQuery } from "@/lib/use-results-query";
 import { useResultsQuickQuery } from "@/lib/use-results-quick-query";
 import type { ResultItemDTO } from "@/lib/results-api";
+import {
+  isEarlierFileVersion,
+  loadEarlierFileVersion,
+  type EarlierFileVersion,
+} from "@/lib/results-file-versions";
 import {
   clearResultsRoute,
   isStableResultToken,
@@ -159,6 +166,7 @@ import {
 import { LucideGlyph } from "@/components/icon-refresh";
 import { CharIcon } from "@/components/char-icon";
 import { HighlightedCode } from "@/components/highlighted-code";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Three-state split gate (P2 batch 4: from 1024). */
 const DESKTOP_SPLIT_QUERY = "(min-width: 1024px)";
@@ -724,6 +732,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   }, [reportEditing]);
   const [exportPreparing, setExportPreparing] = useState(false);
   const [exportsDrawerOpen, setExportsDrawerOpen] = useState(false);
+  // File versions (R2): the versions list of the selected Results file (owner Results only).
+  const [fileVersionsArtifactId, setFileVersionsArtifactId] = useState<string | null>(null);
   // layout-redesign v10 canvas header: two header dropdowns (export · more).
   // Pure chrome state — the underlying export/clear/delete/history handlers are unchanged.
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -1441,8 +1451,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         if (!active || controller.signal.aborted) return;
         if (scope) { reference = { ...reference, selectedContext: scope }; setComposerPrefill(question); setChartFollowupReveal((count) => count + 1); }
         setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId) ? current.map((ref) => ref.fileId === reference.fileId ? reference : ref) : [...current, reference]);
-      }).catch(() => {
-        if (active && !controller.signal.aborted) toast({ kind: "error", text: tChat("chart_followup_unavailable") });
+      }).catch((cause: unknown) => {
+        if (active && !controller.signal.aborted) {
+          toast({ kind: "error", text: withHttpFailureReason(tChat("chart_followup_unavailable"), cause) });
+        }
       });
     });
     return () => { active = false; pending?.abort(); stop(); };
@@ -1715,15 +1727,53 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const resultsNavigatorItems = completeResultsActive
     ? completeNavigationItems
     : legacyResultItems;
+  // An earlier chat card of a revised file opens the version it delivered
+  // (file versions R2); Results lists that file once, showing its latest version.
+  const [earlierFileVersion, setEarlierFileVersion] = useState<EarlierFileVersion | null>(null);
+  const focusedEarlierFileVersion = completeResultsActive
+    && earlierFileVersion
+    && earlierFileVersion.sessionId === resultsArtifactSessionId
+    && earlierFileVersion.item.id === dataFocusArtifactId
+    ? earlierFileVersion
+    : null;
   const resultArtifactsForViewer = useMemo(
     () => completeResultsActive
-      ? completeCatalogItems.flatMap((item) => (
-          item.artifactItem ? [item.artifactItem] : []
-        ))
+      ? [
+          ...completeCatalogItems.flatMap((item) => (
+            item.artifactItem ? [item.artifactItem] : []
+          )),
+          ...(focusedEarlierFileVersion ? [focusedEarlierFileVersion.item] : []),
+        ]
       : resultArtifacts,
-    [completeCatalogItems, completeResultsActive, resultArtifacts],
+    [completeCatalogItems, completeResultsActive, focusedEarlierFileVersion, resultArtifacts],
   );
   const [failedResultLocateKey, setFailedResultLocateKey] = useState<string | null>(null);
+  const locateFocusedArtifact = useCallback(async (
+    artifactId: string,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const located = await completeResults.locate(`artifact:${artifactId}`);
+    if (signal.aborted) return;
+    if (!located) {
+      setFailedResultLocateKey(artifactId);
+      return;
+    }
+    if (!isEarlierFileVersion(artifactId, located) || !resultsArtifactSessionId) return;
+    try {
+      const version = await loadEarlierFileVersion({
+        artifactId,
+        entry: located,
+        scope: resultsArtifactScope,
+        sessionId: resultsArtifactSessionId,
+        signal,
+      });
+      if (signal.aborted) return;
+      if (version) setEarlierFileVersion(version);
+      else setFailedResultLocateKey(artifactId);
+    } catch {
+      if (!signal.aborted) setFailedResultLocateKey(artifactId);
+    }
+  }, [completeResults.locate, resultsArtifactScope, resultsArtifactSessionId]);
   const selectedArtifactKnown = !dataFocusArtifactId
     || Boolean(resultArtifactsForViewer?.some((item) => item.id === dataFocusArtifactId));
   const explorerOwnsSelectedArtifact = explorerOwnsArtifactSelection({
@@ -1748,20 +1798,15 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       setFailedResultLocateKey(null);
       return;
     }
-    const artifactId = dataFocusArtifactId;
-    let active = true;
+    const controller = new AbortController();
     setFailedResultLocateKey(null);
-    void completeResults.locate(`artifact:${artifactId}`).then((located) => {
-      if (active && !located) setFailedResultLocateKey(artifactId);
-    });
-    return () => {
-      active = false;
-    };
+    void locateFocusedArtifact(dataFocusArtifactId, controller.signal);
+    return () => controller.abort();
   }, [
-    completeResults.locate,
     completeResultsActive,
     dataFocusArtifactId,
     explorerOwnsSelectedArtifact,
+    locateFocusedArtifact,
     selectedArtifactKnown,
   ]);
   const locatingSelectedArtifact = completeResultsActive
@@ -1777,15 +1822,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       retryResultArtifacts();
       return;
     }
-    const artifactId = dataFocusArtifactId;
     setFailedResultLocateKey(null);
-    void completeResults.locate(`artifact:${artifactId}`).then((located) => {
-      if (!located) setFailedResultLocateKey(artifactId);
-    });
+    void locateFocusedArtifact(dataFocusArtifactId, new AbortController().signal);
   }, [
-    completeResults.locate,
     completeResultsActive,
     dataFocusArtifactId,
+    locateFocusedArtifact,
     retryResultArtifacts,
   ]);
   const resultsNavigatorListState = completeResultsActive
@@ -1974,6 +2016,14 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       : selectedTab === "sql"
         ? { type: "code" }
         : { type: "report" };
+  // An earlier version open in the viewer selects its file's entry in Results.
+  const earlierVersionEntry = focusedEarlierFileVersion
+    ? resultItems.find((item) => item.key === focusedEarlierFileVersion.entryKey)
+    : undefined;
+  const resultsLookupSelection: ResultsSelection =
+    resultsSelection.type === "artifact" && earlierVersionEntry?.route.type === "artifact"
+      ? { type: "artifact", artifactId: earlierVersionEntry.route.artifactId }
+      : resultsSelection;
   const resultsExplorerDetailOpen = Boolean(
     resultsCapabilities.scaleNav
     && resultsSurface === "explorer"
@@ -1985,7 +2035,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     : resultsChooserAvailable && selectedTab === "report" && !resultsRouteUnavailable
       ? resultsT("title")
     : resultsSelectionTitle(
-        resultsSelection,
+        resultsLookupSelection,
         resultItems,
         {
           report: currentReportTitle,
@@ -2000,7 +2050,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       );
   const selectedResult = resultsSurface === "explorer" && !resultsExplorerDetailOpen
     ? undefined
-    : resolveSelectedResult(resultItems, resultsSelection);
+    : resolveSelectedResult(resultItems, resultsLookupSelection);
   const selectedResultKey = selectedResult?.key ?? null;
   const purgeResultsRecent = useCallback(() => {
     if (resultsRecentScope) clearRecentResults(resultsRecentScope);
@@ -2997,6 +3047,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             onAbandon={onAbandonRecoveredSubmission}
           />
         ) : null}
+        {/* Waiting tool confirmations elsewhere dock here, above the composer, instead of
+            floating over its Send/Stop button. Inactive while this column is hidden. */}
+        <ToolConfirmationNoticeSlot active={!(hasRightPane && canvasMaximized)} />
         <V2Composer
           onInputInteraction={onCanvasInteraction}
           surface="workbench"
@@ -3480,7 +3533,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         : undefined}
       onOpenArtifactHistory={selectedResult?.version
         ? () => setExportsDrawerOpen(true)
-        : undefined}
+        : selectedResult?.lineage && selectedResult.lineage.count > 1 && selectedResult.stableId && !reportOnly
+          ? () => setFileVersionsArtifactId(selectedResult.stableId)
+          : undefined}
       onOpenFailed={recordResultOpenFailure}
     />
   );
@@ -3690,7 +3745,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                   items={resultsNavigatorItems}
                   open={resultsNavigatorOpen}
                   query={resultsNavigatorQuery}
-                  selection={resultsSelection}
+                  selection={resultsLookupSelection}
                   canPin={resultsCanPin}
                   listState={resultsNavigatorListState}
                   onPinnedChange={setResultsNavigatorPin}
@@ -3782,6 +3837,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           onRetryDefaultTheme={exportCtl.retryWithDefaultTheme}
           onOpenHistory={() => setExportsDrawerOpen(true)}
         />
+        <FileVersionsDrawer
+          sessionId={reportOnly ? null : runner.sessionId}
+          artifactId={fileVersionsArtifactId}
+          open={fileVersionsArtifactId !== null}
+          onClose={() => setFileVersionsArtifactId(null)}
+        />
         <ExportsDrawer
           canvasId={canvas.canvasId}
           open={exportsDrawerOpen}
@@ -3797,7 +3858,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             items={resultsNavigatorItems}
             open
             query={resultsNavigatorQuery}
-            selection={resultsSelection}
+            selection={resultsLookupSelection}
             presentation="pinned"
             canPin
             listState={resultsNavigatorListState}
@@ -3821,7 +3882,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             items={resultsNavigatorItems}
             open
             query={resultsNavigatorQuery}
-            selection={resultsSelection}
+            selection={resultsLookupSelection}
             presentation="mobile"
             listState={resultsNavigatorListState}
             onClose={() => setResultsMobileListOpen(false)}

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { CardStatus, useCiFormat } from "./agent-ci-shared";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /**
  * Eval credibility R14: the Owner picks past questions they asked this Agent, or Turns members shared
@@ -48,7 +49,7 @@ export function AgentEvalConversationPicker({
     void listAgentEvalConversationCandidates(agentId).then((value) => {
       setItems(value.items);
       setMax(value.max_selection);
-    }).catch((cause) => setError({ message: t("eval_conversations_load_failed"), cause, retry: () => load() }));
+    }).catch((cause) => setError({ message: withHttpFailureReason(t("eval_conversations_load_failed"), cause, { read: true }), cause, retry: () => load() }));
   };
   useEffect(() => load(), [agentId]); // eslint-disable-line react-hooks/exhaustive-deps
 

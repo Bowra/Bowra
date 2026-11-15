@@ -227,6 +227,27 @@ def _require_settled_returns(helper: ToolInvocation, state: OrdinaryLeadRunState
             raise OrdinaryContinuationUnavailable()
 
 
+def blocked_before_work(state: OrdinaryLeadRunState | None, inv: ToolInvocation) -> bool:
+    """A call refused before any work started (premature return, revision-scope question).
+
+    It ran no helper and keeps no binding, so it never decides whether a question needs a
+    durable pause. The exact recorded result must match; a changed result is not exempt.
+    """
+    return state is not None and state.blocked_calls.get(inv.call_id) == content_hash(
+        {"tool": inv.tool_name, "arguments": inv.arguments, "result": inv.result}
+    )
+
+
+def capture_failure_site(exc: BaseException) -> str:
+    """Name the innermost frame that refused, without any request content."""
+    failure = exc.__traceback__
+    while failure is not None and failure.tb_next is not None:
+        failure = failure.tb_next
+    if failure is None:
+        return "unknown"
+    return f"{failure.tb_frame.f_globals.get('__name__', 'unknown')}.{failure.tb_frame.f_code.co_name}:{failure.tb_lineno}"
+
+
 async def capture_ordinary_lead_loop(
     *,
     ctx: ToolExecutionContext,
@@ -257,10 +278,15 @@ async def capture_ordinary_lead_loop(
 
         knowledge_read = KnowledgeReadState()
     retained_knowledge = knowledge_read is not None or bool(state and state.knowledge_sources) or navigation_used
+
+    def blocked(inv: ToolInvocation) -> bool:
+        return blocked_before_work(state, inv)
+
     # Effect-free questions still use the existing bounded contract. An
     # unsupported post-helper pause must not pretend it can restart safely.
     if not navigation_used and not any(
-        inv.tool_name == "subagent_spawn" or (retained_knowledge and inv.tool_name in KNOWLEDGE_READ_TOOLS) for inv in invocations
+        (inv.tool_name == "subagent_spawn" and not blocked(inv)) or (retained_knowledge and inv.tool_name in KNOWLEDGE_READ_TOOLS)
+        for inv in invocations
     ):
         return None
     if state is None or state.checkpoint is not None:
@@ -278,31 +304,12 @@ async def capture_ordinary_lead_loop(
     helpers = prefix
     if prefix and empty_lookup_before_question([prefix[0], question], getattr(ctx, "document_turn_state", None)):
         helpers = prefix[1:]
-    helpers = [
-        inv
-        for inv in helpers
-        if state.blocked_calls.get(inv.call_id) != content_hash({"tool": inv.tool_name, "arguments": inv.arguments, "result": inv.result})
-    ]
+    helpers = [inv for inv in helpers if not blocked(inv)]
     if collaboration is not None:
         helpers = [inv for inv in helpers if inv.tool_name != "agent_message"]
     # Lead's own settled calls stay in its transcript and are never rerun.
     lead_calls = [inv for inv in helpers if retained_lead_call(inv)]
     helpers = [inv for inv in helpers if not retained_lead_call(inv)]
-    if (
-        helpers
-        and len(state.helper_bindings) != len(helpers)
-        and any(
-            inv.tool_name == "subagent_spawn"
-            and not inv.nested
-            and isinstance(inv.result, dict)
-            and inv.result.get("error_kind") == "invalid_args"
-            and inv.result.get("reason_code") == "revise_scope_unresolved"
-            for inv in helpers
-        )
-    ):
-        raise OrdinaryQuestionUnavailable(
-            "No question card was created after a rejected revision scope. Preserve confirmed earlier results and explain any remaining input needed in your answer."
-        )
     if any(helper.tool_name != "subagent_spawn" for helper in helpers):
         raise OrdinaryQuestionUnavailable(
             "No question was created because the current Tool sequence cannot be retained for a durable pause. "
@@ -350,11 +357,19 @@ async def capture_ordinary_lead_loop(
         if len(by_dispatch) != len(bindings) or len(set(dispatch_keys)) != len(dispatch_keys) or set(by_dispatch) != set(dispatch_keys):
             raise OrdinaryContinuationUnavailable()
         bindings = [by_dispatch[key] for key in dispatch_keys]
-    from bowhead_core.ordinary_lead_material import _artifact_metadata_hash, retained_read_tool, retained_sandbox_inputs, retained_tool_materials
+    from bowhead_core.ordinary_lead_material import (
+        _artifact_metadata_hash,
+        retained_canvas_tool,
+        retained_read_tool,
+        retained_sandbox_inputs,
+        retained_tool_materials,
+    )
 
-    # Read-only observations use the same extended envelope as attachment reads.
+    # Read-only and Canvas observations use the same extended envelope as attachment reads.
     has_attachment_reads = bool(lead_calls) or any(
-        child.tool_name == "attachment_read" or retained_read_tool(child.tool_name) for helper in helpers for child in helper.nested
+        child.tool_name == "attachment_read" or retained_read_tool(child.tool_name) or retained_canvas_tool(child.tool_name)
+        for helper in helpers
+        for child in helper.nested
     )
     extended_outcomes = has_attachment_reads or any(
         binding.get("source_kind") == "system" or helper.result.get("ok") is False
@@ -503,7 +518,7 @@ async def capture_ordinary_lead_loop(
 
     material["canvas"] = await canvas_evidence(
         ctx,
-        contract="ordinary-lead-loop.v10" if has_retained_context else "ordinary-lead-loop.v3",
+        contract="ordinary-lead-loop.v15" if state.observed_inputs else "ordinary-lead-loop.v10" if has_retained_context else "ordinary-lead-loop.v3",
         tool_inputs=retained_sandbox_inputs(helper_materials),
     )
     context = {
@@ -596,17 +611,12 @@ async def capture_ordinary_lead_loop(
     try:
         checkpoint.encode()
     except OrdinaryContinuationUnavailable as exc:
-        failure = exc.__traceback__
-        while failure is not None and failure.tb_next is not None:
-            failure = failure.tb_next
         logger.info(
-            "ordinary_lead.question_capture_unavailable turn=%s next_iteration=%d max_iterations=%d failure_site=%s.%s:%d",
+            "ordinary_lead.question_capture_unavailable turn=%s next_iteration=%d max_iterations=%d failure_site=%s",
             ctx.turn_id,
             checkpoint.next_iteration,
             checkpoint.max_iterations,
-            failure.tb_frame.f_globals.get("__name__", "unknown") if failure is not None else "unknown",
-            failure.tb_frame.f_code.co_name if failure is not None else "unknown",
-            failure.tb_lineno if failure is not None else 0,
+            capture_failure_site(exc),
         )
         # Resource and worker checks above remain authoritative. An existing
         # envelope's representation limits do not invalidate live execution.
@@ -716,6 +726,16 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
 
 
 async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) -> None:
+    restart_card_id = getattr(ctx, "ordinary_restart_card_id", None)
+    if restart_card_id:
+        # The answer restarts Lead from the original request. Mark the card used
+        # before any provider or Tool work, exactly as an exact resume does.
+        async with open_shared_ctx(ctx.session_store.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await consume_ordinary_resume_in_tx(db, worker=worker_identity(ctx), card_id=restart_card_id)
+            await db.commit()
+        logger.info("ordinary_lead.question_restarted turn=%s card=%s", ctx.turn_id, restart_card_id)
+        return
     state = getattr(ctx, "ordinary_lead_state", None)
     if state is None or state.checkpoint is None:
         return

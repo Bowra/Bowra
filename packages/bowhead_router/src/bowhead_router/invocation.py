@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import sqlite3
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar, Token
@@ -21,6 +23,8 @@ from bowhead_router.errors import InvocationOutcomeUnknownError, LLMTargetFailur
 from bowhead_router.input_admission import LLMInputAdmissionError, admit_dispatch_input
 from bowhead_router.request_record import record_request
 from bowhead_router.types import LLMRequest, TokenUsage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +95,35 @@ def physical_observation_active() -> bool:
     return _CURRENT_OBSERVER.get() is not None
 
 
+#: Waits between attempts to settle a usage row whose first settlement hit a storage error: about
+#: fifteen minutes in all. A row never settled stays ``pending`` and is logged as abandoned.
+_LATE_SETTLEMENT_DELAYS = (1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 300.0)
+_LATE_SETTLEMENTS: set[asyncio.Task[None]] = set()
+
+
+def _settle_later(observation: PhysicalInvocationAttempt, *, usage: TokenUsage, response_digest: str, error: BaseException) -> None:
+    identity = getattr(observation, "identity", None)
+    logger.warning("physical_usage.settlement_deferred receipt=%s error=%s", identity, type(error).__name__)
+
+    async def settle() -> None:
+        for attempt, delay in enumerate(_LATE_SETTLEMENT_DELAYS, 1):
+            await asyncio.sleep(delay)
+            try:
+                await observation.complete(usage=usage, response_digest=response_digest)
+            except sqlite3.OperationalError:
+                continue
+            except Exception as failure:
+                logger.error("physical_usage.late_settlement_refused receipt=%s error=%s", identity, type(failure).__name__)
+                return
+            logger.info("physical_usage.settled_late receipt=%s attempts=%d", identity, attempt)
+            return
+        logger.error("physical_usage.late_settlement_abandoned receipt=%s attempts=%d", identity, len(_LATE_SETTLEMENT_DELAYS))
+
+    task = asyncio.create_task(settle())
+    _LATE_SETTLEMENTS.add(task)
+    task.add_done_callback(_LATE_SETTLEMENTS.discard)
+
+
 class _ObservedAttempt:
     """Observe the existing authority attempt without replacing its decisions."""
 
@@ -111,7 +144,15 @@ class _ObservedAttempt:
         try:
             allowed = self.authority is None or await self.authority.complete(usage=usage, response_digest=response_digest)
         finally:
-            recorded = await self.observation.complete(usage=usage, response_digest=response_digest)
+            try:
+                recorded = await self.observation.complete(usage=usage, response_digest=response_digest)
+            except sqlite3.OperationalError as error:
+                # The provider answered and the response is in hand; only the usage row could not be
+                # written. Keep the response and settle the row afterwards instead of discarding the
+                # call as outcome-unknown (116 t_fb8f7054b786 lost a 13-minute helper run this way).
+                # A settlement conflict is not a storage error and still fails the call.
+                _settle_later(self.observation, usage=usage, response_digest=response_digest, error=error)
+                recorded = True
         return allowed and recorded
 
     async def unknown(self, *, reason_code: str) -> None:

@@ -40,14 +40,14 @@ Si vous décochez des outils actuellement importés, Bowra affiche d’abord l�
 
 ## Confirmer chaque appel pouvant modifier des données
 
-Lorsque votre déploiement active la confirmation des appels, Bowra demande au membre qui a lancé une tâche de confirmer avant d’appeler un outil MCP susceptible de modifier des données. La fenêtre affiche la source d’outils, l’outil, sa description, si l’outil écrit des données, en supprime ou n’a pas de catégorie connue, et tous les arguments qui seront envoyés :
+Lorsque votre déploiement active la confirmation des appels, Bowra demande au membre qui a lancé une tâche de confirmer avant d’appeler un outil MCP susceptible de modifier des données. La confirmation apparaît dans la conversation sous l’étape en attente et affiche la source d’outils, l’outil, sa description, si l’outil écrit des données, en supprime ou n’a pas de catégorie connue, et tous les arguments qui seront envoyés :
 
 - **Autoriser cet appel** exécute cet appel une fois avec les arguments affichés.
 - **Toujours autoriser dans cette conversation** autorise aussi les appels suivants au même outil dans la conversation actuelle. L’autorisation prend fin avec la conversation ou lorsque la définition de l’outil change.
 - **Refuser et passer** n’exécute pas l’appel.
 - Sans décision dans les trois minutes, l’appel est ignoré.
 
-Si votre déploiement active la confirmation dans la conversation, la demande apparaît sous l’étape en attente au lieu d’une fenêtre, puis reste affichée sous forme d’une ligne indiquant votre décision. Si vous êtes sur une autre page, un avis mène à la conversation et le titre de l’onglet indique le nombre d’actions en attente.
+Après votre décision, la demande reste dans la conversation sous forme d’une ligne indiquant votre décision. Si vous êtes sur une autre page, un avis mène à la conversation et le titre de l’onglet indique le nombre d’actions en attente.
 
 Les outils que le service indique comme en lecture seule s’exécutent sans demande. Un outil indiqué à la fois comme en lecture seule et comme supprimant des données est traité comme non indiqué. Les outils indiqués comme écrivant ou supprimant des données peuvent alors être sélectionnés pour les Agents et sont confirmés à chaque appel. Les outils sans indication ne peuvent être sélectionnés pour les Agents qu’après la confirmation de leur catégorie par un propriétaire ou un administrateur ; lorsque l’assistant les utilise, chaque appel est confirmé. Chaque appel utilise le compte avec lequel la source a été connectée et agit donc avec ce compte pour tous les membres. Les tâches planifiées n’ont personne pour confirmer : leurs appels à ces outils sont ignorés.
 

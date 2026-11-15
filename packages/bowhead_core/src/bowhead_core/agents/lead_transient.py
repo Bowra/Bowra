@@ -143,7 +143,9 @@ def init_lead_transient(
         ctx._resume_turn_id = _resume_turn_id  # type: ignore[attr-defined]
         ctx._resume_glossary = _resume_glossary or {}  # type: ignore[attr-defined]
         ctx._resume_answer_context = getattr(request, "resume_answer_context", None)  # type: ignore[attr-defined]
-        if getattr(request, "ordinary_clarification_id", None):
+        if getattr(request, "ordinary_clarification_id", None) and getattr(request, "ordinary_restart", False):
+            ctx.ordinary_restart_card_id = request.ordinary_clarification_id  # type: ignore[attr-defined]
+        elif getattr(request, "ordinary_clarification_id", None):
             from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadRunState
 
             checkpoint = request.ordinary_lead_checkpoint

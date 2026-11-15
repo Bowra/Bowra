@@ -10,7 +10,7 @@ from bowhead_core.space_governance import SpaceOperation
 from fastapi import HTTPException, Request
 
 from bowhead_gateway.access_context import AccessContextError, build_access_context, has_workspace_access_source
-from bowhead_gateway.files_sharing import shared_artifact_ids
+from bowhead_gateway.files_sharing import file_granted, shared_artifact_ids
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def authorized_report_artifact_ids(request: Request, canvas: Any, artifact
                     workspace_id=grant_space,
                     group_ids=tuple(groups),
                 )
-            if artifact.id in grants[grant_space]:
+            if await file_granted(store, artifact.id, grants[grant_space]):
                 allowed.add(artifact.id)
                 break
     from bowhead_gateway.routes.auth import resolve_user_id_sync
@@ -162,7 +162,7 @@ async def authorized_report_artifact_ids(request: Request, canvas: Any, artifact
                         workspace_id=context.workspace_id,
                         group_ids=tuple(context.group_ids),
                     )
-            if artifact.id in recipient_grants[grant_space]:
+            if await file_granted(store, artifact.id, recipient_grants[grant_space]):
                 delivered.add(artifact.id)
                 break
     return frozenset(delivered)

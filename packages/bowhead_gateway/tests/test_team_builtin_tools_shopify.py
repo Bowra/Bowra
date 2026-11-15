@@ -13,8 +13,8 @@ from bowhead_core.builtin_shopify_tool import build_builtin_shopify_specs
 from bowhead_core.shopify_client import ADMIN_API_VERSION, ShopifyClient
 from bowhead_core.tool_registry import ToolExecutionContext
 from bowhead_core.user_store import User, UserStore
-from bowhead_gateway.routes import shopify_content_confirmations
 from bowhead_gateway.routes import team_builtin_tools as routes
+from bowhead_gateway.routes import tool_confirmations
 from bowhead_gateway.routes.auth import _current_user
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
@@ -196,7 +196,7 @@ async def test_content_plugin_http_review_and_native_write_keep_analysis_readonl
 
     monkeypatch.setenv("FEATURE_SHOPIFY_CONTENT_WRITES", "1")
     monkeypatch.setattr(shopify_content, "_default", shopify_content.ShopifyContentConfirmations(timeout_seconds=2))
-    setup.app.include_router(shopify_content_confirmations.router, prefix="/api/v1/shopify-content-confirmations")
+    setup.app.include_router(tool_confirmations.router, prefix="/api/v1/tool-confirmations")
     setup.state.scopes += ",write_products,write_content"
     original = {
         "id": "gid://shopify/Page/1",
@@ -241,18 +241,21 @@ async def test_content_plugin_http_review_and_native_write_keep_analysis_readonl
         view[f"teammcp.{tool_id}.shopify_apply_content_update"].handler({**args, "review_token": preview["review_token"]}, ctx)
     )
     with anyio.fail_after(2):
-        while not (items := (await setup.http.get("/api/v1/shopify-content-confirmations")).json()["confirmations"]):
+        while not (items := (await setup.http.get("/api/v1/tool-confirmations")).json()["items"]):
             await anyio.sleep(0.001)
     assert original["body"] == "<p>Original story</p>"
-    assert items[0]["edits"] == [{"field": "body_html", "before": "<p>Original story</p>", "after": "<p>Reviewed story</p>"}]
-    path = f"/api/v1/shopify-content-confirmations/{items[0]['id']}/decision"
+    assert items[0]["kind"] == "shopify_content"
+    detail = (await setup.http.get(f"/api/v1/tool-confirmations/{items[0]['id']}")).json()
+    assert detail["item"]["edits"] == [{"field": "body_html", "before": "<p>Original story</p>", "after": "<p>Reviewed story</p>"}]
+    path = f"/api/v1/tool-confirmations/{items[0]['id']}/decision"
     setup.state.user = User(id="owner_1", team_id="team_1", email="owner_1@example.com", status="active")
-    assert (await setup.http.get("/api/v1/shopify-content-confirmations")).json()["confirmations"] == []
-    assert (await setup.http.post(path, json={"decision": "approve"})).status_code == 409
+    assert (await setup.http.get("/api/v1/tool-confirmations")).json()["items"] == []
+    assert (await setup.http.post(path, json={"decision": "approve"})).status_code == 404
     setup.state.user = User(id="user_1", team_id="team_1", email="user_1@example.com", status="active")
     assert (await setup.http.post(path, json={"decision": "approve", "changes": {"body": "forged"}})).status_code == 422
+    assert (await setup.http.post(path, json={"decision": "approve_session"})).status_code == 422
     assert (await setup.http.post(path, json={"decision": "approve"})).status_code == 200
-    assert (await setup.http.post(path, json={"decision": "approve"})).status_code == 409
+    assert (await setup.http.post(path, json={"decision": "approve"})).status_code == 404
     result = await waiting
     assert result["status"] == "updated_and_verified", result
     assert result["data"]["body"] == "<p>Reviewed story</p>"

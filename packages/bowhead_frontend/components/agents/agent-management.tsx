@@ -49,6 +49,7 @@ import { AgentPageHeader } from "./agent-page-frame";
 import { useAgentListingText } from "./agent-listing-text";
 import { LimitedStatus, ReasonRetry, ReasonStatus } from "./availability-reason";
 import { useCapabilityLabel } from "./capability-label";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const VIEWS = AGENT_MANAGEMENT_VIEWS;
 
@@ -139,6 +140,7 @@ export function AgentManagement() {
   const [statusMessage, setStatusMessage] = useState("");
   const [drafts, setDrafts] = useState<SubagentDraftListItem[]>([]);
   const [draftsError, setDraftsError] = useState<"failed" | "unavailable" | null>(null);
+  const [draftsFailure, setDraftsFailure] = useState<unknown>(null);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [rosterVersion, setRosterVersion] = useState(0);
   const refreshSequence = useRef(0);
@@ -198,7 +200,7 @@ export function AgentManagement() {
       return true;
     } catch (cause) {
       if (refreshSequence.current !== sequence) return false;
-      setError(t(options.mutationSucceeded ? "saved_refresh_failed" : "load_failed"));
+      setError(withHttpFailureReason(t(options.mutationSucceeded ? "saved_refresh_failed" : "load_failed"), cause, { read: true }));
       return false;
     } finally {
       if (refreshSequence.current === sequence) {
@@ -245,6 +247,7 @@ export function AgentManagement() {
       // During an upgrade the draft store answers 503; say so calmly instead of alerting.
       const unavailable = cause instanceof SubagentDraftApiError && cause.code === "subagent_draft_store_unavailable";
       setDraftsError(unavailable ? "unavailable" : "failed");
+      setDraftsFailure(cause);
     }).finally(() => {
       if (!cancelled) setDraftsLoading(false);
     });
@@ -307,7 +310,7 @@ export function AgentManagement() {
       setRosterVersion((current) => current + 1);
       if (refreshed && resetsPagination) announceFirstPageReset();
     } catch (cause) {
-      setError(t("action_failed"));
+      setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
       setPendingId(null);
     }
@@ -329,7 +332,7 @@ export function AgentManagement() {
       setRosterVersion((current) => current + 1);
       if (refreshed && resetsPagination) announceFirstPageReset();
     } catch (cause) {
-      setError(t("action_failed"));
+      setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
       setPendingId(null);
     }
@@ -348,7 +351,7 @@ export function AgentManagement() {
         setActiveDialog({ kind: "unhire", item, value });
       }
     } catch (cause) {
-      if (previewSequence.current === sequence) setError(t("action_failed"));
+      if (previewSequence.current === sequence) setError(withHttpFailureReason(t("action_failed"), cause, { read: true }));
     } finally {
       if (previewSequence.current === sequence) setPendingId(null);
     }
@@ -375,7 +378,7 @@ export function AgentManagement() {
       setRosterVersion((current) => current + 1);
       if (refreshed && resetsPagination) announceFirstPageReset();
     } catch (cause) {
-      setError(t("action_failed"));
+      setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
       setPendingId(null);
     }
@@ -395,7 +398,7 @@ export function AgentManagement() {
         setActiveDialog({ kind: "team_default", item, value });
       }
     } catch (cause) {
-      if (previewSequence.current === sequence) setError(t("action_failed"));
+      if (previewSequence.current === sequence) setError(withHttpFailureReason(t("action_failed"), cause, { read: true }));
     } finally {
       if (previewSequence.current === sequence) setPendingId(null);
     }
@@ -423,7 +426,7 @@ export function AgentManagement() {
       const refreshed = await refresh(viewRef.current, { preserve: true, mutationSucceeded: true });
       if (refreshed && resetsPagination) announceFirstPageReset();
     } catch (cause) {
-      setError(t("action_failed"));
+      setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
       setPendingId(null);
     }
@@ -446,7 +449,7 @@ export function AgentManagement() {
           onNavigate={(item) => changeView(item.key as AgentManagementView)}
         />
       </div>
-      {view === "created" && canResumeDrafts && draftsError === "failed" ? <p role="alert">{t("drafts_load_failed")}</p> : null}
+      {view === "created" && canResumeDrafts && draftsError === "failed" ? <p role="alert">{withHttpFailureReason(t("drafts_load_failed"), draftsFailure, { read: true })}</p> : null}
       {view === "created" && canResumeDrafts && draftsError === "unavailable" ? <p role="status">{t("drafts_unavailable")}</p> : null}
       {view === "created" && canResumeDrafts && !draftsLoading && !draftsError && drafts.length > 0 ? (
         <section className="am-management-context" aria-labelledby="am-resume-drafts-title">

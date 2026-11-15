@@ -2,6 +2,7 @@
 
 import { PRODUCT_NAME } from "@/lib/product-identity";
 
+import { applyFrameOptionsToDoc } from "./frame-options";
 import {
   BRAND_BUNDLE_CHANGED_EVT,
   BRAND_CACHE_POINTER_KEY,
@@ -80,6 +81,7 @@ export function applyBrandBundleToDocument(
       removeBrandTokenStyle();
       delete root.dataset.brandChecksum;
     }
+    applyFrameOptionsToDoc(response.frame);
     root.dataset.theme = resolvedTheme;
     root.dataset.brandTeam = response.team?.id ?? "";
     root.dataset.brandRevision = response.team?.revisionId ?? "";
@@ -159,6 +161,7 @@ function persistBrandBundle(response: EffectiveThemeResponse): void {
     teamId,
     response: {
       schemaVersion: 2,
+      ...(response.frame ? { frame: response.frame } : {}),
       brand: response.brand,
       effective: response.effective,
       locks: {},

@@ -17,6 +17,7 @@ import { toast } from "@/lib/use-toast";
 import { handleAgentMemberFeedback, type AgentMemberFeedback } from "@/lib/agents-api";
 import { ANSWER_FEEDBACK_REASONS } from "@/lib/answer-feedback-reasons";
 import { useCiFormat } from "./agent-ci-shared";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const KNOWN_REASONS = new Set<string>(ANSWER_FEEDBACK_REASONS);
 
@@ -69,8 +70,8 @@ export function MemberFeedbackView({
       await onImprove(text, async () => {
         await handleAgentMemberFeedback(agentId, item.turn_id, "coach");
       });
-    } catch {
-      toast({ kind: "error", text: t("version_member_feedback_failed") });
+    } catch (cause) {
+      toast({ kind: "error", text: withHttpFailureReason(t("version_member_feedback_failed"), cause) });
       await reload();
     }
   };

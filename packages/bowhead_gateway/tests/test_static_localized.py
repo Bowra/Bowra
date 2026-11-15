@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from typing import TYPE_CHECKING
 
 import httpx2
@@ -889,3 +890,105 @@ async def test_bowra_frontend_callback_does_not_cache_or_log_authorization(tmp_p
     assert response.headers["referrer-policy"] == "no-referrer"
     assert scope["query_string"] == b""
     assert "private-code" not in response.body.decode()
+
+
+_BROWSER_DOCUMENT_ACCEPT = (b"accept", b"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+
+def _exported_page(root: Path, page: str) -> None:
+    directory = root / page if page else root
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "index.html").write_text("<html><head></head><body>page</body></html>")
+    (directory / "index.txt").write_text('0:{"b":"build"}\n')
+
+
+def _static_scope(browser_path: str, *, headers: list[tuple[bytes, bytes]], query: bytes = b"") -> dict:
+    return {
+        "type": "http",
+        "method": "GET",
+        "path": browser_path,
+        "root_path": "",
+        "scheme": "http",
+        "server": ("internal", 8000),
+        "query_string": query,
+        "headers": headers,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("browser_prefix", ["", "/bowhead", "/team/a/bowhead"])
+@pytest.mark.parametrize(
+    ("page", "requested", "query", "location"),
+    [
+        ("settings/profile", "settings/profile/index.txt", b"", "./"),
+        ("", "index.txt", b"session=s_1&_rsc=1a2b", "./?session=s_1"),
+        ("settings/profile", "settings/profile.txt", b"_rsc=1a2b", "profile/"),
+    ],
+)
+async def test_runtime_static_returns_a_browser_opening_a_page_payload_to_the_page(
+    tmp_path: Path,
+    browser_prefix: str,
+    page: str,
+    requested: str,
+    query: bytes,
+    location: str,
+) -> None:
+    """Next's static-export fallback opens ``<page>/index.txt`` when a navigation fetch rejects."""
+    _exported_page(tmp_path, page)
+    static_files = RuntimeBasePathStaticFiles(directory=tmp_path, html=True)
+
+    response = await static_files.get_response(
+        requested,
+        _static_scope(f"{browser_prefix}/{requested}", headers=[_BROWSER_DOCUMENT_ACCEPT], query=query),
+    )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == location
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_runtime_static_serves_page_payload_to_the_router(tmp_path: Path) -> None:
+    _exported_page(tmp_path, "settings/profile")
+    app = frontend_static_app(RuntimeBasePathStaticFiles(directory=tmp_path, html=True))
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app),
+        base_url="http://dev.example",
+    ) as client:
+        router_fetch = await client.get(
+            "/settings/profile/index.txt",
+            params={"_rsc": "1a2b"},
+            headers={"rsc": "1", "accept": "*/*"},
+        )
+        browser_open = await client.get(
+            "/settings/profile/index.txt",
+            headers={"accept": "text/html,*/*;q=0.8"},
+            follow_redirects=True,
+        )
+
+    assert router_fetch.status_code == 200
+    assert router_fetch.text == '0:{"b":"build"}\n'
+    assert browser_open.status_code == 200
+    assert browser_open.url.path == "/settings/profile/"
+    assert "page" in browser_open.text
+
+
+@pytest.mark.asyncio
+async def test_runtime_static_serves_text_files_that_are_not_page_payloads(tmp_path: Path) -> None:
+    (tmp_path / "robots.txt").write_text("User-agent: *\n")
+    (tmp_path / "help").mkdir()
+    (tmp_path / "help" / "notes.txt").write_text("plain notes\n")
+    (tmp_path / "help" / "index.html").write_text("<html>help</html>")
+    (tmp_path / "help" / ".txt").write_text("unnamed\n")
+    static_files = RuntimeBasePathStaticFiles(directory=tmp_path, html=True)
+
+    for requested, body in (("robots.txt", "User-agent: *\n"), ("help/notes.txt", "plain notes\n"), ("help/.txt", "unnamed\n")):
+        response = await static_files.get_response(
+            requested,
+            _static_scope(f"/{requested}", headers=[_BROWSER_DOCUMENT_ACCEPT]),
+        )
+        assert response.status_code == 200
+        assert response.headers.get("location") is None
+        assert response.path.endswith(requested)
+        assert pathlib.Path(response.path).read_text() == body

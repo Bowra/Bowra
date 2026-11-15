@@ -145,7 +145,7 @@ export function ShAudienceBadge({ level, n, size }: { level: Audience; n?: numbe
     </span>
   );
   return (
-    <span style={{ ...baseStyle, background: T.accent, color: "#fff" }}>
+    <span style={{ ...baseStyle, background: T.accent, color: "var(--c-accent-ink)" }}>
       <ShIcon name="globe" size={11} />{t("audience_team_wide")}
     </span>
   );

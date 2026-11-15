@@ -104,7 +104,7 @@ def test_notification_action_projection_uses_server_classification(type_: str, s
     assert _to_dto(row).actionRequired is (type_ in ACTION_REQUIRED_TYPES and state == "open")
 
 
-# ── FEATURE_NOTIFICATION_REACH: browser candidates and Team labels ─────────────
+# ── Browser candidates and Team labels ─────────────────────────────────────────
 
 
 class _Users:
@@ -118,7 +118,7 @@ class _Users:
         return {}
 
 
-def _client(tmp_path, monkeypatch, *, reach: bool, multi_team: bool = True, teams=None):
+def _client(tmp_path, monkeypatch, *, multi_team: bool = True, teams=None):
     import asyncio
     from types import SimpleNamespace
 
@@ -129,7 +129,6 @@ def _client(tmp_path, monkeypatch, *, reach: bool, multi_team: bool = True, team
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    monkeypatch.setenv("FEATURE_NOTIFICATION_REACH", "1" if reach else "0")
     monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1" if multi_team else "0")
     store = NotificationStore(str(tmp_path / "n.db"))
     asyncio.run(store.initialize())
@@ -165,18 +164,10 @@ def _put(store, *, key: str, type_: str, priority: str, team_id: str = "team_a",
     ).item
 
 
-def test_browser_candidates_are_off_without_the_switch(tmp_path, monkeypatch):
-    client, store = _client(tmp_path, monkeypatch, reach=False)
-    _put(store, key="approval.required:a1", type_="approval.required", priority="p1")
-
-    assert client.get("/api/v1/notifications/browser-candidates").status_code == 404
-    assert client.get("/api/v1/notifications/unread-count").json()["latestBrowserCandidateAt"] is None
-
-
 def test_browser_candidates_are_only_unread_urgent_open_action_items_after_since(tmp_path, monkeypatch):
     import asyncio
 
-    client, store = _client(tmp_path, monkeypatch, reach=True)
+    client, store = _client(tmp_path, monkeypatch)
     urgent = _put(store, key="approval.required:a1", type_="approval.required", priority="p1")
     _put(store, key="skill_approval:submitted:s1:t", type_="skill_approval_submitted", priority="p2")
     _put(store, key="approval.execution_failed:a2", type_="approval.execution_failed", priority="p1")
@@ -197,7 +188,7 @@ def test_browser_candidates_are_only_unread_urgent_open_action_items_after_since
 
 
 def test_items_name_their_team_only_for_members_of_several_teams(tmp_path, monkeypatch):
-    client, store = _client(tmp_path, monkeypatch, reach=True)
+    client, store = _client(tmp_path, monkeypatch)
     _put(store, key="approval.required:b1", type_="approval.required", priority="p1", team_id="team_b")
     _put(store, key="memory.candidate:u_1", type_="memory.candidate", priority="p2", team_id="team_b")
 
@@ -213,7 +204,7 @@ def test_items_name_their_team_only_for_members_of_several_teams(tmp_path, monke
 
 def test_no_team_labels_for_a_single_team_or_without_multi_team(tmp_path, monkeypatch):
     for kwargs in ({"teams": [{"id": "team_a", "name": "Team A"}]}, {"multi_team": False}):
-        client, store = _client(tmp_path / str(len(kwargs)) / next(iter(kwargs)), monkeypatch, reach=True, **kwargs)
+        client, store = _client(tmp_path / str(len(kwargs)) / next(iter(kwargs)), monkeypatch, **kwargs)
         _put(store, key="approval.required:a1", type_="approval.required", priority="p1")
         row = client.get("/api/v1/notifications").json()["items"][0]
         assert row["teamName"] is None and row["currentTeam"] is True

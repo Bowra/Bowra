@@ -2403,7 +2403,7 @@ class CanvasStore:
             params.append(min_visible_sections)
         if min_sections > 0:
             # empty-canvas cleanup: filter before LIMIT so empty shells consume no slots.
-            # ★116 dogfood 1.0.93 P3: count only **visible report content**. All sections in chat-mode turns
+            # ★Regression check 1.0.93 P3: count only **visible report content**. All sections in chat-mode turns
             # have hidden_for_chat_mode=1 (users have no report); the previous raw count made pure chat sessions
             # appear in recent outputs as empty Untitled report entries.
             # superseded/quarantined/meta likewise do not count as content.
@@ -2525,6 +2525,26 @@ class CanvasStore:
             if revision.by_turn_id:
                 revision.turn_ordinal = ordinals.get(revision.by_turn_id)
         return revisions
+
+    async def html_artifact_sections_for(self, *, user_id: str, artifact_ids: list[str]) -> list[Section]:
+        """The owner's live ``html_artifact`` sections that embed one of ``artifact_ids`` (file versions R4).
+
+        An HTML section only accepts its creator's own artifact, so the owner's canvases are
+        the whole search space. Superseded sections are left as they are.
+        """
+        ids = [item for item in dict.fromkeys(artifact_ids) if item]
+        if not user_id or not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        async with open_shared_ctx(self._path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT s.* FROM canvas_sections s JOIN canvases c ON c.id = s.canvas_id "  # noqa: S608 — placeholders only
+                "WHERE c.user_id = ? AND s.kind = 'html_artifact' AND COALESCE(s.superseded, 0) = 0 "
+                f"AND json_extract(s.payload, '$.artifact_id') IN ({placeholders}) ORDER BY s.canvas_id, s.seq",
+                (user_id, *ids),
+            ) as cur:
+                return [_row_to_section(row) for row in await cur.fetchall()]
 
     async def list_sections_appended_by_turn(
         self,

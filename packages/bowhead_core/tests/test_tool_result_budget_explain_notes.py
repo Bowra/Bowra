@@ -53,7 +53,21 @@ def test_dropped_filter_note_survives_the_cap() -> None:
     parse = {"tokens": [{"word": "菲诺利单抗", "kind": "value", "value": "菲诺利单抗"}], "unknown_words": []}
     out, _ = cap_result("bi_query", _over_budget(_parse=parse, query_explain={"models": ["TMS_Latest"], "measures": ["销售金额"]}))
     hint = out["_preflight_hint"]
-    assert "recognized these filter values: 「菲诺利单抗」" in hint
+    assert "not restricted to them: 「菲诺利单抗」" in hint
+    assert "其他说明" not in hint
+
+
+@pytest.mark.unit
+def test_unreported_field_note_survives_the_cap() -> None:
+    parse = {
+        "tokens": [{"word": "月坪效", "kind": "measure", "field": "月坪效"}],
+        "unknown_words": [],
+        "fields_not_in_report": {"measures": ["月坪效"]},
+    }
+    explain = {"models": ["门店品牌品类表"], "filters": ["女装"], "measures": ["营业额"]}
+    out, _ = cap_result("bi_query", _over_budget(_parse=parse, query_explain=explain))
+    hint = out["_preflight_hint"]
+    assert "measure 「月坪效」 (executed measures: 「营业额」)" in hint
     assert "其他说明" not in hint
 
 

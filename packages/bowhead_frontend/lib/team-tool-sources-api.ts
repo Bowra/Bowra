@@ -7,6 +7,7 @@
  */
 
 import type { ConnectorPreset } from "@/components/canvas/sections/preset-directory";
+import { attachHttpCause } from "./user-facing-error";
 
 import { apiFetch, readApiError } from "./api-client";
 import type { ResourceUsageResponse, ResourceUsageSummary } from "./resource-usage";
@@ -205,7 +206,7 @@ export class TeamToolApiError extends Error {
 async function _check(r: Response): Promise<Response> {
   if (r.ok) return r;
   const error = await readApiError(r);
-  throw new TeamToolApiError(error.status, error.message, error.code, error.requestId);
+  throw attachHttpCause(new TeamToolApiError(error.status, error.message, error.code, error.requestId), error);
 }
 
 const BASE = "/api/v1/team-tool-sources";

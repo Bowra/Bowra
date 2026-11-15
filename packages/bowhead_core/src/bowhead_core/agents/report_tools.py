@@ -659,7 +659,7 @@ async def _update_chapter_title(
 ) -> dict[str, Any]:
     """canvas-update-turn 批 B2-7：就地改**上一轮 plan 章的标题**（h1 + chapter meta）。
 
-    116 dogfood（1.3.49，`s_18c8b86f3003`）：整份改成 1-6 月后封面标题换了、章标题还是「2026年1-9月…」——写手对 h1 只拿到
+    Regression check（1.3.49，`s_18c8b86f3003`）：整份改成 1-6 月后封面标题换了、章标题还是「2026年1-9月…」——写手对 h1 只拿到
     `kind_not_editable`，收尾器只管封面，时间窗又不是数字 token（残留扫描看不见），没有任何一环会动它。
     h1 渲染读 `payload.text`：这里只写这一个键，**不进正文的 bake**（bake 会把首行 `# 标题` 当文档标题剥掉、
     还会铸 [N]）。闸与 `_do_update` 的跨轮放行同一套：系统写手、修订范围、未折叠、rev CAS。"""
@@ -858,6 +858,45 @@ async def _reconcile_chapters(
 
 
 async def _write_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Write a section; a bare number given as a source id is dropped and named in the result."""
+    args, ignored = await _without_unrecorded_numbers(args, ctx)
+    result = await _write_report_section(args, ctx)
+    if ignored and isinstance(result, dict) and result.get("ok") is not False and "error" not in result:
+        result["ignored_source_refs"] = ignored
+        result["source_refs_note"] = (
+            "The section was saved without these values: a bare number is not a source id. "
+            "A source id is the artifact_id or call id returned with a result."
+        )
+    return result
+
+
+async def _without_unrecorded_numbers(args: dict[str, Any], ctx: Any) -> tuple[dict[str, Any], list[str]]:
+    """Models pass list positions where source ids are expected (116: 171 of 214 sections with sources).
+
+    A number that no recorded source of this conversation carries names nothing;
+    it only makes the section harder to authorize. Without the conversation's
+    reader the given values are kept as they are.
+    """
+    from bowhead_core.source_access_projection import names_no_source
+
+    given = args.get("source_refs")
+    if not isinstance(given, list):
+        return args, []
+    numbers = [str(ref).strip() for ref in given if isinstance(ref, (str, int)) and not isinstance(ref, bool) and names_no_source(str(ref).strip())]
+    recorded_of = getattr(getattr(ctx, "report_read_access", None), "recorded_source_identities", None)
+    if not numbers or not callable(recorded_of):
+        return args, []
+    try:
+        recorded = await recorded_of()
+    except Exception:  # noqa: BLE001 - an unavailable reader must not block the write
+        return args, []
+    ignored = list(dict.fromkeys(number for number in numbers if number not in recorded))
+    if not ignored:
+        return args, []
+    return {**args, "source_refs": [ref for ref in given if str(ref).strip() not in ignored]}, ignored
+
+
+async def _write_report_section(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     reject_unclassified_direct_mutation("report.write_report")
     from bowhead_core.chart.edit_guard import blocked, denial
 
@@ -977,7 +1016,7 @@ async def _write_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         from bowhead_core.report_writer_loop import leading_h1_title
 
         ctx._pending_authored_title = leading_h1_title(content) if section_id is None else None
-    # canvas-update-turn batch B2-6 (116 dogfood 1.3.46: write_report.figure_anchors written=2 stripped=2 invalid_ids=['15','17'],
+    # canvas-update-turn batch B2-6 (Regression check 1.3.46: write_report.figure_anchors written=2 stripped=2 invalid_ids=['15','17'],
     # ['26','27']): body uses this-run ν1.5 simple integer IDs, not sec_*; bake strips all as invalid figure IDs,
     # leaving figures unattached to body. Chat already translates using **this run's own table** at close (resolve_run_figure_anchors); report missed it.
     # Same translation entry: figure kinds only (data/doc unchanged for downstream stripping); unresolved stay for bake.

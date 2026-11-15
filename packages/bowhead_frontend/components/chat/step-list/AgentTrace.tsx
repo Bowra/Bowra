@@ -89,6 +89,7 @@ const PEER_FAILURE_MESSAGE_KEYS: Record<
   peer_tool_failure_limit_exceeded:
     "peer_errors.tool_failure_limit_exceeded",
   peer_tool_call_limit_exceeded: "peer_errors.tool_call_limit_exceeded",
+  peer_model_call_limit_exceeded: "peer_errors.model_call_limit_exceeded",
   peer_credit_exhausted: "peer_errors.credit_exhausted",
 };
 
@@ -532,6 +533,7 @@ const PEER_PARTIAL_REASONS = new Set([
   "step_limit",
   "time_limit",
   "tool_call_limit",
+  "model_call_limit",
   "no_progress",
   "budget",
   "agent_stalled",

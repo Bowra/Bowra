@@ -272,6 +272,42 @@ def surface_sandbox_tool_name(tool_name: str, args: Any) -> str:
     return "python_sandbox" if _is_sandbox_tool(tool_name, args) else tool_name
 
 
+# Tools that read or change the report itself. Reading or editing a chart already in the report fetches no data,
+# so naming one of them does not make that chart a new source; its data is already listed.
+REPORT_SELF_TOOLS = frozenset({"read_report", "write_report", "read_chart", "edit_chart", "add_chart", "remove_chart"})
+
+
+def revision_payload_sources(payload_sources: Any, tool_invocations: Any) -> list[dict[str, Any]]:
+    """The payload sources a revise or append turn may add to the report's Sources.
+
+    A helper fills ``sources`` in every payload. When a revision fetched nothing new, it restates the report's
+    existing source in new words and without an ``artifact_id``: "Python 沙箱质数计算" became
+    "primes_by_interval.csv（…Python 计算产出）", and a recolor cited the chart it read. Sources dedupes by artifact,
+    label or (tool, query) and cannot match free wording, so every presentation edit added a row for the same
+    data (116 1.7.32 dogfood D2 and the same-day HEX recheck). Keep an entry that names an artifact, one without
+    a tool (nothing to check it against), and one whose tool this run invoked and that is not a report tool.
+    """
+    invoked = {
+        surface_sandbox_tool_name(str(_get_attr(inv, "tool_name") or _get_attr(inv, "tool") or ""), _get_attr(inv, "arguments"))
+        for inv in tool_invocations or []
+    }
+    kept: list[dict[str, Any]] = []
+    for entry in payload_sources or []:
+        if not isinstance(entry, dict):
+            continue
+        tool = surface_sandbox_tool_name(str(entry.get("tool") or "").strip(), None)
+        if entry.get("artifact_id") or not tool or (tool in invoked and tool not in REPORT_SELF_TOOLS):
+            kept.append(entry)
+    if len(kept) < len([e for e in payload_sources or [] if isinstance(e, dict)]):
+        logger.info(
+            "sources.revision_restated_dropped kept=%d dropped_tools=%s invoked=%s",
+            len(kept),
+            sorted({str(e.get("tool") or "") for e in payload_sources or [] if isinstance(e, dict) and e not in kept}),
+            sorted(invoked)[:8],
+        )
+    return kept
+
+
 # Decorative comment strings (banner `===` / `---` / `###` / `***`); strip them to reveal intent.
 # ⚠ Review R3-2: do not use prefix matching to classify these as noise; it would discard `# === 计算营业额 ===` entirely,
 # though banners commonly declare agent intent. Strip decorations first, then check whether content remains.
@@ -813,7 +849,7 @@ def _source_tool_label(tool: Any, lang: str | None = None) -> str:
     """How a source citation names its tool: the **human name**, not the tool code.
 
     The sources section is the report's credibility surface; customers reading `python_sandbox` /
-    `bi_query` there treat it as noise (116 dogfood 2026-09-09). Names come from the generated
+    `bi_query` there treat it as noise (Regression check 2026-09-09). Names come from the generated
     tool_aliases.yaml table shared with step cards, chips and the tool picker. The language is the
     answer language (`source_label_language`), the same as the run-ordinal suffix; it used to follow
     the interface language, which mixed "Run Code" with "（第 1 次运行）" in one label.
@@ -915,7 +951,7 @@ def _infer_label_from_inv(inv: Any, produced_file: str | None = None) -> str:
     q = _extract_query_text(args, raw_tool, produced_file)
     # First normalize the flat entrance to the pseudo tool name (python_exec → python_sandbox), then translate to a human-readable name.
     # ⚠ Previously only the first step ran, so users saw `python_sandbox: df = ...`: replacing one code name with another,
-    # not a human-readable name (116 dogfood screenshot on 2026-09-09).
+    # not a human-readable name (Regression check screenshot on 2026-09-09).
     tool_name = _source_tool_label(surface_sandbox_tool_name(str(raw_tool), args))
     if q:
         return f"{tool_name}: {_clip_label(q, 40)}"
@@ -1135,7 +1171,7 @@ class TurnSourcesRegistry:
                     if entry.get(k) is not None and existing.get(k) is None:
                         existing[k] = entry[k]
                 return existing_n
-            # ★116 dogfood 1.0.93 P3 (t_c8959fde27ca): peer-reported payload sources
+            # ★Regression check 1.0.93 P3 (t_c8959fde27ca): peer-reported payload sources
             # (label present, artifact_id absent) and actual tool results for the same query are the same source,
             # but aid lookup misses aidless entries, producing duplicate pairs in Sources; the aidless
             # row renders "Source is currently unavailable". Bridge by (tool, query):
@@ -1306,11 +1342,18 @@ class TurnSourcesRegistry:
         self,
         payload_sources: list[dict[str, Any]] | None,
         tool_invocations: list[Any] | None = None,
+        *,
+        revision: bool = False,
     ) -> None:
         """Merge a payload's ``sources[]`` (+ tool_invocations) into the shared
         accumulator. Reuses ``build_sources_list`` (same Pass-1/Pass-2 logic),
         then folds each entry in with cross-payload dedup — the fix for
-        ``lead_orchestrator.py:3705`` building per-peer with no cross-peer dedup."""
+        ``lead_orchestrator.py:3705`` building per-peer with no cross-peer dedup.
+
+        ``revision``: the turn revises or appends to an existing report (``canvas_revise.no_document_chrome``);
+        payload sources then pass ``revision_payload_sources`` first, so a restated source adds no row."""
+        if revision:
+            payload_sources = revision_payload_sources(payload_sources, tool_invocations)
         merged, _ = build_sources_list(payload_sources, tool_invocations)
         for entry in merged:
             self._add_entry(entry)

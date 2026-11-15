@@ -8,6 +8,10 @@
  * `insight_card.evidence[].chart_section_id` + chartLookup precedent.
  *
  * Render delegation covers the `{ data }`-prop figure kinds + chart (`{ spec }`).
+ * A chart uses the same frame as a standalone chart section, so in report editing
+ * it offers the type button, ⚙ settings and inline title; the editor document
+ * does not hold the chart section, so its edits save through
+ * `patchReferencedSection` instead of the document diff.
  * Other kinds (kpi_row/insight_card/design custom NodeViews) fall back to a
  * labeled placeholder for now — they carry edit-controller subtleties the
  * reviews flagged (design contentEditable focus, dispatchPatch path) and are a
@@ -23,25 +27,19 @@ import {
   ReactNodeViewRenderer,
   type NodeViewProps,
 } from "@tiptap/react";
-import dynamic from "next/dynamic";
 import { memo, type ComponentType, type ReactNode } from "react";
 import type { ReportSection } from "@/lib/types";
+import type { ChartSpec } from "@/lib/chart/types";
 import { useCanvasContext } from "../canvas-context";
 import { captionPrefixLength, stripCaptionPrefix } from "./figure-caption";
-import { ChartSourceLine, type DataSourceRef } from "@/components/canvas/sections/chart-source-line";
-import { evidencePlanForViewer } from "@/lib/chart/presentation-plan";
+import { EditableChartFrame } from "./atomic";
+import type { DataSourceRef } from "@/components/canvas/sections/chart-source-line";
 
 import { ImageSection } from "@/components/canvas/sections/image";
 import { DataTableSection } from "@/components/canvas/sections/data-table";
 import { DatarcIframeSection } from "@/components/canvas/sections/datarc-iframe";
 import { HtmlArtifactSection } from "@/components/canvas/sections/html-artifact";
 import { ExternalIframeSection } from "@/components/canvas/sections/external-iframe";
-
-// chart.js is heavy + SSR-unsafe — dynamic import, matching atomic.tsx.
-const ChartBlock = dynamic(
-  () => import("@/components/canvas/sections/chart-block").then((m) => m.ChartBlock),
-  { ssr: false },
-);
 
 // kinds whose existing component takes the default `{ data: ReportSection }` prop
 // (registered via makeAtomicExtension's default toData).
@@ -77,28 +75,24 @@ function renderFigure(
   section: ReportSection,
   labelForKind: (kind: string) => string,
   captionText: string | null,
+  onChartSpecChange?: (next: ChartSpec) => void,
 ): ReactNode {
   const kind = section.kind;
   if (kind === "chart") {
     const spec = (section as Extract<ReportSection, { kind: "chart" }>).spec;
+    if (!spec) return <FigurePlaceholder label={labelForKind(kind)} />;
     return (
       <figure className="v2-chart-figure" style={{ margin: "20px 0" }}>
-        {/* Isolate local display state by canonical root and source identity. */}
-        <ChartBlock
-          key={`${section.id}:${spec?.data_artifact_id || ""}`}
+        {/* Batch 1 2.4 (1-E): the frame always renders the source line; without source it renders the none state
+            ("source not recorded" is an actual state and must not be omitted). */}
+        <EditableChartFrame
           spec={spec}
           sectionId={section.id}
           rootRevision={section.rev}
-          captionText={captionText}
-        />
-        {/* Batch 1 2.4 (1-E): always render, matching atomic.tsx:556; without source, render the none state
-            ("source not recorded" is an actual state and must not be omitted). Inline figures previously lacked a source line. */}
-        <ChartSourceLine
-          source={spec?.source_meta ?? null}
           dataSource={(section as { data_source?: DataSourceRef | null }).data_source ?? null}
-          notes={evidencePlanForViewer(spec?.presentation_plan)?.evidence_notes}
-          measureLabels={Object.fromEntries([spec, ...(spec?.views?.map((view) => view.spec) ?? [])]
-            .flatMap((chart) => chart?.columns?.map((column) => [column.key, column.header]) ?? []))}
+          captionText={captionText}
+          canEdit={Boolean(onChartSpecChange)}
+          onSpecChange={(next) => onChartSpecChange?.(next)}
         />
       </figure>
     );
@@ -117,7 +111,7 @@ function renderFigure(
 
 function FigureRefNodeViewImpl({ node, editor, getPos }: NodeViewProps) {
   const t = useTranslations("canvas");
-  const { sections, isStreaming } = useCanvasContext();
+  const { sections, isStreaming, isEditMode, readOnly, patchReferencedSection } = useCanvasContext();
   const targetSectionId = (node.attrs.targetSectionId as string | null) ?? null;
   const section = targetSectionId
     ? sections.find((s) => s.id === targetSectionId)
@@ -157,7 +151,14 @@ function FigureRefNodeViewImpl({ node, editor, getPos }: NodeViewProps) {
       data-export-section-id={section ? (targetSectionId ?? undefined) : undefined}
     >
       {section ? (
-        renderFigure(section, (k) => t("figure_ref_placeholder", { kind: k }), captionText)
+        renderFigure(
+          section,
+          (k) => t("figure_ref_placeholder", { kind: k }),
+          captionText,
+          isEditMode && !readOnly && !isStreaming && patchReferencedSection
+            ? (next) => { patchReferencedSection(section.id, { spec: next } as Partial<ReportSection>); }
+            : undefined,
+        )
       ) : isStreaming ? (
         <FigurePlaceholder label={t("figure_generating")} />
       ) : (

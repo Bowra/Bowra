@@ -1214,22 +1214,10 @@ def _is_verify_exempt_path(path: str) -> bool:
     return any(path.endswith(s) for s in _VERIFY_EXEMPT_SUFFIXES)
 
 
-def _notification_reach_on() -> bool:
-    from bowhead_gateway.routes.notifications import notification_reach_enabled
+def _notification_center_on() -> bool:
+    from bowhead_core.notification_service import notification_center_enabled
 
-    return notification_reach_enabled()
-
-
-def _notification_delivery_on() -> bool:
-    from bowhead_gateway.notification_delivery_worker import notification_delivery_enabled
-
-    return os.environ.get("BOWHEAD_NOTIFICATION_CENTER", "1").strip() != "0" and notification_delivery_enabled()
-
-
-def _routine_notify_on() -> bool:
-    from bowhead_core.routine_notify_tool import routine_notify_enabled
-
-    return routine_notify_enabled()
+    return notification_center_enabled()
 
 
 def _multi_team_authz_enabled() -> bool:
@@ -2816,9 +2804,7 @@ async def me(
 
     reference_input_ready = reference_composer_authoring_ready(request)
     agent_start_use_ready = reference_input_ready and os.environ.get("FEATURE_AGENT_START_USE_V1", "0").strip().lower() in {"1", "true", "yes"}
-    from bowhead_core.shopify_content import content_writes_enabled
     from bowhead_core.team_tool_confirmation import team_tool_confirmation_enabled
-    from bowhead_core.tool_confirmation_events import inline_tool_confirmation_enabled
 
     shopify_enabled = _shopify_plugin_feature_on()
     capabilities = {
@@ -2831,17 +2817,13 @@ async def me(
         "shopify_plugin": shopify_enabled,
         # Deployment switch for the Coach alignment loop: its Chat cards, review lines and held-out controls.
         "agent_eval_alignment": _agent_eval_alignment_feature_on(),
-        # FEATURE_NOTIFICATION_REACH: one attention loop, panel actions, Team labels and browser notifications.
-        "notification_reach": _notification_reach_on(),
-        # FEATURE_ROUTINE_NOTIFY: scheduled runs may flag results; the task form offers "only when flagged".
-        "routine_notify": _routine_notify_on(),
-        # FEATURE_NOTIFICATION_DELIVERY: recorded email deliveries, reminder emails and their personal switch.
-        "notification_delivery": _notification_delivery_on(),
-        "shopify_content_confirmations": shopify_enabled and content_writes_enabled(),
-        # FEATURE_TEAM_TOOL_CONFIRMATION: the requester confirms each non-read team MCP call.
+        # The notification center is on (BOWHEAD_NOTIFICATION_CENTER): the three keys gate the
+        # Notifications help, the task form's "only when flagged" and the reminder-email switch.
+        "notification_reach": _notification_center_on(),
+        "routine_notify": _notification_center_on(),
+        "notification_delivery": _notification_center_on(),
+        # FEATURE_TEAM_TOOL_CONFIRMATION: team tool settings offer the tool category confirmation.
         "team_tool_confirmations": team_tool_confirmation_enabled(),
-        # FEATURE_INLINE_TOOL_CONFIRMATION: confirmations appear as cards under the waiting step, not as dialogs.
-        "inline_tool_confirmations": inline_tool_confirmation_enabled(),
         "composer": {
             "submission_protocol": composer_submission_protocol_enabled(),
             "reference_input": reference_input_ready,

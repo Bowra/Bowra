@@ -20,6 +20,7 @@ import { useAppRouter } from "@/lib/use-app-router";
 import { toast } from "@/lib/use-toast";
 import { DialogShell } from "@/components/ui/dialog";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Compact number formatting: 1234567 → "1.2M", 1234 → "1.2k", without Intl.NumberFormat
 // (locale consistency). Matches KPI style.
@@ -227,9 +228,10 @@ function ActivationAttentionList({
     } catch (e: unknown) {
       toast({
         kind: "error",
-        text: e instanceof AdminCreditsError
-          ? t(adminCreditsErrorKey(e))
-          : t("attention_action_unavailable"),
+        text: withHttpFailureReason(
+          e instanceof AdminCreditsError ? t(adminCreditsErrorKey(e)) : t("attention_action_unavailable"),
+          e,
+        ),
       });
     } finally {
       setBusyKey(null);
@@ -247,9 +249,10 @@ function ActivationAttentionList({
     } catch (e: unknown) {
       toast({
         kind: "error",
-        text: e instanceof AdminCreditsError
-          ? t(adminCreditsErrorKey(e))
-          : t("err_generic"),
+        text: withHttpFailureReason(
+          e instanceof AdminCreditsError ? t(adminCreditsErrorKey(e)) : t("err_generic"),
+          e,
+        ),
       });
     } finally {
       setBusyKey(null);

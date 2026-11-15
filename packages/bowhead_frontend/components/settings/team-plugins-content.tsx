@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { codedErrorMessage } from "@/lib/user-facing-error";
+import { codedErrorMessage, withHttpFailureReason } from "@/lib/user-facing-error";
 import { useTranslations } from "next-intl";
 
 import { ConfirmDialog, useConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -135,8 +135,10 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
       setCatalog(resources);
       setLoaded(true);
       setError("");
-    } catch {
-      if (mounted.current && request === catalogRequest.current) setError(t("load_failed"));
+    } catch (cause) {
+      if (mounted.current && request === catalogRequest.current) {
+        setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
+      }
     }
   }, [hostedMode, hosted?.readOnly, t]);
 

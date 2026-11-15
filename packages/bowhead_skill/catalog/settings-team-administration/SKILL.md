@@ -11,7 +11,7 @@ audience: peer
 
 Use `configuration_list` to discover the caller's available domains, then `configuration_read` for the requested form. Read its JSON Schema, guidance, current values, version, parameter profiles and editable fields. These receipts supply current fields and constraints; do not copy remembered limits or invent model/provider identifiers.
 
-Prepare only the requested change. Preserve JSON types and all unrelated nested settings. A supplied object or array replaces that admitted field, so retain unrequested entries exactly as read. Explicit null follows the domain schema; it is not a reset instruction. Use `reset_all` only when the read advertises it and the user requested restoring that configuration unit. For execution limits, unlimited steps and automatic model-call duration are distinct from restoring defaults.
+Prepare only the requested change. Preserve JSON types and all unrelated nested settings. A supplied object or array replaces that admitted field, so retain unrequested entries exactly as read. Explicit null follows the domain schema; it is not a reset instruction. Use `reset_all` only when the read advertises it and the user requested restoring that configuration unit. For execution limits, unlimited steps, unlimited model calls per turn and automatic model-call duration are distinct from restoring defaults.
 
 Call `configuration_propose`, then submit its actual receipt immediately with `configuration_submit`. Proposing saves a suggestion and changes no canonical setting. Team changes always require the user's review. Do not call `configuration_apply`, approve the suggestion, accept a risk, or wait/poll for confirmation in this execution.
 

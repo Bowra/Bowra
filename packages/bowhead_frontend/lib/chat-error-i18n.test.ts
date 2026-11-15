@@ -12,6 +12,7 @@ const TURN_REASON_CODES = [
   "access_context_missing",
   "agent_step_limit",
   "agent_tool_call_limit",
+  "agent_model_call_limit",
   "agent_stalled",
   "canvas_compose_failed",
   "canvas_compose_timeout",
@@ -86,6 +87,7 @@ const PEER_REASON_TO_MESSAGE_KEY = {
   peer_iteration_limit_exceeded: "iteration_limit_exceeded",
   peer_tool_failure_limit_exceeded: "tool_failure_limit_exceeded",
   peer_tool_call_limit_exceeded: "tool_call_limit_exceeded",
+  peer_model_call_limit_exceeded: "model_call_limit_exceeded",
   peer_credit_exhausted: "credit_exhausted",
 } as const;
 

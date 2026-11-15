@@ -35,6 +35,7 @@ tools:
     - web_fetch
     - web_extract
     - skill_list
+    - skill_read
     - skill_save_generated
     - tool_creator
     - subagent_creator

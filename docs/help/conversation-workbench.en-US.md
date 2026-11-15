@@ -23,6 +23,8 @@ After your new message is accepted, the conversation scrolls to the latest conte
 
 For a quick lookup, name the metrics and period, for example “last month’s revenue and foot traffic”. The answer focuses on those figures; ask explicitly for brand/store breakdowns, causes, trends, or a table/chart when you need them. If a figure or its scope cannot be verified, the answer explains that limitation.
 
+If an agent handoff fails, expand the failed step to see which input needs attention. If the conversation asks which source or report section you meant, give the exact link or section title so it can continue.
+
 Use **+** to attach files. It opens the file picker directly. When Google Drive is available, choose **Upload File** or **Google Drive** from the small menu instead. The same actions are available in a narrow conversation column. Selecting a file adds it to your draft; send the message when you are ready.
 
 Choose a model in the composer before sending. Models are grouped by connection name. Your personal selection also updates in other open tabs. Choose **Use Team Default** to clear it. A task already sent keeps the model choice it started with.
@@ -86,7 +88,7 @@ Select an evidence reference to open it in Results. Details are checked against 
 
 Auto keeps its existing choice of whether to plan. Steps executing in a Plan can also ask available peers or Lead for help; Plan mode still waits for your approval before executing. Only currently assigned, available participants can answer directly. A completed or not-yet-started step does not restart because another Agent mentions it.
 
-When Lead asks you a clarification question, answer the existing question card. Supported continuations retain the original work and collaboration records. If an interruption cannot safely resume, the task reports the limitation; opening its history does not restart it.
+When Lead asks you a clarification question, answer the existing question card. Supported continuations retain the original work and collaboration records. If an interruption cannot safely resume, the task reports the limitation; opening its history does not restart it. When the work done so far can't be kept for a later answer, Lead asks in its reply instead of showing a card and the task still finishes with its results. Answer in your next message. If earlier work can't be resumed exactly after you answer a card, the task starts again from your original request with your answer, so some earlier steps may run again.
 
 ## Actions under an answer
 
@@ -134,7 +136,7 @@ For supported tasks, the assistant can also ask one question after one or more d
 
 For example, you can ask the assistant to read a PPTX, calculate from its contents and then ask about the intended audience, without editing or generating a file. This is a read-only task, not template generation. If the assistant cannot determine the intended use, follow the failure message to clarify whether you want analysis or a layout-preserving edit.
 
-This can also use a template or earlier result already pinned in the same conversation, including after other calculations have produced newer results. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation.
+This can also use a template or earlier result already pinned in the same conversation, including after other calculations have produced newer results. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation. Existing chart calculations can remain in Results while you answer.
 
 In supported new tasks, files merely listed for discovery do not count as files the assistant used. Renaming an unused listed file does not by itself invalidate the saved work. If access to listed metadata or a required original input is lost, the message identifies which kind of access needs restoring. Your answer and completed results remain saved. Older questions may retain stricter compatibility checks; follow the action offered on the original card.
 
@@ -173,11 +175,17 @@ When you reopen a conversation, the latest answer may appear while its saved res
 
 HTML file previews fill the available height below the Results controls and resize with the window. Scroll inside the page to see longer content.
 
+When a file delivered earlier is revised, Results and the Files page list it once and show its latest version, for example "Version 2 of 2". Deleting the file from the Files page deletes every version; **Undo** or the trash restores them together. Earlier file cards in the conversation open and download the latest version, say "Updated to version N", and offer "Download version N" for the version they delivered. Each file keeps its three newest versions (a draft replaced by a later save in the same request goes first); older versions are cleaned up automatically, and the card says so. Versions used by a report, the knowledge base, a document or an export snapshot are never cleaned up. After opening the file in Results, **Version History** in the **More actions** menu downloads any kept version. A file added to the knowledge base stays at the version you added: the knowledge base says "Newer version N available", and the Files page says the knowledge base uses an older version and offers **Add version N**. After adding it, remove the old entry from the knowledge base.
+
 HTML previews also offer **Stop interaction** and **Restart interaction**. Restarting resets local page state. If a page exceeds preview complexity or preparation limits, simplify it or download the original. Preview isolation does not impose a hard CPU or memory limit on your browser. Downloaded original HTML retains its scripts and can run outside preview restrictions when opened locally.
 
 Dragging files into the conversation, resizing and enlarging from the keyboard, and the dot for new results are described in [Drag and drop, shortcuts, and hints on the conversation page](conversation-workbench-actions.en-US.md).
 
 ## Reviewing and finding document files
+
+To fill or update a PowerPoint file in an ordinary conversation, attach the PPTX and say what it should contain, for example that it is only a format template and which data to use. The filled file appears in **Results** as a PPTX you can open and download; there is no draft to confirm. Check the pages before you use it: charts, number formats and leftover template text are the usual places to look. Ask in the same conversation for corrections or for a PDF of the file. If you allow demo values, the answer says which figures are illustrative.
+
+The draft review described below applies to document drafts that already exist, and to Agents that include the **PPTX template drafts** Plugin.
 
 A partial data preview does not replace the original file used for document calculations. Ask the assistant to calculate from the complete available file rather than treating a sample as the total. If the document task reports insufficient model context, start a new request with fewer inputs, or ask your Team administrator to review the model's context and output settings before starting again. Repeating the unchanged task does not resolve that limit.
 

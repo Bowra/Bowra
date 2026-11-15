@@ -1,15 +1,63 @@
 import { apiJson } from "@/lib/api-client";
-import type { EmailSendConfirmation } from "@/lib/email-send-confirmation-api";
 import type { PersonalMcpConfirmation } from "@/lib/personal-mcp-api";
-import type { ShopifyContentConfirmation } from "@/lib/shopify-content-confirmation-api";
-import type { TeamToolConfirmation } from "@/lib/team-tool-confirmation-api";
 import type {
   ToolConfirmationCategory,
   ToolConfirmationChoice,
   ToolConfirmationKind,
 } from "@/lib/sse-events";
 
-/** One pending confirmation owned by the current user (FEATURE_INLINE_TOOL_CONFIRMATION). */
+/** An email waiting for its requester: the full message and attachment labels. */
+export interface EmailSendConfirmation {
+  id: string;
+  turn_id: string;
+  session_id: string;
+  to: string;
+  subject: string;
+  body: string;
+  attachments?: {
+    artifact_id: string;
+    filename: string;
+    mime: string;
+    size: number;
+    /** File versions: the attached file has a newer version (the requester decides). */
+    newer_version?: { id: string; version: number };
+  }[];
+  expires_at: string;
+}
+
+/** A Shopify content update waiting for its requester, with per-field before/after. */
+export interface ShopifyContentConfirmation {
+  id: string;
+  turn_id: string;
+  session_id: string;
+  team_id: string;
+  shop_domain: string;
+  object_id: string;
+  resource: "product" | "page";
+  title: string;
+  handle: string;
+  state: string;
+  edits: { field: string; before: string | null; after: string }[];
+  expires_at: string;
+}
+
+/** A non-read Team MCP call waiting for the requester (FEATURE_TEAM_TOOL_CONFIRMATION). */
+export interface TeamToolConfirmation {
+  id: string;
+  turn_id: string;
+  session_id: string;
+  team_id: string;
+  source_name: string;
+  tool_ref: string;
+  tool_name: string;
+  description: string;
+  /** Effective category of the tool; older servers omit it, which reads as unknown. */
+  category?: "external_write" | "destructive" | "unknown";
+  arguments: Record<string, unknown>;
+  expires_at: string;
+}
+
+/** One pending confirmation owned by the current user. */
 export interface ToolConfirmationSummary {
   id: string;
   kind: ToolConfirmationKind;
@@ -21,7 +69,7 @@ export interface ToolConfirmationSummary {
   source_label: string | null;
   agent_name: string | null;
   expires_at: string;
-  /** Computed by the server; the only countdown anchor besides the event's own value. */
+  /** Computed by the server; the card's only countdown anchor (never the local clock). */
   remaining_seconds: number;
 }
 
@@ -30,7 +78,7 @@ interface ToolConfirmationDetailBase extends ToolConfirmationSummary {
   choices: ToolConfirmationChoice[];
 }
 
-/** Detail of one confirmation; `item` is exactly what the kind's original list endpoint returns. */
+/** Detail of one confirmation; `item` is the kind's own pending entry, including its preview. */
 export type ToolConfirmationDetail =
   | (ToolConfirmationDetailBase & { kind: "personal_mcp"; item: PersonalMcpConfirmation })
   | (ToolConfirmationDetailBase & { kind: "email_send"; item: EmailSendConfirmation })

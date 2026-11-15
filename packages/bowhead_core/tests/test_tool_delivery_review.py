@@ -685,3 +685,145 @@ async def test_native_review_refusal_retains_exact_provenance_for_a_later_questi
         ],
     )
     _require_settled_returns(helper, state)
+
+
+def _unsupported_review() -> dict[str, Any]:
+    review = _review()
+    review["requirements"].append({"requirement": "Province totals", "status": "fulfilled", "evidence_call_ids": []})
+    return review
+
+
+def test_a_later_refusal_refers_to_the_rules_instead_of_repeating_them() -> None:
+    first = review_terminal_payload({"delivery_review": _unsupported_review()}, _calls(), review_tool="review_delivery")
+    later = review_terminal_payload({"delivery_review": _unsupported_review()}, _calls(), review_tool="review_delivery", guidance_given=True)
+    assert first is not None and later is not None
+    problem, pointer = later["error"].split("\n", 1)
+    assert problem == first["error"].split("\n", 1)[0] and "successful evidence_call_ids" in problem
+    assert pointer.startswith("Correct only the problems above and call review_delivery alone again")
+    assert "rules given earlier in this run still apply" in pointer
+    assert "Fix requirement scope" not in pointer and len(later["error"]) < len(first["error"]) / 5
+    # The current evidence identities are still supplied with every refusal.
+    assert later["review_context"] == first["review_context"]
+
+
+@pytest.mark.parametrize("hygiene", [False, True])
+async def test_the_lead_review_states_its_rules_once_per_run(monkeypatch: pytest.MonkeyPatch, hygiene: bool) -> None:
+    from bowhead_core.tool_delivery_review import LeadDeliveryReview
+
+    monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
+    monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", "1" if hygiene else "0")
+    calls = _calls()
+    review = LeadDeliveryReview()
+    registry = ToolRegistry()
+    registry.register(review.tool_spec())
+    ctx = ToolExecutionContext(workspace_id="ws_test", member_uid="member", user_id="user", turn_id="turn", datarc=None, role="lead")
+    token = set_current_subagent_invocations(calls)
+    try:
+        first = (await registry.execute("review_delivery", {"payload": {"delivery_review": _unsupported_review()}}, ctx)).result
+        assert "Fix requirement scope before filling evidence IDs." in first["error"]
+        calls.append(ToolInvocation("review_delivery", {}, call_id="review-1", result=first))
+        second = (await registry.execute("review_delivery", {"payload": {"delivery_review": _unsupported_review()}}, ctx)).result
+        assert ("Fix requirement scope" not in second["error"]) is hygiene
+        assert ("rules given earlier in this run still apply" in second["error"]) is hygiene
+        assert "successful evidence_call_ids" in second["error"]
+    finally:
+        token.var.reset(token)
+
+
+async def test_a_closeout_correction_counts_as_stating_the_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.tool_delivery_review import LeadDeliveryReview
+
+    monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
+    monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", "1")
+    calls = _calls()
+    review = LeadDeliveryReview()
+    # The Runner sets this when its closeout correction carried review_guidance().
+    review.guidance_given = True
+    registry = ToolRegistry()
+    registry.register(review.tool_spec())
+    ctx = ToolExecutionContext(workspace_id="ws_test", member_uid="member", user_id="user", turn_id="turn", datarc=None, role="lead")
+    token = set_current_subagent_invocations(calls)
+    try:
+        refusal = (await registry.execute("review_delivery", {"payload": {"delivery_review": _unsupported_review()}}, ctx)).result
+        assert "Fix requirement scope" not in refusal["error"] and "rules given earlier in this run still apply" in refusal["error"]
+    finally:
+        token.var.reset(token)
+
+
+def _delegation(*, unfulfilled: list[str] | None = None, stamped: bool = True) -> ToolInvocation:
+    """A helper that delivered the report and stated one gap (Regression check N1)."""
+    result: dict[str, Any] = {"ok": True, "completion": "partial", "delivered": "payload"}
+    if stamped:
+        result["partial_delivery"] = {"unfulfilled": ["Sort stores by province"] if unfulfilled is None else unfulfilled}
+    return ToolInvocation("subagent_spawn", {"profile": "compute"}, call_id="helper", result=result)
+
+
+def _delegation_review(*, resolution: str = "unfulfilled", gap: bool = True) -> dict[str, Any]:
+    requirements = [{"requirement": "HTML report for the boss", "status": "fulfilled", "evidence_call_ids": ["helper"]}]
+    if gap:
+        requirements.append({"requirement": "Sort stores by province", "status": "unfulfilled", "evidence_call_ids": []})
+    return {
+        "requirements": requirements,
+        "issues": [{"call_id": "helper", "resolution": resolution, "evidence_call_ids": [], "explanation": "The helper stated one gap."}],
+    }
+
+
+def test_a_partial_delegation_supports_what_its_helper_delivered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression check N1: the only call is a partial spawn; Lead can still record the delivered report and name the gap."""
+    from bowhead_core.tool_delivery_review import _review_call_context, named_delivery_gaps
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    calls = [_delegation()]
+    review = validate_delivery_review(_delegation_review(), calls)
+    assert review.valid and not review.complete, review.problems
+    assert _review_call_context(calls)["failed_calls"][0] == {
+        "call_id": "helper",
+        "tool": "subagent_spawn",
+        "state": "partial",
+        "failure_code": None,
+        "citable": True,
+        "unfulfilled": ["Sort stores by province"],
+    }
+    assert "marked citable" in review_guidance(calls)
+    payload = {"delivery_review": _delegation_review()}
+    assert review_terminal_payload(payload, calls, review_tool="review_delivery") is None
+    assert payload["completion"] == "partial" and payload["caveats"] == ["Sort stores by province"]
+    assert named_delivery_gaps(payload["delivery_review"], calls) == ["Sort stores by province"]
+
+
+@pytest.mark.parametrize(
+    ("case", "problem"),
+    [
+        ("covered", "resolve its issue as unfulfilled"),
+        ("no_gap", "list each item of its unfulfilled"),
+        ("unstamped", "fulfilled coverage requires actual successful evidence_call_ids"),
+        ("partial_bi", "fulfilled coverage requires actual successful evidence_call_ids"),
+    ],
+)
+def test_a_partial_delegation_never_covers_its_own_gaps(case: str, problem: str) -> None:
+    calls = [_delegation(stamped=case != "unstamped")]
+    review = _delegation_review(resolution="covered" if case == "covered" else "unfulfilled", gap=case != "no_gap")
+    if case == "partial_bi":
+        calls = [ToolInvocation("bi_query", {}, call_id="helper", result={"ok": True, "completion": "partial", "partial_delivery": {}})]
+    checked = validate_delivery_review(review, calls)
+    assert not checked.valid and any(problem in item for item in checked.problems), checked.problems
+
+
+def test_gaps_are_named_only_when_no_other_failure_is_left_unfulfilled() -> None:
+    """An unfulfilled failure may have an unknown effect; "not completed" would misstate it."""
+    from bowhead_core.tool_delivery_review import named_delivery_gaps
+
+    calls = [_delegation(), *_calls()]
+    review = _delegation_review()
+    review["issues"].append({"call_id": "ranking", "resolution": "unfulfilled", "evidence_call_ids": [], "explanation": "No ranking."})
+    assert validate_delivery_review(review, calls).valid
+    assert named_delivery_gaps(review, calls) == []
+    pure_gap = {"requirements": [{"requirement": "Profit\nneeds costs", "status": "unfulfilled", "evidence_call_ids": []}], "issues": []}
+    assert named_delivery_gaps(pure_gap, []) == ["Profit needs costs"]
+
+
+def test_the_named_gaps_notice_follows_the_answer_language() -> None:
+    from bowhead_core.report_chrome_text import delivery_gaps_notice
+
+    assert delivery_gaps_notice(["门店按省份排序。", "补充利润"], "zh-CN") == "未完成：门店按省份排序；补充利润。"
+    assert delivery_gaps_notice(["Sort stores by province."], "pt-BR") == "Not completed: Sort stores by province."

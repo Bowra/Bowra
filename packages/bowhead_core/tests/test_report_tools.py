@@ -87,6 +87,36 @@ async def test_write_new_then_read(ctx) -> None:
     assert line["owner"] == "compute" and line["kind"] == "narrative"
 
 
+async def test_bare_numbers_given_as_source_ids_are_dropped_and_named(ctx) -> None:
+    """A model passes list positions where source ids are expected; stored, they make the section harder to authorize."""
+
+    async def recorded() -> frozenset[str]:
+        return frozenset({"7", "call_abc"})
+
+    async def write(peer: str, arguments: dict) -> dict:
+        # One writer keeps one section per Turn, so each write here has its own writer.
+        tok = _as(peer)
+        try:
+            return await _write_report(arguments, ctx)
+        finally:
+            reset_current_peer_name(tok)
+
+    # Without the conversation's reader nothing can be told apart, so values stay.
+    kept = await write("compute", {"content": "Stores.", "source_refs": ["100"]})
+    ctx.report_read_access = SimpleNamespace(recorded_source_identities=recorded)
+    mixed = await write("analyst", {"content": "Brand analysis.", "source_refs": ["100", "7", "art_0123456789ab", 105]})
+    plain = await write("researcher", {"content": "Store ranking.", "source_refs": ["art_0123456789ab"]})
+    assert len({kept["section_id"], mixed["section_id"], plain["section_id"]}) == 3
+    assert mixed["ok"] is True and mixed["ignored_source_refs"] == ["100", "105"] and "not a source id" in mixed["source_refs_note"]
+    assert "ignored_source_refs" not in plain and "ignored_source_refs" not in kept
+    canvas = await ctx.canvas_store.get_canvas_by_session(ctx.session_id)
+    stored = {section.id: section.payload for section in await ctx.canvas_store.list_sections(canvas.id)}
+    # "7" is the id of a recorded source here, so it stays a requirement.
+    assert stored[mixed["section_id"]]["source_refs"] == ["7", "art_0123456789ab"]
+    assert stored[plain["section_id"]]["source_refs"] == ["art_0123456789ab"]
+    assert stored[kept["section_id"]]["source_refs"] == ["100"]
+
+
 async def test_update_by_owner_with_rev(ctx) -> None:
     tok = _as("compute")
     try:

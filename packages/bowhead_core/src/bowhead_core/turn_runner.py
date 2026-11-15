@@ -2926,7 +2926,7 @@ class TurnRunner:
             )
             if _reference_reparse_items is not None:
                 _prepared_items = _reference_reparse_items
-            if request.ordinary_clarification_id is not None:
+            if request.ordinary_clarification_id is not None and request.ordinary_lead_checkpoint is not None:
                 # This continuation retains exact parsed material. Reopening
                 # validates bytes and access without emitting extraction again.
                 _prepared_items = []

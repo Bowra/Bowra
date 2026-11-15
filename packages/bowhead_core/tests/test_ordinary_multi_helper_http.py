@@ -12,7 +12,7 @@ from bowhead_core.agents.clarification_tool import register_clarification_tool
 from bowhead_core.ordinary_lead_continuation import canonical_json
 from bowhead_core.subagent import PROFILES
 from bowhead_gateway.routes import clarifications
-from test_ordinary_lead_question_http import call, response
+from test_ordinary_lead_question_http import assert_restarted, call, response, review_round
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
@@ -42,7 +42,7 @@ async def test_new_turn_retains_history_without_replaying_previous_helpers(http_
     register_clarification_tool(orch.tool_registry)
     case.app.include_router(clarifications.router, prefix="/api/v1/clarifications")
     monkeypatch.setattr(events, "_default_registry", orch.event_registry)
-    lead_calls, helper_calls = [], []
+    lead_calls, helper_calls, review_calls = [], [], []
     question = "Which audience?"
 
     def respond(request):
@@ -52,6 +52,9 @@ async def test_new_turn_retains_history_without_replaying_previous_helpers(http_
             if "subagent_return" in names:
                 helper_calls.append(body)
             return response(body, {"role": "assistant", "content": "The retained synthetic profit is 42."}, "stop")
+        if review_round(body):
+            review_calls.append(body)
+            return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
         lead_calls.append(body)
         index = len(lead_calls)
         if index in {1, 3, 4}:
@@ -60,7 +63,12 @@ async def test_new_turn_retains_history_without_replaying_previous_helpers(http_
             message = call(
                 call_id,
                 "subagent_spawn",
-                {"profile": case.fixture.case.args["reference_start"].profile_name, "task": "Inspect synthetic profit.", "delegation_role": "helper"},
+                {
+                    "profile": case.fixture.case.args["reference_start"].profile_name,
+                    "task": "Inspect synthetic profit.",
+                    "delegation_role": "helper",
+                    "required_source_urls": [],
+                },
             )
         elif index == 5:
             message = call("question", "clarification_ask", {"questions": [{"question": question, "type": "free_text", "options": []}]})
@@ -172,7 +180,7 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
     register_clarification_tool(orch.tool_registry)
     case.app.include_router(clarifications.router, prefix="/api/v1/clarifications")
     monkeypatch.setattr(events, "_default_registry", orch.event_registry)
-    lead_calls, helper_calls = [], []
+    lead_calls, helper_calls, review_calls = [], [], []
     question = {"question": "Which audience?", "type": "free_text", "options": []}
     capture = ordinary_lead_runtime.capture_ordinary_lead_loop
 
@@ -222,6 +230,9 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             index = len(lead_calls)
             if parallel:
@@ -235,6 +246,7 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
                             "profile": case.fixture.case.args["reference_start"].profile_name,
                             "task": "Inspect part 1.",
                             "delegation_role": "helper",
+                            "required_source_urls": [],
                         },
                     )
                     message["tool_calls"].extend(
@@ -245,6 +257,7 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
                                 "profile": case.fixture.case.args["reference_start"].profile_name,
                                 "task": "Inspect part 2.",
                                 "delegation_role": "helper",
+                                "required_source_urls": [],
                             },
                         )["tool_calls"]
                     )
@@ -257,7 +270,9 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
                 elif boundary == "system_only" and index == 2:
                     profile = "kb-analyst"
                 message = call(
-                    f"helper-{index}", "subagent_spawn", {"profile": profile, "task": f"Inspect part {index}.", "delegation_role": "helper"}
+                    f"helper-{index}",
+                    "subagent_spawn",
+                    {"profile": profile, "task": f"Inspect part {index}.", "delegation_role": "helper", "required_source_urls": []},
                 )
             elif index == helper_count + 1 or (boundary == "second_question" and index == helper_count + 2):
                 message = call(f"question-{index}", "clarification_ask", {"questions": [question]})
@@ -310,7 +325,9 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
         if failed_first:
             assert sorted(item["status"] for item in executions) == (["completed"] * (helper_count - 1) + ["failed"])
         elif boundary == "terminal_write_failed":
-            assert sorted(item["status"] for item in executions) == ["cancelled", "completed"]
+            # The lost terminal write stays unsettled. The Turn now completes instead of
+            # failing, so no failure cleanup cancels it, as when Lead asks no question.
+            assert sorted(item["status"] for item in executions) == ["completed", "running"]
         else:
             assert all(item["status"] == "completed" for item in executions)
         if boundary == "system":
@@ -330,7 +347,20 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
             "unknown_reason",
             "provider_error",
         }
+        if refused_capture and boundary not in {"commit_disabled", "system_commit_disabled"}:
+            # A prefix this run cannot save refuses only the optional question:
+            # Lead keeps its results and completes instead of failing the Turn.
+            assert cards == []
+            assert len(lead_calls) == question_round + 1
+            turn = next(item for item in rows(case, "turns") if item["id"] == turn_id)
+            assert turn["status"] == "completed", turn["error"]
+            refusal = next(item for item in lead_calls[-1]["messages"] if item.get("tool_call_id") == f"question-{helper_count + 1}")
+            assert "clarification_capture_unavailable" in refusal["content"]
+            assert not [item for item in rows(case, "turn_events") if item["turn_id"] == turn_id and item["event_type"] == "turn_failed"]
+            return
         if refused_capture:
+            # The switch turned off after capture: the card commit still refuses after the
+            # loop has ended, so the Turn fails as before.
             assert cards == []
             assert len(lead_calls) == question_round
             failed = next(item for item in rows(case, "turns") if item["id"] == turn_id)
@@ -399,7 +429,7 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
             attempts.append({"answers": [{"question": question["question"], "source": "custom", "answer": "Analysts"}]})
         responses = await asyncio.gather(*[case.client.post(url, json=item) for item in attempts])
         assert all(item.status_code in {200, 409} for item in responses)
-        assert any(item.status_code == (409 if boundary in {"first_denied", "system_disabled"} else 200) for item in responses)
+        assert any(item.status_code == 200 for item in responses)
         if any(item.status_code == 200 for item in responses):
             await settled(turn_id)
         retained = next(item for item in rows(case, "clarification_requests") if item["request_id"] == card["request_id"])
@@ -410,7 +440,17 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
             for item in rows(case, "turn_agent_execution")
             if item["turn_id"] == turn_id and item["dispatch_key"] != "collaboration-lead:" + turn_id
         ] == executions
-        if boundary in {"first_denied", "first_denied_race", "system_disabled", "system_changed_race"}:
+        if boundary in {"first_denied", "system_disabled"}:
+            # A helper that is no longer runnable refuses the exact checkpoint; Lead restarts
+            # with the answer under current authority and does not reuse that helper's result.
+            assert_restarted(case, turn_id, card["request_id"])
+            restarted = lead_calls[question_round]["messages"]
+            assert not [item for item in restarted if str(item.get("tool_call_id", "")).startswith("helper-")]
+            assert any("clarification_responses" in str(item.get("content")) for item in restarted if item.get("role") == "user")
+            if boundary == "system_disabled":
+                monkeypatch.setitem(PROFILES, "compute", original_compute)
+            return
+        if boundary in {"first_denied_race", "system_changed_race"}:
             assert retained["injected_at"] is None and retained["continuation_generation"] is None
             assert len(lead_calls) == question_round
             if boundary == "system_disabled":

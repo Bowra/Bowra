@@ -8,6 +8,7 @@
  */
 
 import type { ChatInlineArtifact } from "@/components/chat/step-list/ChatBubbleNew";
+import type { ChatInlineFileData } from "@/components/chat/step-list/ChatInlineFile";
 import { appPath } from "@/lib/base-path";
 import { selectFinalInlineArtifacts } from "./final-deliverables";
 import type { Step } from "./turn-store";
@@ -61,6 +62,9 @@ export function extractInlineArtifacts(
     ) {
       // multimodal-v1 — raster deliverable inline preview (url carries
       // ?disposition=inline; download_url is the attachment route).
+      // File versions (R3): an image whose file has a newer version previews that version.
+      const latest = latestVersion(e.latest);
+      const shown = latest && typeof latest.url === "string" ? latest : null;
       out.push({
         kind: "image",
         id,
@@ -71,13 +75,13 @@ export function extractInlineArtifacts(
           ? { sectionId: e.section_id }
           : {}),
         data: {
-          id,
-          filename: typeof e.filename === "string" ? e.filename : "image.png",
+          id: shown ? shown.id : id,
+          filename: shown ? shown.filename : typeof e.filename === "string" ? e.filename : "image.png",
           mime: typeof e.mime === "string" ? e.mime : undefined,
-          url: appPath(e.url),
-          downloadUrl: appPath(e.download_url),
+          url: appPath(shown ? (shown.url as string) : e.url),
+          downloadUrl: appPath(shown ? shown.downloadUrl : e.download_url),
           alt: typeof e.alt === "string" ? e.alt : undefined,
-          sizeBytes: typeof e.size_bytes === "number" ? e.size_bytes : undefined,
+          sizeBytes: shown ? shown.sizeBytes : typeof e.size_bytes === "number" ? e.size_bytes : undefined,
         },
       });
     } else if (
@@ -103,9 +107,50 @@ export function extractInlineArtifacts(
           downloadUrl: appPath(e.download_url),
           sizeBytes: typeof e.size_bytes === "number" ? e.size_bytes : undefined,
           slideCount: typeof e.slide_count === "number" ? e.slide_count : undefined,
+          ...fileVersionFields(e),
+          lineage: {
+            root: typeof e.lineage_id === "string" && e.lineage_id ? e.lineage_id : id,
+            versionNo: typeof e.version_no === "number" ? e.version_no : 1,
+          },
         },
       });
     }
   }
   return out;
+}
+
+type LatestVersion = NonNullable<ChatInlineFileData["latest"]> & { url?: string };
+
+/** The projection's newest version of a delivered file (file-versions design R3); same-origin paths only. */
+function latestVersion(raw: unknown): LatestVersion | null {
+  if (!raw || typeof raw !== "object") return null;
+  const latest = raw as Record<string, unknown>;
+  if (
+    typeof latest.id !== "string" ||
+    typeof latest.version_no !== "number" ||
+    typeof latest.filename !== "string" ||
+    typeof latest.download_url !== "string" ||
+    !latest.download_url.startsWith("/api/v1/files/")
+  ) {
+    return null;
+  }
+  return {
+    id: latest.id,
+    versionNo: latest.version_no,
+    filename: latest.filename,
+    downloadUrl: appPath(latest.download_url),
+    sizeBytes: typeof latest.size_bytes === "number" ? latest.size_bytes : undefined,
+    ...(typeof latest.url === "string" && latest.url.startsWith("/api/v1/files/") ? { url: latest.url } : {}),
+  };
+}
+
+function fileVersionFields(e: Record<string, unknown>): Pick<ChatInlineFileData, "versionNo" | "latest" | "pruned"> {
+  const latest = latestVersion(e.latest);
+  if (!latest) return {};
+  const { url: _url, ...file } = latest;
+  return {
+    versionNo: typeof e.version_no === "number" ? e.version_no : 1,
+    latest: file,
+    ...(e.pruned === true ? { pruned: true } : {}),
+  };
 }

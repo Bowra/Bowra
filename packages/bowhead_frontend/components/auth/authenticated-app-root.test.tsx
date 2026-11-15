@@ -51,8 +51,8 @@ vi.mock("@/components/chat/toast-container", () => ({
   ToastContainer: () => <div data-testid="toast" />,
 }));
 
-vi.mock("@/components/chat/tool-confirmation/ToolConfirmationSurfaces", () => ({
-  ToolConfirmationSurfaces: () => <div data-testid="tool-confirmation-surfaces" />,
+vi.mock("@/components/chat/tool-confirmation/ToolConfirmationNotice", () => ({
+  ToolConfirmationNotice: () => <div data-testid="tool-confirmation-notice" />,
 }));
 
 import { AuthenticatedAppRoot } from "./authenticated-app-root";
@@ -79,7 +79,7 @@ describe("AuthenticatedAppRoot", () => {
     expect(screen.getByTestId("app-chrome").dataset.chrome).toBe(
       "product-shell",
     );
-    expect(screen.getByTestId("tool-confirmation-surfaces")).toBeTruthy();
+    expect(screen.getByTestId("tool-confirmation-notice")).toBeTruthy();
   });
 
   it("gates onboarding with standalone chrome", () => {

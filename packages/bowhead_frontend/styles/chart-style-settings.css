@@ -19,7 +19,7 @@
 }
 
 .cs-library__header {
-  border-bottom: 1px solid var(--c-line);
+  border-bottom: var(--rule-w, 1px) solid var(--c-line);
   background: var(--c-surface-2);
 }
 
@@ -122,7 +122,7 @@
   height: 18px;
   overflow: hidden;
   border: 1px solid var(--c-line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
 }
 
 .cs-palette-strip i {
@@ -145,7 +145,7 @@
   align-items: center;
   gap: 14px;
   min-height: 66px;
-  border: 1px solid var(--c-line-2);
+  border: var(--border-w, 1px) solid var(--c-line-2);
   border-radius: var(--r-1);
   padding: 10px 12px;
 }
@@ -226,7 +226,7 @@
   min-height: 116px;
   flex-direction: column;
   gap: 6px;
-  border: 1px dashed var(--c-line);
+  border: var(--border-w, 1px) dashed var(--c-line);
   border-radius: var(--r-1);
   color: var(--c-ink-3);
   font-size: 0.75rem;
@@ -234,7 +234,7 @@
 }
 
 .cs-member {
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-2);
   padding: 16px;
   background: var(--c-surface);
@@ -252,7 +252,7 @@
   min-height: 134px;
   flex-direction: column;
   align-items: flex-start;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   padding: 12px;
   background: var(--c-surface);
@@ -303,7 +303,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-top: 1px solid var(--c-line-2);
+  border-top: var(--rule-w, 1px) solid var(--c-line-2);
   padding: 12px 0;
 }
 
@@ -321,7 +321,7 @@
   width: 44px;
   height: 26px;
   flex: 0 0 auto;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: 999px;
   padding: 3px;
   background: var(--c-surface-3);
@@ -417,7 +417,7 @@
 .cs-editor-section textarea,
 .cs-readonly-field {
   width: 100%;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   padding: 9px 10px;
   background: var(--c-surface);
@@ -443,7 +443,7 @@
   width: fit-content;
   flex-wrap: wrap;
   gap: 2px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   padding: 2px;
   background: var(--c-surface-2);
@@ -453,7 +453,7 @@
 .cs-segment button {
   min-height: 32px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   padding: 5px 9px;
   background: transparent;
   color: var(--c-ink-3);
@@ -523,7 +523,7 @@
   align-items: center;
   gap: 8px;
   min-height: 46px;
-  border: 1px solid var(--c-line-2);
+  border: var(--border-w, 1px) solid var(--c-line-2);
   border-radius: var(--r-1);
   padding: 5px 6px;
   background: var(--c-surface);
@@ -540,7 +540,7 @@
   width: 36px;
   height: 32px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   padding: 0;
   background: transparent;
   cursor: pointer;
@@ -563,7 +563,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--c-ink-3);
   cursor: pointer;
@@ -619,7 +619,7 @@
   min-height: 250px;
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   background: var(--c-surface);
   color-scheme: light dark;
@@ -635,7 +635,7 @@
 .cs-library-skeleton,
 .cs-member-skeleton {
   min-height: 220px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-2);
   background: var(--c-surface-2);
   animation: cs-pulse 1.4s ease-in-out infinite;
@@ -646,7 +646,7 @@
 }
 
 .cs-scope-note {
-  border: 1px solid var(--c-line-2);
+  border: var(--border-w, 1px) solid var(--c-line-2);
   border-radius: var(--r-1);
   padding: 10px 12px;
   background: var(--c-surface-2);
@@ -753,7 +753,7 @@
   align-items: center;
   gap: 8px;
   min-height: 54px;
-  border: 1px solid var(--c-line-2);
+  border: var(--border-w, 1px) solid var(--c-line-2);
   border-radius: var(--r-1);
   padding: 8px 10px;
 }

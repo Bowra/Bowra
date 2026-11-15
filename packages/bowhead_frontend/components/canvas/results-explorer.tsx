@@ -17,11 +17,12 @@ import {
   type CompositionEvent,
 } from "react";
 
-import type {
-  ResultItemDTO,
-  ResultsApiErrorCode,
-  ResultsFiltersDTO,
-  ResultsQueryResponse,
+import {
+  resultItemMatchesKey,
+  type ResultItemDTO,
+  type ResultsApiErrorCode,
+  type ResultsFiltersDTO,
+  type ResultsQueryResponse,
 } from "@/lib/results-api";
 import { formatDateTime } from "@/lib/locale";
 import { resultDisplayTitle } from "@/lib/results-workspace-model";
@@ -171,7 +172,7 @@ export function ResultsExplorer(props: Props) {
     projectionChanged,
     projectionStatus,
     query,
-    selectedKey,
+    selectedKey: requestedSelectedKey,
     onAcceptChanges,
     onAnchorChange,
     onExpandedGroupsChange,
@@ -185,6 +186,10 @@ export function ResultsExplorer(props: Props) {
   } = props;
   const t = useTranslations("results_workspace");
   const locale = useLocale();
+  // The selection is recorded as the opened file; a revised file's entry is
+  // keyed by its first version, so map the selection onto the row showing it.
+  const selectedKey = items.find((item) => resultItemMatchesKey(item, requestedSelectedKey))?.key
+    ?? requestedSelectedKey;
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const composingRef = useRef(false);
   const anchorTimerRef = useRef<number | null>(null);
@@ -351,7 +356,7 @@ export function ResultsExplorer(props: Props) {
   // A locate error also covers missing/unavailable objects. An unfiltered view
   // cannot possibly prove a filter mismatch; an unloaded page proves nothing.
   const anchorError = !loading && error === "results_anchor_not_in_view"
-    && errorAnchorKey !== null && errorAnchorKey === (selectedKey ?? anchor?.key);
+    && errorAnchorKey !== null && errorAnchorKey === (requestedSelectedKey ?? anchor?.key);
   const anchorMessage = targetConditionsActive
     ? "explorer_anchor_not_in_view" : "explorer_anchor_unavailable";
   const recoverAnchor = anchorError && targetConditionsActive;
@@ -776,6 +781,9 @@ function itemContext(
       ordinal: context.duplicate_ordinal,
       count: context.duplicate_count,
     }));
+  }
+  if (item.lineage) {
+    pieces.push(t("quick_version", { number: item.lineage.number, count: item.lineage.count }));
   }
   if (context.occurred_at) {
     const occurredAt = formatDateTime(context.occurred_at, locale, { dateStyle: "medium", timeStyle: "medium" });

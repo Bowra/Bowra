@@ -388,7 +388,11 @@ async def _writeback_results(
             # historical verify_json fail is stable. OR both to prevent unmet→timeout→unmet oscillation.
             _prior_vo = outcome_from_json(step.verify_json) if step is not None else None
             prior_unmet = step is not None and (step.error_kind == "criteria_unmet" or (_prior_vo is not None and _prior_vo.verdict == VERDICT_FAIL))
-            if outcome is not None and outcome.verdict == VERDICT_FAIL and not prior_unmet:
+            # A helper that stopped at a run limit kept part of its work (agent_runner_adapter). Its output
+            # cannot meet every criterion; failing it again would block the plan, so it stays DONE with its
+            # gap stated in the report, like a step that failed acceptance twice.
+            partial_step = isinstance(r.payload, dict) and isinstance(r.payload.get("partial_completion"), dict)
+            if outcome is not None and outcome.verdict == VERDICT_FAIL and not prior_unmet and not partial_step:
                 unmet = "; ".join(outcome.unmet_texts())[:300]
                 # Complete writeback (review B3/C7): record tokens + retain real output (batch 3 revise_step
                 # material + user inspection).
@@ -423,6 +427,8 @@ async def _writeback_results(
                 continue
             if outcome is not None and outcome.verdict == VERDICT_FAIL and prior_unmet:
                 outcome = replace(outcome, note="验收两次未过, 产出已保留")
+            elif outcome is not None and outcome.verdict == VERDICT_FAIL and partial_step:
+                outcome = replace(outcome, note="只完成了一部分, 产出已保留")
             _ti, _to = _acc_tokens(step, r, deps.sctx.turn_id)
             # Batch 1-c: bind (slot reorder) before writeback; ψ-E already persisted paragraphs during execution,
             # so owner lookup finds actual section IDs produced by this step.
@@ -533,7 +539,7 @@ async def _writeback_results(
             kind = r.error.reason if r.error else "error"
             held.add(sid)  # Batch 2 S1: no same-run FAILED redispatch.
             _ti, _to = _acc_tokens(steps_by_id.get(sid), r, deps.sctx.turn_id)
-            # ★116 dogfood 2026-08-14/15 caught two consecutive issues, handled together here:
+            # ★Regression check 2026-08-14/15 caught two consecutive issues, handled together here:
             # ①`str(r.error)` is `f"{kind}: {original}"`, while error_kind already separately stores kind,
             #   causing **repeated enum** cards like "Failed: domain_mismatch: 知识库中无…".
             #   Keep readable half only; fallback to old shape only if original empty (e.g. no-arg exception), preserving info.

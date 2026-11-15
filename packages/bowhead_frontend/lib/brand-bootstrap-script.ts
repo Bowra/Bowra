@@ -1,3 +1,4 @@
+import { FRAME_OPTION_BOOTSTRAP_TABLE } from "@/lib/frame-options";
 import { PRODUCT_NAME } from "@/lib/product-identity";
 
 /**
@@ -65,6 +66,14 @@ export const BRAND_BOOTSTRAP_SCRIPT = String.raw`
     var effective=response&&response.effective;
     var scheme=effective&&effective.colorScheme;
     var brand=response&&response.brand;
+    var frame=meta&&meta.id===team?response.frame:null;
+    if(frame&&typeof frame==="object"){
+      var frameTable=${JSON.stringify(FRAME_OPTION_BOOTSTRAP_TABLE)};
+      for(var field in frameTable){
+        var choice=frame[field];
+        if(typeof choice==="string"&&frameTable[field][1].indexOf(choice)>=0)root.dataset[frameTable[field][0]]=choice;
+      }
+    }
     if(!meta||meta.id!==team||!["legacy","bowhead","preset","custom"].includes(meta.configurationType)||!scheme||scheme.tokenSchemaVersion!==2||!/^sha256:[0-9a-f]{64}$/.test(scheme.checksum||""))return;
     var keys=["background","surface","surface2","surface3","line","line2","ink","ink2","ink3","ink4","accent","accentHover","accentInk","accentSoft","accentTint","focus","positive","positiveSoft","warning","warningSoft","error","errorSoft","info","infoSoft"];
     var names={

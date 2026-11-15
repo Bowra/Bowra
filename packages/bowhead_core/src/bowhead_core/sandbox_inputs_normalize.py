@@ -97,7 +97,7 @@ def salvage_misnested_sandbox_args(args: dict[str, Any]) -> tuple[dict[str, Any]
     # `ToolInvocation` recording and modifying a copy, so source labels read original (still misnested) args;
     # `sources_resolver._sandbox_stated_intent` supports both holders itself. Include here for SSOT
     # parity: future consumers reading normalized args' `intent` will not hit a missing-allowlist-field trap.
-    for key in ("code", "inputs", "timeout_sec", "purpose", "deliverable_outputs", "intent"):
+    for key in ("code", "inputs", "timeout_sec", "purpose", "deliverable_outputs", "work_outputs", "intent"):
         if key in inner and key not in out:
             out[key] = inner[key]
             rescued.append(key)
@@ -105,6 +105,70 @@ def salvage_misnested_sandbox_args(args: dict[str, Any]) -> tuple[dict[str, Any]
         return args, None
     out.pop("input", None)
     return out, "nested_input_" + "+".join(sorted(rescued))
+
+
+#: Runner fields that `skill_invoke` nests under `input`. A model used to the flat entry sometimes writes them
+#: beside `input` instead; `skill_invoke` reads only `input`, so those values used to vanish (116
+#: t_78ba5d3b1429: `inputs` beside `input`, then "no inputs declared" five times in a row).
+SKILL_INVOKE_INPUT_FIELDS = ("code", "inputs", "timeout_sec", "purpose", "deliverable_outputs", "work_outputs", "revises", "intent")
+
+
+def salvage_flattened_skill_invoke_args(args: dict[str, Any]) -> tuple[dict[str, Any], str | None, tuple[str, ...]]:
+    """Move python_sandbox runner fields given beside `input` into it.
+
+    Returns ``(args, shape, conflicts)``. A field given in both places with different values is a
+    conflict: it is left in place and reported, never guessed. Equal duplicates collapse into `input`.
+    """
+    if args.get("name") != SANDBOX_SKILL_NAME:
+        return args, None, ()
+    inner = args.get("input")
+    if inner is None:
+        inner = {}
+    if not isinstance(inner, dict):
+        return args, None, ()
+    misplaced = [key for key in SKILL_INVOKE_INPUT_FIELDS if key in args]
+    if not misplaced:
+        return args, None, ()
+    conflicts = tuple(key for key in misplaced if key in inner and inner[key] != args[key])
+    settled = [key for key in misplaced if key not in conflicts]
+    if not settled:
+        return args, None, conflicts
+    moved = [key for key in settled if key not in inner]
+    out = {key: value for key, value in args.items() if key not in settled}
+    out["input"] = {**inner, **{key: args[key] for key in moved}}
+    return out, ("flattened_input_" + "+".join(sorted(moved)) if moved else None), conflicts
+
+
+def settle_skill_invoke_calls(tool_calls: Any) -> None:
+    """Move misplaced python_sandbox fields into `input` on the model's tool calls, in place.
+
+    Runs where tool names are canonicalized, before the call is recorded, shown in history or
+    executed, so the recorded arguments, the retained question-card material and the runner all
+    see the same call. A conflicting field stays where it is; the sandbox wrapper refuses it by name.
+    """
+    for call in tool_calls or ():
+        if getattr(call, "name", None) != SKILL_INVOKE_TOOL or not isinstance(getattr(call, "arguments", None), dict):
+            continue
+        settled, shape, _conflicts = salvage_flattened_skill_invoke_args(call.arguments)
+        if settled is not call.arguments:
+            call.arguments = settled
+        if shape:
+            _metric(shape)
+            logger.info("sandbox_inputs.salvaged tool=%s shape=%s", SKILL_INVOKE_TOOL, shape)
+
+
+def skill_invoke_field_conflicts(tool_name: str, args: Any) -> str | None:
+    """A model-facing error when a skill_invoke call gives one runner field two different values."""
+    if tool_name != SKILL_INVOKE_TOOL or not isinstance(args, dict):
+        return None
+    _, _, conflicts = salvage_flattened_skill_invoke_args(args)
+    if not conflicts:
+        return None
+    names = ", ".join(f"`{key}`" for key in conflicts)
+    return (
+        f"skill_invoke python_sandbox: {names} is given both beside `input` and inside it, with different values. "
+        "Send it once, inside `input` next to `code`."
+    )
 
 
 def _count_intent_coverage(tool_name: str, args: dict[str, Any]) -> None:
@@ -152,6 +216,10 @@ def normalize_sandbox_tool_args(tool_name: str, args: Any, ctx: Any) -> Any:
         _count_intent_coverage(tool_name, args)
         return args
     if tool_name == SKILL_INVOKE_TOOL and args.get("name") == SANDBOX_SKILL_NAME:
+        args, shape, _conflicts = salvage_flattened_skill_invoke_args(args)
+        if shape:
+            _metric(shape)
+            logger.info("sandbox_inputs.salvaged tool=%s shape=%s", tool_name, shape)
         inner = args.get("input")
         if not isinstance(inner, dict):
             return args

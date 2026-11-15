@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import posixpath
 import re
+import stat
 from collections.abc import Awaitable, Callable
 from html import escape
 from pathlib import Path
@@ -20,6 +21,7 @@ from bowhead_core.language_context import _normalize_accept_language
 from bowhead_core.theme_surface_registry_generated import (
     CANONICAL_THEME_TOKEN_CSS,
 )
+from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
@@ -55,6 +57,8 @@ _CSS_ROOT_URL_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 _NEXT_STATIC_PREFIX = "_next/static/"
+_NEXT_FLIGHT_PAYLOAD_SUFFIX = ".txt"
+_NEXT_FLIGHT_QUERY_PARAMETER = "_rsc"
 _NEXT_STATIC_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
@@ -74,6 +78,11 @@ def _relative_static_directory_path(path: str) -> str:
     """Return a directory redirect that preserves an unknown browser prefix."""
     name = posixpath.basename(path.strip("/"))
     return f"{name}/" if name else "./"
+
+
+def _without_flight_query(query_string: bytes) -> str:
+    """Drop the router's cache-busting parameter and keep the page's own query."""
+    return "&".join(part for part in query_string.decode("latin-1").split("&") if part and part.split("=", 1)[0] != _NEXT_FLIGHT_QUERY_PARAMETER)
 
 
 def _rewrite_html_for_base_path(
@@ -285,7 +294,47 @@ class RuntimeBasePathStaticFiles(StaticFiles):
         super().__init__(directory=directory, html=html)
         self._public_brand_provider = public_brand_provider
 
+    def _flight_payload_page_redirect(self, path: str, scope: Scope) -> Response | None:
+        """Send a browser that opened a page's Flight payload back to that page.
+
+        With ``output: "export"``, Next 15.5 falls back to a full navigation of the
+        payload address (``<page>/index.txt``) when a client-side navigation fetch
+        rejects, for example while the browser is offline or a connection resets.
+        Opening or reloading that address would otherwise show raw Flight text.
+        The router's own payload fetches always send ``RSC: 1``; a request without
+        it that accepts HTML is a browser opening the address as a document.
+        """
+        if scope.get("method") not in {"GET", "HEAD"}:
+            return None
+        requested = path.strip("/")
+        if not requested.endswith(_NEXT_FLIGHT_PAYLOAD_SUFFIX):
+            return None
+        headers = Headers(scope=scope)
+        if "rsc" in headers or "text/html" not in headers.get("accept", ""):
+            return None
+        name = posixpath.basename(requested)
+        if name == "index.txt":
+            page = posixpath.dirname(requested)
+            target = "./"
+        elif name != _NEXT_FLIGHT_PAYLOAD_SUFFIX:
+            page = requested.removesuffix(_NEXT_FLIGHT_PAYLOAD_SUFFIX)
+            target = f"{posixpath.basename(page)}/"
+        else:
+            return None
+        _, page_stat = self.lookup_path(posixpath.join(page, "index.html"))
+        if page_stat is None or not stat.S_ISREG(page_stat.st_mode):
+            return None
+        query = _without_flight_query(scope.get("query_string", b""))
+        return RedirectResponse(
+            f"{target}?{query}" if query else target,
+            status_code=307,
+            headers={"cache-control": "no-store"},
+        )
+
     async def get_response(self, path: str, scope: Scope) -> Response:
+        page_redirect = self._flight_payload_page_redirect(path, scope)
+        if page_redirect is not None:
+            return page_redirect
         callback_headers = {}
         query_string = scope.get("query_string", b"")
         if path.strip("/") in {"connect/bowra/callback", "connect/bowra/callback/index.html"}:

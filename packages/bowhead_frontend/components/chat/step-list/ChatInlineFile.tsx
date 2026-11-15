@@ -1,11 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Check, Download, RotateCcw } from "lucide-react";
 
 import { LucideGlyph } from "@/components/icon-refresh";
 import { ChatCard, ChatCardButton, ChatCardSpinner } from "@/components/ui/card";
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
+import { recordFileVersion, useNewestFileVersion } from "@/lib/file-version-registry";
 import { fileExtensionLabel, fileTypeIcon } from "@/lib/file-type-icon";
 import { useFileDownload } from "@/lib/use-file-download";
 import { useResultsWorkspaceCapabilitySnapshot } from "@/lib/use-results-workspace-capability";
@@ -32,6 +34,14 @@ export interface ChatInlineFileData {
   downloadUrl: string;
   sizeBytes?: number;
   slideCount?: number;
+  /** File versions (R3): the delivered version, when its file has a newer live version. */
+  versionNo?: number;
+  /** The file's newest version; the card opens and downloads it. */
+  latest?: { id: string; versionNo: number; filename: string; downloadUrl: string; sizeBytes?: number };
+  /** The delivered version was cleaned up (older versions are kept up to a limit). */
+  pruned?: boolean;
+  /** The file this card's version belongs to (its first version's id) and that version's number. */
+  lineage?: { root: string; versionNo: number };
 }
 
 export function fmtSize(bytes?: number): string {
@@ -47,13 +57,50 @@ export function ChatInlineFile({ data }: { data: ChatInlineFileData }) {
   const tAttach = useTranslations("attachment");
   const resultsT = useTranslations("results_workspace");
   const resultsWorkspaceEnabled = useResultsWorkspaceCapabilitySnapshot();
-  const { filename, fileType, mime, downloadUrl, sizeBytes, slideCount } = data;
+  const { fileType, mime, pruned, lineage } = data;
+  // 116 recheck N6: a newer version delivered while the page is open reaches this card without a reload.
+  const shownNewest = useNewestFileVersion(lineage?.root);
+  const latest =
+    lineage && shownNewest && shownNewest.versionNo > Math.max(lineage.versionNo, data.latest?.versionNo ?? 0)
+      ? shownNewest
+      : data.latest;
+  const lineageRoot = lineage?.root;
+  const lineageVersion = lineage?.versionNo;
+  const projectedLatest = data.latest;
+  useEffect(() => {
+    if (!lineageRoot || lineageVersion === undefined) return;
+    recordFileVersion(lineageRoot, {
+      id: data.id,
+      versionNo: lineageVersion,
+      filename: data.filename,
+      downloadUrl: data.downloadUrl,
+      sizeBytes: data.sizeBytes,
+    });
+    if (projectedLatest) recordFileVersion(lineageRoot, projectedLatest);
+  }, [lineageRoot, lineageVersion, data.id, data.filename, data.downloadUrl, data.sizeBytes, projectedLatest]);
+  // The card stands for the file: with a newer version it opens and downloads that version (Q5).
+  const filename = latest?.filename ?? data.filename;
+  const downloadUrl = latest?.downloadUrl ?? data.downloadUrl;
+  const sizeBytes = latest ? latest.sizeBytes : data.sizeBytes;
+  const slideCount = latest ? undefined : data.slideCount;
   const { status, pct, download: runDownload } = useFileDownload({ downloadUrl, filename, mime, sizeBytes });
+  const delivered = useFileDownload({
+    downloadUrl: data.downloadUrl,
+    filename: data.filename,
+    mime,
+    sizeBytes: data.sizeBytes,
+  });
+  const deliveredVersion = data.versionNo ?? lineage?.versionNo ?? 1;
 
   const sizeStr = fmtSize(sizeBytes);
   const ext = fileExtensionLabel(filename) || fileType.toUpperCase();
   // Meta: at most type · scale (pages) · size (spec §6).
-  const facts = [ext, slideCount ? tAttach("file_pages", { count: slideCount }) : null, sizeStr || null].filter(Boolean).join(" · ");
+  const facts = [
+    latest ? tAttach("file_updated_version", { version: latest.versionNo }) : null,
+    ext,
+    slideCount ? tAttach("file_pages", { count: slideCount }) : null,
+    sizeStr || null,
+  ].filter(Boolean).join(" · ");
   const meta =
     status === "downloading"
       ? tAttach("file_downloading", { pct })
@@ -113,7 +160,7 @@ export function ChatInlineFile({ data }: { data: ChatInlineFileData }) {
       title={filename}
       onActivate={
         resultsWorkspaceEnabled
-          ? () => requestCanvasDataFocus(data.id, { entryPoint: "chat" })
+          ? () => requestCanvasDataFocus(latest?.id ?? data.id, { entryPoint: "chat" })
           : status === "downloading"
             ? () => undefined
             : runDownload
@@ -121,6 +168,27 @@ export function ChatInlineFile({ data }: { data: ChatInlineFileData }) {
       activateLabel={resultsWorkspaceEnabled ? resultsT("open_object", { filename }) : downloadLabel}
       trailing={trailing}
       progress={status === "downloading" ? pct / 100 : undefined}
+      secondary={
+        latest && !pruned
+          ? [
+              {
+                label:
+                  delivered.status === "error"
+                    ? tAttach("file_this_version_failed", { version: deliveredVersion })
+                    : tAttach("file_this_version", { version: deliveredVersion }),
+                busy: delivered.status === "downloading",
+                busyLabel: tAttach("file_downloading", { pct: delivered.pct }),
+                onSelect: delivered.download,
+                testId: "chat-inline-file-this-version",
+              },
+            ]
+          : undefined
+      }
+      footerStart={
+        latest && pruned ? (
+          <span className="ui-card__note">{tAttach("file_this_version_pruned", { version: deliveredVersion })}</span>
+        ) : undefined
+      }
     >
       {/* role=status so assistive technology hears downloading / done / failed transitions */}
       <span className={status === "error" ? "ui-card__note ui-card__note--error" : "ui-card__note"} role="status" aria-live="polite">

@@ -244,3 +244,25 @@ async def test_real_confirmation_queue_shows_file_metadata_only(ctx: SimpleNames
         assert snapshot["attachments"] == [{"artifact_id": art.id, "filename": art.filename, "mime": MIME, "size": art.size}]
         assert "path" not in str(snapshot) and "content" not in str(snapshot)
         assert queue.decide(ctx.user_id, snapshot["id"], True)
+
+
+async def test_an_older_version_attachment_says_a_newer_version_exists(ctx: SimpleNamespace) -> None:
+    """File versions R6: the requester sees the newer version before approving; the chosen file is what is sent."""
+    from importlib import import_module
+
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    async with aiosqlite.connect(ctx.artifact_store.db_path) as db:
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+            await db.execute(statement)
+        await db.commit()
+    await SessionStore(ctx.artifact_store.db_path).record_turn(turn_id="t_1", session_id="s_1", user_text="Send the PPT to my email.")
+    first = await _file(ctx, created_by_turn="t_1")
+    second = await _file(ctx, created_by_turn="t_1", content=b"revised presentation", version_of_target=first.id)
+    result = await _send(ctx, [first.id])
+    assert result["ok"] is True
+    shown = tool._confirmations.request.await_args.kwargs["attachments"]
+    assert shown[0]["artifact_id"] == first.id and shown[0]["newer_version"] == {"id": second.id, "version": 2}
+    assert result["sent"]["attachments"][0]["newer_version"] == {"id": second.id, "version": 2}
+    assert tool.deliver_email.call_args.kwargs["attachments"][0].content == b"presentation bytes"

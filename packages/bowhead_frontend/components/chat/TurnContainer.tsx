@@ -159,6 +159,7 @@ import { useResultsWorkspaceCapability } from "@/lib/use-results-workspace-capab
 import { getCurrentLocale, formatMessageTime } from "@/lib/locale";
 import { resolveReplyTimeMs, resolveUserMessageTimeMs } from "@/lib/turn-user-time";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type ExplicitDisclosurePlacement = "inline-open" | "before-answer-open";
 
@@ -1387,7 +1388,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           : tpc("plan_busy_retry") });
         return false;
       }
-      toast({ kind: "error", text: tpc("foot_approve_failed") });
+      toast({ kind: "error", text: withHttpFailureReason(tpc("foot_approve_failed"), err) });
       return false;
     }
     return false;
@@ -1455,7 +1456,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           turnCitations: dto.turnCitations,
         });
       } catch (err) {
-        toast({ kind: "error", text: tpc("action_errors.view_report_failed"), action: copyDiagnosticsAction(err, "chat") });
+        toast({ kind: "error", text: withHttpFailureReason(tpc("action_errors.view_report_failed"), err), action: copyDiagnosticsAction(err, "chat") });
       }
     })();
   };

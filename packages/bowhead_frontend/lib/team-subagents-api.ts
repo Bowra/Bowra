@@ -8,6 +8,7 @@
  */
 
 import { apiFetch, readApiError } from "./api-client";
+import { attachHttpCause } from "./user-facing-error";
 import { spaceHeader } from "./space-storage";
 import type { SubagentDraftRequestContext } from "./subagent-draft-context";
 import type { AgentAuthoringTool } from "./agents-api";
@@ -224,11 +225,14 @@ async function _check(r: Response): Promise<Response> {
   const blockedMessage = blockedItems.length
     ? blockedItemLines(blockedItems, staticTranslator("agents_marketplace")).join("\n")
     : null;
-  throw new TeamSubagentApiError(
-    error.status,
-    blockedMessage ?? teamSubagentErrorMessage(error.code, reasonCodes, toolRef) ?? error.message,
-    error.code,
-    blockedItems,
+  throw attachHttpCause(
+    new TeamSubagentApiError(
+      error.status,
+      blockedMessage ?? teamSubagentErrorMessage(error.code, reasonCodes, toolRef) ?? error.message,
+      error.code,
+      blockedItems,
+    ),
+    error,
   );
 }
 

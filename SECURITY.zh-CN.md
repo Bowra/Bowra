@@ -16,6 +16,8 @@
 
 ## ChromaDB 依赖安全公告
 
-截至 2026-11-10，锁定的 `chromadb` 版本为 `1.5.9`。Python 包审计报告四项不同的公开安全公告：[CVE-2026-45829](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)、[CVE-2026-45830](https://github.com/advisories/GHSA-2wm9-hf6c-p5cr)、[CVE-2026-45831](https://github.com/advisories/GHSA-xph7-9rjv-w5fr) 和 [CVE-2026-45833](https://github.com/advisories/GHSA-36p7-vc44-83pf)。其中一项在扫描输出中重复出现。上游尚未列出修复版本，详见[上游版本状态记录](https://github.com/chroma-core/chroma/issues/7909)。这些发现仍未关闭。
+截至 2026-11-15，锁定的 `chromadb` 版本为 `1.5.9`。Python 包审计报告四项不同的公开安全公告：[CVE-2026-45829](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)、[CVE-2026-45830](https://github.com/advisories/GHSA-2wm9-hf6c-p5cr)、[CVE-2026-45831](https://github.com/advisories/GHSA-xph7-9rjv-w5fr) 和 [CVE-2026-45833](https://github.com/advisories/GHSA-36p7-vc44-83pf)。其中一项在扫描输出中重复出现。上游尚未列出修复版本，详见[上游版本状态记录](https://github.com/chroma-core/chroma/issues/7909)。这些发现仍未关闭。
 
 Bowra 使用本地 `PersistentClient`、应用自行提供的向量，以及自身的 Team 和 Space 访问检查。应用构建配方不启动 Chroma 独立 HTTP 服务，也不使用其 HTTP 授权提供器。这限制了服务端公告所述路径，但不代表该依赖没有漏洞。Chroma 客户端也可加载嵌入配置，因此不要将本安装连接到不可信 Chroma 服务、导入不可信 Chroma 存储或配置，或启用远程模型代码。限制本地 Chroma 目录仅供应用和可信运营人员写入；改变这些边界或另行部署 Chroma 服务前，须重新评估公告影响。
+
+1.7.44 源码快照将 OpenTelemetry Python 升级到 1.45.2，修复解析异常跟踪请求头时可能出现的拒绝服务问题。[上游安全公告](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg)。

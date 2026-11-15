@@ -22,6 +22,7 @@ import {
   rejectApproval,
   type ApprovalDTO,
 } from "@/lib/api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Scope = "pending" | "all";
 
@@ -96,7 +97,7 @@ function ApprovalsInner() {
       setList({ scope, items: next });
     } catch (e: unknown) {
       if (seq !== requestSeq.current) return;
-      setErr(shownError(t("load_failed_notice"), e));
+      setErr(shownError(withHttpFailureReason(t("load_failed_notice"), e, { read: true }), e));
     }
     setLoadedScope(scope);
   }, [scope, t]);
@@ -131,7 +132,7 @@ function ApprovalsInner() {
       notifySettingsNavCountsChanged();
       await load();
     } catch (e: unknown) {
-      setErr(shownError(t("decide_failed_notice"), e));
+      setErr(shownError(withHttpFailureReason(t("decide_failed_notice"), e), e));
     } finally {
       setBusy((s) => {
         const next = new Set(s);

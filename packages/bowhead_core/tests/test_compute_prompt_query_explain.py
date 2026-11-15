@@ -20,7 +20,10 @@ def prompt() -> str:
 
 
 def _block(prompt: str) -> str:
-    return prompt[prompt.index("query_explain") :][:900]
+    """The `query_explain` rule itself; other rules mention the field too."""
+    start = prompt.index("- **`query_explain`")
+    end = prompt.find("\n- ", start + 1)
+    return prompt[start : end if end > 0 else None]
 
 
 @pytest.mark.unit

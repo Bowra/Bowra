@@ -105,7 +105,7 @@ _PARADIGM_V2_ROLE_MAP: dict[str, frozenset[str]] = {
     "send_email": frozenset({"lead"}),
     "skill_invoke": frozenset({"analyst"}),
     "skill_list": frozenset({"analyst", "lead"}),
-    "skill_read": frozenset({"analyst"}),
+    "skill_read": frozenset({"analyst", "lead"}),
     "skill_save_generated": frozenset({"analyst", "lead"}),
     "subagent_return": frozenset({"analyst", "lead"}),
     "subagent_spawn": frozenset({"lead"}),

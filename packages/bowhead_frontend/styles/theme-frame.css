@@ -1,0 +1,142 @@
+/* Team frame options (lib/frame-options.ts). Each block is scoped to one data attribute on <html>,
+   which the brand runtime sets only when the Team's published theme chooses that option, so the
+   product look is untouched without them. Colors stay those of the effective scheme: outlines
+   derive from --c-ink, so the scheme's contrast validation keeps holding. Report, chart and export
+   content are outside the scope. The triple :root outranks the radius presets, the brand token
+   style and the refresh sheets imported after this file. */
+
+/* ── corners: square ─────────────────────────────────────────────────────── */
+:root:root:root[data-frame-corners="square"] {
+  --r-1: 0px;
+  --r-2: 0px;
+  --r-3: 0px;
+  --r-4: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --theme-composer-radius: 0px;
+  --theme-ws-pane-radius: 0px;
+}
+/* Shell chrome whose corner radii are literal in the refresh sheets (their tests pin the default
+   values), so the radius scale above does not reach them. */
+:root:root:root[data-frame-corners="square"]
+  :is(
+    .ui-menu,
+    .app-floating-menu,
+    .app-floating-menu-item,
+    .composer-reference-menu,
+    .composer-v2__tooltip,
+    .unified-work-item,
+    .unified-sidebar-nav-item,
+    .unified-sidebar-nav-group-row,
+    .unified-sidebar-group-toggle,
+    .older-sessions-more,
+    .v2-ws-left,
+    .v2-send-btn,
+    .notification-bell__badge
+  ),
+:root:root:root[data-frame-corners="square"]
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]) {
+  border-radius: 0;
+}
+
+/* ── border: bold ────────────────────────────────────────────────────────── */
+/* Four-sided frames and ring outlines thicken; single-side dividers (--rule-w) stay one pixel,
+   because at two they read as heavy bars between table rows. */
+:root:root:root[data-frame-border="bold"] {
+  --border-w: 2px;
+  --hairline: 1px;
+}
+:root:root:root[data-frame-border="bold"] :is(.ui-segmented, .ui-tabs--segmented),
+:root:root:root[data-frame-border="bold"]
+  :is(
+    .ui-segmented [role="radio"][aria-checked="true"],
+    .ui-tabs--segmented [role="tab"][aria-selected="true"]
+  ) {
+  box-shadow: inset 0 0 0 2px var(--c-control-line);
+}
+
+/* ── line contrast: strong ───────────────────────────────────────────────── */
+:root:root:root[data-frame-line-contrast="strong"] {
+  --c-line: color-mix(in srgb, var(--c-ink) 80%, transparent);
+  --c-line-2: color-mix(in srgb, var(--c-ink) 45%, transparent);
+  --c-separator: color-mix(in srgb, var(--c-ink) 45%, transparent);
+  --c-separator-strong: color-mix(in srgb, var(--c-ink) 80%, transparent);
+  --c-control-line: var(--c-ink);
+}
+
+/* ── elevation: hard ─────────────────────────────────────────────────────── */
+/* Offset shadows without blur; floating layers also get an ink outline. */
+:root:root:root[data-frame-elevation="hard"] {
+  --frame-drop: color-mix(in srgb, var(--c-ink) 30%, transparent);
+  --elev-raised: 3px 3px 0 0 var(--frame-drop);
+  --elev-float: 0 0 0 2px var(--c-ink), 6px 6px 0 0 var(--frame-drop);
+  --elev-side: -4px 0 0 0 var(--frame-drop);
+  --shadow-1: 2px 2px 0 0 var(--frame-drop);
+  --shadow-2: 3px 3px 0 0 var(--frame-drop);
+  --shadow-sm: 2px 2px 0 0 var(--frame-drop);
+  --shadow-md: 4px 4px 0 0 var(--frame-drop);
+  --shadow-lg: 0 0 0 2px var(--c-ink), 6px 6px 0 0 var(--frame-drop);
+  --shadow-float: 0 0 0 2px var(--c-ink), 6px 6px 0 0 var(--frame-drop);
+  --shadow-overlay: 0 0 0 2px var(--c-ink), 6px 6px 0 0 var(--frame-drop);
+  --shadow-tooltip: 3px 3px 0 0 var(--frame-drop);
+}
+:root:root:root[data-frame-elevation="hard"] .v2-ws-left {
+  box-shadow:
+    0 0 0 2px var(--c-ink),
+    6px 6px 0 0 var(--frame-drop);
+}
+/* Filled buttons: a pressed-key edge. */
+:root:root:root[data-frame-elevation="hard"] .settings-button--primary,
+:root:root:root[data-frame-elevation="hard"] .settings-button--danger,
+:root:root:root[data-frame-elevation="hard"] .v2-send-btn:not(:disabled) {
+  box-shadow:
+    inset 0 -3px 0 color-mix(in srgb, #000 24%, transparent),
+    inset 0 2px 0 color-mix(in srgb, #fff 22%, transparent);
+}
+:root:root:root[data-frame-elevation="hard"] .settings-button--primary:active:not(:disabled),
+:root:root:root[data-frame-elevation="hard"] .settings-button--danger:active:not(:disabled) {
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+/* ── elevation: flat ─────────────────────────────────────────────────────── */
+/* No shadows; floating layers keep a one-step outline so they still separate from the page. */
+:root:root:root[data-frame-elevation="flat"] {
+  --frame-edge: 0 0 0 var(--border-w, 1px) var(--c-line);
+  --elev-raised: none;
+  --elev-float: var(--frame-edge);
+  --elev-side: var(--frame-edge);
+  --shadow-1: none;
+  --shadow-2: none;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: var(--frame-edge);
+  --shadow-float: var(--frame-edge);
+  --shadow-overlay: var(--frame-edge);
+  --shadow-tooltip: var(--frame-edge);
+}
+:root:root:root[data-frame-elevation="flat"] .v2-ws-left {
+  box-shadow: var(--frame-edge);
+}
+
+/* Segmented controls: without soft shadows the chosen segment is outlined instead of raised. */
+:root:root:root:is([data-frame-elevation="hard"], [data-frame-elevation="flat"]):not(
+    [data-frame-border="bold"]
+  )
+  :is(
+    .ui-segmented [role="radio"][aria-checked="true"],
+    .ui-tabs--segmented [role="tab"][aria-selected="true"]
+  ) {
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:root:root[data-frame-elevation="hard"] .settings-button--primary:active:not(:disabled),
+  :root:root:root[data-frame-elevation="hard"] .settings-button--danger:active:not(:disabled) {
+    transform: none;
+  }
+}

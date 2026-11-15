@@ -13,6 +13,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
+import { ApiError } from "@/lib/api-client";
 
 const apiVoid = vi.fn();
 vi.mock("@/lib/api-client", async (importOriginal) => ({
@@ -226,6 +227,21 @@ describe("profile partial saves", () => {
     await waitFor(() => expect(setUserSetting).toHaveBeenCalledTimes(2));
     expect(apiVoid).toHaveBeenCalledOnce();
   });
+
+  it("says why a name change failed when a proxy answered for a restarting service", async () => {
+    document.documentElement.lang = "zh-CN";
+    apiVoid.mockRejectedValueOnce(new ApiError(502, "x", { nonApiResponse: true }));
+    try {
+      renderIntl(<SettingsProfile />);
+      fireEvent.change(await screen.findByLabelText("显示名称"), { target: { value: "Updated" } });
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      expect(await screen.findByText(
+        "姓名的保存结果尚未确认，请先核对当前资料。服务暂时不可用，可能正在重启或维护，请稍后重试。",
+      )).toBeTruthy();
+    } finally {
+      document.documentElement.lang = "";
+    }
+  });
 });
 
 describe("Profile settings: after Coach edits", () => {
@@ -241,7 +257,7 @@ describe("Profile settings: after Coach edits", () => {
   });
 });
 
-describe("个人设置 · 提醒邮件 (FEATURE_NOTIFICATION_DELIVERY)", () => {
+describe("个人设置 · 提醒邮件", () => {
   it("is shown only with recorded deliveries on, and saves on selection", async () => {
     fetchMe.mockResolvedValue({ ...me, capabilities: { notification_delivery: true } });
     renderIntl(<SettingsProfile />);

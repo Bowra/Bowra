@@ -30,6 +30,7 @@ import {
 import { emailFieldError } from "@/lib/public-form";
 import { appPath } from "@/lib/base-path";
 import { appDocumentHref, useAppRouter } from "@/lib/use-app-router";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export default function RegisterPage() {
   return (
@@ -322,7 +323,7 @@ function RegisterVerifySent({
       setErr(
         error instanceof AuthApiError && error.reasonCode === "resend_too_frequent"
           ? t("verify.resend_too_frequent")
-          : t("verify.resend_failed"),
+          : withHttpFailureReason(t("verify.resend_failed"), error),
       );
     } finally {
       setSending(false);

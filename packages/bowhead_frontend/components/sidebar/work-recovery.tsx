@@ -61,6 +61,7 @@ import { CharIcon } from "@/components/char-icon";
 import { LucideGlyph } from "@/components/icon-refresh";
 import { ChevronDown } from "lucide-react";
 import { OlderSessionsRow, type OlderSessionsPaging } from "./older-sessions-row";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export type SessionMutationResult = "success" | "cancelled";
 
@@ -313,13 +314,13 @@ export function WorkRecovery({
         outcome: "success",
         surface,
       });
-    } catch {
+    } catch (error) {
       track("bowhead_sidebar_session_action_total", {
         action: item.pinned ? "unpin" : "pin",
         outcome: "error",
         surface,
       });
-      setPinError(t("rail_pin_failed"));
+      setPinError(withHttpFailureReason(t("rail_pin_failed"), error));
     } finally {
       pendingPinIdsRef.current.delete(item.id);
       setPendingPinIds((current) => {
@@ -525,7 +526,7 @@ export function WorkRecovery({
         outcome: "error",
         surface,
       });
-      toast({ kind: "error", text: t(sessionRenameErrorKey(error)) });
+      toast({ kind: "error", text: withHttpFailureReason(t(sessionRenameErrorKey(error)), error) });
     }
   };
 
@@ -547,14 +548,14 @@ export function WorkRecovery({
         surface,
       });
       toast({ kind: "success", text: t("rail_restore_done") });
-    } catch {
+    } catch (error) {
       notifySessionListChanged();
       track("bowhead_sidebar_session_action_total", {
         action: "restore",
         outcome: "error",
         surface,
       });
-      toast({ kind: "error", text: t("rail_restore_failed") });
+      toast({ kind: "error", text: withHttpFailureReason(t("rail_restore_failed"), error) });
     } finally {
       markLifecyclePending(item.id, false);
     }
@@ -1358,7 +1359,7 @@ export function useSessionLifecycleErrorText(): (error: unknown, fallback: strin
           return tLifecycleErrors(error.code);
       }
     }
-    return fallback;
+    return withHttpFailureReason(fallback, error);
   };
 }
 

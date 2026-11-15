@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -22,6 +23,16 @@ if TYPE_CHECKING:
     from bowhead_core.user_store import UserStore
 
 logger = logging.getLogger(__name__)
+
+
+def notification_center_enabled() -> bool:
+    """``BOWHEAD_NOTIFICATION_CENTER`` (default on): the deployment kill switch for the whole center.
+
+    Off, nothing is written or announced, no email row is recorded, ``routine_notify`` is not
+    registered and scheduled results go out through their direct email path.
+    """
+    return os.environ.get("BOWHEAD_NOTIFICATION_CENTER", "1").strip() != "0"
+
 
 # Requester-facing fallback copy for every way an access request stops being active (expiry,
 # deleted resource, an approval that did not take effect). Deliberately neutral: it never says
@@ -163,7 +174,7 @@ class NotificationDraft:
     # An access request folded into an approver digest exists so it can be resolved later, but
     # is delivered to nobody yet.
     allow_no_recipients: bool = False
-    # FEATURE_NOTIFICATION_DELIVERY: people to email on a new occurrence, for a type with the
+    # People to email on a new occurrence (recorded deliveries), for a type with the
     # ``email_delivery`` channel (a scheduled result, an urgent task alert). Filtered like recipients.
     email_delivery_to: Sequence[str] = ()
     # Seconds the ``email_delivery`` rows wait before they are due (0: due now).
@@ -175,8 +186,8 @@ class NotificationService:
     store: NotificationStore
     user_store: UserStore
     enabled: bool = True
-    # FEATURE_NOTIFICATION_DELIVERY: write email rows (escalations, configured deliveries) for the
-    # delivery worker. Off: no rows, and producers keep their previous direct email paths.
+    # Write email rows (escalations, configured deliveries) for the delivery worker. The gateway
+    # turns this on with the center. Off: no rows, and producers use their direct email paths.
     delivery_enabled: bool = False
     teams: NotificationTeamResolver = field(init=False)
 
@@ -1092,7 +1103,7 @@ class NotificationService:
         """Phase B opt-in success delivery: an in-app (P3, non-badge → Updates tab) notice that a routine
         produced a result, with a deep link back. Pairs with the external email delivery.
 
-        ``email_user_ids`` (FEATURE_NOTIFICATION_DELIVERY): Team members to email the result; the
+        ``email_user_ids``: Team members to email the result; the
         delivery worker sends, retries and records each outcome for the run history.
         ``flagged_urgent``: the run raised an urgent alert, so the owner's result email says so."""
         if not self.enabled:
@@ -1272,7 +1283,7 @@ class NotificationService:
         """Whether this run flagged something for its owner (delivery mode "only when flagged").
 
         An alert the daily limit refused counts: the limit caps interruptions, and withholding the
-        result too would read as the watched condition having cleared (116 dogfood N8).
+        result too would read as the watched condition having cleared (Regression check N8).
         """
         if await self._open_routine_alert(job, run_id) is not None:
             return True
@@ -1397,7 +1408,7 @@ class NotificationService:
             "rejected": "未采纳",
             "expired": "已过期",
         }.get(final_state, final_state)
-        # 116 dogfood: ISO microseconds/timezone are too rough for user display; receipts need only minute precision.
+        # Regression check: ISO microseconds/timezone are too rough for user display; receipts need only minute precision.
         when = decided_at
         with contextlib.suppress(ValueError):
             when = datetime.fromisoformat(decided_at).strftime("%Y-%m-%d %H:%M")

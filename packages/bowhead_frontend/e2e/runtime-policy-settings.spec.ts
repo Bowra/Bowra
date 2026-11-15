@@ -19,10 +19,10 @@ for (const scenario of [
         const body = await response.json();
         await route.fulfill({ response, json: { ...body, effective: { ...body.effective, mode: scenario.theme } } });
       });
-      const defaults = { turn_time_limit_s: 1800, step_limit: null, tool_call_limit: 300, model_call_time_limit_s: null as number | null };
+      const defaults = { turn_time_limit_s: 1800, step_limit: null, tool_call_limit: 300, model_call_limit: 200, model_call_time_limit_s: null as number | null };
       let limits = { ...defaults, defaults, runtime_controls: { contract: "agent-runtime-controls.v1", system_step_limit: 1000, effective_step_limit: 1000, stall_timeout_s: 300 }, wrap_up_reserve_s: 300, is_default: true, version: "default", ranges: {
         turn_time_limit_s: { min: 600, max: 36000 }, step_limit: { min: 1, max: 10000 },
-        tool_call_limit: { min: 1, max: 10000 }, model_call_time_limit_s: { min: 30, max: 36000 },
+        tool_call_limit: { min: 1, max: 10000 }, model_call_limit: { min: 1, max: 10000 }, model_call_time_limit_s: { min: 30, max: 36000 },
       } };
       const writes: Record<string, unknown>[] = [];
       const executionDefaults = { sandbox_default_timeout_s: 120, sandbox_max_timeout_s: 600, html_max_bytes: 26214400 };
@@ -76,12 +76,14 @@ for (const scenario of [
       const input = page.locator("#arl-model-call");
       await expect(input).toBeDisabled();
       await expect(page.getByRole("radio", { name: /^(Follow turn time|跟随单轮时长)$/ })).toHaveAttribute("aria-checked", "true");
-      await page.getByRole("radio", { name: /^(At most|最多)$/ }).first().click();
+      // Several rows offer "At most"; choose the one in the model-call time row.
+      await page.locator(".agent-run-limits__row", { has: input }).getByRole("radio", { name: /^(At most|最多)$/ }).click();
       await input.fill("900");
       await input.press("Tab");
       await page.getByRole("button", { name: /^(Save|保存)$/ }).click();
       await expect.poll(() => writes.length).toBe(1);
       expect(writes[0].model_call_time_limit_s).toBe(900);
+      expect(writes[0].model_call_limit).toBe(200);
       expect(writes[0]).not.toHaveProperty("runtime_controls");
       await expect(page.getByRole("button", { name: /^(Save|保存)$/ })).toBeHidden();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

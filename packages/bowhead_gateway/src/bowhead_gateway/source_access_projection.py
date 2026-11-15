@@ -972,6 +972,81 @@ async def _with_current_inline_charts(
     return out
 
 
+_INLINE_FILE_KINDS = frozenset({"file", "image"})
+
+
+def _inline_file_refs(payload: Mapping[str, Any]) -> dict[str, tuple[str | None, int | None]]:
+    artifacts = payload.get("inline_artifacts")
+    if not isinstance(artifacts, list):
+        return {}
+    refs: dict[str, tuple[str | None, int | None]] = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping) or artifact.get("kind") not in _INLINE_FILE_KINDS:
+            continue
+        artifact_id = artifact.get("id")
+        if isinstance(artifact_id, str) and artifact_id.startswith("art_"):
+            lineage = artifact.get("lineage_id")
+            number = artifact.get("version_no")
+            # A first version is its own file root.
+            refs[artifact_id] = (lineage if isinstance(lineage, str) and lineage else artifact_id, number if isinstance(number, int) else None)
+    return refs
+
+
+async def _with_current_inline_files(
+    request: Any,
+    turn_id: str,
+    events: list[tuple[str, Mapping[str, Any]]],
+) -> list[tuple[str, Mapping[str, Any]]]:
+    """Point each delivered file card at its file's newest version (file-versions design R3).
+
+    The stored card keeps the version it delivered. This single rule serves live
+    delivery, history reads and replay, so the three agree: a card whose file has
+    a newer live version gains ``latest``, and ``pruned`` when its own version
+    was cleaned up. A failed lookup keeps the delivered cards unchanged.
+    """
+    refs: dict[str, tuple[str | None, int | None]] = {}
+    for event_type, payload in events:
+        if event_type == "lead.final.payload":
+            refs.update(_inline_file_refs(payload))
+    if not refs:
+        return events
+    store = getattr(request.app.state, "artifact_store", None)
+    if store is None or not hasattr(store, "newer_versions"):
+        return events
+    try:
+        newer = await store.newer_versions(refs)
+    except Exception:
+        logger.warning("inline_file_version_lookup_failed turn=%s", turn_id, exc_info=True)
+        return events
+    if not newer:
+        return events
+    out: list[tuple[str, Mapping[str, Any]]] = []
+    for event_type, payload in events:
+        if event_type != "lead.final.payload" or not (set(_inline_file_refs(payload)) & set(newer)):
+            out.append((event_type, payload))
+            continue
+        artifacts = []
+        for artifact in payload["inline_artifacts"]:
+            state = newer.get(artifact.get("id")) if isinstance(artifact, Mapping) and artifact.get("kind") in _INLINE_FILE_KINDS else None
+            if state is not None:
+                latest = state.latest
+                artifact = {
+                    **artifact,
+                    "latest": {
+                        "id": latest.id,
+                        "version_no": latest.version_no or 1,
+                        "filename": latest.filename,
+                        "size_bytes": latest.size,
+                        "download_url": f"/api/v1/files/{latest.id}",
+                        **({"url": f"/api/v1/files/{latest.id}?disposition=inline"} if artifact.get("kind") == "image" else {}),
+                    },
+                    **({"pruned": True} if state.pruned else {}),
+                }
+            artifacts.append(artifact)
+        out.append((event_type, {**payload, "inline_artifacts": artifacts}))
+    return out
+
+
 async def project_event_payloads_for_viewer(
     request: Any,
     turn_id: str,
@@ -1012,6 +1087,7 @@ async def project_event_payloads_for_viewer(
             for event_type, payload in events
         ]
     events = await _with_current_inline_charts(request, turn_id, events)
+    events = await _with_current_inline_files(request, turn_id, events)
     event_sections, descriptors = _event_sections(
         turn_id,
         events,

@@ -14,7 +14,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-3);
   background: var(--c-surface);
   color: var(--c-ink);
@@ -67,7 +67,7 @@
 .reference-parameter-field select,
 .reference-parameter-panel button {
   min-height: 44px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   background: var(--c-surface);
   color: var(--c-ink);
@@ -102,7 +102,7 @@
   margin-top: 6px;
 }
 .reference-parameter-panel footer {
-  border-top: 1px solid var(--c-line);
+  border-top: var(--rule-w, 1px) solid var(--c-line);
   justify-content: flex-end;
 }
 .reference-parameter-panel button {

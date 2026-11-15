@@ -85,15 +85,17 @@ async def load_retained_material_supplement(ctx: Any, *, readers: tuple[str, ...
             coverage = view["coverage"]
             if coverage["references"] != "unknown":
                 coverage["references"] = "partial"
-            if coverage["omitted_count"] is not None:
+            # An incomplete projection has no count, and the model view omits the absent field.
+            if coverage.get("omitted_count") is not None:
                 coverage["omitted_count"] += 1
             if "budget" not in coverage["reasons"]:
                 coverage["reasons"].append("budget")
         # Final authorization need only cover identities actually being sent.
         visible = MaterialReferences.model_validate({key: view[key] for key in ("version", "coverage", "items")})
         return MaterialSupplement(scope, visible, Message(role="user", name=SUPPLEMENT_NAME, content=content))
-    except Exception:
-        logger.warning("retained_material_supplement_unavailable turn=%s", getattr(ctx, "turn_id", None))
+    except Exception as exc:
+        # The type names the failed step; the appendix is optional, so the request goes on without it.
+        logger.warning("retained_material_supplement_unavailable turn=%s error=%s", getattr(ctx, "turn_id", None), type(exc).__name__)
         return None
 
 

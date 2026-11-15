@@ -85,15 +85,21 @@ async def personal(tmp_path, monkeypatch):
     )
 
 
+_CONFIRMATIONS = "/api/v1/tool-confirmations"
+
+
 async def _client(personal, user_id=None):
     from bowhead_gateway.routes import personal_mcp as routes
-    from bowhead_gateway.routes.auth import _current_user
+    from bowhead_gateway.routes import tool_confirmations
+    from bowhead_gateway.routes.auth import _current_user, _store
 
     app = FastAPI()
     app.state = personal.license_app.state
     app.include_router(routes.router, prefix="/personal")
+    app.include_router(tool_confirmations.router, prefix=_CONFIRMATIONS)
     user = await personal.fixture.users.get_user(user_id or personal.ctx.user_id)
     app.dependency_overrides[_current_user] = lambda: user
+    app.dependency_overrides[_store] = lambda: personal.fixture.users
     app.dependency_overrides[routes._registry] = lambda: personal.registry
     return httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test")
 
@@ -153,12 +159,12 @@ async def test_owner_consent_is_required_and_is_single_use(personal, monkeypatch
     assert calls == []
     assert pending["arguments"] == {"query": "private-query"}
     async with await _client(personal, personal.fixture.owner_id) as other:
-        assert (await other.get("/personal/calls/confirmations")).json() == {"confirmations": []}
-        response = await other.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve"})
+        assert (await other.get(_CONFIRMATIONS)).json() == {"items": []}
+        response = await other.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})
         assert response.status_code == 404
     assert calls == []
     async with await _client(personal) as client:
-        response = await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve"})
+        response = await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})
         assert response.status_code == 200, response.text
     result = await asyncio.wait_for(task, 3)
     assert result == {"ok": True, "data": {"answer": "[redacted]", "query": "private-query"}}
@@ -197,7 +203,7 @@ async def test_rejection_and_disabled_connection_do_not_dispatch(personal, monke
     task = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
     pending = await _wait_pending(personal, task)
     async with await _client(personal) as client:
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
     assert (await task)["error_kind"] == "personal_mcp_confirmation_rejected"
     personal.ctx.personal_mcp_call_id = "call_two"
     task = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
@@ -213,7 +219,7 @@ async def test_session_allowance_is_exact_and_revoked_with_the_connection(person
     first = asyncio.create_task(spec.handler({"query": "first"}, personal.ctx))
     pending = await _wait_pending(personal, first)
     async with await _client(personal) as client:
-        response = await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve_session"})
+        response = await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve_session"})
         assert response.status_code == 200, response.text
     assert (await asyncio.wait_for(first, 3))["ok"] is True
     personal.ctx.personal_mcp_call_id = "call_two"
@@ -238,7 +244,6 @@ async def test_confirmation_card_records_each_decision_on_the_step(personal, mon
             self.events.append((event.event_type, dict(event.payload)))
             return True
 
-    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
     _remote(monkeypatch)
     spec = (await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx))[0]
     bus = Bus()
@@ -246,7 +251,7 @@ async def test_confirmation_card_records_each_decision_on_the_step(personal, mon
     first = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
     pending = await _wait_pending(personal, first)
     async with await _client(personal) as client:
-        response = await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve_session"})
+        response = await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve_session"})
         assert response.status_code == 200, response.text
     assert (await asyncio.wait_for(first, 3))["ok"] is True
     (requested, req), (resolved, res) = bus.events
@@ -269,7 +274,7 @@ async def test_timeout_and_restart_never_resend_an_external_action(personal, mon
     task = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
     pending = await _wait_pending(personal, task)
     async with await _client(personal) as client:
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve"})).status_code == 200
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})).status_code == 200
     result = await task
     assert result["error_kind"] == "personal_mcp_outcome_unknown"
     assert "sensitive-personal-token" not in canonical(result)
@@ -415,7 +420,7 @@ async def test_execution_trace_uses_friendly_name_without_consent_arguments(pers
     )
     pending = await _wait_pending(personal, task)
     async with await _client(personal) as client:
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
     invocation = await asyncio.wait_for(task, 3)
     assert invocation.arguments == {}
     rows = _invocations_to_trace_rows(turn_id=personal.ctx.turn_id, intent=None, invocations=[invocation])
@@ -431,8 +436,8 @@ async def test_lost_membership_hides_pending_parameters_and_prevents_execution(p
     with sqlite3.connect(personal.fixture.db_path) as db:
         db.execute("UPDATE workspace_members SET status='removed' WHERE user_id=?", (personal.ctx.user_id,))
     async with await _client(personal) as client:
-        assert (await client.get("/personal/calls/confirmations")).json() == {"confirmations": []}
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve"})).status_code == 409
+        assert (await client.get(_CONFIRMATIONS)).json() == {"items": []}
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})).status_code == 404
     assert (await asyncio.wait_for(task, 3))["ok"] is False
     assert calls == []
 
@@ -515,7 +520,7 @@ async def test_cold_worker_start_is_not_charged_to_the_validation_limit(personal
     assert pending["arguments"] == {"query": "private-query"}
     assert calls == []
     async with await _client(personal) as client:
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "reject"})).status_code == 200
     assert (await asyncio.wait_for(task, 10))["error_kind"] == "personal_mcp_confirmation_rejected"
 
 
@@ -652,7 +657,7 @@ async def test_dispatched_parameters_are_the_exact_confirmed_snapshot(personal, 
     arguments["query"] = "changed-after-confirmation"
     assert pending["arguments"] == {"query": "private-query"}
     async with await _client(personal) as client:
-        assert (await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve"})).status_code == 200
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})).status_code == 200
     assert (await asyncio.wait_for(task, 3))["data"]["query"] == "private-query"
     assert calls == [("search", {"query": "private-query"})]
 

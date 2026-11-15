@@ -414,8 +414,10 @@ def keep_prior_report(bus: Any) -> bool:
 
 _REVISE_SCOPE_ATTR = "_lead_revise_scope"
 _SCOPE_UNBOUNDED = "*"
-# 用户点名的章节对不上报告时记下是哪一步：此后（更晚的步）本轮不再派活，只能 clarification_ask 问用户或直接回复。
+# The step of this Turn's first unresolved revise_scope, and the unresolved items so far. Later steps read them
+# (docs/sprints/revision-scope-retry-2026-11-10/tech-design.md D3/D4); recording a miss refuses nothing by itself.
 _SCOPE_MISSES_ATTR = "_lead_revise_scope_misses"
+_SCOPE_MISS_ITEMS_ATTR = "_lead_revise_scope_miss_items"
 _CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 _ORDINAL_RE = re.compile(r"^第\s*([0-9]+|[一二三四五六七八九十]+)\s*(?:章|节|部分|篇)$")
 _SCOPE_NORM_RE = re.compile(r"[\s「」『』《》“”\"'·:：,，。、()（）\-—_#*]+")
@@ -427,7 +429,7 @@ class ScopeUnit:
 
     title: str
     section_ids: frozenset[str]
-    # 116 dogfood (1.3.43, `s_549979486a1b`): a plan chapter h1 may be an uninformative table+insight label; its first body subheading
+    # Regression check (1.3.43, `s_549979486a1b`): a plan chapter h1 may be an uninformative table+insight label; its first body subheading
     # (e.g. women's wear dominates...) actually describes the chapter. Use it for named scope and the list shown to Lead.
     aliases: tuple[str, ...] = ()
 
@@ -482,7 +484,7 @@ def revise_scope_units(sections: Sequence[Any], *, this_turn_id: str | None) -> 
     章之外的分组：一段以 `##` 级标题开头的正文开一个单元，其后更深一级的小节（`###`）与没有标题的段并进来，
     直到下一个同级 / 更高级标题、文档级 h1 或 plan 章为止。
 
-    116 dogfood（1.3.46，`s_030bdd27d75a`）：plan 只有一步落成了带章 h1 的 plan 章，品类 / 门店 / 季节性 / 结论四部分是
+    Regression check（1.3.46，`s_030bdd27d75a`）：plan 只有一步落成了带章 h1 的 plan 章，品类 / 门店 / 季节性 / 结论四部分是
     `## 标题 + ### 小节` 的普通正文——原先「有 plan 章就只列 plan 章」⇒ 只剩一个单元，退回清单里唯一的选项是月度章，
     Lead 照着选，「改第二章（品类）」改成了月度章。"""
     vis = [s for s in sections if not getattr(s, "superseded", False) and not getattr(s, "hidden_for_chat_mode", False)]
@@ -498,7 +500,7 @@ def revise_scope_units(sections: Sequence[Any], *, this_turn_id: str | None) -> 
             unit["title"] = str(_payload(s).get("text") or "").strip()
         elif kind == "narrative" and not unit["heading"] and _first_heading_level(s):
             unit["heading"] = _section_heading(s)
-    # Plan chapters whose h1 never materialized (116 dogfood 1.3.47 `s_6f8297c12cd1`: four monthly-chapter sections had chapter meta but no h1)
+    # Plan chapters whose h1 never materialized (Regression check 1.3.47 `s_6f8297c12cd1`: four monthly-chapter sections had chapter meta but no h1)
     # use the first body subheading as their name. Requiring h1 hid the entire chapter and excluded its sections from grouping below, so named scope never matched.
     ordered: list[tuple[int, ScopeUnit]] = [
         (
@@ -550,7 +552,7 @@ def resolve_revise_scope(units: Sequence[ScopeUnit], items: Iterable[Any]) -> tu
     否则按规整后的名字（标题或正文首个小标题）**唯一**包含匹配（任一方向）。匹配到零个或多个都算解析不了——
     回给 Lead 带内容的章节清单让它按内容重给，不猜。
 
-    ⚠ **不按位置数**（116 dogfood 1.3.43 `s_549979486a1b`）：plan 有一步失败时章会缺一个（门店章没出来），
+    ⚠ **不按位置数**（Regression check 1.3.43 `s_549979486a1b`）：plan 有一步失败时章会缺一个（门店章没出来），
     用户说的「第二章（品类）」按位置落到了月度章上——改错了章，比不限范围更糟。"""
     allowed: set[str] = set()
     unresolved: list[str] = []
@@ -642,23 +644,55 @@ def out_of_revise_scope(bus: Any, section_id: str) -> bool:
     return str(section_id) not in cur
 
 
-def note_revise_scope_unresolved(bus: Any, batch: Any = None) -> None:
-    """用户点名的章节对不上报告：记下是哪一步（同一步并行的兄弟照常判，更晚的步一律不再派活）。"""
-    if bus is not None:
-        _earlier_step_already_refused(bus, _SCOPE_MISSES_ATTR, batch)
+def note_revise_scope_unresolved(bus: Any, batch: Any = None, items: Iterable[Any] = ()) -> None:
+    """Record a revise_scope miss: the step of the first miss and this Turn's unresolved items (deduplicated).
+
+    It refuses nothing by itself. Later steps read it for the narrow refusals and the disclosure in
+    docs/sprints/revision-scope-retry-2026-11-10/tech-design.md (D3/D4); siblings of the missing step are judged
+    on their own arguments, because sibling handlers run concurrently.
+    """
+    if bus is None:
+        return
+    _earlier_step_already_refused(bus, _SCOPE_MISSES_ATTR, batch)
+    with contextlib.suppress(Exception):
+        seen = list(getattr(bus, _SCOPE_MISS_ITEMS_ATTR, None) or [])
+        for item in items:
+            text = str(item or "").strip()
+            if text and text not in seen:
+                seen.append(text)
+        setattr(bus, _SCOPE_MISS_ITEMS_ATTR, seen)
 
 
-def revise_scope_must_ask(bus: Any, batch: Any = None) -> bool:
-    """更早一步点名的章节对不上 ⇒ 本轮不再派活，只能 `clarification_ask` 问用户或直接回复。
+def revise_scope_missed_earlier(bus: Any, batch: Any = None) -> bool:
+    """An earlier step of this Turn passed a revise_scope that matched no part of the report.
 
-    116 dogfood（1.3.56，`t_8c8b80040f9c` / `t_eb052e2762c8`）：此前回给 Lead 章节清单让它重给，
-    「第五章」被它从清单里硬挑成第四部分改掉；「客户画像」被它去掉范围重派，写手新写一章、回复却说「就地改写完成」。
-    分不出「Lead 挑的就是用户说的」与「硬挑」（要分就得拿用户原话做文本比对）⇒ 一律交给用户选（用户拍板）。"""
+    Until 2026-11-10 this locked the Turn (116 1.3.56 `t_8c8b80040f9c` hard pick, `t_eb052e2762c8` drop-scope rewrite).
+    The lock also blocked correct next steps (the original regression`), so only the unsafe ones are refused now.
+    """
     first = getattr(bus, _SCOPE_MISSES_ATTR, None) if bus is not None else None
     if first is None:
         return False
     kind, value = first
     return not (kind == "batch" and batch is not None and batch == value)
+
+
+def revise_scope_missed_items(bus: Any) -> list[str]:
+    """The unresolved revise_scope items of this Turn, in order (Lead's wording, not necessarily the user's)."""
+    return list(getattr(bus, _SCOPE_MISS_ITEMS_ATTR, None) or []) if bus is not None else []
+
+
+def scope_items_all_ordinal(items: Iterable[Any]) -> bool:
+    """Every item names only a position ("第五章"); positions are never mapped onto parts (`s_549979486a1b`)."""
+    texts = [str(item).strip() for item in items if str(item or "").strip()]
+    return bool(texts) and all(_ORDINAL_RE.match(text) for text in texts)
+
+
+SCOPE_AFTER_MISS_DIRECTIVE = (
+    "`scope_after_miss`: an earlier dispatch in this Turn named a part that matched nothing in the report (`not_found`, "
+    "your wording). Tell the user that part was not found, and say what this dispatch did instead: which parts it revised "
+    "(`scope_parts`), that the whole report was revised (`whole_report`), or that content was added as a new section "
+    "(`mode`=append). Base it on `canvas_changes`. Never present the change as a change to the part that was not found."
+)
 
 
 def scope_unit_display_names(units: Sequence[ScopeUnit]) -> list[str]:
@@ -684,9 +718,11 @@ _SCOPE_QUESTION_TEXT = {
         "unknown": "没有在报告里找到你说的那一部分",
         "ask": "，你想改哪一部分？",
         "new": "都不是，新加一章",
-        "list": "，你想改哪一部分？报告里有：{names}{more}。也可以回复「新加一章」。",
+        "list": "，你想改哪一部分？报告里有：{names}{more}。{files}也可以回复「新加一章」。",
         "more": " 等 {n} 部分",
         "sep": "；",
+        "files": "也可能是之前交付的文件：{files}。",
+        "file": "文件：{name}",
     },
     "en": {
         "ordinal": "I couldn't tell which part of the report 「{named}」 refers to",
@@ -694,18 +730,24 @@ _SCOPE_QUESTION_TEXT = {
         "unknown": "I couldn't find the part you mentioned in the report",
         "ask": ". Which part do you want to change?",
         "new": "None of these — add a new section",
-        "list": '. Which part do you want to change? The report has: {names}{more}. You can also reply "add a new section".',
+        "list": '. Which part do you want to change? The report has: {names}{more}. {files}You can also reply "add a new section".',
         "more": " and {rest} more",
         "sep": "; ",
+        "files": "Or a file delivered earlier: {files}. ",
+        "file": "File: {name}",
     },
 }
 
 
-def revise_scope_question(units: Sequence[ScopeUnit], unresolved: Iterable[str], *, lang: str = "zh-CN") -> dict[str, Any] | None:
+def revise_scope_question(
+    units: Sequence[ScopeUnit], unresolved: Iterable[str], *, lang: str = "zh-CN", files: Sequence[str] = ()
+) -> dict[str, Any] | None:
     """点名对不上时给 Lead 的现成问法（`clarification_ask` 的一个 question）。报告里没有可点名的部分 ⇒ None（调用方不按范围拦）。
 
     选项是每部分能唯一对上它的名字 +「都不是，新加一章」；多于 3 部分时卡片放不下（每题最多 4 个选项）⇒ 自由回答、章名列在问题里，
     问句放在前面、整句不超过 200 字（超出就截短章名、列不下的写「等 N 部分」——review：此前整句被截断，后面的章和问句都丢了）。
+    `files`（修订目标，FEATURE_REVISION_TARGETS）：本会话之前交付的文件名——用户说的可能是文件而不是报告，一并给出由用户选；
+    不传时文字逐字节不变。
     「第 N 章」类说法措辞是「没法确定指哪一部分」：章确实可能存在、只是标题里没写编号，说「没找到」像系统看不见报告。"""
     names = scope_unit_display_names(units)
     if not names:
@@ -719,12 +761,16 @@ def revise_scope_question(units: Sequence[ScopeUnit], unresolved: Iterable[str],
         head = t["ordinal"].format(named=named)
     else:
         head = t["missing"].format(named=named)
-    if len(names) <= 3:
-        return {"question": head + t["ask"], "type": "single_select", "options": [*names, t["new"]]}
+    file_names = [name for name in dict.fromkeys(str(x or "").strip() for x in files) if name][:3]
+    if len(names) + len(file_names) <= 3:
+        options = [*names, *(t["file"].format(name=name) for name in file_names), t["new"]]
+        return {"question": head + t["ask"], "type": "single_select", "options": options}
     shown = [n if len(n) <= _LISTED_NAME_MAX_CHARS else n[: _LISTED_NAME_MAX_CHARS - 1] + "…" for n in names]
+    shown_files = [n if len(n) <= _LISTED_NAME_MAX_CHARS else n[: _LISTED_NAME_MAX_CHARS - 1] + "…" for n in file_names]
+    files_text = t["files"].format(files=t["sep"].join(shown_files)) if shown_files else ""
     for k in range(len(shown), 0, -1):
         more = t["more"].format(n=len(shown), rest=len(shown) - k) if k < len(shown) else ""  # zh 写总数、en 写剩下几部分
-        text = head + t["list"].format(names=t["sep"].join(shown[:k]), more=more)
+        text = head + t["list"].format(names=t["sep"].join(shown[:k]), more=more, files=files_text)
         if len(text) <= _QUESTION_MAX_CHARS:
             return {"question": text, "type": "free_text", "options": []}
     return {"question": (head + t["ask"])[:_QUESTION_MAX_CHARS], "type": "free_text", "options": []}
@@ -1179,7 +1225,7 @@ def canvas_mode_context_line(mode: str | None, doc_title: str | None) -> str:
             "改数/改口径时先 `read_report(include_full=true)`，**凡提到被改指标的段都要改**（导语、结论、各节），只改一段不算完成。"
             "章标题（outline 里 `kind=h1`、`editable=true` 的段）若写着被改掉的口径（如「2026年1-9月…」），也用 "
             '`write_report(section_id=<它的 id>, expected_rev=…, content="新标题")` 改掉——content 只写标题这一行；报告大标题别这样改，走 payload.title。'
-            "payload：`exec_summary` 一句说清改了哪几段；`sources` 照填；**口径（时间/范围/指标定义）变了** ⇒ `title`（需改才填）、"
+            "payload：`exec_summary` 一句说清改了哪几段；`sources` 只填本轮新取到的数据（只改图、改措辞而没有新取数就不填，原报告的来源已在）；**口径（时间/范围/指标定义）变了** ⇒ `title`（需改才填）、"
             "`kpis`（**整条带的全部指标**按新口径给，别只给变了的那个）、`recommendations`/`caveats`（受影响则整组重写）——系统据此就地换标题/KPI 带/建议/局限；"
             "纯措辞修订这些都别填；`insights` 不填；`delivery_surface='report'`。"
         )
@@ -1219,7 +1265,7 @@ def is_cross_turn_editable(section: Any, this_turn_id: str | None) -> bool:
     """flag 开时上一轮的段能否被本轮写手就地改：上一轮建的 + 正文段或章标题 + 未折叠。
     outline 的 ``editable`` 与 ``_do_update`` 的放行**同一口径**。
 
-    章标题（116 dogfood 1.3.49 `s_18c8b86f3003`）：整份改成 1-6 月后封面标题换了，章标题还是「2026年1-9月…」——
+    章标题（Regression check 1.3.49 `s_18c8b86f3003`）：整份改成 1-6 月后封面标题换了，章标题还是「2026年1-9月…」——
     写手改不了 h1、收尾器只管封面、时间窗也不是数字 token（残留扫描看不见），没有任何一环会动它。
     章标题走 `write_report` 的专用分支（只写 `payload.text`），不进正文的 bake。"""
     return (
@@ -1568,7 +1614,7 @@ def chapter_scoped_revision(
 ) -> list[tuple[str, str]]:
     """修订只动了 plan 文档里的**一部分章**时，返回被修订章的 key；整份文档改口径或根本不是 plan 章 ⇒ 空列表。
 
-    116 dogfood R12（`s_bae4bff9d319`）：用户说「只把第二章改成 1-6 月，其它章节不动」，收尾器却把
+    Regression check R12（`s_bae4bff9d319`）：用户说「只把第二章改成 1-6 月，其它章节不动」，收尾器却把
     payload.kpis 当**文档级** KPI 写进封面带（5 格 → 3 格，第一/三章还是全年），又把第二章自己的
     KPI 带折掉——结果封面和其它章互相矛盾、第二章一条 KPI 都没有。章范围的修订，KPI 属于那一章。
 
@@ -1665,7 +1711,7 @@ async def _mark_folded_by_revise(
 
 # ─── Batch B1-7: revision completeness (warn only; no changes) ─────────────────
 
-# 116 dogfood R12: `1-12月` yielded `-12`, mislabeling correct full-year numbers as pre-revision stale values.
+# Regression check R12: `1-12月` yielded `-12`, mislabeling correct full-year numbers as pre-revision stale values.
 # A number must not immediately follow a digit/decimal point (range hyphens are not signs), nor precede date units (月/日/年/号/季度/周).
 # ⚠ Negative lookahead must include `\.\d`: otherwise `45.2 日` backtracks to truncated `45` (observed in review), which matches unrelated
 # `45家` and is printed verbatim in user-visible provenance text.
@@ -1732,7 +1778,7 @@ def stale_values_after_revision(
         dropped |= old - new
     if not dropped:
         return []
-    # 116 dogfood R12: only chapter 2 of a plan document changed; full-year values like `116.23亿元` in chapters 1/3 were correct (their basis stayed unchanged),
+    # Regression check R12: only chapter 2 of a plan document changed; full-year values like `116.23亿元` in chapters 1/3 were correct (their basis stayed unchanged),
     # yet provenance called them pre-revision stale values. For **chapter-scoped revision**, do not scan other chapters or the cover KPI band.
     # ⚠ Scope comes from the caller (same `chapter_scoped_revision` decision as chrome patching). Inferring it from revised chapters
     # would mistake an unfinished whole-document basis change for chapter scope, hiding residues precisely when a warning is needed (independent review observed this).
@@ -2018,6 +2064,8 @@ def canvas_changes_ledger(
     """本轮到此刻为止画布上**实际**发生了什么。纯函数。
 
     - ``patched``：本轮就地改过的**上一轮**段（``patched_ids`` 来自本轮 patch 账本）；
+    - ``added_sections``: visible text a helper wrote this Turn (not chrome, tail or provenance), so an added
+      chapter is never reported as an in-place revision;
     - ``added_charts``：本轮新画、仍可见的图；
     - ``removed_charts``：本轮收起的图（``folded_by=revise`` 且 ``superseded_by_turn`` 是本轮），
       外加 ``pending_fold_ids``——收尾器紧接着按 B1-2 规则一定会收的图（锚被本轮新图替换）；
@@ -2031,6 +2079,7 @@ def canvas_changes_ledger(
     pending = set(pending_fold_ids)
     patched: list[dict[str, Any]] = []
     added: list[dict[str, Any]] = []
+    added_sections: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
     for s in all_sections:
         kind = str(getattr(s, "kind", "") or "")
@@ -2050,8 +2099,21 @@ def canvas_changes_ledger(
                 patched.append({"section_id": sid, "kind": kind, "heading": item["title"]})
         elif sid in patched_set and not own_turn and not superseded:
             patched.append({"section_id": sid, "kind": kind, "heading": _section_heading(s)})
+        elif (
+            own_turn
+            and this_turn_id
+            and not superseded
+            and not getattr(s, "hidden_for_chat_mode", False)
+            and is_peer_authored_narrative(s)
+            and _chrome_piece_of(s) is None
+            and not _is_tail(s)
+            and not is_provenance_section(s)
+        ):
+            # New text written by a helper this Turn: an added chapter is not an in-place revision (116 `t_eb052e2762c8`).
+            added_sections.append({"section_id": sid, "heading": _section_heading(s)})
     return {
         "patched": patched[:_LEDGER_MAX_ITEMS],
+        "added_sections": added_sections[:_LEDGER_MAX_ITEMS],
         "added_charts": added[:_LEDGER_MAX_ITEMS],
         "removed_charts": removed[:_LEDGER_MAX_ITEMS],
         "prior_charts_visible": [c for c in prior_visible_charts(all_sections, this_turn_id=this_turn_id) if c["section_id"] not in pending],
@@ -2112,8 +2174,77 @@ async def build_canvas_changes(
     return ledger
 
 
+_TITLE_APPLIED_ATTR = "_revise_title_applied"
+
+
+def revise_title_applied(bus: Any) -> bool:
+    return bool(getattr(bus, _TITLE_APPLIED_ATTR, False)) if bus is not None else False
+
+
+async def apply_title_only_revision(
+    canvas_store: Any, bus: Any, *, session_id: str | None, turn_id: str | None, payload: dict[str, Any] | None, language_context: Any = None
+) -> bool:
+    """Replace the newest report's title for a revision that changed only the title (Regression check N8).
+
+    The helper is told to change the document title through ``payload.title``. The revision finalizer
+    that applies it ran only after a prior narrative was patched, and the card path strips ``title`` in
+    revise mode, so "rename the report" changed nothing. This runs when the helper returns, so the patch
+    is in this Turn's Canvas change ledger before Lead answers, and again from the finalizer as a fallback.
+    Only in revise mode without a named scope, when this Turn revised no prior narrative (the finalizer
+    owns the title then) and opened no new document. Returns whether the title was replaced.
+    """
+    title = str((payload or {}).get("title") or "").strip()
+    if (
+        not title
+        or canvas_store is None
+        or not session_id
+        or not turn_id
+        or lead_canvas_mode(bus) != "revise"
+        or revise_scope_bounded(bus)
+        or getattr(bus, "_d6_is_plan_execution", False)  # A plan document's cover belongs to its own finalizer.
+    ):
+        return False
+    try:
+        canvas = await canvas_store.get_canvas_by_session(session_id)
+        if canvas is None:
+            return False
+        sections = await canvas_store.list_sections(canvas.id)
+        touched = await canvas_store.section_ids_touched_by_turn(turn_id)
+        if revised_prior_narratives(sections, touched_ids=touched, this_turn_id=turn_id):
+            return False
+        if turn_opened_new_document(await canvas_store.list_sections_appended_by_turn(turn_id)):
+            return False
+        block = latest_document_block(sections)
+    except Exception:
+        logger.exception("canvas_revise.title_only_detect_failed turn=%s", turn_id)
+        return False
+    if block is None or block.h1 is None or str(_payload(block.h1).get("text") or "").strip() == title:
+        return False
+    from bowhead_core.report_chrome_text import chrome_lang
+
+    with contextlib.suppress(Exception):
+        setattr(bus, _TITLE_APPLIED_ATTR, True)
+    chrome = await patch_document_chrome(
+        canvas_store, bus, canvas_id=canvas.id, turn_id=turn_id, block=block, payload={"title": title}, lang=chrome_lang(language_context)
+    )
+    if "h1" not in (chrome.get("patched") or []):
+        with contextlib.suppress(Exception):
+            setattr(bus, _TITLE_APPLIED_ATTR, False)
+        logger.info("canvas_revise.title_only_skipped turn=%s skipped=%s", turn_id, chrome.get("skipped"))
+        return False
+    logger.info("canvas_revise.title_only turn=%s canvas=%s", turn_id, canvas.id)
+    from bowhead_core.canvas_composer import _event
+
+    with contextlib.suppress(Exception):
+        await bus.emit(_event(turn_id, "canvas.opened", {"canvas_id": canvas.id, "session_id": canvas.session_id, "title": title, "revised": True}))
+    return True
+
+
 def canvas_changes_is_empty(cc: dict[str, Any] | None) -> bool:
-    """本轮对画布什么都没做（没改段、没画图、没收图）。「仍可见的旧图」不算改动。"""
+    """本轮对画布什么都没做（没改段、没画图、没收图）。「仍可见的旧图」不算改动。
+
+    `added_sections` is deliberately not counted: this predicate also gates chat-direct and plain-chat delivery,
+    which stay as they were (revision-scope-retry design D5)."""
     return not cc or not (cc.get("patched") or cc.get("added_charts") or cc.get("removed_charts"))
 
 
@@ -2122,6 +2253,7 @@ CANVAS_CHANGES_DIRECTIVE = (
     "向用户描述画布上做了什么，只能依据它：`removed_charts` 为空时，不得说图「已替换 / 已删除 / 不再展示」；"
     "`prior_charts_visible` 里的上一轮图此刻仍在画布上——用户要求换掉或删掉的图若还在其中，要如实说它仍在。"
     "`stale_kpi` / `stale_elsewhere` 非空＝这些地方还留着改之前的数（KPI 卡、没在修订范围内的段），要如实告诉用户哪里仍是旧口径。"
+    "`patched` 为空时，不得说改了、改写了或就地修订了报告里原有的部分；`added_sections` 里的是本轮新加的内容，要说是新加的。"
 )
 
 

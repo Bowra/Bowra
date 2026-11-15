@@ -1074,7 +1074,7 @@ tools:
     category: skill
     kind: part
     risk: read
-    allowed_roles: [analyst]
+    allowed_roles: [lead, analyst]
 
   - canonical: skill_invoke
     display_zh: 执行技能

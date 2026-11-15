@@ -1,6 +1,6 @@
 "use client";
 
-import { ToolConfirmationSurfaces } from "@/components/chat/tool-confirmation/ToolConfirmationSurfaces";
+import { ToolConfirmationNotice } from "@/components/chat/tool-confirmation/ToolConfirmationNotice";
 
 import { usePathname } from "next/navigation";
 
@@ -42,7 +42,7 @@ export function AuthenticatedAppRoot({
             pathname={pathname}
           >
             {children}
-            <ToolConfirmationSurfaces />
+            <ToolConfirmationNotice />
           </AuthenticatedAppChrome>
         </AuthenticatedAppBoundary>
       </AuthSessionProvider>

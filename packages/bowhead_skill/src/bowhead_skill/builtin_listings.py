@@ -238,10 +238,10 @@ BUILTIN_LISTING_DESCRIPTIONS: dict[str, dict[str, str]] = {
         "fr-FR": "Guide d’extraction de texte et de tableaux, de fusion, de découpage et d’autres opérations PDF. Leur exécution dépend de l’environnement disponible ; ce n’est ni l’export du rapport courant ni la conversion d’une présentation.",
     },
     "pptx": {
-        "en-US": "Guidance for inspecting and authoring PowerPoint presentations, including style references. Editing an uploaded template uses the separate draft review and confirmation workflow; this guide does not publish it.",
-        "zh-CN": "提供 PPT 阅读、制作及样例风格参考方法。修改上传模板走独立的草稿审阅和确认流程，本参考不会直接发布模板修改。",
-        "de-DE": "Anleitung zum Prüfen und Erstellen von PowerPoint-Präsentationen, auch mit Stilvorlagen. Änderungen an importierten Vorlagen nutzen den separaten Entwurfs- und Bestätigungsablauf; dieser Leitfaden veröffentlicht sie nicht.",
-        "fr-FR": "Guide d’inspection et de création de présentations PowerPoint, avec références de style. La modification d’un modèle importé passe par le circuit séparé de brouillon et de confirmation ; ce guide ne la publie pas.",
+        "en-US": "Guidance for inspecting PowerPoint presentations, filling or updating an existing one while keeping its design, and authoring new ones, including style references.",
+        "zh-CN": "提供 PPT 的阅读方法、在保留原有设计的前提下填写或更新已有 PPT 的方法，以及新建 PPT（含样例风格参考）的方法。",
+        "de-DE": "Anleitung zum Prüfen von PowerPoint-Präsentationen, zum Ausfüllen oder Aktualisieren einer vorhandenen Präsentation unter Beibehaltung ihres Designs und zum Erstellen neuer Präsentationen, auch mit Stilvorlagen.",
+        "fr-FR": "Guide pour inspecter des présentations PowerPoint, compléter ou mettre à jour une présentation existante en conservant sa mise en forme, et en créer de nouvelles, avec références de style.",
     },
     "python_sandbox": {
         "en-US": "Runs Python calculations in a secure, offline environment for statistics, forecasts and other analysis that data queries can’t do. Pick it when an Agent needs to calculate with code.",

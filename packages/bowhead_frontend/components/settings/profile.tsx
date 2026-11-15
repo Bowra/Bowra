@@ -37,6 +37,7 @@ import { getUserSettings, getUserSettingsView, setUserSetting } from "@/lib/api"
 import { apiVoid } from "@/lib/api-client";
 import { AccountDeletionControl } from "@/components/settings/account-deletion";
 import { useCoachAfterEdit, type CoachAfterEdit } from "@/lib/agent-coach-after-edit";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const ANSWER_STYLES = ["concise", "detailed", "technical", "business"] as const;
 
@@ -60,7 +61,7 @@ export function SettingsProfile() {
     void fetchMe().then((u) => {
       setMe(u);
       setDisplayName(u.display_name || "");
-    }).catch((e) => setErr(t("load_failed", { err: "" })));
+    }).catch((e) => setErr(withHttpFailureReason(t("load_failed", { err: "" }), e, { read: true })));
   }, [t]);
 
   useEffect(() => { load(); }, [load]);
@@ -81,7 +82,7 @@ export function SettingsProfile() {
         : "detailed";
       setAnswerStyle(style);
       setSavedAnswerStyle(style);
-    }).catch(() => setErr(t("style_load_failed")));
+    }).catch((cause) => setErr(withHttpFailureReason(t("style_load_failed"), cause, { read: true })));
   }, []);
 
   const flash = (m: string, isErr = false) => {
@@ -118,7 +119,8 @@ export function SettingsProfile() {
         const outcomes = [];
         if (nameChanged) outcomes.push(t(nameResult.status === "fulfilled" ? "name_saved" : "name_unconfirmed"));
         if (styleChanged) outcomes.push(t(styleResult.status === "fulfilled" ? "style_saved" : "style_unconfirmed"));
-        setErr(outcomes.join(" "));
+        const failure = nameResult.status === "rejected" ? nameResult.reason : styleResult.status === "rejected" ? styleResult.reason : null;
+        setErr(withHttpFailureReason(outcomes.join(" "), failure));
       }
     } finally {
       setBusy(false);
@@ -142,7 +144,7 @@ export function SettingsProfile() {
     } catch (e) {
       setErr(e instanceof AuthError && e.reasonCode === "resend_too_frequent"
         ? t("resend_wait")
-        : t("resend_failed", { err: "" }));
+        : withHttpFailureReason(t("resend_failed", { err: "" }), e));
     } finally {
       setResending(false);
     }
@@ -296,7 +298,7 @@ export function SettingsProfile() {
 }
 
 /**
- * FEATURE_NOTIFICATION_DELIVERY: the personal switch for reminder emails about items still waiting on
+ * The personal switch for reminder emails about items still waiting on
  * you. Saves on selection; unset means on. Emails a task owner configured are not affected.
  */
 function ReminderEmailsRow() {

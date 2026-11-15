@@ -38,6 +38,7 @@ Team-Inhaber und Team-Admins legen unter **Team-Einstellungen › Agents › Lau
 - **Zeit pro Modellaufruf**: folgt standardmäßig der verbleibenden Agent-Laufzeit. Mit **Höchstens** können Sie eine kürzere Grenze von 30–36.000 Sekunden setzen. Das verlängert die Runde nicht; das Timeout der Modellverbindung gilt weiterhin.
 - **Schrittlimit pro Aufgabe**: wie viele Schritte ein Agent für eine Aufgabe machen darf. Standard ist **Unbegrenzt**. Ein Agent, der mehrere Schritte lang keine neuen Ergebnisse liefert, wird automatisch angehalten; ein Schrittlimit ist daher meist nicht nötig.
 - **Tool-Aufrufe pro Runde**: Gesamtzahl der Tool-Aufrufe aller Agents in einer Runde. Standard sind 300; jedes Tool zählt gleich.
+- **Modellaufrufe pro Runde**: Gesamtzahl der Modellaufrufe von Lead und allen Helfern in einer Runde, einschließlich ihrer Abstimmung und des Entwerfens von Dokumenten. Standard ist **Höchstens 200**; Sie können **Unbegrenzt** oder 1–10.000 wählen. Helfer stoppen 2 Aufrufe vor dem Limit, damit Lead die Antwort aus ihren Ergebnissen schreiben kann; bei 1 oder 2 können keine Helfer laufen. Das unterscheidet sich vom Schrittlimit pro Aufgabe, das jeden Agent einzeln begrenzt.
 
 1. Öffnen Sie **Team-Einstellungen › Agents** und wählen Sie den Tab **Laufzeitlimits**.
 2. Ändern Sie die gewünschten Werte. Liegt ein Wert außerhalb des Bereichs, steht der erlaubte Bereich unter dem Feld und Speichern ist nicht verfügbar.

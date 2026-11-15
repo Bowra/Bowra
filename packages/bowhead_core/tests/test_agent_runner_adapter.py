@@ -562,6 +562,46 @@ async def test_runner_fn_failure_raises() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reported", [True, False], ids=["wrap-up-report", "count-only"])
+async def test_runner_fn_keeps_a_reported_partial_step(reported: bool) -> None:
+    """116 t_78ba5d3b1429: three helpers stopped at a run limit with their done and remaining work,
+    every step failed, and the plan blocked the whole Turn although 27 sections were written."""
+    registry = AgentRegistry.bootstrap()
+    register_all_system_manifests(registry)
+    manifest = registry.get("compute")
+    stub_runner = _StubRunner(
+        next_result=SubagentResult(
+            profile="compute",
+            subagent_id="sub_x",
+            ok=False,
+            final_answer="门店 TOP10 与同比已算完。",
+            error="run_limit_no_progress",
+            completion="partial",
+            stop_reason="no_progress",
+            partial_done="门店 TOP10 与同比已算完。",
+            partial_remaining="BOTTOM10 图表未画出。",
+            partial_reported=reported,
+        ),
+    )
+    runner_fn = make_legacy_agent_runner_fn(
+        subagent_runner=stub_runner,  # type: ignore[arg-type]
+        parent_turn_id="t_test",
+        parent_bus=_StubBus(),  # type: ignore[arg-type]
+        parent_ctx=_StubCtx(),  # type: ignore[arg-type]
+        team_sourced_names=frozenset(),
+    )
+    spec = TaskSpec(agent_name="compute", user_question="q")
+    if not reported:
+        # Only a count of retained results: nothing to keep, so the step fails and stays retryable.
+        with pytest.raises(RuntimeError, match="run_limit_no_progress"):
+            await runner_fn(manifest, spec, _mk_runtime_ctx())
+        return
+    payload, _, _ = await runner_fn(manifest, spec, _mk_runtime_ctx())
+    assert payload["fallback_markdown"] == "门店 TOP10 与同比已算完。"
+    assert payload["partial_completion"] == {"stop_reason": "no_progress", "remaining": "BOTTOM10 图表未画出。"}
+
+
+@pytest.mark.asyncio
 async def test_runner_fn_no_payload_uses_fallback_markdown() -> None:
     """SubagentResult 没 payload 但有 final_answer → wrap 成 fallback_markdown."""
     registry = AgentRegistry.bootstrap()
@@ -774,7 +814,7 @@ async def test_runner_fn_no_language_ctx_injects_nothing() -> None:
 async def test_runner_fn_hands_the_agent_its_acceptance_criteria() -> None:
     """★判据必须跨过派活这条缝——执行者得看见自己要被按什么打分。
 
-    2026-08-18 116 dogfood 根因：`success_criteria` 全仓只有三个用处(写库/渲染到
+    2026-08-18 Regression check 根因：`success_criteria` 全仓只有三个用处(写库/渲染到
     计划卡/给核验官判)，`step_to_task` 从没带上它。enforce 上线后实测「Top N 名称」
     类判据 15/44 不达标，note 形状高度一致(产出点名 TOP1/TOP2/末位就是不点第 3 名)
     ——判官判得对，考卷没发给考生。

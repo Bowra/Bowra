@@ -1,4 +1,4 @@
-"""Lead tool for a scheduled task run to flag its result for the task owner (FEATURE_ROUTINE_NOTIFY).
+"""Lead tool for a scheduled task run to flag its result for the task owner.
 
 A scheduled run happens while nobody watches. When the Agent finds something its owner should
 see now (a threshold crossed, missing data, an anomaly), it calls ``routine_notify`` with a level:
@@ -11,7 +11,7 @@ see now (a threshold crossed, missing data, an anomaly), it calls ``routine_noti
 
 Boundaries:
 
-- **Scheduled runs only.** The tool is registered only with the switch on, and the turn adapter
+- **Scheduled runs only.** The tool is registered while the notification center is on, and the turn adapter
   hides it unless the Turn carries the server-set ``scheduled_run`` reference. A Turn without it
   is refused even if the tool is called.
 - **Owner only.** The only recipient is the task owner; the Agent chooses no addresses.
@@ -25,7 +25,6 @@ Boundaries:
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any, Final
 
@@ -49,11 +48,6 @@ _urgent_email: UrgentEmailSender | None = None
 _result_email_reaches_owner: ResultEmailProbe | None = None
 
 
-def routine_notify_enabled() -> bool:
-    """FEATURE_ROUTINE_NOTIFY (default off). Rollout and rollback: docs/灰度功能清单.md."""
-    return os.environ.get("FEATURE_ROUTINE_NOTIFY", "0").strip().lower() in {"1", "true", "yes"}
-
-
 def _metric(status: str) -> None:
     try:
         from bowhead_core import metrics as _m
@@ -68,7 +62,7 @@ def _schema() -> ToolSchema:
         name=TOOL_NAME,
         description=(
             # Offered only in a scheduled run, so state that context: a condition ("only in a scheduled
-            # task run") read as "not this conversation" and the Agent refused (116 dogfood, 2026-11-09).
+            # task run") read as "not this conversation" and the Agent refused (Regression check, 2026-11-09).
             "This Turn is a run of the owner's scheduled task: it runs unattended, nobody is watching this conversation, "
             "and this tool is available now. Call it to flag this run's result for the task owner when they should look now: "
             "a condition the task's instructions ask to be alerted about holds, a metric crossed the threshold the task watches, "
@@ -162,6 +156,24 @@ def unraised_alert_note(ctx: Any, invocations: Sequence[Any], tool_names: Iterab
     return UNRAISED_ALERT_NOTE
 
 
+async def alert_already_raised(ctx: Any) -> bool:
+    """Whether this run already has an alert, such as one raised before it paused for an answer.
+
+    The resumed half of a run sees only its own tool calls, so `unraised_alert_note` alone would
+    correct an answer whose alert was raised before the question.
+    """
+    run = getattr(ctx, "scheduled_run", None)
+    service = _service_provider() if _service_provider is not None else None
+    if run is None or service is None:
+        return False
+    try:
+        return bool(await service.routine_alert_raised(_JobRef(run), run_id=run.run_id))
+    except Exception:
+        # Unknown: keep the correction; at worst the Lead is asked once to check its alert.
+        logger.warning("routine_notify.alert_lookup_failed job=%s run=%s", run.job_id, run.run_id, exc_info=True)
+        return False
+
+
 async def _owner_gets_result_email(run: Any) -> bool:
     """Whether the run's result email goes to the owner, so it can carry the urgent alert."""
     if _result_email_reaches_owner is None:
@@ -191,9 +203,11 @@ def register_routine_notify_tool(
     urgent_email: UrgentEmailSender | None = None,
     result_email_reaches_owner: ResultEmailProbe | None = None,
 ) -> bool:
-    """Register ``routine_notify`` when FEATURE_ROUTINE_NOTIFY is on; returns whether it did."""
+    """Register ``routine_notify`` while the notification center is on; returns whether it did."""
     global _service_provider, _urgent_email, _result_email_reaches_owner  # noqa: PLW0603 -- startup binding, resolved at invocation time
-    if not routine_notify_enabled():
+    from bowhead_core.notification_service import notification_center_enabled
+
+    if not notification_center_enabled():
         return False
     _service_provider = service_provider
     _urgent_email = urgent_email

@@ -77,7 +77,7 @@ When asking for saved settings, distinguish an explicitly saved choice from an e
 
 ## When saving or refreshing fails
 
-A save error stays visible so you can act on it. If a response times out, the result may be unconfirmed: check the current settings before sending the change again. A network message means the connection failed; a service or unexpected error does not necessarily mean your network is offline.
+A save error stays visible so you can act on it. If a response times out, the result may be unconfirmed: check the current settings before sending the change again. A network message means the connection failed; a service or unexpected error does not necessarily mean your network is offline. When the service gives no specific reason, the message still says what kind of problem it was: the service is temporarily unavailable (it may be restarting), it timed out and the result is unconfirmed, it hit an internal error, requests were too frequent, the submission was too large, or a gateway blocked the request. Follow the next step it suggests.
 
 Profile changes may have separate outcomes: a saved name stays saved even if the answer-style update cannot be confirmed. Feishu connection settings and personal chart preferences distinguish successful saving from a failed status or appearance refresh. Use **Check again** or **Refresh status** to reread the current state; this does not repeat the saved change.
 

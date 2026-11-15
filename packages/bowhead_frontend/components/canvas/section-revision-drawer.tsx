@@ -31,6 +31,7 @@ import { ChangeRow } from "@/components/canvas/object";
 import { diffText, trimDiffContext, type ChangeValue } from "@/lib/canvas-change-value";
 import { formatShortDateTime } from "@/lib/locale";
 import styles from "./section-revision-drawer.module.css";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Backend turn marker for machine organization (reordering etc.), not a user conversation turn. */
 const MACHINE_TURN_PREFIX = "machine:";
@@ -183,7 +184,7 @@ export function SectionRevisionDrawer({
       })
       .catch((e) => {
         // Say only what happened and the remedy; status codes and request IDs go in "复制诊断".
-        setError(shownError(t("load_failed_plain"), e));
+        setError(shownError(withHttpFailureReason(t("load_failed_plain"), e, { read: true }), e));
         setLoading(false);
       });
   }, [open, canvasId, t, attempt]);

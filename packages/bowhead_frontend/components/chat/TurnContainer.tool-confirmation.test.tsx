@@ -79,7 +79,6 @@ function seedWaitingStep(turnId: string): void {
       category: null,
       choices: ["reject", "approve"],
       expiresAt: "2026-11-08T10:03:00Z",
-      timeoutSeconds: 180,
     },
   });
 }

@@ -128,6 +128,27 @@ describe("credits badge", () => {
     );
   });
 
+  it("exhausted: says the credits are used up, names the overage and the next step instead of 'almost out' with a minus sign", async () => {
+    // 116 1.7.32 dogfood D4: running Turns took the balance to -403 while the badge still read "Almost out · -403".
+    state.me = { ...baseMe(), credit_balance: -403 };
+    const { button, dialog } = await openPopover("en-US");
+    expect(button).toHaveAttribute("data-level", "critical");
+    expect(button).toHaveAccessibleName("Credits: Out of credits");
+    expect(button).not.toHaveTextContent("-403");
+    expect(dialog).toHaveTextContent("403 over this period's allowance");
+    expect(within(dialog).getByRole("progressbar")).toHaveAttribute("aria-valuetext", "10,000 of 10,000 used (100%)");
+    expect(dialog.querySelector(".ui-credit-pop__state")).toHaveTextContent(
+      "This period's credits are used up. New requests can start after the reset, or an administrator can add credits.",
+    );
+    cleanup();
+
+    state.me = { ...baseMe(), credit_balance: 0 };
+    const zero = await openPopover();
+    expect(zero.button).toHaveAccessibleName("额度：额度已用完");
+    expect(zero.dialog).toHaveTextContent("剩余 0");
+    expect(zero.dialog.querySelector(".ui-credit-pop__state")).toHaveTextContent("本期额度已用完。新的请求要等额度重置，或请管理员增加额度。");
+  });
+
   it("unknown allowance: no usage bar, says no allowance is set; an empty balance says none is left", async () => {
     state.me = { ...baseMe(), credit_quota: 0, credit_balance: 500 };
     const first = await openPopover();

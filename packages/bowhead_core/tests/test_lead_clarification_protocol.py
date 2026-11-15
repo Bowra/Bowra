@@ -9,7 +9,7 @@ import httpx2
 import pytest
 import respx
 from bowhead_core.agents.clarification_tool import register_clarification_tool
-from bowhead_core.documents.turn_policy import NATIVE_DOCUMENT_GUIDANCE, UNAVAILABLE_DOCUMENT_GUIDANCE
+from bowhead_core.documents.turn_policy import NATIVE_DOCUMENT_GUIDANCE
 from bowhead_core.subagent import PROFILES
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
 from bowhead_router.runtime_notes import REJECTED_TOOL_SYNTAX_INSTRUCTION
@@ -95,9 +95,9 @@ async def test_user_example_and_runtime_guidance_keep_separate_roles(http_start,
     assert roster[0]["execution_id"] == owner["id"]
     system = "\n".join(message["content"] for message in calls[0]["messages"] if message["role"] == "system")
     advertised_tools = {tool["function"]["name"] for tool in calls[0].get("tools", [])}
-    native_document_available = "template_document_submit" in advertised_tools
-    assert (NATIVE_DOCUMENT_GUIDANCE in system) == native_document_available
-    assert (UNAVAILABLE_DOCUMENT_GUIDANCE in system) == (not native_document_available)
+    # An ordinary Lead Turn is not offered the document Tool or its guidance.
+    assert "template_document_submit" not in advertised_tools
+    assert NATIVE_DOCUMENT_GUIDANCE not in system
     assert "clarification_ask alone" in system
     assert "output_language=" in system
     assert not [row for row in rows(case, "clarification_requests") if row["turn_id"] == turn_id]

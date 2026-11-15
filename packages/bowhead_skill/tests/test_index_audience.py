@@ -48,7 +48,7 @@ def test_render_index_lead_view_filters_and_reframes(tmp_path: Path) -> None:
     assert "**lead-visible**" in lead
     assert "peer-only" not in lead
     assert "subagent_spawn" in lead  # Routing semantics.
-    assert "do not call them directly" in lead
+    assert "`skill_read(name)` returns the body of a Skill listed here" in lead
     assert "skill_invoke(name, script, args)" not in lead  # The old misleading header is absent from the Lead view.
 
     peer = render_index(cat)  # Default peer view.

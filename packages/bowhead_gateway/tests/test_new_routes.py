@@ -352,6 +352,21 @@ async def test_upload_session_pin_idor_and_kind_validation(app_ctx) -> None:
             files={"file": ("linked.png", png(), "image/png")},
         )
         assert r4.status_code == 400
+        r5 = await c.post(
+            f"/api/v1/files/upload?derived_from={foreign_manifest.id}",
+            files={"file": ("derived.png", png(), "image/png")},
+        )
+        r6 = await c.post(
+            "/api/v1/files/upload?derived_from=art_missing",
+            files={"file": ("derived.png", png(), "image/png")},
+        )
+        assert (r5.status_code, r6.status_code) == (400, 400)
+        assert r5.json() == r6.json(), "A foreign ID must not be distinguishable from a missing one"
+        r7 = await c.post(
+            f"/api/v1/files/upload?derived_from={r2.json()['file_id']}",
+            files={"file": ("derived.png", png(), "image/png")},
+        )
+        assert r7.status_code == 200
 
 
 @pytest.mark.integration

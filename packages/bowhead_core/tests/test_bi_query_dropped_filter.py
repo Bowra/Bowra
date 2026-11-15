@@ -41,14 +41,14 @@ async def test_parsed_filter_value_missing_from_the_report_is_named() -> None:
 async def test_reported_condition_adds_no_claim(condition_key: str) -> None:
     explain = {"models": ["CHPA_National"], "measures": ["销售金额"], "dimensions": ["每月"], condition_key: ["中文通用名=菲诺利单抗"]}
     out = await _run(f"t-dropped-filter-{condition_key}", _download(["每月", "销售金额"], _ROWS, explain), _clean_cut(), _QUERY)
-    assert "recognized these filter values" not in (out.get("_preflight_hint") or "")
+    assert "names these filter values" not in (out.get("_preflight_hint") or "")
 
 
 @pytest.mark.asyncio
 async def test_text_only_report_adds_no_claim() -> None:
     """Without a structured report there is no key to check, so nothing is asserted."""
     out = await _run("t-dropped-filter-textonly", _download(["每月", "销售金额"], _ROWS, None), _clean_cut(), _QUERY)
-    assert "recognized these filter values" not in (out.get("_preflight_hint") or "")
+    assert "names these filter values" not in (out.get("_preflight_hint") or "")
 
 
 @pytest.mark.asyncio
@@ -57,5 +57,5 @@ async def test_dimension_bound_value_is_named_once_with_unknown_words() -> None:
     cut = _cut(("上海", "d50=" + base64.b64encode("上海".encode()).decode()), ("华东地", "unknown"), ("营业额", "m1"))
     out = await _run("t-dropped-filter-dimvalue", _download(["营业额"], [{"营业额": 1.0}], {"measures": ["营业额"]}), cut, "上海 华东地 营业额")
     hint = out["_preflight_hint"]
-    assert "「华东地」" in hint and "recognized these filter values: 「上海」" in hint
+    assert "「华东地」" in hint and "not restricted to them: 「上海」" in hint
     assert "contains no `filters` field" not in hint

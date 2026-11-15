@@ -165,10 +165,17 @@ _SOURCE_CONTINUITY_RULE = (
     "answer directly; do not switch to bi_query just because a BI dataset is connected**, unless the user explicitly switches to a metric that is in the dataset."
 )
 _SECTION_REVISE_HINT = (
-    "- **Follow-up mode** (every spawn MUST pass `canvas_mode`, one mode per turn): the user adds just one line narrowing the scope / changing numbers / changing wording "
+    "- **Follow-up mode for the Canvas report** (every spawn for the Canvas report MUST pass `canvas_mode`, one mode per turn): the user adds just one line narrowing the scope / changing numbers / changing wording "
     '(e.g. "Jan-Jun 2026" 「2026年1-6月」, "switch to a first-half basis" 「改成上半年口径」, "tighten the wording of chapter 2" 「第二章措辞收一下」) → `revise` '
     "(revise sections of the same report in place; both recomputed numbers and wording changes go to compute, which can refetch data and edit sections with write_report); "
-    "the user wants an extra section → `append`; the user explicitly wants a separate report or a new topic → `new_report`."
+    "the user wants an extra section in the Canvas report → `append`; the user explicitly wants a separate report or a new topic → `new_report`."
+)
+# Revision targets (FEATURE_REVISION_TARGETS): the canvas line above is not the only revisable output.
+_FILE_TARGET_HINT = (
+    "- **Delivered files are separate targets**: when the user wants to change a file delivered earlier (see <delivered_files>), "
+    "that is not a Canvas revision; dispatch with `revise_files` instead of choosing a `canvas_mode` for the report. "
+    "An HTML report file is its own report, also when the user first asked for the report as that file: edits to it are "
+    "`revise_files`, and the Canvas report is not synced."
 )
 _SOURCE_LABELS = {
     "web": "web / external knowledge (open world, not this dataset)",
@@ -179,7 +186,7 @@ _SOURCE_LABELS = {
 
 
 def _canvas_line(cid: Any) -> str:
-    return f"- Output: the report is already on the canvas (canvas {cid}). To build a PPT / deck / chart from it, reuse this analysis directly; do not rerun the data."
+    return f"- Output: a Canvas report already exists (canvas {cid}). To build a PPT / deck / chart from it, reuse this analysis directly; do not rerun the data."
 
 
 def _turn_label(d: dict[str, Any]) -> str:
@@ -230,6 +237,11 @@ def render_history_rules_block(
         lines.append(_canvas_line(last_canvas))
     if section_revise:
         lines.append(_SECTION_REVISE_HINT)
+        from bowhead_core.delivered_files import revision_targets_enabled
+
+        if revision_targets_enabled():
+            # Revision-target design §9 review: the default history path had the Canvas hint but not this one.
+            lines.append(_FILE_TARGET_HINT)
     return "\n".join(lines)
 
 
@@ -311,6 +323,10 @@ def render_recent_turns_block(digests: list[dict[str, Any]], *, source_continuit
             # making Lead choose revise for a first report without a prior report).
             lines.append("")
             lines.append(_SECTION_REVISE_HINT)
+            from bowhead_core.delivered_files import revision_targets_enabled
+
+            if revision_targets_enabled():
+                lines.append(_FILE_TARGET_HINT)
         return "\n".join(lines)
 
     # Defensive: if the block is unexpectedly large, drop oldest turns until it fits.

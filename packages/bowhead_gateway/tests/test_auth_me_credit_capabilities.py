@@ -260,22 +260,18 @@ async def test_auth_me_exposes_deployment_switch_capabilities(app_ctx, monkeypat
 
 
 @pytest.mark.parametrize("plugin_flag", [None, "0", "1"])
-@pytest.mark.parametrize("content_flag", [None, "0", "1"])
-async def test_auth_me_gates_shopify_content_confirmations_on_both_switches(app_ctx, monkeypatch, plugin_flag, content_flag) -> None:
-    for name, value in (("FEATURE_SHOPIFY_PLUGIN", plugin_flag), ("FEATURE_SHOPIFY_CONTENT_WRITES", content_flag)):
-        if value is None:
-            monkeypatch.delenv(name, raising=False)
-        else:
-            monkeypatch.setenv(name, value)
+async def test_auth_me_reports_the_shopify_plugin_switch(app_ctx, monkeypatch, plugin_flag) -> None:
+    if plugin_flag is None:
+        monkeypatch.delenv("FEATURE_SHOPIFY_PLUGIN", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_SHOPIFY_PLUGIN", plugin_flag)
     app, store = app_ctx
     await _seed_team_and_user(store)
     async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
         client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
         response = await client.get("/api/v1/auth/me")
     assert response.status_code == 200, response.text
-    capabilities = response.json()["capabilities"]
-    assert capabilities["shopify_plugin"] is (plugin_flag == "1")
-    assert capabilities["shopify_content_confirmations"] is (plugin_flag == "1" and content_flag == "1")
+    assert response.json()["capabilities"]["shopify_plugin"] is (plugin_flag == "1")
 
 
 @pytest.mark.parametrize("flag", [None, "0", "1"])

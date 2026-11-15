@@ -49,6 +49,7 @@ import { MemberFeedbackView, memberFeedbackKey } from "./agent-member-feedback";
 import { AgentVersionValidation, type TestChangeState } from "./agent-version-validation";
 import { CoachChangesSection } from "./coach-changes-section";
 import { casePoints } from "./agent-eval-points";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Availability = "checking" | "enabled" | "disabled";
 
@@ -218,7 +219,7 @@ export function AgentVersionWorkbenchPanel({
       // A failed background poll keeps the workbench already on screen.
       setLoadState((current) => (current === "ready" ? current : "failed"));
       onAvailability("enabled");
-      if (!quiet) onError(t("version_load_failed"), cause);
+      if (!quiet) onError(withHttpFailureReason(t("version_load_failed"), cause, { read: true }), cause);
     }
   }, [agentId, onAvailability, onError, onPendingCount, onRecommendedTask, onResultWaiting, t]);
 
@@ -527,7 +528,7 @@ function ProposalsView({
       await reload();
       return true;
     } catch (cause) {
-      setStatus({ id, value: { tone: "error", message: cause instanceof ApiError && cause.code === "agent_not_active" ? t("version_agent_archived") : typeof failure === "function" ? failure(cause) : failure, cause } });
+      setStatus({ id, value: { tone: "error", message: cause instanceof ApiError && cause.code === "agent_not_active" ? t("version_agent_archived") : withHttpFailureReason(typeof failure === "function" ? failure(cause) : failure, cause), cause } });
       return false;
     } finally {
       setBusy(null);

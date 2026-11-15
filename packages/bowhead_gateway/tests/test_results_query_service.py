@@ -327,6 +327,73 @@ async def test_owner_query_search_filters_and_locates_deep_item(tmp_path: Path) 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_owner_locate_from_any_file_version_echoes_its_file_entry(tmp_path: Path) -> None:
+    """A revised file's chat cards each name one version; a locate from any of them
+    resolves to the file's entry, which shows the latest version, and echoes its key."""
+    from importlib import import_module
+
+    session_store, canvas_store, artifact_store, session, _, _ = await _stores(tmp_path)
+    contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+    async with aiosqlite.connect(artifact_store.db_path) as db:
+        for column, declaration in contract.COLUMNS:
+            await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+        for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+            await db.execute(statement)
+        # Owned by migration 0046 outside this fixture's stores.
+        await db.execute("CREATE TABLE IF NOT EXISTS artifact_purge_claims (artifact_id TEXT PRIMARY KEY)")
+        await db.execute(
+            "INSERT INTO turns(id,session_id,seq,user_text,started_at) VALUES('turn_report',?,1,'Make the HTML report','2026-11-13')",
+            (session.id,),
+        )
+        await db.commit()
+    artifact_store._version_cols_present = None
+    versions = []
+    for body in (b"<html>v1</html>", b"<html>v2</html>", b"<html>v3</html>"):
+        versions.append(
+            await artifact_store.put_bytes(
+                content=body,
+                filename="经营分析报告.html",
+                mime="text/html",
+                source="python_sandbox",
+                created_by=session.user_id,
+                created_by_turn="turn_report",
+                session_id=session.id,
+                workspace_id=session.workspace_id,
+                kind="deliverable",
+                version_of_target=versions[-1].id if versions else None,
+            )
+        )
+    file_key = f"artifact:{versions[0].id}"
+    kwargs = {
+        "session": session,
+        "team_id": "team_results",
+        "scale_nav": True,
+        "session_store": session_store,
+        "canvas_store": canvas_store,
+        "artifact_store": artifact_store,
+        "cursor_codec": _codec(),
+    }
+
+    for version in versions:
+        version_key = f"artifact:{version.id}"
+        located = await query_owner_results(
+            **kwargs,
+            request_body=ResultsQueryRequestV1(surface="locate", anchor_key=version_key, current_key=version_key),
+        )
+        entry = next(item for item in located.items if item.key == file_key)
+        assert entry.route.artifact_id == versions[-1].id
+        assert entry.lineage is not None and (entry.lineage.number, entry.lineage.count) == (3, 3)
+        assert located.resolved_current_key == file_key
+
+    unrequested = await query_owner_results(
+        **kwargs,
+        request_body=ResultsQueryRequestV1(surface="locate", anchor_key=f"artifact:{versions[1].id}"),
+    )
+    assert unrequested.resolved_current_key is None, "Only a requested current key is resolved"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_owner_query_supports_report_relation_filter_and_rejects_stale_projection(
     tmp_path: Path,
 ) -> None:

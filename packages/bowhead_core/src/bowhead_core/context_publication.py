@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -57,8 +58,16 @@ class ContextPublication:
     expected_generation: str | None
     inherited_generation: str | None
     append_answer: bool = True
+    # The published head to replace when nothing is inherited from it.
+    replaced_generation: str | None = None
     prepared_messages: tuple[PreparedContextMessages, ...] = ()
     prepared_ancestry: PreparedContextAncestry | None = None
+    # True once ``dependencies`` is the cumulative manifest of the whole
+    # conversation; the published generation then references only the manifest.
+    manifest: bool = False
+    # Set by ``verify_authority``: the validator the write transaction uses once current authority
+    # has been checked outside it.
+    adoption_validator: Callable[[list[Message]], Awaitable[None]] | None = None
 
     @asynccontextmanager
     async def open_adoption_readers(self) -> AsyncIterator[ContextPublication]:
@@ -72,11 +81,28 @@ class ContextPublication:
         messages, dependencies = deepcopy(self.messages), deepcopy(self.dependencies)
         values = [*messages, *([Message(role="assistant", content=final_answer)] if self.append_answer else [])]
         prepared = []
-        for body in ([dependencies] if dependencies else []) + [values]:
-            if isinstance(self.validate_sources, PreparedContextSourceValidator):
-                # Revalidate changed final inputs before acquiring the writer;
-                # adoption still repeats current authority in its own snapshot.
+        manifest = isinstance(self.validate_sources, PreparedContextSourceValidator)
+        if manifest:
+            # Revalidate changed final inputs before acquiring the writer;
+            # adoption still repeats current authority in its own snapshot.
+            for body in ([dependencies] if dependencies else []) + [values]:
                 await self.validate_sources.collect(body)
+            # Preparation has read the whole chain, so its collected set is
+            # every dependency of the conversation. Publish that set instead of
+            # only this Turn's, and later Turns read no older generation.
+            dependencies = self.validate_sources.manifest()
+            if dependencies:
+                await self.validate_sources.collect(dependencies)
+            logging.getLogger(__name__).info(
+                "context_publication.manifest session=%s turn=%s bytes=%d attachment_proofs=%d material_turns=%d knowledge_sources=%d",
+                self.worker.session_id,
+                self.worker.turn_id,
+                sum(len(message.content.encode()) for message in dependencies),
+                sum(message.name.startswith("context_attachment_dependencies") for message in dependencies),
+                sum(message.name == "context_material_dependencies_v1" for message in dependencies),
+                len(self.validate_sources.retained_sources),
+            )
+        for body in ([dependencies] if dependencies else []) + [values]:
             prepared.append(
                 await prepare_context_messages(
                     body,
@@ -88,7 +114,15 @@ class ContextPublication:
                     preparation=self.prepared_ancestry,
                 )
             )
-        return replace(self, messages=messages, dependencies=dependencies, prepared_messages=tuple(prepared))
+        return replace(self, messages=messages, dependencies=dependencies, prepared_messages=tuple(prepared), manifest=manifest)
+
+    async def verify_authority(self, final_answer: str) -> ContextPublication:
+        """Recheck current authority now, so the completion transaction only writes."""
+        if not isinstance(self.validate_sources, PreparedContextSourceValidator):
+            return self
+        values = [*self.messages, *([Message(role="assistant", content=final_answer)] if self.append_answer else [])]
+        validator = await self.validate_sources.verify_for_adoption(([self.dependencies] if self.dependencies else []) + [values])
+        return replace(self, adoption_validator=validator)
 
     async def _stage(self, db, final_answer: str) -> tuple[str, list[Message]]:
         current = self.expected_generation
@@ -106,8 +140,10 @@ class ContextPublication:
             configuration_version=self.budget.configuration_version,
         )
         validation = adoption_source_validator(self.validate_sources, db)
+        carried: tuple[str, ...] = ()
         for index, body in enumerate(([self.dependencies] if self.dependencies else []) + [values]):
-            current = await write_context_in_tx(
+            is_manifest = self.manifest and bool(self.dependencies) and index == 0
+            written = await write_context_in_tx(
                 db,
                 worker=self.worker,
                 execution_id=self.execution_id,
@@ -122,7 +158,12 @@ class ContextPublication:
                 prepared_ancestry=self.prepared_ancestry,
                 source_refs=(self.inherited_generation,) if self.inherited_generation else (),
                 for_publication=True,
+                # The manifest stands alone; the published view references only it.
+                stored_refs=(() if is_manifest else carried) if self.manifest else None,
             )
+            if is_manifest:
+                carried = (written,)
+            current = written
         return current, values
 
     async def __call__(self, db, final_answer: str) -> None:
@@ -131,7 +172,7 @@ class ContextPublication:
             raise ContextStoreError("context_terminal_candidate_required")
         working = replace(
             self,
-            validate_sources=adoption_source_validator(self.validate_sources, db),
+            validate_sources=self.adoption_validator or adoption_source_validator(self.validate_sources, db),
             prepared_ancestry=self.prepared_ancestry.for_transaction() if self.prepared_ancestry is not None else None,
         )
         generation, _ = await working._stage(db, final_answer)
@@ -140,7 +181,7 @@ class ContextPublication:
             worker=self.worker,
             execution_id=self.execution_id,
             generation_id=generation,
-            expected_conversation_generation=self.inherited_generation,
+            expected_conversation_generation=self.inherited_generation or self.replaced_generation,
             cipher=self.cipher,
             validate_sources=working.validate_sources,
             prepared_ancestry=working.prepared_ancestry,
@@ -169,7 +210,7 @@ class ContextPublication:
             projection=TerminalContextProjection(
                 execution_id=self.execution_id,
                 generation_id=generation,
-                expected_head_id=self.inherited_generation,
+                expected_head_id=self.inherited_generation or self.replaced_generation,
                 content_digest=message_digest(messages),
                 content_state="conversation" if self.append_answer else "maintenance",
             ),

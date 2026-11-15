@@ -40,6 +40,7 @@ import { ApiError } from "@/lib/api-client";
 import { dismissToast, toast } from "@/lib/use-toast";
 import { useTurnEvalShare } from "@/lib/use-turn-eval-share";
 import { AnswerFeedbackDialog, type AnswerFeedbackValue } from "./answer-feedback-dialog";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Copy the **human-readable body**, removing machine markers rendered as badges / figure slots or hidden
  *  (`[figure:]`, `[cite:N]`, `[data:art_*]`, retired markers, provenance tags). Badges have no clickable sources
@@ -94,11 +95,15 @@ export function MessageActions({ answerText, resendText, onResend, latest = fals
   const markedBad = Boolean(evalShare?.item.feedback);
 
   function shareErrorText(cause: unknown) {
-    return cause instanceof ApiError && cause.status === 404 ? t("msg_eval_share_unavailable") : t("msg_eval_share_failed");
+    return cause instanceof ApiError && cause.status === 404
+      ? t("msg_eval_share_unavailable")
+      : withHttpFailureReason(t("msg_eval_share_failed"), cause);
   }
 
   function feedbackErrorText(cause: unknown) {
-    return cause instanceof ApiError && cause.status === 404 ? t("msg_feedback_unavailable") : t("msg_feedback_failed");
+    return cause instanceof ApiError && cause.status === 404
+      ? t("msg_feedback_unavailable")
+      : withHttpFailureReason(t("msg_feedback_failed"), cause);
   }
 
   /** Clear the thumbs-down and, when `withdraw`, the share it came with (Claude Design L0-c: undo takes both back). */

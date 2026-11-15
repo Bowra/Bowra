@@ -738,7 +738,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "sandbox",
                         "rejected",
                         *(
-                            {"attachment_read", "read_result", "report_read"}
+                            {"attachment_read", "read_result", "report_read", "canvas_result"}
                             if self.contract
                             in {
                                 "ordinary-lead-loop.v8",
@@ -832,6 +832,18 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         or record["skills"] != []
                         or not retained_read_tool(child.tool_name, legacy_report=True)
                         or not child.ended_at
+                    ):
+                        raise OrdinaryContinuationUnavailable()
+                if record["kind"] == "canvas_result":
+                    from bowhead_core.ordinary_lead_material import canvas_result_failed, retained_canvas_tool
+
+                    if (
+                        set(record) != {"kind", "skills", "error", "tool", "arguments_hash", "result_hash", "call_id"}
+                        or record["skills"] != []
+                        or not retained_canvas_tool(child.tool_name)
+                        or not child.ended_at
+                        # A Canvas write is proven only by the retained Canvas projection.
+                        or (not canvas_result_failed(child.result, child.error) and not isinstance(material.get("canvas"), dict))
                     ):
                         raise OrdinaryContinuationUnavailable()
                 if record["kind"] == "uncertain_sandbox" and (

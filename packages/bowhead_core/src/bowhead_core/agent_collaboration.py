@@ -20,10 +20,11 @@ import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core.agent_run_limits import MAX_MODEL_CALL_LIMIT, MAX_TOOL_CALL_LIMIT, MAX_TURN_TIME_LIMIT_S, AgentRunLimits
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
-from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, require_live_worker_in_tx
+from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, ordinary_question_wait_in_tx, require_live_worker_in_tx
 from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.sqlite_readable_schema import readable_table_exists
 
@@ -118,10 +119,18 @@ class CollaborationPolicy(BaseModel):
     max_references: int = Field(default=8, ge=0, le=8)
     max_reference_bytes: int = Field(default=2048, ge=2, le=2048)
     question_seconds: int = Field(default=60, ge=1, le=60)
-    task_seconds: int = Field(default=900, ge=1, le=900)
-    max_model_attempts: int = Field(default=100, ge=1, le=100)
-    max_tool_attempts: int = Field(default=256, ge=1, le=256)
+    task_seconds: int = Field(default=900, ge=1, le=MAX_TURN_TIME_LIMIT_S)
+    # None: the Turn's run limits count these calls (Team model_call_limit and
+    # tool_call_limit), and holds stay receipts without a collaboration counter.
+    # Integers are the fixed effort limits of Turns admitted before that change.
+    max_model_attempts: int | None = Field(default=100, ge=1, le=MAX_MODEL_CALL_LIMIT)
+    max_tool_attempts: int | None = Field(default=256, ge=1, le=MAX_TOOL_CALL_LIMIT)
     max_coordination_attempts: int = Field(default=8, ge=1, le=8)
+
+    @classmethod
+    def for_run_limits(cls, limits: AgentRunLimits) -> CollaborationPolicy:
+        """The policy of a new Turn: its time and effort follow the Team run limits."""
+        return cls(task_seconds=limits.turn_time_limit_s, max_model_attempts=None, max_tool_attempts=None)
 
 
 class EvidenceReference(BaseModel):
@@ -579,10 +588,15 @@ class CollaborationStore:
                 db, "SELECT coordination_attempts FROM agent_collaboration_participant WHERE execution_id=?", (identity.execution_id,)
             )
             limit = policy.max_model_attempts if kind == "model" else policy.max_tool_attempts
-            if task[f"{kind}_attempts"] >= limit or (kind == "model" and coordination and participant[0] >= policy.max_coordination_attempts):
+            if (limit is not None and task[f"{kind}_attempts"] >= limit) or (
+                kind == "model" and coordination and participant[0] >= policy.max_coordination_attempts
+            ):
                 raise CollaborationUnavailable("collaboration_effort_exhausted")
-            # kind is a closed server enum, never an arbitrary SQL identifier.
-            await db.execute(f"UPDATE agent_collaboration_turn SET {kind}_attempts={kind}_attempts+1 WHERE turn_id=?", (worker.turn_id,))
+            if limit is not None:
+                # The counter columns keep their original CHECK bounds; a Turn whose run
+                # limits count the calls records only the hold below.
+                # kind is a closed server enum, never an arbitrary SQL identifier.
+                await db.execute(f"UPDATE agent_collaboration_turn SET {kind}_attempts={kind}_attempts+1 WHERE turn_id=?", (worker.turn_id,))
             if kind == "model" and coordination:
                 await db.execute(
                     "UPDATE agent_collaboration_participant SET coordination_attempts=coordination_attempts+1 WHERE execution_id=?",
@@ -780,7 +794,7 @@ class CollaborationStore:
             task = await _row(db, "SELECT deadline FROM agent_collaboration_turn WHERE turn_id=?", (worker.turn_id,))
             questions = [await self._question(db, worker, item) for item in content["question_ids"]]
             inbox = await self._inbox_in_tx(db, worker, execution_id, content["after"], authorize)
-            deadline = min(task[0], *(row["deadline"] for row in questions))
+            deadline = min(await self._deadline(db, worker.turn_id, task[0]), *(row["deadline"] for row in questions))
             ready = (
                 bool(inbox["items"])
                 or any(row["response_status"] != "pending" or row["dependency_status"] != "open" for row in questions)
@@ -1049,12 +1063,27 @@ class CollaborationStore:
                 await db.rollback()
                 raise
 
-    async def _task(self, db: aiosqlite.Connection, worker: DocumentTurnOwner) -> tuple[aiosqlite.Row, CollaborationPolicy]:
+    async def _deadline(self, db: aiosqlite.Connection, turn_id: str, admitted: float) -> float:
+        """Return the admitted deadline plus the time spent waiting for the user.
+
+        The task limit bounds Agent work. A Turn paused on Lead's question card
+        runs no Agent, so that wait does not consume it; the stored admission
+        deadline stays immutable. A wait ends no later than now, so one that
+        began after the deadline cannot move it past now and revive the task.
+        """
+        window = await ordinary_question_wait_in_tx(db, turn_id=turn_id, now=self.clock())
+        return admitted if window is None else admitted + window[1] - window[0]
+
+    async def _task(self, db: aiosqlite.Connection, worker: DocumentTurnOwner) -> tuple[dict, CollaborationPolicy]:
         row = await _row(db, "SELECT * FROM agent_collaboration_turn WHERE turn_id=?", (worker.turn_id,))
-        if row is None or row["deadline"] <= self.clock():
+        if row is None:
             raise CollaborationUnavailable("collaboration_task_unavailable")
-        await self._execution(db, worker, row["owner_execution_id"])
-        return row, CollaborationPolicy.model_validate_json(row["policy_json"])
+        task = dict(row)
+        task["deadline"] = await self._deadline(db, worker.turn_id, row["deadline"])
+        if task["deadline"] <= self.clock():
+            raise CollaborationUnavailable("collaboration_task_unavailable")
+        await self._execution(db, worker, task["owner_execution_id"])
+        return task, CollaborationPolicy.model_validate_json(task["policy_json"])
 
     @staticmethod
     async def _execution(db: aiosqlite.Connection, worker: DocumentTurnOwner, execution_id: str) -> aiosqlite.Row:

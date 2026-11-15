@@ -10,6 +10,7 @@ lease settlement, exact bus retirement and _inflight_tasks bookkeeping.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sqlite3
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -2055,6 +2056,120 @@ async def test_spawn_turn_owner_loss_never_settles_cas_without_wire_terminal(
     assert recovery_calls == 1
     assert turn_probe_calls == 0
     assert terminal_calls == []
+
+
+async def test_spawn_turn_waits_for_its_own_completion_write_instead_of_declaring_owner_loss(
+    monkeypatch,
+) -> None:
+    """A long completion transaction holds the execution writer lock, so the heartbeat
+    cannot renew; cancelling the worker would discard an answer it is committing."""
+    from bowhead_core.session_store import _completion_write
+
+    in_completion = asyncio.Event()
+    heartbeats_failed = asyncio.Event()
+    allow_commit = asyncio.Event()
+    recovery_calls = 0
+
+    async def completing_runner(*_args, **_kwargs):
+        with _completion_write("t_long_completion"):
+            in_completion.set()
+            await allow_commit.wait()
+
+    monkeypatch.setattr(chat_mod, "_run_turn_and_cleanup", completing_runner)
+    monkeypatch.setattr(ts_mod, "_CHAT_DISPATCH_LEASE_SECONDS", 0.0)
+
+    class DispatchStore(FakeDispatchStore):
+        heartbeat_calls = 0
+
+        async def claim_chat_spawn_dispatch_for_worker(self, **_kwargs):
+            return "claimed"
+
+        async def heartbeat_chat_spawn_dispatch(self, **kwargs):
+            if kwargs.get("settling"):
+                return "renewed"
+            self.heartbeat_calls += 1
+            if self.heartbeat_calls == 1:
+                return "renewed"
+            if self.heartbeat_calls >= 3:
+                heartbeats_failed.set()
+            raise RuntimeError("database is locked")
+
+        async def recover_expired_chat_spawn_dispatches(self):
+            nonlocal recovery_calls
+            recovery_calls += 1
+
+        async def get_turn(self, _turn_id: str):
+            return type("Turn", (), {"status": "completed"})()
+
+        async def mark_chat_spawn_dispatch_terminal(self, **_kwargs):
+            return True
+
+    orchestrator = FakeSpawnOrchestrator(DispatchStore())
+    orchestrator.dispatch_owner_id = "worker-a"
+    orchestrator._cancel_events = {}
+
+    task = await spawn_turn(orchestrator, FakeTurnReq("s1", "t_long_completion"))
+    await asyncio.wait_for(in_completion.wait(), timeout=1)
+    await asyncio.wait_for(heartbeats_failed.wait(), timeout=5)
+    assert not task.done(), "The lease deadline passed, but the worker still holds its completion write"
+
+    allow_commit.set()
+    await asyncio.wait_for(task, timeout=2)
+    assert not task.cancelled()
+    assert recovery_calls == 0
+
+
+async def test_a_hung_completion_write_is_cancelled_after_the_grace_period(monkeypatch) -> None:
+    """The completion exemption is bounded: a transaction that outlives the grace holds the
+    execution writer lock for every other Turn, so the monitor cancels it (rolling it back)."""
+    from bowhead_core.session_store import _completion_write
+
+    in_completion = asyncio.Event()
+    rolled_back = asyncio.Event()
+
+    async def hung_runner(*_args, **_kwargs):
+        with _completion_write("t_hung_completion"):
+            in_completion.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                rolled_back.set()
+                raise
+
+    monkeypatch.setattr(chat_mod, "_run_turn_and_cleanup", hung_runner)
+    monkeypatch.setattr(ts_mod, "_CHAT_DISPATCH_LEASE_SECONDS", 0.0)
+    monkeypatch.setattr(ts_mod, "_COMPLETION_WRITE_GRACE_SECONDS", 0.0)
+
+    class DispatchStore(FakeDispatchStore):
+        heartbeat_calls = 0
+
+        async def claim_chat_spawn_dispatch_for_worker(self, **_kwargs):
+            return "claimed"
+
+        async def heartbeat_chat_spawn_dispatch(self, **kwargs):
+            if kwargs.get("settling"):
+                return "renewed"
+            self.heartbeat_calls += 1
+            if self.heartbeat_calls == 1:
+                return "renewed"
+            raise RuntimeError("database is locked")
+
+        async def get_turn(self, _turn_id: str):
+            return type("Turn", (), {"status": "running"})()
+
+        async def mark_chat_spawn_dispatch_terminal(self, **_kwargs):
+            return True
+
+    orchestrator = FakeSpawnOrchestrator(DispatchStore())
+    orchestrator.dispatch_owner_id = "worker-a"
+    orchestrator._cancel_events = {}
+
+    task = await spawn_turn(orchestrator, FakeTurnReq("s1", "t_hung_completion"))
+    await asyncio.wait_for(in_completion.wait(), timeout=1)
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=5)
+    assert task.done(), "A completion write past the grace period is treated as owner loss"
+    assert rolled_back.is_set(), "The hung completion transaction is cancelled, releasing the writer lock"
 
 
 async def test_spawn_turn_cancelled_monitor_leaves_running_worker_for_lease_recovery(

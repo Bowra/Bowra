@@ -41,6 +41,11 @@ class KbTruncatedRows(BaseModel):
     total: int
 
 
+class KbNewerVersionDTO(BaseModel):
+    artifact_id: str
+    version_no: int
+
+
 class KbFileDTO(BaseModel):
     """KB 文件 metadata DTO. SQL kb_files row → API response."""
 
@@ -136,6 +141,9 @@ class KbFileDTO(BaseModel):
     # Caller-visible permissions (backend computes DTO values)
     can_delete: bool = False
     can_change_scope: bool = False
+    # File versions (Q7): the source file has a newer version; the entry keeps the indexed one until the
+    # user adds the newer version. Shown only to the file's owner.
+    newer_version: KbNewerVersionDTO | None = None
 
 
 class KbFileScopePatchRequest(BaseModel):

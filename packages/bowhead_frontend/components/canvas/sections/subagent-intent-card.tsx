@@ -22,6 +22,7 @@ import { draftGenerationFailureKey, subagentDraftFailureKey } from "./subagent-d
 import { DialogShell } from "@/components/ui/dialog";
 import { randomUuid } from "@/lib/random-id";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const TERMINAL_RETRYABLE_DRAFT_CODES = new Set([
   "subagent_draft_model_timeout",
@@ -155,9 +156,10 @@ export function SubagentIntentCard({
         ) {
           idempotencyKeyRef.current = null;
         }
-        setError(t(messageKey), nextError);
+        setError(messageKey === "intent_unavailable" ? withHttpFailureReason(t(messageKey), nextError) : t(messageKey), nextError);
       } else {
-        setError(t(subagentDraftFailureKey(nextError)), nextError);
+        const failureKey = subagentDraftFailureKey(nextError);
+        setError(failureKey === "draft_failed_plain" ? withHttpFailureReason(t(failureKey), nextError) : t(failureKey), nextError);
       }
     } finally {
       if (controllerRef.current === controller) {

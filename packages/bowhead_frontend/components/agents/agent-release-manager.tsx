@@ -79,6 +79,7 @@ import { AGENT_PENDING_ANCHOR, AgentVersionWorkbenchPanel } from "./agent-versio
 import { type PickerPlugin, ResourcePluginPicker, ResourceSummary, ResourceToolPicker, pluginMatches, pluginToolOwners, pluginsFromCatalog, visiblePlugins } from "@/components/ui/resource-picker";
 import { randomUuid } from "@/lib/random-id";
 import { releaseNoteText } from "@/lib/agent-release-notes";
+import { type HttpFailureReasonOptions, withHttpFailureReason } from "@/lib/user-facing-error";
 
 type AudienceMode = AgentAudienceSnapshot["effective_mode"];
 function HostedStage({ value: _value, ...props }: HTMLAttributes<HTMLDivElement> & { value: string }) {
@@ -381,8 +382,8 @@ function fingerprint(value: EditorDraft): string {
   });
 }
 
-function errorText(_error: unknown, fallback: string): string {
-  return fallback;
+function errorText(error: unknown, fallback: string, options?: HttpFailureReasonOptions): string {
+  return withHttpFailureReason(fallback, error, options);
 }
 
 function formatDate(value: string, locale: string): string {
@@ -566,7 +567,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       if (cause instanceof ApiError && cause.code === "agent_release_cutover_required") {
         setError(t("release_cutover_required"));
       } else {
-        setError(errorText(cause, t("release_load_failed")));
+        setError(errorText(cause, t("release_load_failed"), { read: true }));
       }
     } finally {
       if (mounted.current && request === loadRequest.current) setLoading(false);
@@ -642,8 +643,8 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         setUsers(directory.items);
         setGroups(groupDirectory.items.filter((group) => !directoryQuery.trim()
           || group.name.toLocaleLowerCase().includes(directoryQuery.trim().toLocaleLowerCase())));
-      }).catch(() => {
-        if (!cancelled) setError(t("release_directory_failed"));
+      }).catch((cause: unknown) => {
+        if (!cancelled) setError(withHttpFailureReason(t("release_directory_failed"), cause, { read: true }));
       });
     }, 180);
     return () => {

@@ -33,7 +33,8 @@ DOMAINS = {
         "settings-team-administration",
         "team",
         "/team/settings/subagents/",
-        "Team Agent loop limits: turn duration, model steps, tool calls and model-call time; restore Team defaults. Deployment ceilings remain effective.",
+        "Team Agent loop limits: turn duration, model steps, tool calls, model calls per turn and model-call time; restore Team defaults. "
+        "Deployment ceilings remain effective.",
     ),
     "team_execution_limits": ConfigurationDomain(
         "settings-team-administration",

@@ -19,6 +19,7 @@ import { fetchTeams, setLastTeam } from "@/lib/auth-api";
 import { readInviteResult, type InviteRegisterResult } from "@/lib/invite-api";
 import { switchActiveSpace } from "@/lib/use-space";
 import { appDocumentHref } from "@/lib/use-app-router";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export default function InviteReadyPage() {
   return (
@@ -65,8 +66,8 @@ function InviteReadyInner() {
         }
         setError(r.error ? t("ready.space_list_error") : null);
       })
-      .catch(() => {
-        if (!cancelled) setError(t("ready.space_list_error"));
+      .catch((error: unknown) => {
+        if (!cancelled) setError(withHttpFailureReason(t("ready.space_list_error"), error, { read: true }));
       })
       .finally(() => {
         if (!cancelled) setLoadingWorkspace(false);
@@ -98,8 +99,8 @@ function InviteReadyInner() {
       }
       if (workspaceId) switchActiveSpace(workspaceId);
       window.location.replace(appDocumentHref(path));
-    } catch {
-      setError(t("ready.continue_error"));
+    } catch (error) {
+      setError(withHttpFailureReason(t("ready.continue_error"), error));
     } finally {
       setLoadingWorkspace(false);
     }

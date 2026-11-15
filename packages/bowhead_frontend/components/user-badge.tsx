@@ -126,7 +126,12 @@ function CreditBadgeButton({ me }: { me: MeUser }) {
   const critical = isCriticalBalance(balance, quota);
   const low = isLowBalance(balance, quota);
   const level = critical ? "critical" : low ? "low" : undefined;
-  const value = critical
+  // Turns already running when the balance reaches zero still finish, so an exhausted balance can be negative;
+  // say it is used up rather than "almost out" with a minus sign.
+  const exhausted = balance <= 0;
+  const value = exhausted
+    ? t("credits_exhausted")
+    : critical
     ? t("credits_critical", { balance: balanceText })
     : low && pct !== null
       ? t("credits_low", { pct: Math.round(pct * 100), balance: balanceText })
@@ -138,8 +143,8 @@ function CreditBadgeButton({ me }: { me: MeUser }) {
   const detailPath = creditDetailPath(me);
   const stateMessage = !level
     ? null
-    : usage === null
-      ? t("credits_state_empty")
+    : exhausted || usage === null
+      ? t("credits_state_exhausted")
       : t(level === "critical" ? "credits_state_critical" : "credits_state_low", { pct: usage.leftPct });
 
   const close = () => setOpen(false);
@@ -162,10 +167,15 @@ function CreditBadgeButton({ me }: { me: MeUser }) {
         {t("credits_plan", { plan })}
       </h2>
       <p className="ui-credit-pop__balance">
-        {t.rich("credits_left", {
-          balance: balanceText,
-          num: (chunks) => <span className="ui-credit-pop__num">{chunks}</span>,
-        })}
+        {balance < 0
+          ? t.rich("credits_over", {
+              amount: Math.abs(balance).toLocaleString(),
+              num: (chunks) => <span className="ui-credit-pop__num">{chunks}</span>,
+            })
+          : t.rich("credits_left", {
+              balance: balanceText,
+              num: (chunks) => <span className="ui-credit-pop__num">{chunks}</span>,
+            })}
       </p>
       {usage ? (
         <>

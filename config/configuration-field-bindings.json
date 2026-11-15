@@ -1228,6 +1228,13 @@
     "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
     "schema_revision": "18e43a31e6af71d4bc62"
   },
+  "team_run_limits.model_call_limit": {
+    "kind": "control",
+    "file": "components/settings/agent-run-limits.tsx",
+    "marker": "team_run_limits.model_call_limit",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "e1b0a65e2594e0fbb567"
+  },
   "team_run_limits.model_call_time_limit_s": {
     "kind": "control",
     "file": "components/settings/agent-run-limits.tsx",

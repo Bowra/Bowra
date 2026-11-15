@@ -799,6 +799,21 @@ async def test_eager_compose_suppressed_by_lead_spawn_chat(
 
 
 @pytest.mark.unit
+async def test_eager_compose_skips_a_file_revision_payload_in_a_report_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Revision targets: a helper revising delivered files never adds Canvas report cards, even when
+    another dispatch in the same Turn chose report delivery (docs/sprints/revision-target-2026-11-10)."""
+    reg, ctx, calls = _eager_harness(monkeypatch)
+    ctx.parent_bus._lead_delivery_spawn = "report"
+    ctx.revision_target_files = ("art_html",)
+    inv = await reg.execute("subagent_return", {"payload": _good_payload()}, ctx)
+    assert inv.result["ok"] is True, inv.result
+    assert calls == []
+    assert not hasattr(ctx.parent_bus, "_psi_compose_done")
+
+
+@pytest.mark.unit
 async def test_eager_compose_suppressed_for_pen_using_peer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1142,3 +1157,23 @@ async def test_answer_plan_accepts_report_shaped_findings_without_automatic_repo
     assert result.result["ok"] is True
     assert calls == []
     assert not getattr(ctx.parent_bus, "_psi_compose_done", False)
+
+
+@pytest.mark.unit
+async def test_a_returned_title_is_applied_when_the_helper_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression check N8: the title-only revision runs at return time, so Lead's canvas_changes already shows it."""
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    reg, ctx, _calls = _eager_harness(monkeypatch)
+    ctx.parent_bus._lead_canvas_mode = "revise"
+    applied: list[dict] = []
+
+    async def _record_title(canvas_store, bus, **kwargs):
+        applied.append({"store": canvas_store, "bus": bus, **kwargs})
+        return True
+
+    monkeypatch.setattr("bowhead_core.canvas_revise.apply_title_only_revision", _record_title)
+    payload = {"delivery_surface": "report", "title": "2025年度经营复盘", "exec_summary": "大标题已改。"}
+    inv = await reg.execute("subagent_return", {"payload": payload}, ctx)
+    assert inv.result["ok"] is True, inv.result
+    assert len(applied) == 1 and applied[0]["payload"]["title"] == "2025年度经营复盘"
+    assert applied[0]["store"] is ctx.canvas_store and applied[0]["bus"] is ctx.parent_bus and applied[0]["turn_id"] == ctx.turn_id

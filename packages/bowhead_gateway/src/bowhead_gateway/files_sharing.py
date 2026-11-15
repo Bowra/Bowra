@@ -86,6 +86,27 @@ async def shared_artifact_ids(
         return frozenset()
 
 
+async def file_granted(artifact_store: Any, artifact_id: str, granted_ids: frozenset[str] | set[str]) -> bool:
+    """Whether a grant covers ``artifact_id`` for a non-owner (file versions R5).
+
+    A grant on any version of a file covers the file (a new share is stored on the version
+    current when it is made, which pruning then keeps), and a recipient reads only its latest
+    live version: an older version ID is not readable, exactly like a file without a grant.
+    Without version columns this is the exact-ID rule.
+    """
+    if not granted_ids:
+        return False
+    if artifact_store is None or not hasattr(artifact_store, "lineage_member_ids") or not await artifact_store.versions_supported():
+        return artifact_id in granted_ids
+    artifact = await artifact_store.get(artifact_id, include_deleted=True)
+    if artifact is None:
+        return False
+    members = await artifact_store.lineage_member_ids(artifact_id, user_id=artifact.created_by)
+    if not set(members) & set(granted_ids):
+        return False
+    return await artifact_store.latest_live_version_id(artifact) == artifact_id
+
+
 async def can_read_shared(
     access_store: Any,
     *,
@@ -94,10 +115,12 @@ async def can_read_shared(
     user_id: str,
     workspace_id: str | None,
     group_ids: tuple[str, ...] = (),
+    artifact_store: Any = None,
 ) -> bool:
     """下载/预览路径的 grant 检查——owner check 失败后的第二次机会。
 
-    **每次实查，不缓存**：撤销必须立即生效（design §2.3-4）。
+    **每次实查，不缓存**：撤销必须立即生效（design §2.3-4）。``artifact_store`` given:
+    grants follow the file and cover only its latest version (``file_granted``).
     """
     ids = await shared_artifact_ids(
         access_store,
@@ -106,4 +129,6 @@ async def can_read_shared(
         workspace_id=workspace_id,
         group_ids=group_ids,
     )
-    return artifact_id in ids
+    if artifact_store is None:
+        return artifact_id in ids
+    return await file_granted(artifact_store, artifact_id, ids)

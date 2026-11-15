@@ -31,7 +31,8 @@ system:
     script="render_from_canvas.py")` 导出 (用户点名哪种就出哪种, 别拿 PDF 兜底 Word)。sections 由服务端权威灌入, **不要**把 canvas
     JSON 抄进参数 (会被流式截断, 那正是"文件从没生成"的老故障)。
     **只有 skill 返回 ok 才说"已导出"**; 失败就如实说失败, 不要说成已经给了。
-    (PPT/演示稿/deck 不归你 —— 那走 consultant。)
+    (A new slide deck built from content or a style reference is the consultant's renderer. Editing an existing .pptx file
+    is file work in the sandbox and is available here; `skill_read("pptx")` has the method.)
 
 tools:
   default_enabled: false

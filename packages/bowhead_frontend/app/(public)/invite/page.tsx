@@ -37,6 +37,7 @@ import {
 } from "@/lib/invite-api";
 import { appFetch, appPath } from "@/lib/base-path";
 import { appDocumentHref, useAppRouter } from "@/lib/use-app-router";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type InviteState =
   | { state: "loading" }
@@ -76,8 +77,8 @@ function InvitePageInner() {
       window.location.replace(appDocumentHref(
         accepted.invite_result.next_route || accepted.invite_result.ready_route || "/",
       ));
-    } catch {
-      setAcceptError(t("error.accept_failed"));
+    } catch (error) {
+      setAcceptError(withHttpFailureReason(t("error.accept_failed"), error));
     } finally {
       setAccepting(false);
     }

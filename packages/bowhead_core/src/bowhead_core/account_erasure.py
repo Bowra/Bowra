@@ -18,7 +18,7 @@ from typing import Any
 import aiosqlite
 
 from bowhead_core.account_deletion import AccountDeletionError
-from bowhead_core.sqlite_domains import APPENDED_TABLES, TABLE_DOMAINS
+from bowhead_core.sqlite_domains import APPENDED_COLUMNS, APPENDED_TABLES, TABLE_DOMAINS
 
 _POLICY = json.loads(Path(__file__).with_name("account_erasure_policy.json").read_text())
 # Tables created by revisions after the domain split, by the attached schema that holds them. A
@@ -127,7 +127,10 @@ async def reviewed_schema(db: aiosqlite.Connection) -> dict[str, list[str]]:
             raise AccountDeletionError("account_erasure_schema_incomplete")
         async with db.execute(f"PRAGMA {_q(table_schemas[table])}.table_info({_q(table)})") as cur:
             info = await cur.fetchall()
-        if [row[1] for row in info] != policy["columns"]:
+        columns = [row[1] for row in info]
+        appended = APPENDED_COLUMNS.get(table, ((), ""))[0]
+        # Columns appended after the domain split are absent from a legacy single-file schema.
+        if columns != policy["columns"] and columns != [column for column in policy["columns"] if column not in appended]:
             raise AccountDeletionError("account_erasure_unreviewed_column")
         keys = [row[1] for row in sorted(info, key=lambda row: row[5]) if row[5]]
         # FTS logical row IDs survive database VACUUM; ordinary rowid does not.

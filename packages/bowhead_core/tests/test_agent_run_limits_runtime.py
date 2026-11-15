@@ -72,6 +72,7 @@ async def _run(
     *,
     max_iterations: int = 40,
     profile_name: str = "run-limits-test",
+    model_budget: rl.TurnModelCallBudget | None = None,
     **run_options,
 ):
     profile = SubagentProfile(
@@ -85,6 +86,9 @@ async def _run(
     monkeypatch.setitem(PROFILES, profile.name, profile)
     limits_token = rl.set_run_limits(limits)
     budget_token = rl.set_tool_call_budget(rl.TurnToolCallBudget(limits.tool_call_limit) if limits else None)
+    if model_budget is None and limits is not None:
+        model_budget = rl.TurnModelCallBudget(limits.model_call_limit)
+    model_budget_token = rl.set_model_call_budget(model_budget)
     deadline_token = set_turn_deadline(time.monotonic() + (limits.turn_time_limit_s if limits else 1800))
     try:
         return await SubagentRunner(router=router, tool_registry=_registry()).run(
@@ -104,6 +108,7 @@ async def _run(
         )
     finally:
         reset_turn_deadline(deadline_token)
+        rl.reset_model_call_budget(model_budget_token)
         rl.reset_tool_call_budget(budget_token)
         rl.reset_run_limits(limits_token)
 
@@ -216,6 +221,59 @@ async def test_lead_uses_the_shared_ceiling_beyond_twelve(monkeypatch):
     assert len(router.requests) == 14
 
 
+async def test_helper_stops_at_the_turn_model_call_limit_before_lead_reserve(monkeypatch):
+    router = _LoopingRouter(steps_before_return=20, distinct=True)
+    budget = rl.TurnModelCallBudget(6)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(model_call_limit=6), model_budget=budget)
+    assert (result.completion, result.stop_reason, result.error) == ("partial", "model_call_limit", "run_limit_model_call_limit")
+    # Two decisions stay with Lead, and the stop makes no wrap-up model call.
+    assert len(router.requests) == 4 and budget.used == 4
+    assert all(request.tool_choice != "none" for request in router.requests)
+    assert len(result.tool_invocations) == 4 and result.partial_done
+    assert result.step_usage == {"used": 4, "limit": 6}
+
+
+async def test_helper_runs_share_one_turn_model_call_budget(monkeypatch):
+    budget = rl.TurnModelCallBudget(10)
+    first = await _run(monkeypatch, _LoopingRouter(steps_before_return=2, distinct=True), rl.AgentRunLimits(model_call_limit=10), model_budget=budget)
+    assert first.ok and budget.used == 3
+    second = _LoopingRouter(steps_before_return=20, distinct=True)
+    result = await _run(monkeypatch, second, rl.AgentRunLimits(model_call_limit=10), model_budget=budget)
+    assert result.stop_reason == "model_call_limit" and len(second.requests) == 5
+
+
+async def test_unlimited_model_calls_do_not_stop_a_run(monkeypatch):
+    router = _LoopingRouter(steps_before_return=12, distinct=True)
+    budget = rl.TurnModelCallBudget(None)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(model_call_limit=None), model_budget=budget)
+    assert result.ok, result.error
+    assert budget.used == len(router.requests) == 13
+
+
+async def test_lead_answers_with_its_reserved_model_calls(monkeypatch):
+    router = _LoopingRouter(steps_before_return=30, distinct=True)
+    budget = rl.TurnModelCallBudget(6, used=3)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(model_call_limit=6), profile_name="lead", model_budget=budget)
+    # One read, then helpers are out of decisions and Lead answers without Tools.
+    assert [request.tool_choice for request in router.requests] == ["auto", "none"]
+    assert "Team limit of 6 model calls" in router.requests[-1].messages[-1].content
+    assert result.ok, result.error
+    assert result.final_answer.startswith("Done: read keys 1-4")
+    assert budget.used == 5
+
+
+async def test_lead_without_an_answer_stops_at_the_model_call_limit(monkeypatch):
+    class EmptyRouter(_LoopingRouter):
+        def _next(self):
+            return LLMResponse(content="")
+
+    router = EmptyRouter(steps_before_return=0, distinct=True)
+    budget = rl.TurnModelCallBudget(6, used=4)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(model_call_limit=6), profile_name="lead", model_budget=budget)
+    assert (result.stop_reason, result.error) == ("model_call_limit", "run_limit_model_call_limit")
+    assert len(router.requests) == 1 and router.requests[0].tool_choice == "none"
+
+
 async def test_empty_last_decision_reports_step_exhaustion(monkeypatch):
     class EmptyRouter(_LoopingRouter):
         def _next(self):
@@ -225,3 +283,23 @@ async def test_empty_last_decision_reports_step_exhaustion(monkeypatch):
     result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=1), profile_name="lead")
     assert result.stop_reason == "step_limit", result.error
     assert len(router.requests) == 1
+
+
+async def test_repeatedly_refused_calls_wrap_up_as_partial(monkeypatch):
+    """Refused calls never reach the executed-failure counters and runtime controls have no
+    step stop; consecutive fully refused decisions are the bounded policy (the original regression)."""
+
+    class RefusedRouter(_LoopingRouter):
+        def _next(self):
+            if self.requests[-1].tool_choice == "none":
+                return super()._next()
+            step = len(self.requests)
+            # `write` is outside the helper's whitelist: refused before execution every time.
+            return LLMResponse(content="", tool_calls=[ToolCall(id=f"w{step}", name="write", arguments={"key": str(step)})])
+
+    router = RefusedRouter(steps_before_return=99, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(tool_call_limit=1000))
+    assert (result.completion, result.stop_reason) == ("partial", "no_progress"), result.error
+    assert len(router.requests) == rl.REFUSED_DECISION_LIMIT + 1  # the refused decisions, then the tool-free summary
+    assert router.requests[-1].tool_choice == "none"
+    assert result.partial_done and result.partial_done.startswith("read keys 1-4")

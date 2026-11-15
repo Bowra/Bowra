@@ -191,6 +191,16 @@ def generic_source_type(identity: object, source: Mapping[str, Any] | None = Non
     return "other_source"
 
 
+def names_no_source(identity: str) -> bool:
+    """A bare number is a position in some list, never a source identity.
+
+    Source identities are file, call and knowledge ids (``art_…``, ``call_…``,
+    ``kb:…``, ``chunk_…``). Models pass a row or list number where an id is
+    expected; stored as a section's source it can never be authorized.
+    """
+    return identity.isascii() and identity.isdigit()
+
+
 def canonical_source_identity(source: Mapping[str, Any]) -> object:
     for key in _SOURCE_IDENTITY_KEYS:
         if key in source:
@@ -407,7 +417,7 @@ def _project_source_object(
     accessible = valid is not None and access_by_identity.get(valid, False)
     if not accessible:
         out = _unavailable_source(source, alias=alias, identity=identity, ordinal=ordinal)
-        # ★116 dogfood 1.0.95 P3 (t_7781d2970a27 batch-label shape): identity-less
+        # ★Regression check 1.0.95 P3 (t_7781d2970a27 batch-label shape): identity-less
         # descriptive sources (peer-reported entries with artifact_id=None) **have no object to authorize**.
         # Their label/query is report-author text, trusted like the body; stripping it leaves FE showing misleading
         # "Source is currently unavailable". Give them **distinct "descriptive" state** with text;

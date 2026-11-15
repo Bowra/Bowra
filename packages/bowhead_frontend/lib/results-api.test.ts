@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   parseResultsQueryResponse,
   queryResults,
+  resultItemMatchesKey,
   ResultsApiError,
 } from "./results-api";
 
@@ -175,6 +176,33 @@ describe("results-api", () => {
     expect(() => parseResultsQueryResponse(body)).toThrowError(
       expect.objectContaining({ code: "results_response_invalid" }),
     );
+  });
+
+  it("accepts a revised file keyed by its first version and opening the version it shows", () => {
+    const revised = {
+      ...artifactItem(),
+      key: "artifact:art_100",
+      route: { type: "artifact", artifact_id: "art_103", default_mode: "preview" },
+      lineage: { number: 3, count: 3 },
+    };
+    const parsed = parseResultsQueryResponse({ ...responseBody(), items: [revised] });
+
+    expect(parsed.items[0]?.key).toBe("artifact:art_100");
+    expect(resultItemMatchesKey(parsed.items[0]!, "artifact:art_100")).toBe(true);
+    expect(resultItemMatchesKey(parsed.items[0]!, "artifact:art_103")).toBe(true);
+    expect(resultItemMatchesKey(parsed.items[0]!, "artifact:art_102")).toBe(false);
+  });
+
+  it("keeps a file without versions keyed by the file it opens", () => {
+    for (const item of [
+      { ...artifactItem(), key: "artifact:art_100" },
+      { ...artifactItem(), key: "artifact:art_100", lineage: { number: 3, count: 2 } },
+      { ...artifactItem(), key: "report:cv_1", lineage: { number: 2, count: 2 } },
+    ]) {
+      expect(() => parseResultsQueryResponse({ ...responseBody(), items: [item] })).toThrowError(
+        expect.objectContaining({ code: "results_response_invalid" }),
+      );
+    }
   });
 
   it("rejects missing or internally inconsistent group counts", () => {

@@ -94,6 +94,23 @@ async def test_dimension_columns_are_kept() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_withheld_result_does_not_point_to_a_data_file() -> None:
+    """Regression check the original regression: 「女装 营业面积 每月」 kept 10 of 438 store-area rows and no data file, yet the hint
+    still said to read the rest from the artifact, so compute passed another query's artifact to the sandbox."""
+    rows = [{"每月": "2026年1月", "门店面积": str(1000 + i), "营业额 / 元": float(i)} for i in range(60)]
+    explain = {"models": ["门店品牌品类表"], "filters": ["女装"], "measures": ["营业额"], "dimensions": ["门店面积", "每月"]}
+    dl = _download(["每月", "门店面积", "营业额 / 元"], rows, explain)
+    cut = _cut(("2026年", "dateRange_2026010120261231"), ("营业面积", "unknown"))
+    out = await _run("t-fb-nofile", dl, cut, "2026年 营业面积")
+    assert out.get("_withheld_fallback_measures") == ["营业额 / 元"]
+    assert "artifact_id" not in out and "_ref_artifact_id" not in out
+    hint = out.get("_preflight_hint") or ""
+    assert "Use the artifact" not in hint and "在 artifact_id 里" not in hint, hint
+    assert "只给你看了" in hint and "没有数据文件" in hint, hint
+    assert "不提供数据文件" in hint and "别的查询的 artifact_id" in hint, hint
+
+
+@pytest.mark.asyncio
 async def test_recognized_measure_is_left_alone() -> None:
     """负对照：查询里有被认出的指标（m1）——那一列是用户要的，只是还有别的词没认出。"""
     dl = _download(["营业额 / 元"], [{"营业额 / 元": 165.35}], {"measures": ["营业额"]})

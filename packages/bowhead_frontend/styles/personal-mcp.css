@@ -6,9 +6,7 @@
 }
 .personal-mcp-panel h2,
 .personal-mcp-panel h3,
-.personal-mcp-panel p,
-.personal-mcp-confirmation h2,
-.personal-mcp-confirmation p {
+.personal-mcp-panel p {
   margin: 0;
 }
 .personal-mcp-page-header {
@@ -28,7 +26,7 @@
 .personal-mcp-tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--c-line);
+  border-bottom: var(--rule-w, 1px) solid var(--c-line);
 }
 .personal-mcp-tab-panel {
   display: grid;
@@ -40,7 +38,7 @@
   padding: 11px 13px;
   color: var(--c-warn-ink);
   background: var(--c-warn-soft);
-  border: 1px solid color-mix(in srgb, var(--c-warn) 22%, var(--c-line));
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-warn) 22%, var(--c-line));
   border-radius: var(--r-1);
 }
 .personal-mcp-risk-notice strong {
@@ -117,8 +115,7 @@
 .personal-mcp-connections-empty {
   display: grid;
 }
-.personal-mcp-panel p,
-.personal-mcp-confirmation p {
+.personal-mcp-panel p {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -127,7 +124,7 @@
   display: grid;
   gap: 12px;
   padding: 16px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   background: var(--c-surface);
   border-radius: var(--r-2);
   min-width: 0;
@@ -161,7 +158,7 @@
   font: inherit;
   color: var(--c-ink);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
 }
 .personal-mcp-panel input[type="checkbox"] {
@@ -182,22 +179,20 @@
   line-height: 1.5;
   margin-top: 4px;
 }
-.personal-mcp-panel button,
-.personal-mcp-confirmation button {
+.personal-mcp-panel button {
   padding: 8px 12px;
   min-height: 40px;
   font: inherit;
   color: var(--c-ink);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   cursor: pointer;
   touch-action: manipulation;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.personal-mcp-panel button:hover:not(:disabled),
-.personal-mcp-confirmation button:hover:not(:disabled) {
+.personal-mcp-panel button:hover:not(:disabled) {
   background: var(--c-surface-2);
 }
 .personal-mcp-panel .personal-mcp-tabs button {
@@ -220,29 +215,24 @@
   color: var(--c-accent);
   border-bottom-color: var(--c-accent);
 }
-.personal-mcp-panel button[type="submit"],
-.personal-mcp-confirmation-allow-session {
+.personal-mcp-panel button[type="submit"] {
   background: var(--c-accent);
   color: var(--c-accent-ink);
   border-color: var(--c-accent);
 }
-.personal-mcp-panel button[type="submit"]:hover:not(:disabled),
-.personal-mcp-confirmation-allow-session:hover:not(:disabled) {
+.personal-mcp-panel button[type="submit"]:hover:not(:disabled) {
   background: var(--c-accent-hover);
 }
-.personal-mcp-panel :is(input, select, button):focus-visible,
-.personal-mcp-confirmation button:focus-visible {
+.personal-mcp-panel :is(input, select, button):focus-visible {
   outline: 2px solid var(--c-focus);
   outline-offset: 2px;
 }
 .personal-mcp-panel :disabled,
-.personal-mcp-panel fieldset:disabled button,
-.personal-mcp-confirmation button:disabled {
+.personal-mcp-panel fieldset:disabled button {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.personal-mcp-panel [role="alert"],
-.personal-mcp-confirmation [role="alert"] {
+.personal-mcp-panel [role="alert"] {
   color: var(--c-err);
 }
 .personal-mcp-panel [role="status"] {
@@ -253,7 +243,7 @@
   padding: 3px 8px;
   color: var(--c-ink-3);
   background: var(--c-surface-2);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 650;
@@ -314,7 +304,7 @@
   padding: 18px;
   color: var(--c-ink-3);
   background: var(--c-surface-2);
-  border: 1px dashed var(--c-line);
+  border: var(--border-w, 1px) dashed var(--c-line);
   border-radius: var(--r-2);
   font-size: 0.8125rem;
 }
@@ -328,7 +318,7 @@
   gap: 8px;
   padding: 14px 16px;
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
 }
 .personal-mcp-history-row {
@@ -360,7 +350,7 @@
   padding: 3px 8px;
   color: var(--c-ink-2);
   background: var(--c-surface-2);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: 999px;
   font-size: 0.6875rem;
   font-weight: 650;
@@ -402,77 +392,6 @@
     align-self: flex-start;
   }
 }
-.personal-mcp-confirmation-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-dialog-top);
-  background: rgb(0 0 0 / 40%);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  overscroll-behavior: contain;
-}
-.personal-mcp-confirmation {
-  display: grid;
-  gap: 12px;
-  box-sizing: border-box;
-  background: var(--c-surface);
-  color: var(--c-ink);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
-  padding: 24px;
-  width: min(600px, 100%);
-  min-width: 0;
-  max-height: 85dvh;
-  overflow: auto;
-  overscroll-behavior: contain;
-  overflow-wrap: anywhere;
-}
-.personal-mcp-confirmation pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  min-width: 0;
-  max-height: 35dvh;
-  overflow: auto;
-  margin: 0;
-  padding: 12px;
-  color: var(--c-ink);
-  background: var(--c-bg);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-1);
-}
-.personal-mcp-confirmation-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.personal-mcp-confirmation-actions button {
-  width: 100%;
-}
-.personal-mcp-confirmation-allow-once {
-  color: var(--c-accent) !important;
-  border-color: var(--c-accent) !important;
-  background: color-mix(
-    in srgb,
-    var(--c-accent) 8%,
-    var(--c-surface)
-  ) !important;
-}
-.personal-mcp-confirmation-allow-session {
-  grid-column: 1 / -1;
-}
-.personal-mcp-confirmation-session-note {
-  color: var(--c-ink-3);
-  font-size: 0.75rem;
-}
-@media (max-width: 480px) {
-  .personal-mcp-confirmation-actions {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .personal-mcp-confirmation-allow-session {
-    grid-column: auto;
-  }
-}
 .personal-mcp-panel .personal-mcp-form-fields {
   padding: 0;
   border: 0;
@@ -510,7 +429,7 @@
   font: inherit;
   color: var(--c-ink);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
 }
 .personal-mcp-dialog-form :is(input, select, button):focus-visible {
@@ -529,7 +448,7 @@
   font: inherit;
   color: var(--c-ink);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   cursor: pointer;
 }
@@ -574,7 +493,7 @@
 .personal-mcp-server {
   overflow: hidden;
   background: var(--c-bg);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
 }
 .personal-mcp-server > header {
@@ -585,7 +504,7 @@
   justify-content: space-between;
   gap: 12px;
   background: color-mix(in srgb, var(--c-accent-tint) 42%, var(--c-surface));
-  border-bottom: 1px solid var(--c-line);
+  border-bottom: var(--rule-w, 1px) solid var(--c-line);
 }
 .personal-mcp-server > header > div {
   min-width: 0;
@@ -616,7 +535,7 @@
   padding: 3px 7px;
   color: var(--c-accent);
   background: var(--c-surface);
-  border: 1px solid color-mix(in srgb, var(--c-accent) 22%, var(--c-line));
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-accent) 22%, var(--c-line));
   border-radius: 999px;
   font-size: 0.625rem;
   font-weight: 700;
@@ -629,7 +548,7 @@
 .personal-mcp-server-tools label,
 .personal-mcp-missing-tools label {
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 .personal-mcp-server-tools label:hover {
   background: var(--c-surface-2);
@@ -646,7 +565,7 @@
   padding: 12px;
   color: var(--c-ink-3);
   background: var(--c-surface-2);
-  border: 1px dashed var(--c-line);
+  border: var(--border-w, 1px) dashed var(--c-line);
   border-radius: var(--r-1);
   font-size: 0.75rem;
 }
@@ -656,7 +575,7 @@
   padding: 10px;
   color: var(--c-warn-ink);
   background: var(--c-warn-soft);
-  border: 1px solid color-mix(in srgb, var(--c-warn) 26%, var(--c-line));
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-warn) 26%, var(--c-line));
   border-radius: var(--r-1);
 }
 .personal-mcp-missing-tools strong {
@@ -679,8 +598,8 @@
   margin: 0 0 20px;
   padding: 14px;
   background: color-mix(in srgb, var(--c-accent-tint) 28%, var(--c-surface));
-  border: 1px solid color-mix(in srgb, var(--c-accent) 14%, var(--c-line));
-  border-radius: 14px;
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-accent) 14%, var(--c-line));
+  border-radius: var(--radius-2xl);
 }
 .personal-mcp-connection-actions {
   display: flex;
@@ -765,7 +684,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-2);
 }
 .google-connection-row > div:nth-child(2) {
@@ -804,7 +723,7 @@
   gap: 8px;
   padding: 12px 14px;
   background: var(--c-surface);
-  border: 1px solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
   border-radius: var(--r-2);
 }
 .tcf p {
@@ -899,7 +818,7 @@
   min-height: 36px;
   color: var(--c-ink);
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
   white-space: normal;
 }
@@ -981,6 +900,19 @@
 .tcf-notice:empty {
   display: none;
 }
+/* Docked above a chat composer: in the column's flow, aligned with the composer, so it never
+   covers Send or Stop. The composer wrap's top padding separates the two. */
+.tcf-notice-slot {
+  flex-shrink: 0;
+  padding: 0 var(--theme-composer-wrap-x, 20px);
+}
+.tcf-notice.is-docked {
+  position: static;
+  z-index: auto;
+  width: 100%;
+  max-width: 840px;
+  margin: var(--theme-composer-wrap-y, 12px) auto 0;
+}
 .tcf-notice-row {
   display: flex;
   align-items: center;
@@ -989,9 +921,9 @@
   color: var(--c-ink);
   font-size: var(--fs-md);
   background: var(--c-surface);
-  border: 1px solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
+  border: var(--border-w, 1px) solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
   border-radius: var(--r-2);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  box-shadow: var(--elev-raised, 0 6px 20px rgb(0 0 0 / 12%));
 }
 .tcf-notice-text {
   flex: 1 1 auto;
@@ -1003,7 +935,7 @@
   padding: 4px 10px;
   color: var(--c-accent);
   background: transparent;
-  border: 1px solid var(--c-line);
+  border: var(--border-w, 1px) solid var(--c-line);
   border-radius: var(--r-1);
 }
 @media (max-width: 640px) {

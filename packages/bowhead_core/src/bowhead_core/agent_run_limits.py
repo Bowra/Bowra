@@ -1,4 +1,4 @@
-"""Team-wide agent run limits: turn time, subagent steps and tool calls per turn.
+"""Team-wide agent run limits: turn time, steps, and tool and model calls per turn.
 
 Design: docs/design/agent-run-limits.md and agent-run-limits-phase-1-tech-design.md.
 The Team settings page is the only source of these values; one snapshot is resolved
@@ -28,8 +28,13 @@ DEFAULT_TURN_TIME_LIMIT_S = 1800
 MIN_TURN_TIME_LIMIT_S = 600
 MAX_TURN_TIME_LIMIT_S = 36_000
 DEFAULT_TOOL_CALL_LIMIT = 300
+DEFAULT_MODEL_CALL_LIMIT = 200
 MAX_STEP_LIMIT = 10_000
 MAX_TOOL_CALL_LIMIT = 10_000
+MAX_MODEL_CALL_LIMIT = 10_000
+# Model decisions held back from helpers so Lead can still write the answer when the
+# Turn's model-call limit is nearly used (one answer plus one repair).
+LEAD_MODEL_CALL_RESERVE = 2
 MIN_MODEL_CALL_TIME_LIMIT_S = 30
 MAX_MODEL_CALL_TIME_LIMIT_S = MAX_TURN_TIME_LIMIT_S
 # Internal loop bound for an unlimited step setting. It is never persisted or shown:
@@ -40,6 +45,13 @@ UNBOUNDED_STEPS = 1_000_000
 # stop after this many.
 NO_PROGRESS_NUDGE_STEPS = 8
 NO_PROGRESS_STOP_STEPS = 12
+# Bounded Tool-error policy for calls refused before execution (whitelist, Skill scope,
+# repeated-failure gates, dispatch guards). Refusals never reach the executed-failure
+# counters, and runtime-control runs have no step stop, so a model that keeps requesting
+# refused calls would otherwise spin until the Turn deadline (the original regression).
+# After this many consecutive decisions whose every call was refused, Lead answers once
+# without Tools and a helper wraps up as partial.
+REFUSED_DECISION_LIMIT = 3
 # Subagents stop this long before the turn deadline so Lead can write the answer.
 WRAP_UP_RESERVE_S = 300
 
@@ -74,6 +86,19 @@ class AgentRunLimits:
             "minimum": 1,
             "maximum": MAX_TOOL_CALL_LIMIT,
             "description": "Maximum tool calls shared by the agents in one turn.",
+        },
+    )
+    model_call_limit: int | None = field(
+        default=DEFAULT_MODEL_CALL_LIMIT,
+        metadata={
+            "minimum": 1,
+            "maximum": MAX_MODEL_CALL_LIMIT,
+            "nullable": True,
+            # A stored value or submission without this key predates the field and takes
+            # the default; only an explicit null removes the limit.
+            "absent_is_default": True,
+            "unit": "count",
+            "description": "Maximum model calls shared by Lead and all helpers in one turn; null removes the limit. The step limit separately bounds each agent run.",
         },
     )
     model_call_time_limit_s: int | None = field(
@@ -170,14 +195,15 @@ def _int_field(raw: Any, field: str, minimum: int, maximum: int) -> int:
 
 def validate(payload: dict[str, Any]) -> AgentRunLimits:
     """Validate a settings submission. Raises ``AgentRunLimitsInvalid`` naming the field."""
-    return AgentRunLimits(
-        **{
-            item.name: None
-            if payload.get(item.name) is None and item.metadata.get("nullable")
-            else _int_field(payload.get(item.name), item.name, item.metadata["minimum"], item.metadata["maximum"])
-            for item in fields(AgentRunLimits)
-        }
-    )
+
+    def value(item: Any) -> int | None:
+        if item.name not in payload and item.metadata.get("absent_is_default"):
+            return item.default
+        if payload.get(item.name) is None and item.metadata.get("nullable"):
+            return None
+        return _int_field(payload.get(item.name), item.name, item.metadata["minimum"], item.metadata["maximum"])
+
+    return AgentRunLimits(**{item.name: value(item) for item in fields(AgentRunLimits)})
 
 
 def parse_stored(value: str | None) -> AgentRunLimits:
@@ -248,6 +274,33 @@ class TurnToolCallBudget:
         )
 
 
+@dataclass
+class TurnModelCallBudget:
+    """Model decisions of one Lead run, shared by Lead and every helper.
+
+    ``limit=None`` counts without refusing. Helpers stop ``lead_reserve`` decisions
+    before the limit so Lead can still answer from their results.
+    """
+
+    limit: int | None
+    used: int = 0
+    lead_reserve: int = LEAD_MODEL_CALL_RESERVE
+
+    def allows(self, count: int = 1, *, is_lead: bool) -> bool:
+        if self.limit is None:
+            return True
+        return self.used + count <= (self.limit if is_lead else self.limit - self.lead_reserve)
+
+    def admit(self, *, is_lead: bool) -> bool:
+        if not self.allows(1, is_lead=is_lead):
+            return False
+        self.used += 1
+        return True
+
+    def remaining(self) -> int | None:
+        return None if self.limit is None else max(0, self.limit - self.used)
+
+
 _TOOL_CALL_BUDGET_CONTEXTVAR: contextvars.ContextVar[TurnToolCallBudget | None] = contextvars.ContextVar("turn_tool_call_budget", default=None)
 
 
@@ -261,6 +314,21 @@ def get_tool_call_budget() -> TurnToolCallBudget | None:
 
 def reset_tool_call_budget(token: contextvars.Token) -> None:
     _TOOL_CALL_BUDGET_CONTEXTVAR.reset(token)
+
+
+_MODEL_CALL_BUDGET_CONTEXTVAR: contextvars.ContextVar[TurnModelCallBudget | None] = contextvars.ContextVar("turn_model_call_budget", default=None)
+
+
+def set_model_call_budget(budget: TurnModelCallBudget | None) -> contextvars.Token:
+    return _MODEL_CALL_BUDGET_CONTEXTVAR.set(budget)
+
+
+def get_model_call_budget() -> TurnModelCallBudget | None:
+    return _MODEL_CALL_BUDGET_CONTEXTVAR.get()
+
+
+def reset_model_call_budget(token: contextvars.Token) -> None:
+    _MODEL_CALL_BUDGET_CONTEXTVAR.reset(token)
 
 
 class TurnCreditGate:
@@ -343,6 +411,9 @@ def reset_run_limits(token: contextvars.Token) -> None:
 
 __all__ = [
     "DEFAULT_LIMITS",
+    "DEFAULT_MODEL_CALL_LIMIT",
+    "LEAD_MODEL_CALL_RESERVE",
+    "MAX_MODEL_CALL_LIMIT",
     "MAX_STEP_LIMIT",
     "MAX_TOOL_CALL_LIMIT",
     "MAX_TURN_TIME_LIMIT_S",
@@ -351,6 +422,7 @@ __all__ = [
     "MIN_TURN_TIME_LIMIT_S",
     "NO_PROGRESS_NUDGE_STEPS",
     "NO_PROGRESS_STOP_STEPS",
+    "REFUSED_DECISION_LIMIT",
     "SETTINGS_KEY",
     "TOOL_CALL_BUDGET_EXEMPT",
     "TurnCreditGate",
@@ -358,8 +430,10 @@ __all__ = [
     "WRAP_UP_RESERVE_S",
     "AgentRunLimits",
     "AgentRunLimitsInvalid",
+    "TurnModelCallBudget",
     "TurnToolCallBudget",
     "get_credit_gate",
+    "get_model_call_budget",
     "get_run_limits",
     "get_tool_call_budget",
     "load_team_limits",
@@ -367,10 +441,12 @@ __all__ = [
     "parse_stored",
     "persisted_step_limit",
     "reset_credit_gate",
+    "reset_model_call_budget",
     "reset_run_limits",
     "reset_tool_call_budget",
     "run_time_budget_s",
     "set_credit_gate",
+    "set_model_call_budget",
     "set_run_limits",
     "set_tool_call_budget",
     "validate",

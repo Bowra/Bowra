@@ -8,6 +8,7 @@ skill_bridge.register_skill_tools() 把它们包成 ToolSpec 注册到 ToolRegis
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from dataclasses import dataclass, replace
@@ -162,6 +163,147 @@ class SkillToolDef:
     risk_level: str = "low"
 
 
+_REVISES_LIMIT = 8
+_VERSION_REFUSAL_HINTS = {
+    "version_target_not_found": "The file to revise was not found among your files.",
+    "version_target_out_of_scope": (
+        "Only a deliverable produced earlier in this conversation can get a new version; save this output as a new file instead."
+    ),
+    "version_target_format_changed": "A new version must keep the original file type; save a different type as a new file.",
+    "version_target_not_latest": "A newer version of this file exists; revise the latest version.",
+}
+
+
+async def _validated_revises(raw: Any, deliverable_outputs: list[str], ctx: Any) -> dict[str, Any]:
+    """File versions (docs/sprints/file-versions-2026-11-10/tech-design.md W1): validate ``input.revises``.
+
+    ``revises`` maps declared deliverable output filenames to the artifact each one revises.
+    Every target is checked before the sandbox runs, so a refused version runs nothing; the
+    gateway repeats the check when the output is stored. Returns ``{"revises": {...}}`` or an
+    ``invalid_args`` refusal naming the reason and, when known, the latest version.
+    """
+
+    def refuse(error: str, **extra: Any) -> dict[str, Any]:
+        return {"error_kind": "invalid_args", "error": error, **extra}
+
+    if not isinstance(raw, dict):
+        return refuse("python_sandbox input.revises must map declared deliverable output filenames to the artifact_id each one revises.")
+    if len(raw) > _REVISES_LIMIT:
+        return refuse(f"python_sandbox input.revises accepts at most {_REVISES_LIMIT} files.")
+    pairs: dict[str, str] = {}
+    for name, target in raw.items():
+        filename = name.strip() if isinstance(name, str) else ""
+        artifact_id = target.strip() if isinstance(target, str) else ""
+        if filename not in deliverable_outputs:
+            return refuse(f"python_sandbox input.revises key {filename!r} must be one of input.deliverable_outputs (purpose='deliverable').")
+        if not artifact_id:
+            return refuse(f"python_sandbox input.revises[{filename!r}] must be the artifact_id of the file it revises.")
+        pairs[filename] = artifact_id
+    if len(set(pairs.values())) != len(pairs):
+        return refuse("python_sandbox input.revises cannot name the same file for two outputs.")
+    store = getattr(ctx, "artifact_store", None)
+    if store is None or not hasattr(store, "check_version_target") or not await store.versions_supported():
+        logger.info("python_sandbox.revises_unavailable outputs=%d", len(pairs))
+        return {"revises": {}}
+    for filename, artifact_id in pairs.items():
+        try:
+            target = await store.check_version_target(
+                artifact_id,
+                user_id=getattr(ctx, "user_id", None),
+                session_id=getattr(ctx, "session_id", None),
+                workspace_id=getattr(ctx, "workspace_id", None) or None,
+                mime=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — the store's VersionTargetRefused carries reason/latest_id
+            reason = getattr(exc, "reason", None)
+            if reason not in _VERSION_REFUSAL_HINTS:
+                logger.warning("python_sandbox.revises_check_failed target=%s", artifact_id, exc_info=True)
+                return refuse("The file to revise could not be verified right now; retry the same call.", reason_code="version_target_unverified")
+            latest = getattr(exc, "latest_id", None)
+            hint = _VERSION_REFUSAL_HINTS[reason] + (f" Latest version: {latest}." if latest else "")
+            if reason == "version_target_not_latest" and latest and await _written_by_this_turn(store, latest, ctx):
+                # Regression check M3: the run's own earlier save is the latest version; say so, so the run
+                # neither re-saves the same content as another version nor overwrites its own edit.
+                hint = (
+                    f"This run already saved a new version of this file as {latest}. To change that file further, "
+                    f"set revises to {latest}. Do not save the same content again."
+                )
+            return refuse(
+                f"input.revises[{filename!r}] = {artifact_id}: {hint}",
+                reason_code=reason,
+                **({"latest_id": latest} if latest else {}),
+            )
+        if Path(filename).suffix.lower() != Path(str(getattr(target, "filename", "") or "")).suffix.lower():
+            return refuse(
+                f"input.revises[{filename!r}] = {artifact_id}: {_VERSION_REFUSAL_HINTS['version_target_format_changed']}",
+                reason_code="version_target_format_changed",
+            )
+    return {"revises": pairs}
+
+
+async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises: dict[str, str]) -> dict[str, str]:
+    """In a "revise this file" dispatch, a deliverable with the target's file name is its next version (Regression check N10).
+
+    Coding harnesses identify a file by its path, so a write to the same path is an edit of that file.
+    A sandbox call starts in an empty directory and has no path for a delivered file, so the file name
+    within the dispatch's revision targets stands in for it. Each target maps to its newest live version
+    at this moment (the run may already have saved one). Outputs the model mapped itself, other names,
+    and targets it already used are left alone; ``_validated_revises`` checks the result like any other.
+    """
+    targets = [str(item) for item in getattr(ctx, "revision_target_files", ()) or () if isinstance(item, str) and item]
+    store = getattr(ctx, "artifact_store", None)
+    if not targets or store is None or not hasattr(store, "latest_live_version_id"):
+        return {}
+    used = set(revises.values())
+    found: dict[str, str] = {}
+    for target_id in targets:
+        try:
+            target = await store.get(target_id)
+            latest_id = await store.latest_live_version_id(target) if target is not None else None
+            latest = await store.get(latest_id) if latest_id and latest_id != target_id else target
+        except Exception:  # noqa: BLE001 — without the lookup the output is saved as a new file, as before
+            logger.warning("python_sandbox.same_name_revision_lookup_failed target=%s", target_id, exc_info=True)
+            continue
+        if latest is None or latest.id in used:
+            continue
+        names = {str(getattr(target, "filename", "") or ""), str(getattr(latest, "filename", "") or "")}
+        for name in deliverable_outputs:
+            if name in names and name not in revises and name not in found:
+                found[name] = latest.id
+                used.add(latest.id)
+                break
+    return found
+
+
+def _same_name_version_facts(versions: dict[str, str], saved: list[dict[str, Any]]) -> dict[str, Any]:
+    """State which saved outputs became the next version of a revision target (only outputs that were saved)."""
+    saved_by_name = {item.get("name"): item.get("artifact_id") for item in saved if item.get("name")}
+    recorded = [
+        {"filename": name, "artifact_id": saved_by_name[name], "previous_version": target}
+        for name, target in versions.items()
+        if name in saved_by_name
+    ]
+    if not recorded:
+        return {}
+    return {
+        "recorded_as_new_version": recorded,
+        "_version_note": (
+            "Each listed output has the name of a file you were asked to revise, so it was saved as that file's next version, not as a separate file."
+        ),
+    }
+
+
+async def _written_by_this_turn(store: Any, artifact_id: str, ctx: Any) -> bool:
+    turn_id = getattr(ctx, "turn_id", None)
+    if not turn_id or not hasattr(store, "get"):
+        return False
+    try:
+        artifact = await store.get(artifact_id)
+    except Exception:  # noqa: BLE001 — the generic hint still applies
+        return False
+    return artifact is not None and getattr(artifact, "created_by_turn", None) == turn_id
+
+
 async def _fill_input_filenames(input_data: dict[str, Any], ctx: Any) -> None:
     """inputs 里没写 filename 的，宿主侧按 artifact_id 补上真名——模型不用复述.
 
@@ -195,6 +337,18 @@ async def _fill_input_filenames(input_data: dict[str, Any], ctx: Any) -> None:
             spec["filename"] = art.filename
 
 
+async def _input_newer_versions(input_data: dict[str, Any], ctx: Any) -> list[dict[str, Any]]:
+    """File versions (R6): inputs whose file has a newer version, stated as a fact; the input is not replaced."""
+    raw_inputs = input_data.get("inputs")
+    if not isinstance(raw_inputs, dict):
+        return []
+    from bowhead_core.artifact_store import newer_version_facts
+
+    pairs = [(key, spec["artifact_id"]) for key, spec in raw_inputs.items() if isinstance(spec, dict) and isinstance(spec.get("artifact_id"), str)]
+    newer = await newer_version_facts(getattr(ctx, "artifact_store", None), [artifact_id for _, artifact_id in pairs])
+    return [{"input": key, "artifact_id": artifact_id, "newer_version": newer[artifact_id]} for key, artifact_id in pairs if artifact_id in newer]
+
+
 # followup-context-deck #5 `_resolve_input_artifact_refs` was removed on 2026-09-06
 # (sandbox-input-contract L2). Its job, translating simple-int <available_refs> IDs in inputs.artifact_id
 # to actual art_id values, now has **one implementation**:
@@ -210,7 +364,7 @@ _CANVAS_EXPORT_SKILLS: frozenset[str] = frozenset({"canvas-xlsx", "canvas-pptx",
 
 # Section kinds persisted only during compose; their presence means this turn's report has taken shape.
 #
-# Why this criterion is needed (116 dogfood 1.0.74, t_f3441c8bb6af): the gate below originally checked only
+# Why this criterion is needed (Regression check 1.0.74, t_f3441c8bb6af): the gate below originally checked only
 # whether the canvas had content, but tool-stage chart / code_block sections are persisted **before** compose. Thus
 # in a single-turn "create a report + export to Word" request, export ran **6 seconds before** compose (observed: docx
 # at 13:45:14, h1/kpi_row/narrative at 13:45:20). Nonempty `rows` ⇒ allowed ⇒ the exported document was
@@ -369,6 +523,7 @@ def build_skill_tools(
     runtime: SkillRuntime,
     *,
     authorize_invoke: Callable[[str, Any], Awaitable[dict[str, Any] | None]] | None = None,
+    authorize_read: Callable[[SkillSpec, Any], dict[str, Any] | None] | None = None,
     material_observer: Any | None = None,
 ) -> list[SkillToolDef]:
     """Build handlers with an optional host-owned final authorization check.
@@ -491,6 +646,8 @@ def build_skill_tools(
             return _import_pending_error(name)
         if not await _user_enabled(ctx, name):
             return {"error": f"skill '{name}' disabled by user"}
+        if authorize_read is not None and (denial := authorize_read(spec, ctx)) is not None:
+            return denial
 
         # Frozen assigned packages retain their original exact file map. Live
         # builtin source excludes generated caches from both digest and reads.
@@ -626,6 +783,9 @@ def build_skill_tools(
                     f'input must be an object like {{"code": "<python>", "inputs": {{...}}, "timeout_sec": 30}}. got: {type(input_data).__name__}'
                 )
             }
+        # Work on a copy. The caller keeps `args` as the recorded Tool call that later model requests repeat, and
+        # the control keys set below include the artifact fetch token and the sandbox executor token.
+        input_data = copy.deepcopy(input_data)
         # skill-multiruntime: _skill_dir/_skill_entry are server-injected control keys; strip all LLM-supplied
         # values (matching defensive stripping of _pi_k_/_sandbox_executor_*).
         input_data.pop("_skill_dir", None)
@@ -640,10 +800,20 @@ def build_skill_tools(
         # the runner must not infer it from extensions such as MP4/PNG. The LLM may use only the public purpose field;
         # strip all server control keys first, then reconstruct them from validated values.
         input_data.pop("_output_purpose", None)
+        input_data.pop("_output_purpose_declared", None)
         input_data.pop("_deliverable_outputs", None)
+        input_data.pop("_work_outputs", None)
+        input_data.pop("_revises", None)
         _output_purpose = "analysis"
+        _output_purpose_declared = False
         _deliverable_outputs: list[str] = []
+        _work_outputs: list[str] = []
+        _revises: dict[str, str] = {}
+        _same_name_versions: dict[str, str] = {}
+        _inputs_newer: list[dict[str, Any]] = []
         if _direct_python_sandbox:
+            # Regression check N5: an explicit purpose='analysis' keeps the call's documents out of the result files.
+            _output_purpose_declared = "purpose" in input_data
             _raw_output_purpose = str(input_data.pop("purpose", "analysis") or "analysis").strip()
             if _raw_output_purpose not in {"analysis", "deliverable"}:
                 return {
@@ -686,6 +856,47 @@ def build_skill_tools(
                     "error_kind": "invalid_args",
                     "error": ("python_sandbox input.deliverable_outputs requires purpose='deliverable'."),
                 }
+            # Work files: kept and usable as a later call's input, never shown as a result file.
+            _raw_work_outputs = input_data.pop("work_outputs", [])
+            if _raw_work_outputs:
+                _work_error = {
+                    "error_kind": "invalid_args",
+                    "error": (
+                        "python_sandbox input.work_outputs must list top-level output filenames without paths, "
+                        "and none of them may also be in input.deliverable_outputs."
+                    ),
+                }
+                if not isinstance(_raw_work_outputs, list):
+                    return _work_error
+                for _candidate in _raw_work_outputs:
+                    _filename = _candidate.strip() if isinstance(_candidate, str) else ""
+                    if (
+                        not _filename
+                        or len(_filename) > 255
+                        or "/" in _filename
+                        or "\\" in _filename
+                        or Path(_filename).name != _filename
+                        or _filename in _deliverable_outputs
+                    ):
+                        return _work_error
+                    if _filename not in _work_outputs:
+                        _work_outputs.append(_filename)
+            _raw_revises = input_data.pop("revises", None)
+            if _raw_revises:
+                _revises_or_refusal = await _validated_revises(_raw_revises, _deliverable_outputs, ctx)
+                if "error_kind" in _revises_or_refusal:
+                    return _revises_or_refusal
+                _revises = _revises_or_refusal["revises"]
+            if _output_purpose == "deliverable":
+                _same_name = await _same_name_revisions(ctx, _deliverable_outputs, _revises)
+                if _same_name:
+                    _same_name_checked = await _validated_revises(_same_name, _deliverable_outputs, ctx)
+                    if "error_kind" in _same_name_checked:
+                        # The model did not ask for a version: a refused target (an upload, another type) keeps the new file.
+                        logger.info("python_sandbox.same_name_revision_skipped reason=%s", _same_name_checked.get("reason_code"))
+                    else:
+                        _same_name_versions = _same_name_checked["revises"]
+                        _revises = {**_revises, **_same_name_versions}
         # follow-up② model-driven command (argv array assembled by the model from commands documented in the skill's SKILL.md).
         _command = args.get("command")
         _orig_skill_name: str | None = None  # D7 attribution: rewrite changes name→python_sandbox.
@@ -882,9 +1093,16 @@ def build_skill_tools(
                 input_data["_deliverable_outputs"] = ["main.tex", "report.pdf"]
             if _direct_python_sandbox:
                 input_data["_output_purpose"] = _output_purpose
+                if _output_purpose_declared and _output_purpose == "analysis":
+                    input_data["_output_purpose_declared"] = True
                 input_data["_deliverable_outputs"] = _deliverable_outputs
+                if _work_outputs:
+                    input_data["_work_outputs"] = _work_outputs
+                if _revises:
+                    input_data["_revises"] = _revises
             # Fill filenames **after** resolving refs to actual IDs (simple-int IDs cannot be looked up).
             await _fill_input_filenames(input_data, ctx)
+            _inputs_newer = await _input_newer_versions(input_data, ctx)
 
         # π §K Layer 1 — flag-gated INPUTS schema injection
         k_enabled_for_call = name == "python_sandbox" and _k_should_enable(ctx)
@@ -1100,6 +1318,8 @@ def build_skill_tools(
             # do not collapse. Fall back to basename when workdir is absent.
             "outputs": ([_rel_to_workdir(p, result.workdir) for p in result.outputs] if _is_sandbox else [str(p) for p in result.outputs]),
             "output_artifacts": _output_artifacts_from_result_json(result.result_json),
+            **({"inputs_with_newer_version": _inputs_newer} if _inputs_newer else {}),
+            **_same_name_version_facts(_same_name_versions, _output_artifacts_from_result_json(result.result_json)),
             "workdir": None if _is_sandbox else (str(result.workdir) if result.workdir else None),
             "duration_ms": result.duration_ms,
             **(
@@ -1150,6 +1370,10 @@ def build_skill_tools(
             inner["purpose"] = args["purpose"]
         if "deliverable_outputs" in args:
             inner["deliverable_outputs"] = args["deliverable_outputs"]
+        if "work_outputs" in args:
+            inner["work_outputs"] = args["work_outputs"]
+        if "revises" in args:
+            inner["revises"] = args["revises"]
         # `intent` (user-facing source wording) is **deliberately not copied into `inner`**: source labels read the recorded
         # `ToolInvocation.arguments`, which for the flat entry is the top-level `args` here; `intent` is already present.
         # `inner` is a new dict used only by the `_invoke` execution path; copying intent adds only an unread key to the runner payload
@@ -1331,12 +1555,35 @@ def build_skill_tools(
                     "purpose": {
                         "type": "string",
                         "enum": ["analysis", "deliverable"],
-                        "description": "默认 analysis；仅用户明确要求最终可下载文件时用 deliverable。",
+                        "description": (
+                            "Defaults to analysis. Use deliverable only when the user asked for a downloadable final file. "
+                            "With an explicit purpose=analysis, documents the call writes (.html, .pptx, .xlsx and so on) are "
+                            "intermediate files and are not shown to the user as result files."
+                        ),
                     },
                     "deliverable_outputs": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "purpose=deliverable 时必填：代码实际写出的顶层文件名。",
+                    },
+                    "work_outputs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional: top-level output filenames that are work in progress, such as a half-edited .pptx or .xlsx. "
+                            "They are kept and can be passed to a later call through inputs by artifact_id, and are not shown to the user as result files. "
+                            "Each call starts with an empty /workdir, so this is how a file is carried from one call to the next."
+                        ),
+                    },
+                    "revises": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "description": (
+                            "Optional, with purpose=deliverable: when an output is a revised version of a file delivered earlier "
+                            "in this conversation, map that output filename to the file's artifact_id, e.g. "
+                            '{"report.html": "art_…"}. The output is then recorded as the next version of the same file '
+                            "(same file type, latest version only)."
+                        ),
                     },
                 },
                 # Declare `intent` required so the model is **prompted every time**; runtime

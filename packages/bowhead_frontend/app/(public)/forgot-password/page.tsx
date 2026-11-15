@@ -21,6 +21,7 @@ import {
 import { AuthError as AuthApiError, forgotPassword } from "@/lib/auth-api";
 import { appPath } from "@/lib/base-path";
 import { emailFieldError } from "@/lib/public-form";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export default function ForgotPage() {
   const t = useBrandedTranslations("auth");
@@ -49,7 +50,7 @@ export default function ForgotPage() {
       await forgotPassword(normalized);
       setSentTo(normalized);
     } catch (ex) {
-      setErr(
+      setErr(withHttpFailureReason(
         ex instanceof AuthApiError
           ? ex.reasonCode === "rate_limited"
             ? t("error.forgot_rate_limited")
@@ -59,7 +60,8 @@ export default function ForgotPage() {
               ? t("error.forgot_delivery_unavailable")
               : t("error.forgot_failed")
           : t("error.forgot_failed"),
-      );
+        ex,
+      ));
       setErrFocus((n) => n + 1);
     } finally {
       setBusy(false);

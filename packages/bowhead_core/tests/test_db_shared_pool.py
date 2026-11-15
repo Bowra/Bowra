@@ -161,7 +161,7 @@ async def test_pragmas_changed_by_a_borrower_are_reset(tmp_path: Path) -> None:
         for name in ("query_only", "foreign_keys", "synchronous", "busy_timeout", "secure_delete", "legacy_alter_table"):
             async with db.execute(f"PRAGMA {name}") as cur:
                 pragmas[name] = (await cur.fetchone())[0]
-        assert pragmas == {"query_only": 0, "foreign_keys": 1, "synchronous": 1, "busy_timeout": 5000, "secure_delete": 1, "legacy_alter_table": 0}
+        assert pragmas == {"query_only": 0, "foreign_keys": 1, "synchronous": 1, "busy_timeout": 60000, "secure_delete": 1, "legacy_alter_table": 0}
         async with db.execute("SELECT v FROM kv WHERE k='a'") as cur:
             assert type(await cur.fetchone()) is tuple  # row_factory is back to its default.
         with pytest.raises(sqlite3.IntegrityError):  # Foreign keys are actually enforced again.

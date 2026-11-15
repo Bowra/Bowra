@@ -20,6 +20,36 @@ RADIUS_VALUES: Final = frozenset({"balanced", "sharp", "soft"})
 MOTION_VALUES: Final = frozenset({"standard", "reduced"})
 CHART_PALETTE_VALUES: Final = frozenset({"default", "high-contrast", "colorblind-safe"})
 
+# Team frame options: how frames are drawn for every member of a Team. Each field's first value
+# is the product look and is never stored; a Team stores only the fields it changes.
+FRAME_OPTION_VALUES: Final[dict[str, tuple[str, ...]]] = {
+    "corners": ("radius", "square"),
+    "border": ("standard", "bold"),
+    "elevation": ("soft", "hard", "flat"),
+    "lineContrast": ("standard", "strong"),
+}
+
+
+def normalize_frame_options(value: Any, *, label: str = "frame") -> dict[str, str]:
+    """Validate Team frame options and drop fields left at the product look."""
+
+    if not isinstance(value, dict):
+        raise ThemeConfigError(f"{label} must be an object")
+    unknown = sorted(set(value) - set(FRAME_OPTION_VALUES))
+    if unknown:
+        raise ThemeConfigError(f"{label} has unknown field(s): {', '.join(unknown)}")
+    normalized: dict[str, str] = {}
+    for field, allowed in FRAME_OPTION_VALUES.items():
+        if field not in value:
+            continue
+        choice = value[field]
+        if not isinstance(choice, str) or choice not in allowed:
+            raise ThemeConfigError(f"{label}.{field} must be one of: {', '.join(allowed)}")
+        if choice != allowed[0]:
+            normalized[field] = choice
+    return normalized
+
+
 THEME_FIELDS: Final = (
     "mode",
     "colorProfile",

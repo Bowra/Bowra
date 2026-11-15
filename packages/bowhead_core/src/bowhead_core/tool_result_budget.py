@@ -90,7 +90,7 @@ def _halve_rows_to_fit(d: dict, key: str, cap_tok: int, full: Any) -> None:
         d[key] = rows
         d["_rows_truncated"] = True
         _sync_rows_shown(d, len(rows))
-        d["_preflight_hint"] = _replace_truncation_note(d.get("_preflight_hint"), len(rows), full)
+        d["_preflight_hint"] = _replace_truncation_note(d.get("_preflight_hint"), len(rows), full, has_file=has_data_file(d))
 
 
 def _cap_bi_query(r: dict, cap_tok: int) -> dict:
@@ -120,8 +120,20 @@ def _shorten_sandbox_hint(full: str, artifact_id: Any) -> str:
 #: Preserve this substring when changing wording, or old note stays and model receives two conflicting counts.
 TRUNCATION_NOTE_MARK = "只给你看了"
 
+#: The bi_query handler's preview sentence. Shared so a result that loses its data file can drop the pointer to it.
+PREVIEW_NOTE = (
+    "Only a preview of the returned rows is shown. `rows_shown` is the displayed count; "
+    "`row_count` counts all returned rows, not source-wide completeness. "
+    "Use the artifact to read the remaining returned rows when available."
+)
 
-def rows_truncation_note(shown: int, full: Any) -> str:
+
+def has_data_file(r: dict) -> bool:
+    """Whether the result names a data file the sandbox can read (fallback-measure withholding removes it)."""
+    return bool(r.get("artifact_id") or r.get("_ref_artifact_id"))
+
+
+def rows_truncation_note(shown: int, full: Any, *, has_file: bool = True) -> str:
     """「只给你看了一部分」那句提醒——bi_query handler 与裁剪层共用这一份措辞。
 
     ★ 末尾那句「再查一次结果一样」是**防重试循环**用的，不是废话：
@@ -129,7 +141,18 @@ def rows_truncation_note(shown: int, full: Any) -> str:
     `rows_shown=10 / row_count=358` 会合理地认为「数据没取全，再要一次」。
     116 实测 `t_a091c1b59a78`：同一参数的 `bi_query` **连发 21 次、其中 16 次逐字节相同**，
     每次各建一个 artifact，51 秒全耗在这上面。它缺的不是数据，是「这是展示上限」这句话。
+
+    Without a data file the rest of the rows cannot be read at all. Regression check (the original regression): told the rows
+    were in an artifact that a withheld result no longer had, compute passed another query's artifact with an
+    invented filename; about ten sandbox calls read the wrong file, two failed on a missing column
+    and two identical repeats were refused.
     """
+    if not has_file:
+        return (
+            f"⚠ 只给你看了 {shown} 行，全量 {full} 行，但这条结果没有数据文件（artifact_id），其余行拿不到。"
+            f"**不要**当作只有 {shown} 行做计数、统计或下结论，也**不要**拿别的查询的 artifact_id 代替它。"
+            "这是**展示**上限，调大 `inline_max_rows` 或重查同一条都不会给到更多行。"
+        )
     return (
         f"⚠ 只给你看了 {shown} 行，全量 {full} 行在 artifact_id 里。"
         f"**不要**当作只有 {shown} 行做计数、统计或下结论；需要全量走 python_sandbox + artifact_id。"
@@ -140,7 +163,7 @@ def rows_truncation_note(shown: int, full: Any) -> str:
 def unsorted_window_note(metric: str) -> str:
     """这 N 行不是按指标排序的 —— 别据此判断谁最大。
 
-    116 dogfood（1.3.46 真机）A/B，同一天同一个库：
+    Regression check（1.3.46 真机）A/B，同一天同一个库：
 
       · `t_669060c7504f` 38 行按 `营业额` **降序** ⇒ 内联 10 行里就有真前三 ⇒ 答案全对。
       · `t_f4edf5b877b3` 390 行**没排序**（内联值 0.0, 0.009, 0.499, 0.0 …）⇒ 模型把窗口里
@@ -182,7 +205,7 @@ def window_is_metric_sorted(rows: Any, metric: str | None) -> bool:
     return all(a >= b for a, b in zip(nums, nums[1:]))
 
 
-def _replace_truncation_note(hint: Any, shown: int, full: Any) -> str:
+def _replace_truncation_note(hint: Any, shown: int, full: Any, *, has_file: bool = True) -> str:
     """把 `_preflight_hint` 里那句陈旧的截断提醒换成按**裁后**行数重写的一句，其余句子原样留着。
 
     ⚠ handler 在**裁剪之前**就写下了这句（那时的行数是 30 或 358），裁剪层随后把行砍到 10
@@ -192,8 +215,20 @@ def _replace_truncation_note(hint: Any, shown: int, full: Any) -> str:
     """
     parts = [p.strip() for chunk in str(hint or "").split("\n") for p in chunk.split("; ")]
     kept = [p for p in parts if p and TRUNCATION_NOTE_MARK not in p]
-    kept.append(rows_truncation_note(shown, full))
+    kept.append(rows_truncation_note(shown, full, has_file=has_file))
     return "\n".join(kept)
+
+
+def without_data_file_hint(hint: Any, *, truncated: bool, shown: Any, full: Any) -> str:
+    """Rewrite a hint for a result whose data file was removed: drop the handler's pointer to the file and, when
+    rows were cut, say that the rest cannot be read."""
+    text = str(hint or "")
+    for piece in (f"{PREVIEW_NOTE}; ", f"; {PREVIEW_NOTE}", PREVIEW_NOTE):
+        text = text.replace(piece, "")
+    lines = [line for line in text.split("\n") if line.strip() and TRUNCATION_NOTE_MARK not in line]
+    if truncated:
+        lines.append(rows_truncation_note(shown, full, has_file=False))
+    return "\n".join(lines)
 
 
 def query_limit_note() -> str:
@@ -217,7 +252,7 @@ def _notes_to_keep(r: dict, shown: int, full: Any) -> str:
 
     notes: list[str] = []
     if r.get("_rows_truncated"):
-        notes.append(rows_truncation_note(shown, full))
+        notes.append(rows_truncation_note(shown, full, has_file=has_data_file(r)))
     if r.get("_rows_limited_by_query"):
         notes.append(query_limit_note())
     notes.extend(parse_gap_notes(r.get("_parse"), r.get("query_explain")))
@@ -267,7 +302,7 @@ def _cap_bi_query_single(r: dict, cap_tok: int) -> dict:
         _sync_rows_shown(r, 10)
         # ★ Whenever rows are actually trimmed, **unconditionally** rewrite the note. Previously regenerated only
         # when still over budget after trimming (`_notes_to_keep`), but 10 rows usually fit ⇒ branch never reached.
-        r["_preflight_hint"] = _replace_truncation_note(r.get("_preflight_hint"), 10, full_count)
+        r["_preflight_hint"] = _replace_truncation_note(r.get("_preflight_hint"), 10, full_count, has_file=has_data_file(r))
         # If window is not metric-sorted, add the **fact** that these rows cannot determine the leader.
         # See `unsorted_window_note`: same day/database, sorting determines answer correctness.
         _metric = _primary_metric_key(r.get("rows"))

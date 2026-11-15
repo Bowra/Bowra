@@ -870,7 +870,7 @@
   border: 0;
   box-shadow:
     0 0 0 var(--hairline) var(--c-control-line),
-    0 2px 8px color-mix(in srgb, var(--c-ink) 8%, transparent);
+    var(--elev-raised, 0 2px 8px color-mix(in srgb, var(--c-ink) 8%, transparent));
 }
 :root:root .kb-page-v2 .mx-app {
   border: 0;

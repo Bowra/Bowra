@@ -22,7 +22,7 @@ from bowhead_core.ordinary_lead_continuation import (
 )
 from bowhead_core.subagent import PROFILES
 from bowhead_gateway.routes import clarifications, files
-from test_ordinary_lead_question_http import call, response
+from test_ordinary_lead_question_http import assert_restarted, call, response
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
@@ -47,7 +47,7 @@ pytestmark = [
         ("pptx", "recreated", 2),
         ("pptx", "selected", 1),
         ("docx", "unknown", 1),
-        *[("docx", boundary, 1) for boundary in ("bytes", "deleted", "confirmation", "binding", "owner", "space", "confirmation_race")],
+        *[("docx", boundary, 1) for boundary in ("bytes", "deleted", "confirmation", "binding", "owner", "space", "metadata", "confirmation_race")],
     ],
 )
 async def test_native_attachment_read_continues_without_reparsing(http_start, monkeypatch, kind, boundary, helper_count):
@@ -148,7 +148,7 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
         async with open_shared_ctx(case.path) as db:
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card_id))
-        assert checkpoint.contract == "ordinary-lead-loop.v12"
+        assert checkpoint.contract == "ordinary-lead-loop.v15"
         if boundary == "resume":
             for mutation in ("legacy", "other_attachment", "missing_proof"):
                 value = json.loads(checkpoint.encode())
@@ -183,6 +183,9 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
                     elif boundary in {"owner", "space"}:
                         column = "created_by" if boundary == "owner" else "workspace_id"
                         db.execute(f"UPDATE artifacts SET {column}=? WHERE id=?", ("changed-owner-or-space", artifact.id))
+                    elif boundary == "metadata":
+                        # The restart checks its own files exactly as sending the message again.
+                        db.execute("UPDATE artifacts SET filename=? WHERE id=?", ("renamed.docx", artifact.id))
 
         if boundary == "confirmation_race":
             validate = ordinary_lead_runtime.validate_ordinary_retained_materials
@@ -229,7 +232,14 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
             json={"answers": [{"question": question["question"], "source": "custom", "answer": "Board members"}]},
         )
         success = boundary in {"resume", "recreated", "unknown", "selected"}
-        assert answered.status_code == (200 if success or boundary == "confirmation_race" else 409), answered.text
+        # The changed retained read refuses the exact checkpoint. The original upload still
+        # passes the checks for sending the message again, so Lead restarts with the answer.
+        restarted = boundary in {"bytes", "confirmation", "space"}
+        assert answered.status_code == (200 if success or restarted or boundary == "confirmation_race" else 409), answered.text
+        if restarted:
+            await settled(turn_id)
+            assert_restarted(case, turn_id, card_id)
+            return
         if answered.status_code == 200:
             await settled(turn_id)
         turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)

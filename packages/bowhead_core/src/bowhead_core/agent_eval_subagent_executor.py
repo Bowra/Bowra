@@ -93,10 +93,13 @@ class ExactSubagentEvalExecutor:
         )
         await self.binding_store.mark_running(binding.execution_id)
         from bowhead_core.agent_run_limits import (
+            TurnModelCallBudget,
             TurnToolCallBudget,
             load_team_limits,
+            reset_model_call_budget,
             reset_run_limits,
             reset_tool_call_budget,
+            set_model_call_budget,
             set_run_limits,
             set_tool_call_budget,
         )
@@ -104,6 +107,8 @@ class ExactSubagentEvalExecutor:
         limits = await load_team_limits(self.team_settings_store, getattr(ctx, "team_id", None))
         limits_token = set_run_limits(limits)
         budget_token = set_tool_call_budget(TurnToolCallBudget(limits.tool_call_limit))
+        # The evaluated Agent runs without a Lead, so no decisions are held back for one.
+        model_budget_token = set_model_call_budget(TurnModelCallBudget(limits.model_call_limit, lead_reserve=0))
         started = time.perf_counter()
         try:
             try:
@@ -122,6 +127,7 @@ class ExactSubagentEvalExecutor:
                         exact_binding=binding,
                     )
             finally:
+                reset_model_call_budget(model_budget_token)
                 reset_tool_call_budget(budget_token)
                 reset_run_limits(limits_token)
             if not result.ok and result.error in _PLATFORM_FAILURE_CODES:

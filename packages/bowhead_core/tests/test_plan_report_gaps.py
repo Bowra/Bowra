@@ -243,3 +243,19 @@ def test_retired_writer_step_is_neither_a_gap_nor_a_chapter(writer_status: str) 
     assert p is not None
     assert "writer 当年的综述" not in json.dumps(p, ensure_ascii=False)
     assert [i["title"] for i in p["insights"]] == ["销量结构"]
+
+
+def test_a_done_step_that_kept_partial_work_is_a_gap() -> None:
+    import json
+
+    partial = SimpleNamespace(
+        agent_name="business-analyst",
+        status="done",
+        error_kind=None,
+        payload_json=json.dumps({"fallback_markdown": "x", "partial_completion": {"stop_reason": "no_progress", "remaining": "BOTTOM10 图表未画出"}}),
+    )
+    whole = SimpleNamespace(agent_name="compute", status="done", error_kind=None, payload_json=json.dumps({"fallback_markdown": "y"}))
+    caveats = _plan_report_gap_caveats([partial, whole])
+    assert len(caveats) == 1, caveats
+    assert "business-analyst" in caveats[0] and "只完成了一部分" in caveats[0] and "BOTTOM10 图表未画出" in caveats[0]
+    assert "连续几步没有产生新结果" in caveats[0]

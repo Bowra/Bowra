@@ -62,8 +62,8 @@ def test_saved_runtime_budget_requires_a_version_and_valid_used_count():
         rl.AgentLoopBudget.model_validate(raw)
 
 
-def test_defaults_are_thirty_minutes_unlimited_steps_and_300_tool_calls() -> None:
-    assert rl.AgentRunLimits(turn_time_limit_s=1800, step_limit=None, tool_call_limit=300) == rl.DEFAULT_LIMITS
+def test_defaults_are_thirty_minutes_unlimited_steps_300_tool_calls_and_200_model_calls() -> None:
+    assert rl.AgentRunLimits(turn_time_limit_s=1800, step_limit=None, tool_call_limit=300, model_call_limit=200) == rl.DEFAULT_LIMITS
     assert rl.DEFAULT_LIMITS.wrap_up_reserve_s == 300
 
 
@@ -76,6 +76,9 @@ def test_defaults_are_thirty_minutes_unlimited_steps_and_300_tool_calls() -> Non
         ({"turn_time_limit_s": 1800, "step_limit": True, "tool_call_limit": 300}, "step_limit"),
         ({"turn_time_limit_s": 1800, "step_limit": None, "tool_call_limit": 10_001}, "tool_call_limit"),
         ({"turn_time_limit_s": "1800", "step_limit": None, "tool_call_limit": 300}, "turn_time_limit_s"),
+        ({"turn_time_limit_s": 1800, "step_limit": None, "tool_call_limit": 300, "model_call_limit": 0}, "model_call_limit"),
+        ({"turn_time_limit_s": 1800, "step_limit": None, "tool_call_limit": 300, "model_call_limit": 10_001}, "model_call_limit"),
+        ({"turn_time_limit_s": 1800, "step_limit": None, "tool_call_limit": 300, "model_call_limit": False}, "model_call_limit"),
     ],
 )
 def test_validation_names_the_field_and_range(payload: dict, field: str) -> None:
@@ -91,6 +94,29 @@ def test_stored_values_round_trip_and_bad_values_fall_back_to_defaults() -> None
     assert rl.parse_stored(None) == rl.DEFAULT_LIMITS
     assert rl.parse_stored("not json") == rl.DEFAULT_LIMITS
     assert rl.parse_stored('{"turn_time_limit_s": 5}') == rl.DEFAULT_LIMITS
+
+
+def test_a_value_saved_before_the_model_call_limit_takes_its_default_and_only_null_removes_it() -> None:
+    saved = '{"turn_time_limit_s": 3600, "step_limit": null, "tool_call_limit": 500, "model_call_time_limit_s": null}'
+    assert rl.parse_stored(saved) == rl.AgentRunLimits(turn_time_limit_s=3600, tool_call_limit=500, model_call_limit=200)
+    assert rl.parse_stored(saved[:-1] + ', "model_call_limit": null}').model_call_limit is None
+    assert rl.parse_stored(saved[:-1] + ', "model_call_limit": 40}').model_call_limit == 40
+    assert rl.parse_stored(rl.AgentRunLimits(model_call_limit=None).to_json()).model_call_limit is None
+
+
+def test_turn_model_call_budget_keeps_the_last_decisions_for_lead() -> None:
+    budget = rl.TurnModelCallBudget(5)
+    assert [budget.admit(is_lead=False) for _ in range(4)] == [True, True, True, False]
+    assert budget.remaining() == 2
+    assert budget.allows(2, is_lead=True) and not budget.allows(3, is_lead=True)
+    assert [budget.admit(is_lead=True) for _ in range(3)] == [True, True, False]
+    assert budget.used == 5 and budget.remaining() == 0
+    unlimited = rl.TurnModelCallBudget(None)
+    assert all(unlimited.admit(is_lead=False) for _ in range(500))
+    assert unlimited.used == 500 and unlimited.remaining() is None
+    assert not rl.TurnModelCallBudget(2).admit(is_lead=False)
+    evaluation = rl.TurnModelCallBudget(2, lead_reserve=0)
+    assert [evaluation.admit(is_lead=False) for _ in range(3)] == [True, True, False]
 
 
 @pytest.mark.parametrize("configured,remaining,expected", [(None, 1400, 1400), (900, 1400, 900), (900, 300, 300), (900, 0.2, 0.2), (None, -1, 0)])

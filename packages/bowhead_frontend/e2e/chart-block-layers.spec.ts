@@ -224,7 +224,8 @@ async function maxLabelTickOverlap(page: Page) {
     const entries = (window as unknown as { __canvasText: (c: HTMLCanvasElement) => Entry[] }).__canvasText(
       el as HTMLCanvasElement,
     );
-    const label = entries.find((e) => e.text === "19.9");
+    // The label carries the unit read from the column header ("19.9亿元"); match the value, not the full text.
+    const label = entries.find((e) => /^19\.9(?![\d.])/.test(e.text));
     const ticks = entries.filter((e) => e.align === "right" && /^-?[\d.,]+$/.test(e.text));
     const hits = ticks
       .map((tick) => {

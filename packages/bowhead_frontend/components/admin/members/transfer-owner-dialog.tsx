@@ -12,6 +12,7 @@ import {
   type AdminMemberRow,
   transferTeamOwnership,
 } from "@/lib/admin-members-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 const ERROR_KEY: Record<string, string> = {
   owner_transfer_same_user: "err_same_user",
@@ -44,11 +45,10 @@ export function TransferOwnerDialog({
       await transferTeamOwnership(member.user_id);
       onSuccess();
     } catch (cause) {
-      setError(
-        cause instanceof AdminMembersError
-          ? t(ERROR_KEY[cause.code] ?? "err_generic")
-          : t("err_generic"),
-      );
+      setError(withHttpFailureReason(
+        cause instanceof AdminMembersError ? t(ERROR_KEY[cause.code] ?? "err_generic") : t("err_generic"),
+        cause,
+      ));
     } finally {
       setSubmitting(false);
     }

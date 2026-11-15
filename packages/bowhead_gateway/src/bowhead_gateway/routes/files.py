@@ -300,6 +300,7 @@ async def upload(
     created_by_turn: str | None = Query(None),
     derived_from: str | None = Query(None),
     manifest_artifact_id: str | None = Query(None),
+    version_of: str | None = Query(None),
 ) -> FileUploadDTO:
     artifact_fetch_user_id = _artifact_fetch_identity(request)
     await _require_request_workspace_access(
@@ -331,10 +332,8 @@ async def upload(
                 effective_source,
             )
 
-    # TeX is admitted only as an authenticated run output, never by a caller's
-    # source label or by relaxing ordinary browser upload MIME rules.
-    tex_output = False
-    if (file.filename or "").lower().endswith(".tex"):
+    async def producer_output_bound() -> bool:
+        """The caller is a running Turn's own sandbox output (producer-output token for this session and Turn)."""
         from bowhead_core.artifact_store import artifact_fetch_producer_output
 
         authorization = request.headers.get("Authorization", "")
@@ -343,7 +342,7 @@ async def upload(
         store = getattr(request.app.state, "session_store", None)
         session = await store.get_session(session_id) if store is not None and session_id else None
         turn = await store.get_turn(created_by_turn) if store is not None and created_by_turn else None
-        if (
+        return bool(
             artifact_fetch_user_id
             and scope is not None
             and session is not None
@@ -353,9 +352,23 @@ async def upload(
             and turn.session_id == session_id
             and turn.status == "running"
             and effective_source in {"python_sandbox", "sandbox_output"}
-            and (file.content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
-            in {"application/x-tex", "text/x-tex", "application/octet-stream", "text/plain"}
-        ):
+        )
+
+    # A file version is declared only by a running Turn's own deliverable output, never by an
+    # ordinary upload (docs/sprints/file-versions-2026-11-10/tech-design.md W1).
+    if version_of and (effective_source == "upload" or kind != "deliverable" or not await producer_output_bound()):
+        raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
+
+    # TeX is admitted only as an authenticated run output, never by a caller's
+    # source label or by relaxing ordinary browser upload MIME rules.
+    tex_output = False
+    if (file.filename or "").lower().endswith(".tex"):
+        if await producer_output_bound() and (file.content_type or "application/octet-stream").split(";", 1)[0].strip().lower() in {
+            "application/x-tex",
+            "text/x-tex",
+            "application/octet-stream",
+            "text/plain",
+        }:
             mime = "text/x-tex"
             tex_output = True
         else:
@@ -458,13 +471,14 @@ async def upload(
         raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
 
     artifact_store = _store(request)
-    if manifest_artifact_id:
-        manifest = await artifact_store.get(manifest_artifact_id)
-        if manifest is None or manifest.created_by != created_by_user_id:
-            # A public upload may only link provenance within its own ownership
-            # boundary. Treat missing and foreign IDs identically so this
-            # parameter cannot become an artifact-existence oracle.
-            raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
+    # A public upload may only link provenance within its own ownership boundary.
+    # Treat missing and foreign IDs identically so neither parameter can become an
+    # artifact-existence oracle (derived_from: docs/sprints/file-versions-2026-11-10 W4).
+    for linked_id in (manifest_artifact_id, derived_from):
+        if linked_id:
+            linked = await artifact_store.get(linked_id)
+            if linked is None or linked.created_by != created_by_user_id:
+                raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
 
     # Persist validated upload scope and admission proof with the artifact.
     # Runtime outputs retain their existing provenance and never become uploads.
@@ -485,24 +499,35 @@ async def upload(
             authorize=authorize_upload,
         )
     else:
-        art = await artifact_store.put_bytes(
-            content=content,
-            filename=file.filename or "upload",
-            mime=mime,
-            source=effective_source,
-            # cca P3 F-B: a python_sandbox runner upload carries an artifact-fetch Bearer →
-            # own the output as the real caller (sub), symmetric with the fetch side so a
-            # chained sandbox output→input read matches. Normal uploads → JWT/header identity.
-            created_by=created_by_user_id,
-            workspace_id=upload_workspace_id or None,
-            bind_chat_upload=effective_source == "upload",
-            session_id=(session_id or None),
-            kind=(kind or None),
-            created_by_turn=(created_by_turn or None),
-            derived_from=(derived_from or None),
-            manifest_artifact_id=(manifest_artifact_id or None),
-            authorize_in_connection=inspection_authorizer,
-        )
+        from bowhead_core.artifact_store import VersionTargetRefused
+
+        try:
+            art = await artifact_store.put_bytes(
+                content=content,
+                filename=file.filename or "upload",
+                mime=mime,
+                source=effective_source,
+                # cca P3 F-B: a python_sandbox runner upload carries an artifact-fetch Bearer →
+                # own the output as the real caller (sub), symmetric with the fetch side so a
+                # chained sandbox output→input read matches. Normal uploads → JWT/header identity.
+                created_by=created_by_user_id,
+                workspace_id=upload_workspace_id or None,
+                bind_chat_upload=effective_source == "upload",
+                session_id=(session_id or None),
+                kind=(kind or None),
+                created_by_turn=(created_by_turn or None),
+                derived_from=(derived_from or None),
+                manifest_artifact_id=(manifest_artifact_id or None),
+                authorize_in_connection=inspection_authorizer,
+                version_of_target=(version_of or None),
+            )
+        except VersionTargetRefused as refused:
+            # The target was checked against the caller's own files, so naming the latest version reveals nothing new.
+            raise _file_error(
+                status.HTTP_409_CONFLICT if refused.reason == "version_target_not_latest" else status.HTTP_400_BAD_REQUEST,
+                refused.reason,
+                **({"latest_id": refused.latest_id} if refused.latest_id else {}),
+            ) from refused
 
     # ★★ Instrument **after writing**, reading art.workspace_id's **actual persisted value** (2026-09-19 review).
     #    Counting session presence measures **intent**. _resolve_write_workspace_id returns None for all of:
@@ -511,6 +536,11 @@ async def upload(
     #    underestimating NONE and overestimating SESSION, falsely implying unresolved attribution is rare enough to enable the gate.
     # ⚠ 2026-09-19 device observation: all three frontend callers (file library / settings templates / chat attachments) **omit session**;
     #   attribution is always NULL here, accounting for 116's sole C4 NULL row.
+    if (getattr(art, "version_no", None) or 1) >= 2:
+        # File versions B4: after the new version committed, prune older versions of this file.
+        from bowhead_gateway.file_versions_pruning import schedule_file_version_prune
+
+        schedule_file_version_prune(request.app, art.lineage_root)
     files_upload_reason = reason_for_resolved_attribution(getattr(art, "workspace_id", None))
     log.info("%s.files_upload reason=%s source=%s", ATTRIBUTION_EVENT, files_upload_reason, effective_source)
     # source (4 allowlisted values) must enter attrs: sandbox runner POSTs **every output file** here
@@ -611,6 +641,9 @@ async def _list_shared(
     分页在 id 集上做——grant 集合通常远小于全量 artifact，一次取完再切片
     比每页回查授权便宜，也避免"翻页时权限变了导致行数跳动"。
     """
+    # File versions R5: a grant on any version shares the file; list it once, at its latest version.
+    newer = await store.newer_versions(dict.fromkeys(ids, (None, None))) if hasattr(store, "newer_versions") else {}
+    ids = list(dict.fromkeys(newer[aid].latest.id if aid in newer else aid for aid in ids))
     arts = await store.get_many(ids)  # Deleted/hard-deleted grant remnants are absent.
     visible_ids = await _history_visible_ids(request, store, arts, user_id=_user_id(request))
     visible = [(art.id, art) for art in arts if art.id in visible_ids]
@@ -1246,6 +1279,7 @@ def _art_to_dto(  # type: ignore[no-untyped-def]
     kb: FileKbStatusDTO | None = None,
     origin_session: dict[str, str | None] | None = None,
     trust_override: str | None = None,
+    lineage_canvas_ref: bool = False,
 ) -> FileListItemDTO:
     return FileListItemDTO(
         file_id=art.id,
@@ -1268,8 +1302,10 @@ def _art_to_dto(  # type: ignore[no-untyped-def]
         kb_promotable=is_kb_promotable(art),
         session_id=(origin_session or {}).get("session_id"),
         session_title=(origin_session or {}).get("session_title"),
-        has_canvas_ref=bool(getattr(art, "canvas_id", None)),
+        has_canvas_ref=bool(getattr(art, "canvas_id", None)) or lineage_canvas_ref,
         retention_hint=getattr(art, "retention_hint", None),
+        version_no=getattr(art, "version_no", None),
+        version_count=getattr(art, "version_count", None),
         url=f"/api/v1/files/{art.id}",
     )
 
@@ -1522,7 +1558,9 @@ async def list_files(
         include_deleted=bool(include_deleted),
     )
     ids = [a.id for a in items]
-    kb_ids, kb_status = await _kb_overlays(request, ids)
+    # File versions: KB membership and report attachment of any version decide this file's delete guidance.
+    lineages = await store.lineage_overview(ids, user_id=user_id)
+    kb_ids, kb_status = await _kb_overlays(request, sorted({*ids, *(member for members, _ in lineages.values() for member in members)}))
     # Source session: same-DB JOIN, one batch per page (no N+1).
     try:
         origins = await store.origin_sessions(ids)
@@ -1542,16 +1580,19 @@ async def list_files(
     trust_by_id = await _export_trust_projection(request, store, visible_artifacts)
     usage = await store.usage_counts([art.id for art in visible_artifacts])
     for art in visible_artifacts:
-        out.append(
-            _art_to_dto(
-                art,
-                usage.get(art.id, 0),
-                in_kb=art.id in kb_ids,
-                kb=kb_status.get(art.id),
-                origin_session=origins.get(art.id),
-                trust_override=trust_by_id.get(art.id),
-            )
+        members = lineages.get(art.id, ([art.id], False))[0]
+        # File versions (Q7): an entry on an older version still shows its status and says this version is not indexed.
+        kb_outdated = art.id not in kb_ids and any(member in kb_ids for member in members)
+        dto = _art_to_dto(
+            art,
+            usage.get(art.id, 0),
+            in_kb=art.id in kb_ids or kb_outdated,
+            kb=kb_status.get(art.id) or next((kb_status[member] for member in members if member in kb_status), None),
+            origin_session=origins.get(art.id),
+            trust_override=trust_by_id.get(art.id),
+            lineage_canvas_ref=lineages.get(art.id, ([], False))[1],
         )
+        out.append(dto.model_copy(update={"kb_outdated": True}) if kb_outdated else dto)
         visible_size += art.size
     return FileListDTO(
         total=len(out) if access_filtered else total,
@@ -1580,9 +1621,11 @@ async def soft_delete_file(artifact_id: str, request: Request) -> Response:
     #
     # Fresh single lookup, not list batch cache: user may have just removed it from KB.
     kb_store = getattr(request.app.state, "kb_files_store", None)
+    # File versions: deleting a file deletes every version, so every version is checked.
+    lineage_ids = await store.lineage_member_ids(artifact_id, user_id=_user_id(request))
     if kb_store is not None:
         try:
-            still_in_kb = bool(await kb_store.artifact_ids_in_kb([artifact_id]))
+            still_in_kb = bool(await kb_store.artifact_ids_in_kb(lineage_ids))
         except Exception as e:  # noqa: BLE001
             # Failed lookup is fail-open: permit one deletion (recoverable for 30 days) rather than
             # let KB DB instability disable the user's delete capability.
@@ -1590,7 +1633,19 @@ async def soft_delete_file(artifact_id: str, request: Request) -> Response:
             still_in_kb = False
         if still_in_kb:
             raise _file_error(status.HTTP_409_CONFLICT, "file_in_knowledge_base")
-    ok = await store.soft_delete(artifact_id, user_id=_user_id(request))
+    from bowhead_core.documents.retention import DocumentArtifactInUse
+
+    try:
+        ok = await store.soft_delete(artifact_id, user_id=_user_id(request))
+    except DocumentArtifactInUse as in_use:
+        # A document draft still uses this file (or one of its versions): name the version instead of a generic 500.
+        referenced_id = getattr(in_use, "artifact_id", artifact_id)
+        referenced = await store.get(referenced_id, include_deleted=True)
+        raise _file_error(
+            status.HTTP_409_CONFLICT,
+            "file_in_document",
+            details={"artifact_id": referenced_id, "version_no": (getattr(referenced, "version_no", None) or 1)},
+        ) from in_use
     if not ok:
         raise _file_error(status.HTTP_404_NOT_FOUND, "file_not_found")
     from bowhead_core.export_copy_contract import evict_export_copy_manifest
@@ -1622,6 +1677,10 @@ async def restore_file(artifact_id: str, request: Request) -> FileListItemDTO:
     evict_export_copy_manifest(getattr(existing, "manifest_artifact_id", None))
     art = await store.get(artifact_id)
     assert art is not None
+    # File versions B4: a restored file re-applies the version limit (a no-op for a file without versions).
+    from bowhead_gateway.file_versions_pruning import schedule_file_version_prune
+
+    schedule_file_version_prune(request.app, art.lineage_root)
     trust_by_id = await _export_trust_projection(request, store, [art])
     return _art_to_dto(
         art,
@@ -1761,6 +1820,7 @@ async def _read_representation_artifact(request: Request, store: ArtifactStore, 
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 group_ids=ctx.group_ids,
+                artifact_store=store,
             ):
                 raise representation_error("scope_unavailable")
         await _require_artifact_visible(request, store, art, operation=SpaceOperation.READ_HISTORY, user_id=user_id)
@@ -1832,6 +1892,7 @@ async def file_preview(
             user_id=ctx.user_id,
             workspace_id=ctx.workspace_id,
             group_ids=ctx.group_ids,
+            artifact_store=store,
         )
         if not shared:
             raise _file_denied(artifact_id, user_id, "not_owner_not_shared")
@@ -1937,9 +1998,15 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
     from bowhead_gateway.sharing_policy import require_sharing_expansion
 
     require_sharing_expansion("artifact")
-    kb_ids = await _in_kb_ids(request, [artifact_id])
+    # File versions R5: a share covers the whole file. Check the version recipients will read
+    # (the latest) and KB membership of any version, and store the grant on that latest version:
+    # pruning keeps a version that holds a grant (B4), whereas the first version may already be pruned.
+    members = await store.lineage_member_ids(artifact_id, user_id=user_id)
+    latest_id = await store.latest_live_version_id(art) if await store.versions_supported() else artifact_id
+    latest = await store.get(latest_id, include_deleted=True) if latest_id and latest_id != artifact_id else art
+    kb_ids = await _in_kb_ids(request, members)
     try:
-        assert_shareable(art, in_kb=artifact_id in kb_ids)
+        assert_shareable(latest or art, in_kb=bool(set(members) & kb_ids))
     except ShareRejected as e:
         raise _file_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "file_not_shareable") from e
 
@@ -1954,7 +2021,7 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
     await access_store.create_or_update_resource_grant(
         team_id=team_id,
         resource_kind=ARTIFACT_RESOURCE_KIND,
-        resource_id=artifact_id,
+        resource_id=(latest or art).id,
         principal_type=subject_kind,
         principal_id=subject_id,
         permission="read",  # Read-only: recipients cannot delete/edit/add to KB.
@@ -1993,16 +2060,17 @@ async def unshare_file(
     if access_store is None or not team_id:
         raise _file_error(status.HTTP_503_SERVICE_UNAVAILABLE, "file_access_service_unavailable")
 
-    grants = await access_store.list_resource_grants(
-        team_id,
-        resource_kind=ARTIFACT_RESOURCE_KIND,
-        resource_id=artifact_id,
-    )
-    for g in grants:
-        if g.principal_type == subject_kind and g.principal_id == subject_id:
-            await access_store.revoke_resource_grant(team_id, g.id)
-            log.info("files.unshared aid=%s from=%s:%s", artifact_id, subject_kind, subject_id)
-            break
+    # File versions R5: the share covers the file, so revoke it on every version (older grants were per version).
+    for member in await store.lineage_member_ids(artifact_id, user_id=user_id):
+        grants = await access_store.list_resource_grants(
+            team_id,
+            resource_kind=ARTIFACT_RESOURCE_KIND,
+            resource_id=member,
+        )
+        for g in grants:
+            if g.principal_type == subject_kind and g.principal_id == subject_id:
+                await access_store.revoke_resource_grant(team_id, g.id)
+                log.info("files.unshared aid=%s from=%s:%s", member, subject_kind, subject_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -2034,18 +2102,18 @@ async def list_file_shares(artifact_id: str, request: Request) -> dict[str, Any]
     access_store = getattr(request.app.state, "access_control_store", None)
     if access_store is None or not team_id:
         return {"shares": []}
-    grants = await access_store.list_resource_grants(
-        team_id,
-        resource_kind=ARTIFACT_RESOURCE_KIND,
-        resource_id=artifact_id,
-    )
-    return {
-        "shares": [
-            {"subject_kind": g.principal_type, "subject_id": g.principal_id}
-            for g in grants
-            if getattr(g, "revoked_at", None) is None and g.effect == "allow"
-        ]
+    # File versions R5: a share on any version covers the file.
+    grants = [
+        grant
+        for member in await store.lineage_member_ids(artifact_id, user_id=user_id)
+        for grant in await access_store.list_resource_grants(team_id, resource_kind=ARTIFACT_RESOURCE_KIND, resource_id=member)
+    ]
+    shares = {
+        (g.principal_type, g.principal_id): {"subject_kind": g.principal_type, "subject_id": g.principal_id}
+        for g in grants
+        if getattr(g, "revoked_at", None) is None and g.effect == "allow"
     }
+    return {"shares": list(shares.values())}
 
 
 class PurgeRequest(_BaseModel):
@@ -2078,7 +2146,10 @@ async def purge_files(body: PurgeRequest, request: Request) -> dict[str, int]:
         checked.add(scopes[art.id])
     # Same D2 guard: never permanently delete KB-referenced artifacts, leaving retrieval hits but permanent original-download 404
     # without even the 30-day recovery window. Soft delete has a 409 guard; this path needs it too.
-    kb_ids = await _in_kb_ids(request, list(body.artifact_ids))
+    # File versions: purging a file purges every version, so a KB reference to any version blocks that file.
+    members = {item: await store.lineage_member_ids(item, user_id=user_id) for item in dict.fromkeys(body.artifact_ids)}
+    kb_member_ids = set(await _in_kb_ids(request, [member for ids in members.values() for member in ids]))
+    kb_ids = [item for item, ids in members.items() if kb_member_ids & set(ids)]
     targets = [i for i in body.artifact_ids if i not in kb_ids]
     n = await store.purge_now(targets, user_id=user_id)
     log.info(
@@ -2154,6 +2225,7 @@ async def download(artifact_id: str, request: Request):  # type: ignore[no-untyp
             user_id=ctx.user_id,
             workspace_id=ctx.workspace_id,
             group_ids=ctx.group_ids,
+            artifact_store=store,
         ):
             art = await store.get(artifact_id)
     if art is None:

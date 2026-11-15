@@ -14,6 +14,7 @@ from typing import Any
 
 import anyio
 
+from bowhead_core.artifact_store import VersionTargetRefused
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_router import ToolSchema
 
@@ -53,7 +54,7 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
             return {
                 "ok": False,
                 "error": "deck_render_not_admitted",
-                "message": "This tool needs the original new-presentation assignment. Read-only inspection and template updates use their existing workflows.",
+                "message": "This tool needs the original new-presentation assignment. It creates new slides and does not change an existing file.",
             }
         if not ctx.artifact_store or not ctx.user_id:
             return {
@@ -61,11 +62,11 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                 "error": "deck_storage_unavailable",
                 "message": "Presentation storage is unavailable. No downloadable file can be confirmed.",
             }
-        if set(args) - {"sections", "expected_slides", "style"}:
+        if set(args) - {"sections", "expected_slides", "style", "revises"}:
             return {
                 "ok": False,
                 "error": "invalid_deck_arguments",
-                "message": "Use sections, optional expected_slides and optional style only. Template and output paths are server-owned.",
+                "message": "Use sections, optional expected_slides, optional style and optional revises only. Template and output paths are server-owned.",
             }
         sections = args.get("sections")
         expected = args.get("expected_slides")
@@ -109,6 +110,12 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                     "error": "invalid_deck_bullets",
                     "message": "For a list slide use insight_card with title and a nonempty bullets array of text, one point per item. Do not mix bullets with thesis or narrative.",
                 }
+        revises = args.get("revises")
+        if revises is not None:
+            # File versions (docs/sprints/file-versions-2026-11-10/tech-design.md W2): checked before rendering.
+            refusal = await _deck_version_refusal(ctx, revises)
+            if refusal is not None:
+                return refusal
         encoded = json.dumps(args, sort_keys=True, ensure_ascii=False).encode()
         if len(encoded) > 128_000:
             return {"ok": False, "error": "deck_content_too_large", "message": "Reduce the presentation content to the requested slides and retry."}
@@ -180,6 +187,7 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                         producer_kind="consultant_deck",
                         source="consultant_deck",
                         created_by_turn=ctx.turn_id,
+                        version_of_target=revises if isinstance(revises, str) and revises and await ctx.artifact_store.versions_supported() else None,
                     )
                     binding.staged[digest] = staged
                 art = staged.artifact
@@ -187,7 +195,12 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                     raise ValueError("Staged presentation bytes differ")
                 existing = await ctx.artifact_store.get(art.id)
                 if existing is None:
-                    await ctx.artifact_store.commit_staged_artifacts((staged,))
+                    try:
+                        await ctx.artifact_store.commit_staged_artifacts((staged,))
+                    except VersionTargetRefused as refused:
+                        # Another version was recorded first: drop this staged copy and name the latest version.
+                        binding.staged.pop(digest, None)
+                        return _version_refusal(refused.reason, refused.latest_id)
                 elif existing.created_by != ctx.user_id or existing.created_by_turn != ctx.turn_id or existing.path != art.path:
                     raise ValueError("Presentation registration identity differs")
 
@@ -237,6 +250,10 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                             },
                         },
                         "expected_slides": {"type": "integer", "minimum": 1, "maximum": 100},
+                        "revises": {
+                            "type": "string",
+                            "description": "Optional: the artifact_id of a deck delivered earlier in this conversation that this render revises. The new PPTX is recorded as its next version (latest version only).",
+                        },
                         "style": {
                             "type": "object",
                             "additionalProperties": False,
@@ -250,3 +267,36 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
             risk_level="low",
         )
     )
+
+
+_DECK_VERSION_HINTS = {
+    "version_target_not_found": "The deck to revise was not found among your files.",
+    "version_target_out_of_scope": "Only a deck produced earlier in this conversation can get a new version; omit revises to register a new deck.",
+    "version_target_format_changed": "A new version must stay a PPTX; omit revises to register a different file.",
+    "version_target_not_latest": "A newer version of this deck exists; revise the latest version.",
+}
+
+
+def _version_refusal(reason: str, latest_id: str | None) -> dict[str, Any]:
+    message = _DECK_VERSION_HINTS.get(reason, "The deck to revise could not be verified; retry the same call.")
+    return {
+        "ok": False,
+        "error": reason if reason in _DECK_VERSION_HINTS else "version_target_unverified",
+        "message": message + (f" Latest version: {latest_id}." if latest_id else ""),
+        **({"latest_id": latest_id} if latest_id else {}),
+    }
+
+
+async def _deck_version_refusal(ctx: Any, revises: Any) -> dict[str, Any] | None:
+    if not isinstance(revises, str) or not revises.strip():
+        return {"ok": False, "error": "invalid_revises", "message": "revises must be the artifact_id of the deck being revised."}
+    store = getattr(ctx, "artifact_store", None)
+    if store is None or not await store.versions_supported():
+        return None
+    try:
+        await store.check_version_target(
+            revises.strip(), user_id=getattr(ctx, "user_id", None), session_id=getattr(ctx, "session_id", None), workspace_id=None, mime=MIME
+        )
+    except VersionTargetRefused as refused:
+        return _version_refusal(refused.reason, refused.latest_id)
+    return None

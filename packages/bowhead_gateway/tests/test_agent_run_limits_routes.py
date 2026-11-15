@@ -28,9 +28,10 @@ async def test_only_owners_and_admins_read_and_write(client, app_ctx):
     read = client.get(URL, cookies=_as(app_ctx.admin))
     assert read.status_code == 200
     view = read.json()
-    assert (view["turn_time_limit_s"], view["step_limit"], view["tool_call_limit"]) == (1800, None, 300)
+    assert (view["turn_time_limit_s"], view["step_limit"], view["tool_call_limit"], view["model_call_limit"]) == (1800, None, 300, 200)
     assert view["is_default"] is True and view["wrap_up_reserve_s"] == 300
     assert view["ranges"]["turn_time_limit_s"] == {"min": 600, "max": 36000}
+    assert view["ranges"]["model_call_limit"] == {"min": 1, "max": 10000} and view["defaults"]["model_call_limit"] == 200
 
     assert client.put(URL, cookies=_as(app_ctx.member), json=_body(view["version"])).status_code == 403
     saved = client.put(URL, cookies=_as(app_ctx.admin), json=_body(view["version"], step_limit=200))
@@ -80,6 +81,9 @@ async def test_system_policy_is_read_only_and_reset_keeps_the_ceiling(client, ap
         ({"model_call_time_limit_s": 29}, "model_call_time_limit_s"),
         ({"model_call_time_limit_s": 36001}, "model_call_time_limit_s"),
         ({"model_call_time_limit_s": True}, "model_call_time_limit_s"),
+        ({"model_call_limit": 0}, "model_call_limit"),
+        ({"model_call_limit": 10001}, "model_call_limit"),
+        ({"model_call_limit": "200"}, "model_call_limit"),
     ],
 )
 async def test_out_of_range_values_name_the_field_and_range(client, app_ctx, patch, field):
@@ -120,3 +124,27 @@ async def test_model_call_deadline_persists_and_resets_to_follow_turn(client, ap
     automatic = client.put(URL, cookies=_as(app_ctx.owner), json=_body(legacy.json()["version"], model_call_time_limit_s=None))
     assert automatic.status_code == 200 and automatic.json()["model_call_time_limit_s"] is None
     assert client.delete(URL, cookies=_as(app_ctx.owner)).json()["model_call_time_limit_s"] is None
+
+
+async def test_model_calls_per_turn_persist_can_be_unlimited_and_reset_to_200(client, app_ctx):
+    initial = client.get(URL, cookies=_as(app_ctx.owner)).json()
+    saved = client.put(URL, cookies=_as(app_ctx.owner), json=_body(initial["version"], model_call_limit=40))
+    assert saved.status_code == 200 and saved.json()["model_call_limit"] == 40
+    # A page that predates the field keeps the stored value.
+    legacy = client.put(URL, cookies=_as(app_ctx.owner), json=_body(saved.json()["version"], tool_call_limit=600))
+    assert legacy.status_code == 200 and legacy.json()["model_call_limit"] == 40
+    unlimited = client.put(URL, cookies=_as(app_ctx.owner), json=_body(legacy.json()["version"], model_call_limit=None))
+    assert unlimited.status_code == 200 and unlimited.json()["model_call_limit"] is None
+    stored = await app_ctx.app.state.team_settings_store.get(app_ctx.team.id, "agent_run_limits")
+    assert '"model_call_limit":null' in stored
+    assert client.delete(URL, cookies=_as(app_ctx.owner)).json()["model_call_limit"] == 200
+
+
+async def test_a_value_saved_before_model_calls_per_turn_reads_as_200(client, app_ctx):
+    await app_ctx.app.state.team_settings_store.set(
+        app_ctx.team.id,
+        "agent_run_limits",
+        '{"turn_time_limit_s":3600,"step_limit":null,"tool_call_limit":500,"model_call_time_limit_s":null}',
+        app_ctx.owner.id,
+    )
+    assert client.get(URL, cookies=_as(app_ctx.owner)).json()["model_call_limit"] == 200

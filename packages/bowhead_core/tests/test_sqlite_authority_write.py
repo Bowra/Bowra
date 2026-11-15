@@ -96,7 +96,7 @@ async def test_authority_timeout_preserves_the_original_error(database: Path, mo
 
     async def operation(db):
         await db.execute("INSERT INTO accepted VALUES('original-operation')")
-        clock[0] = 6.0
+        clock[0] = 61.0
         raise failure
 
     with pytest.raises(sqlite3.OperationalError) as caught:
@@ -113,7 +113,7 @@ async def test_new_attempt_uses_only_the_remaining_timeout(database: Path, monke
         async with db.execute("PRAGMA busy_timeout") as cursor:
             observed.append((await cursor.fetchone())[0])
         if len(observed) == 1:
-            clock[0] = 4.0
+            clock[0] = 59.0
             raise sqlite_domain_runtime._busy()
         return "accepted"
 
@@ -122,9 +122,9 @@ async def test_new_attempt_uses_only_the_remaining_timeout(database: Path, monke
 
     monkeypatch.setattr(_db, "anyio", SimpleNamespace(sleep=pause))
     assert await _db.run_sqlite_authority_write(database, operation) == "accepted"
-    assert observed[0] == 5000 and 0 < observed[1] <= 1000
+    assert observed[0] == 60000 and 0 < observed[1] <= 1000
     async with _db.open_shared_ctx(str(database)) as db, db.execute("PRAGMA busy_timeout") as cursor:
-        assert (await cursor.fetchone())[0] == 5000
+        assert (await cursor.fetchone())[0] == 60000
 
 
 @pytest.mark.parametrize("phase", ["commit", "rollback"])

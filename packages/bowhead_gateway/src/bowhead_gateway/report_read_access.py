@@ -8,8 +8,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from bowhead_core.ordinary_lead_continuation import content_hash
-from bowhead_core.report_read_material import ReportReadObservation
-from bowhead_core.source_access_projection import canonical_source_identity, collect_source_identities
+from bowhead_core.report_read_material import ReportReadObservation, validation_pass_cache
+from bowhead_core.source_access_projection import canonical_source_identity, collect_source_identities, names_no_source
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,27 @@ class ReportReadAccess:
             return identities
         return collect_source_identities([canonical])
 
+    @staticmethod
+    def _recorded(refs) -> frozenset[str]:
+        return frozenset(identity for identity in (canonical_source_identity(ref) for ref in refs) if isinstance(identity, str))
+
+    @staticmethod
+    def _authorizable(identities, recorded: frozenset[str]) -> list[str]:
+        """Leave out bare numbers that no recorded source carries.
+
+        Such a value names nothing to authorize. Kept as a requirement it hid the
+        whole section from every read: on 116 (2026-11-15) a helper wrote
+        ``source_refs`` ["100", "101", "105"] and later helpers reported that
+        chapter missing. Every other identity still has to be authorized.
+        """
+        return [identity for identity in identities if identity in recorded or not names_no_source(identity)]
+
+    async def recorded_source_identities(self) -> frozenset[str]:
+        """Identities of the sources this conversation's Tool results recorded."""
+        from bowhead_gateway.routes.canvas import _build_source_refs_for_session
+
+        return self._recorded(await _build_source_refs_for_session(self.request, self.session_id, strict=True))
+
     async def read(self, arguments, ctx):
         from bowhead_core.agents.report_tools import _read_report_snapshot
         from bowhead_core.context_segments import MAX_CONTEXT_BYTES
@@ -148,11 +169,12 @@ class ReportReadAccess:
                 raise ValueError("Report unavailable")
             canvas, all_sections = snapshot
             refs = await _build_source_refs_for_session(self.request, self.session_id, strict=True)
+            recorded = self._recorded(refs)
             visible = [s for s in all_sections if not s.quarantined]
             required = {}
             for section in visible:
                 try:
-                    required[section.id] = await self._required_sources(section)
+                    required[section.id] = self._authorizable(await self._required_sources(section), recorded)
                 except ValueError:
                     continue
             canonical = [{"kind": "narrative", "source_refs": ids} for ids in required.values()]
@@ -228,19 +250,36 @@ class ReportReadAccess:
     async def validate(self, observation):
         if any(getattr(observation, name) != getattr(self, name) for name in ("session_id", "workspace_id", "team_id", "user_id")):
             raise ValueError("Report observation scope changed")
-        canvas = await self._canvas()
+        # A pass over a conversation's history meets the same report once per recorded read. It reads the
+        # report once and projects each distinct set of sources once; outside a pass every check reads.
+        cache = validation_pass_cache()
+        scope = (self.team_id, self.user_id, self.workspace_id, self.session_id)
+        report = cache.get(("report", scope)) if cache is not None else None
+        if report is None:
+            report = [await self._canvas(), None]
+            if cache is not None:
+                cache["report", scope] = report
+        canvas = report[0]
         if observation.canvas_id is None:
             # An authorized historical empty report stays an empty observation.
             return
         if canvas is None or canvas.id != observation.canvas_id:
             raise ValueError("Report observation unavailable")
-        sections = {s.id: s for s in await self.request.app.state.canvas_store.list_sections(canvas.id, include_hidden=True)}
+        if report[1] is None:
+            report[1] = {s.id: s for s in await self.request.app.state.canvas_store.list_sections(canvas.id, include_hidden=True)}
+        sections = report[1]
         for old in observation.sections:
             current = sections.get(old["id"])
             if current is None or current.quarantined or current.hidden_for_chat_mode != old["hidden"]:
                 raise ValueError("Report observation unavailable")
-        projector = await self._sources(canvas, observation.source_sections, observation.source_refs)
-        if not all(projector.access_by_identity.values()):
+        sources = ("sources", scope, content_hash([observation.source_sections, observation.source_refs]))
+        accessible = cache.get(sources) if cache is not None else None
+        if accessible is None:
+            projector = await self._sources(canvas, observation.source_sections, observation.source_refs)
+            accessible = all(projector.access_by_identity.values())
+            if cache is not None:
+                cache[sources] = accessible
+        if not accessible:
             raise ValueError("Report source unavailable")
 
     async def authorize_reference(self, reference):
@@ -258,6 +297,7 @@ class ReportReadAccess:
 
             identities = await self._required_sources(section)
             refs = await _build_source_refs_for_session(self.request, self.session_id, strict=True) if identities else []
+            identities = self._authorizable(identities, self._recorded(refs))
             projector = await self._sources(
                 canvas, [{"kind": "narrative", "source_refs": identities}], [r for r in refs if canonical_source_identity(r) in identities]
             )

@@ -63,7 +63,7 @@ _ALLOWED_KEYS = {
     KEY_KB_FILE_SCOPE,
     # What Coach does after writing an Agent draft: run the release check, or ask first.
     KEY_AGENT_COACH_AFTER_EDIT,
-    # FEATURE_NOTIFICATION_DELIVERY: reminder emails for items still waiting on you ("on" | "off"; unset = on).
+    # Reminder emails for items still waiting on you ("on" | "off"; unset = on).
     KEY_NOTIFICATION_EMAIL_REMINDERS,
 }
 

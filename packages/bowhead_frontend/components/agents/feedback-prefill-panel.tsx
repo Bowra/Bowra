@@ -40,16 +40,16 @@ export function FeedbackPrefillPanel({
 
   return (
     <section data-testid="feedback-prefill-panel" aria-labelledby="feedback-prefill-title" style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
-      <div role="note" style={{ background: "var(--c-warn-soft)", border: "1px solid #e3d3a6", borderRadius: 8, padding: "12px 14px" }}>
-        <div id="feedback-prefill-title" style={{ font: "600 13px var(--sans, inherit)", color: "#7d5f14" }}>{t("banner")}</div>
-        <div style={{ fontSize: "0.75rem", color: "#8a6f2a", marginTop: 3 }}>
+      <div role="note" style={{ background: "var(--c-warn-soft)", border: "1px solid var(--c-warn-line)", borderRadius: 8, padding: "12px 14px" }}>
+        <div id="feedback-prefill-title" style={{ font: "600 13px var(--sans, inherit)", color: "var(--c-warn-ink)" }}>{t("banner")}</div>
+        <div style={{ fontSize: "0.75rem", color: "var(--c-warn-ink)", marginTop: 3 }}>
           {t("banner_meta", { proposer: handoff.banner.proposer_display || handoff.banner.proposer_id, count: handoff.banner.evidence_count, candidate: handoff.candidate_id })}
         </div>
       </div>
       {stale ? (
-        <div role="status" data-testid="feedback-prefill-stale" style={{ background: "var(--c-info-soft)", border: "1px solid #c6dbe6", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div role="status" data-testid="feedback-prefill-stale" style={{ background: "var(--c-info-soft)", border: "1px solid var(--c-info-line)", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ font: "600 13px var(--sans, inherit)", color: "var(--c-info)" }}>{t("stale_title")}</div>
-          <div style={{ fontSize: "0.75rem", color: "#4a6d84", lineHeight: 1.6 }}>{t("stale_body")}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--c-info-ink)", lineHeight: 1.6 }}>{t("stale_body")}</div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button size="sm" variant="primary" disabled={realigning || !onRealign} onClick={() => onRealign?.()}>{realigning ? t("realigning") : t("realign")}</Button>
             <Button size="sm" variant="secondary" disabled={realigning} onClick={onDiscard}>{t("discard")}</Button>

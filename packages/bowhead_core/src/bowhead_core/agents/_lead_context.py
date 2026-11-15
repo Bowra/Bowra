@@ -92,6 +92,22 @@ def reset_current_peer_name(token: contextvars.Token) -> None:
     _CURRENT_PEER_NAME_CONTEXTVAR.reset(token)
 
 
+_SYSTEM_LEAD_RUN_CONTEXTVAR: contextvars.ContextVar[bool] = contextvars.ContextVar("bowhead_system_lead_run", default=False)
+
+
+def set_system_lead_run(active: bool) -> contextvars.Token:
+    """SubagentRunner marks whether the running loop is the system Lead's own."""
+    return _SYSTEM_LEAD_RUN_CONTEXTVAR.set(active)
+
+
+def is_system_lead_run() -> bool:
+    return _SYSTEM_LEAD_RUN_CONTEXTVAR.get()
+
+
+def reset_system_lead_run(token: contextvars.Token) -> None:
+    _SYSTEM_LEAD_RUN_CONTEXTVAR.reset(token)
+
+
 def set_current_subagent_id(subagent_id: str) -> contextvars.Token:
     """SubagentRunner sets this (unique per-spawn id) around the agent loop."""
     return _CURRENT_SUBAGENT_ID_CONTEXTVAR.set(subagent_id)

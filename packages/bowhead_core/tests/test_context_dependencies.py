@@ -251,6 +251,87 @@ async def test_attachment_proofs_keep_current_access_and_exact_image_bytes(colla
             await prepared(proofs)
 
 
+@pytest.mark.unit
+async def test_shared_evidence_hashes_the_same_stored_bytes_once_and_still_detects_a_different_expectation():
+    import hashlib
+
+    from bowhead_core.context_attachments import ContextAttachment, _validate_bytes
+
+    content = b"retained session file"
+    reads = []
+
+    async def read_bounded(path, *, limit):
+        reads.append(path)
+        return content
+
+    ctx = SimpleNamespace(artifact_store=SimpleNamespace(backend=SimpleNamespace(read_bounded=read_bounded)))
+    item = ContextAttachment(
+        artifact_id="art_retained",
+        filename="a.txt",
+        mime="text/plain",
+        size=len(content),
+        content_hash="sha256:" + hashlib.sha256(content).hexdigest(),
+    )
+    art = SimpleNamespace(path="uploads/a.txt")
+    verified: set[str] = set()
+    for _ in range(3):
+        await _validate_bytes(ctx, [item], [art], verified_bytes=verified)
+    assert len(reads) == 1
+    await _validate_bytes(ctx, [item], [art])
+    assert len(reads) == 2
+    changed = item.model_copy(update={"content_hash": "sha256:" + "0" * 64})
+    with pytest.raises(ValueError, match="context_attachment_bytes_changed"):
+        await _validate_bytes(ctx, [changed], [art], verified_bytes=verified)
+
+
+@pytest.mark.unit
+async def test_manifest_lists_each_collected_dependency_once(monkeypatch):
+    from bowhead_core.context_dependencies import (
+        ContextSourceValidator,
+        KnowledgeContextDependencies,
+        MaterialContextDependencies,
+        PreparedContextSourceValidator,
+    )
+
+    ctx = SimpleNamespace(knowledge_source_uses={}, ordinary_lead_state=None, knowledge_navigation_uses={})
+    original = ContextSourceValidator(ctx)
+
+    async def validate(messages, **_):
+        for message in messages:
+            if message.name == "context_source_dependencies_v1":
+                ctx.knowledge_source_uses.update(KnowledgeContextDependencies.model_validate_json(message.content).knowledge_sources)
+
+    monkeypatch.setattr(original, "validate", validate)
+    prepared = PreparedContextSourceValidator(original)
+    records = [{"kind": "sandbox", "skills": [], "artifacts": [], "call_id": str(index)} for index in range(3)]
+
+    def material(turn_id, tools):
+        proof = MaterialContextDependencies(turn_id=turn_id, tools=tools)
+        return Message(role="user", name="context_material_dependencies_v1", content=proof.model_dump_json())
+
+    def sources(values):
+        return Message(
+            role="user", name="context_source_dependencies_v1", content=KnowledgeContextDependencies(knowledge_sources=values).model_dump_json()
+        )
+
+    # One Turn records its growing list three times; another Turn repeats a record.
+    await prepared.collect([material("t_first", records[:1]), sources({"file_b": "g2"})])
+    await prepared.collect([material("t_first", records[:2]), material("t_first", records), sources({"file_a": "g1"})])
+    await prepared.collect([material("t_second", records[:1])])
+    manifest = prepared.manifest()
+    assert [message.name for message in manifest] == [
+        "context_source_dependencies_v1",
+        "context_material_dependencies_v1",
+        "context_material_dependencies_v1",
+    ]
+    assert KnowledgeContextDependencies.model_validate_json(manifest[0].content).knowledge_sources == {"file_a": "g1", "file_b": "g2"}
+    merged = [MaterialContextDependencies.model_validate_json(message.content) for message in manifest[1:]]
+    assert [(value.turn_id, value.tools) for value in merged] == [("t_first", records), ("t_second", records[:1])]
+    # Collecting the manifest itself changes nothing.
+    await prepared.collect(manifest)
+    assert prepared.manifest() == manifest
+
+
 async def test_context_sources_do_not_inherit_continuation_mime_or_size_caps(collab):
     from bowhead_core._db import open_shared_ctx
     from bowhead_core.artifact_store import ArtifactStore, LocalBackend
@@ -481,6 +562,53 @@ async def test_adoption_observes_source_revocation_in_its_own_transaction(collab
         with pytest.raises(OrdinaryContinuationUnavailable):
             await prepared.for_adoption(db)(messages)
         await db.rollback()
+
+
+async def test_authority_is_checked_before_the_write_and_not_again_inside_it(collab, monkeypatch):
+    """The completion transaction only writes: current authority is read before the writer lock is taken."""
+    from bowhead_core._db import open_shared_ctx
+    from bowhead_core.context_dependencies import ContextSourceValidator, MaterialContextDependencies, PreparedContextSourceValidator
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+    from bowhead_core import ordinary_lead_material
+
+    allowed = True
+    checks = 0
+
+    async def metadata(ctx, db, material, *, contract, historical_skills=False):
+        nonlocal checks
+        checks += 1
+        if not allowed:
+            raise OrdinaryContinuationUnavailable()
+
+    monkeypatch.setattr(ordinary_lead_material, "revalidate_tool_materials", AsyncMock())
+    monkeypatch.setattr(ordinary_lead_material, "revalidate_material_authority_in_connection", metadata)
+    ctx = SimpleNamespace(
+        session_id=collab.worker.session_id,
+        turn_id=collab.worker.turn_id,
+        session_store=SimpleNamespace(db_path=collab.path),
+        knowledge_scope=None,
+        knowledge_source_uses={},
+        ordinary_lead_state=None,
+    )
+    proof = MaterialContextDependencies(turn_id=collab.worker.turn_id, tools=[{"kind": "sandbox", "skills": [], "artifacts": []}])
+    messages = [Message(role="user", name="context_material_dependencies_v1", content=proof.model_dump_json())]
+    prepared = PreparedContextSourceValidator(ContextSourceValidator(ctx))
+    await prepared.collect(messages)
+
+    checks = 0
+    in_write = await prepared.verify_for_adoption([messages])
+    assert checks == 1
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        await in_write(messages)
+        await in_write([])
+        await db.rollback()
+    assert checks == 1
+
+    allowed = False
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        await prepared.verify_for_adoption([messages])
 
 
 async def test_compaction_and_publication_encryption_allow_an_independent_writer(collab, context_case, monkeypatch):

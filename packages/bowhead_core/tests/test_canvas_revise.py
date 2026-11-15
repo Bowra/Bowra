@@ -456,6 +456,51 @@ async def test_card_path_in_revise_mode_lands_chapter_at_tail_without_promote(st
     assert (await store.list_sections(cv_id))[0].turn_id == "t3"
 
 
+async def test_presentation_edit_in_revise_mode_leaves_report_sources_unchanged(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 1.7.32 dogfood D2: a type-only chart edit's helper payload restated the report's Python source in new words;
+    the eager card path in revise mode appended it, so Sources grew from one row to two for the same data."""
+    from bowhead_core.canvas_revise import strip_document_chrome_payload
+    from bowhead_core.types import ToolInvocation
+
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    cv_id, _ = await _seed_prior_report(store)
+    prior = {
+        "label": "Python 沙箱质数计算（试除法 + 暴力法复核）",
+        "tool": "python_sandbox",
+        "artifact_id": None,
+        "query": "1-2000 质数按 200 区间计数",
+    }
+    src = await store.append_section(canvas_id=cv_id, kind="sources", payload={"entries": [prior]}, by_turn_id="t1")
+    bus = _Bus()
+    bus._lead_canvas_mode = "revise"
+    payload = {
+        "exec_summary": "已把图就地改为面积图，数据与其他章节未改动。",
+        "sources": [
+            {
+                "label": "primes_by_interval.csv（1-2000 每 200 一档质数个数，Python 计算产出）",
+                "tool": "python_sandbox",
+                "query": "1-2000 质数按每 200 区间计数",
+            }
+        ],
+    }
+    await compose_canvas_from_payload(
+        canvas_store=store,
+        request=_turn_request("t2"),
+        bus=bus,
+        payload=strip_document_chrome_payload(payload, bus),
+        tool_invocations=[
+            ToolInvocation(tool_name="read_chart", arguments={"section_id": "sec_chart"}, result={"ok": True}),
+            ToolInvocation(tool_name="edit_chart", arguments={"section_id": "sec_chart", "changes": {"kind": "area_stacked"}}, result={"ok": True}),
+        ],
+        peer_id="sub_p2",
+        emit_lifecycle=False,
+        chapter_mode=True,
+    )
+    sources = [s for s in await store.list_sections(cv_id) if s.kind == "sources" and not s.superseded]
+    assert [s.id for s in sources] == [src.id]
+    assert [e["label"] for e in sources[0].payload["entries"]] == [prior["label"]]
+
+
 async def test_write_report_cross_turn_unverified_numbers_tristate(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """fix-round review：跨轮改段的 unverified_numbers——零 tool 数据 ⇒ 不写键（旧警示留）；有 tool 数据 ⇒ 写，
     旧正文里已有的数字不重标，全验证通过的 [] 照写（真验掉了）。"""
@@ -705,3 +750,33 @@ def test_authored_title_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
     assert authored_title(None) is None
     monkeypatch.setenv("BOWHEAD_EAGER_CHROME_DEDUP", "0")
     assert authored_title(bus) is None
+
+
+@pytest.mark.parametrize("case", ["title_only", "append_mode", "same_title", "scoped", "no_title"])
+async def test_a_title_only_revision_replaces_the_document_title(store: CanvasStore, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    """Regression check N8: "把报告大标题改成…" patched no narrative, so the title in payload.title was dropped."""
+    from bowhead_core.canvas_revise import note_lead_canvas_mode, note_revise_scope
+    from bowhead_core.report_writer_loop import _revise_finish_if_applicable
+
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    cv_id, nid = await _seed_prior_report(store)
+    bus = _Bus()
+    note_lead_canvas_mode(bus, "append" if case == "append_mode" else "revise")
+    if case == "scoped":
+        note_revise_scope(bus, [nid])
+    title = {"same_title": "旧报告", "no_title": ""}.get(case, "2025年度经营分析")
+    kinds = await _revise_finish_if_applicable(canvas_store=store, request=_request("t2"), bus=bus, payload={"title": title}, tool_invocations=[])
+    h1 = next(s for s in await store.list_sections(cv_id) if s.kind == "h1")
+    if case == "title_only":
+        assert kinds == ["h1"] and h1.payload["text"] == "2025年度经营分析"
+        assert bus._revise_title_applied is True
+        # Applied once: the finalizer fallback reports the title without patching it again.
+        assert await _revise_finish_if_applicable(
+            canvas_store=store, request=_request("t2"), bus=bus, payload={"title": title}, tool_invocations=[]
+        ) == ["h1"]
+        assert next(s for s in await store.list_sections(cv_id) if s.kind == "h1").rev == h1.rev
+        opened = [ev for ev in bus.events if getattr(ev, "event_type", None) == "canvas.opened"]
+        assert opened and opened[-1].payload["title"] == "2025年度经营分析" and opened[-1].payload["revised"] is True
+        assert h1.id in await store.section_ids_touched_by_turn("t2"), "Lead's Canvas change ledger sees the new title"
+    else:
+        assert kinds is None and h1.payload["text"] == "旧报告"

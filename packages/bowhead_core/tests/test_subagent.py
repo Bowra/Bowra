@@ -1341,6 +1341,18 @@ def test_query_fingerprint_preserves_order_semantic() -> None:
     assert neg_a != neg_b
 
 
+def test_query_fingerprint_separates_skill_invoke_calls_by_input() -> None:
+    """Two python_sandbox runs with different code are different calls; an unchanged one is the same call."""
+    from bowhead_core.subagent import _query_fingerprint
+
+    def call(code: str) -> dict:
+        return {"name": "python_sandbox", "script": "runner.py", "input": {"code": code}}
+
+    assert _query_fingerprint("skill_invoke", call("print(1)")) != _query_fingerprint("skill_invoke", call("print(2)"))
+    assert _query_fingerprint("skill_invoke", call("print(1)")) == _query_fingerprint("skill_invoke", call("print(1)"))
+    assert _query_fingerprint("skill_read", {"name": "pptx"}) == ("skill_read", "pptx")
+
+
 def test_query_fingerprint_normalizes_whitespace_and_punct() -> None:
     """标点 + 空白归一化."""
     from bowhead_core.subagent import _query_fingerprint

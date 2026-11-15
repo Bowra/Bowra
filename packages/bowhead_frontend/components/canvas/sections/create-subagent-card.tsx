@@ -119,6 +119,7 @@ import {
   type SkillsCatalog,
   type ToolsCatalog,
 } from "@/lib/team-subagents-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // ── props ────────────────────────────────────────────────────────────────────
 
@@ -846,7 +847,7 @@ export function CreateSubagentCard({
     let live = true;
     getToolsCatalog(unifiedDraftEnabled ? requestContext.current : undefined)
       .then((c) => { if (live) setCatalog(c); })
-      .catch((e) => { if (live) setCatalogErr(shownError(t("catalog_load_failed_plain"), e)); });
+      .catch((e) => { if (live) setCatalogErr(shownError(withHttpFailureReason(t("catalog_load_failed_plain"), e, { read: true }), e)); });
     return () => { live = false; };
   }, [revisioned]);
 
@@ -861,7 +862,7 @@ export function CreateSubagentCard({
     let live = true;
     getSkillsCatalog(unifiedDraftEnabled ? requestContext.current : undefined)
       .then((c) => { if (live) setSkillsCatalog(c); })
-      .catch((e) => { if (live) setSkillsCatErr(shownError(t("skills_load_failed_plain"), e)); });
+      .catch((e) => { if (live) setSkillsCatErr(shownError(withHttpFailureReason(t("skills_load_failed_plain"), e, { read: true }), e)); });
     return () => { live = false; };
   }, [revisioned]);
 

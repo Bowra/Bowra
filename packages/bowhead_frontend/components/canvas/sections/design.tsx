@@ -546,7 +546,7 @@ export function DesignSection({
                 role="status"
                 aria-live="polite"
                 style={{
-                  color: "#92400e",
+                  color: "var(--c-warn-ink)",
                   fontSize: "0.75rem",
                   fontWeight: 600,
                 }}

@@ -1,22 +1,24 @@
 import { parseFieldContract, type FieldContract } from "./configuration-field-guidance";
 import { ApiError, apiJson } from "./api-client";
 
-/** Team agent run limits (`/api/v1/team-settings/agent-run-limits`). `stepLimit: null` means unlimited. */
+/** Team agent run limits (`/api/v1/team-settings/agent-run-limits`). `stepLimit` and `modelCallLimit` null mean unlimited. */
 export interface AgentRunLimits {
   field_contract?: FieldContract;
   turnTimeLimitS: number;
   stepLimit: number | null;
   toolCallLimit: number;
+  modelCallLimit?: number | null;
   modelCallTimeLimitS?: number | null;
   wrapUpReserveS: number;
   isDefault: boolean;
   version: string;
   runtimeControls?: { systemStepLimit: number | null; effectiveStepLimit: number | null; stallTimeoutS: number };
-  defaults: { turnTimeLimitS: number; stepLimit: number | null; toolCallLimit: number; modelCallTimeLimitS?: number | null };
+  defaults: { turnTimeLimitS: number; stepLimit: number | null; toolCallLimit: number; modelCallLimit?: number | null; modelCallTimeLimitS?: number | null };
   ranges: {
     turnTimeLimitS: { min: number; max: number };
     stepLimit: { min: number; max: number };
     toolCallLimit: { min: number; max: number };
+    modelCallLimit?: { min: number; max: number };
     modelCallTimeLimitS?: { min: number; max: number };
   };
 }
@@ -25,6 +27,7 @@ export interface AgentRunLimitsDraft {
   turnTimeLimitS: number;
   stepLimit: number | null;
   toolCallLimit: number;
+  modelCallLimit?: number | null;
   modelCallTimeLimitS?: number | null;
 }
 
@@ -62,6 +65,7 @@ function limitsOf(value: unknown): AgentRunLimits {
     turnTimeLimitS: int(v.turn_time_limit_s),
     stepLimit: v.step_limit === null ? null : int(v.step_limit),
     toolCallLimit: int(v.tool_call_limit),
+    ...(v.model_call_limit !== undefined ? { modelCallLimit: v.model_call_limit === null ? null : int(v.model_call_limit) } : {}),
     ...(v.model_call_time_limit_s !== undefined ? { modelCallTimeLimitS: v.model_call_time_limit_s === null ? null : int(v.model_call_time_limit_s) } : {}),
     wrapUpReserveS: int(v.wrap_up_reserve_s),
     isDefault: v.is_default,
@@ -70,12 +74,14 @@ function limitsOf(value: unknown): AgentRunLimits {
       turnTimeLimitS: int(defaults.turn_time_limit_s),
       stepLimit: defaults.step_limit === null ? null : int(defaults.step_limit),
       toolCallLimit: int(defaults.tool_call_limit),
+      ...(defaults.model_call_limit !== undefined ? { modelCallLimit: defaults.model_call_limit === null ? null : int(defaults.model_call_limit) } : {}),
       ...(defaults.model_call_time_limit_s !== undefined ? { modelCallTimeLimitS: defaults.model_call_time_limit_s === null ? null : int(defaults.model_call_time_limit_s) } : {}),
     },
     ranges: {
       turnTimeLimitS: range(ranges.turn_time_limit_s),
       stepLimit: range(ranges.step_limit),
       toolCallLimit: range(ranges.tool_call_limit),
+      ...(ranges.model_call_limit !== undefined ? { modelCallLimit: range(ranges.model_call_limit) } : {}),
       ...(ranges.model_call_time_limit_s !== undefined ? { modelCallTimeLimitS: range(ranges.model_call_time_limit_s) } : {}),
     },
   };
@@ -104,6 +110,7 @@ export async function saveAgentRunLimits(
         turn_time_limit_s: draft.turnTimeLimitS,
         step_limit: draft.stepLimit,
         tool_call_limit: draft.toolCallLimit,
+        ...(draft.modelCallLimit !== undefined ? { model_call_limit: draft.modelCallLimit } : {}),
         ...(draft.modelCallTimeLimitS !== undefined ? { model_call_time_limit_s: draft.modelCallTimeLimitS } : {}),
         expected_version: expectedVersion,
       }),

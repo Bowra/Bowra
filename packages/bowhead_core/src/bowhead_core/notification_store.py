@@ -244,7 +244,7 @@ class NotificationStore:
         Whether this was a new occurrence, and who just received the item, are decided here, once,
         inside the transaction (`NotificationWrite`).
 
-        Email rows (``notification_deliveries``, FEATURE_NOTIFICATION_DELIVERY) are written in the same
+        Email rows (``notification_deliveries``) are written in the same
         transaction: ``escalate_after_s`` schedules one escalation per person who just received the
         item; ``email_delivery_to`` schedules a configured email on a new occurrence, due now or after
         ``email_delivery_after_s``.
@@ -790,7 +790,7 @@ class NotificationStore:
             await db.commit()
         return cur.rowcount > 0
 
-    # ── Recorded email deliveries (FEATURE_NOTIFICATION_DELIVERY) ─────────────
+    # ── Recorded email deliveries ─────────────────────────────────────────────
 
     async def get_item(self, notification_id: str) -> NotificationItem | None:
         async with open_shared_ctx(self.db_path) as db:

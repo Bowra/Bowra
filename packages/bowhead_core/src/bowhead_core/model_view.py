@@ -46,8 +46,8 @@ from typing import Any
 _BACKEND_ONLY_KEYS: dict[str, frozenset[str]] = {
     # `_debug_explain_message` and model-facing `query_explain` are two forms of the same content
     # (prose vs structured); including both spends budget twice. Keep prose for backend troubleshooting.
-    # Datarc ids (`m1` / `d54` cut props, task uid) are not accepted by any tool and give the model a second,
-    # opaque spelling of names it already has in `_parse.tokens`; keep them for audit only.
+    # Datarc ids (`m1` / `d54` cut props, task uid) are not accepted by any tool; keep them for audit only.
+    # The cut's named tokens are withheld too (see `_executed_query_first`).
     "bi_query": frozenset({"artifact_filename", "_debug_csv_filename", "_debug_explain_message", "_debug_cut_props", "_debug_task_uid"}),
     # `bi_fetch_rows` entry removed with tool retirement on 2026-09-05: it is no longer registered,
     # so tool_name-based projection could never match it. All row-level fetches now return under bi_query.
@@ -81,7 +81,7 @@ def enabled() -> bool:
 #     with three prompt sources (manifest `compute.md`, team custom, user custom);
 #     changing each also duplicates work and requires another update for every new custom agent.
 #   · **Every agent necessarily reads** tool results, independent of prompt source.
-# 116 dogfood evidence: giving the list to Lead was useless; `_chat_direct_delivery` short-circuits Lead
+# Regression check evidence: giving the list to Lead was useless; `_chat_direct_delivery` short-circuits Lead
 # in chat turns, with no writing iteration (t_6787e8159e94 / t_752998836ac7 both had 0 anchors).
 #
 # Add hints only when a section was **actually created** (`section_id` in result), never for failure/skip results.
@@ -118,6 +118,42 @@ def _with_figure_anchor_hint(result: Any, *, anchor_id: str | None = None) -> An
         "这张图就渲在那一段旁边（写进 exec_summary 或某条 insight 的 narrative 均可）。"
         "不写 = 图落在答案末尾，不会丢。报告轮不用写这个，照常 write_report。"
     )
+    return out
+
+
+# ── bi_query: the hint and what ran lead the result; the cut stays backend-only ─────────────────────
+#
+# `_preflight_hint` was the last key, after the rows, the chart catalog and the sandbox usage note. Regression check
+# (2026-11-15, 1.7.38): compute read the rows and the report dates, then went straight to the sandbox without ever
+# addressing the hint. The hint states what the rows are not, so the model should read it before the rows.
+#
+# 116 re-check on 1.7.43 (2026-11-15): the model saw two parses of each query. `_parse.tokens` comes from Datarc's
+# separate /data/cut/ call, made before a model is chosen, and bound 女装 to 种类大类 word by word; `query_explain`,
+# Datarc's report of the query it executed, showed that the filter was dropped only by lacking a `filters` key.
+# deepseek-flash delivered all-store 月坪效 as 女装 in two of three runs and quoted the binding ("种类大类=女装",
+# "女装是种类大类维度下的取值"). The model now sees only what ran: the tokens and the internal gap record are withheld
+# (the handler and the trimmer still read them to write the hint), the report follows the hint, and a structured
+# report without `filters` shows `"filters": []`, since Datarc omits the keys that took no effect.
+_HINT_KEY = "_preflight_hint"
+_REPORT_KEYS = ("query_explain", "query_explain_text")
+_PARSE_KEY = "_parse"
+_BACKEND_ONLY_PARSE_KEYS = frozenset({"tokens", "fields_not_in_report"})
+
+
+def _executed_query_first(result: Any) -> Any:
+    """Lead a bi_query result, and each batched sub-result, with its hint and the executed-query report."""
+    if not isinstance(result, dict):
+        return result
+    lead = {key: result[key] for key in (_HINT_KEY, *_REPORT_KEYS) if key in result}
+    out = {**lead, **{key: value for key, value in result.items() if key not in lead}}
+    report = out.get("query_explain")
+    if isinstance(report, dict) and report and "filters" not in report:
+        out["query_explain"] = {**report, "filters": []}
+    parse = out.get(_PARSE_KEY)
+    if isinstance(parse, dict):
+        out[_PARSE_KEY] = {key: value for key, value in parse.items() if key not in _BACKEND_ONLY_PARSE_KEYS}
+    if isinstance(out.get("results"), list):
+        out["results"] = [_executed_query_first(item) for item in out["results"]]
     return out
 
 
@@ -163,6 +199,8 @@ def project_tool_result(
             )
     if tool_name in _FIGURE_ANCHOR_TOOLS:
         result = _with_figure_anchor_hint(result, anchor_id=figure_anchor_id)
+    if tool_name == "bi_query":
+        result = _executed_query_first(result)
     keys = _BACKEND_ONLY_KEYS.get(tool_name)
     if not keys:
         return result

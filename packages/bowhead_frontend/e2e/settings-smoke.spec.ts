@@ -165,9 +165,9 @@ test.beforeEach(async ({ page }) => {
       return;
     }
 
-    // The authenticated root polls pending email confirmations on every page.
-    if (path === "/api/v1/email-send-confirmations") {
-      await json({ confirmations: [] });
+    // The authenticated root reads the caller's waiting tool confirmations on every page.
+    if (path === "/api/v1/tool-confirmations") {
+      await json({ items: [] });
       return;
     }
 

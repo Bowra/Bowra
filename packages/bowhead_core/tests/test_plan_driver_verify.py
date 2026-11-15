@@ -219,6 +219,30 @@ async def test_enforce_second_fail_degrades_to_done(db_path: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_partial_step_failing_verification_stays_done_and_the_plan_completes(db_path: str) -> None:
+    """A helper stopped at a run limit kept part of its work; failing acceptance must not block the plan
+    (116 t_78ba5d3b1429 ended as plan_blocked with 27 written sections)."""
+
+    class PartialRunner:
+        async def dispatch(self, tasks, sctx, rf, arf, ml):
+            payload = {"fallback_markdown": "TOP10 done", "partial_completion": {"stop_reason": "no_progress", "remaining": "BOTTOM10"}}
+            return [
+                TaskResult.succeeded(t, payload if t.agent_name == "business-analyst" else {"exec_summary": "ok"}, tokens_input=1, tokens_output=1)
+                for t in tasks
+            ]
+
+    store = await _store(db_path)
+    plan, _ = await _setup(store, ["business-analyst", "compute"])
+    hooks = PlanHooks(verify=_hook({"business-analyst": _fail_outcome()}))
+    out = await run_plan(plan.id, store=store, deps=_deps(PartialRunner()), hooks=hooks, caps=PlanCaps(), parent_token_budget=1000)
+    assert out.status == "completed" and out.done == 2
+    partial = next(s for s in await store.list_steps(plan.id) if s.agent_name == "business-analyst")
+    assert partial.status == StepStatus.DONE
+    assert "只完成了一部分" in json.loads(partial.verify_json)["note"]
+    assert "partial_completion" in (partial.payload_json or "")
+
+
+@pytest.mark.asyncio
 async def test_no_hook_is_current_behavior(db_path: str) -> None:
     """hook=None: 现状回归——无 verify 字段/verify_json 不写 (flag-off 路径)."""
     store = await _store(db_path)

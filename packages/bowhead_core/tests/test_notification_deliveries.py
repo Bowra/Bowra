@@ -1,4 +1,4 @@
-"""Recorded notification emails (FEATURE_NOTIFICATION_DELIVERY): the revision and the write path."""
+"""Recorded notification emails: the revision and the write path."""
 
 from __future__ import annotations
 

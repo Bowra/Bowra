@@ -171,7 +171,7 @@ export interface LlmStreamRestartedEvent {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Inline tool call confirmation (FEATURE_INLINE_TOOL_CONFIRMATION).
+// Inline tool call confirmation: a waiting tool step asks its requester and records the outcome.
 // Both events are persisted Turn events attached to the waiting tool step and
 // replayed through the normal replay path. They never carry arguments, email
 // bodies or diffs: the full preview stays in the owner-only queue.
@@ -206,7 +206,7 @@ export interface ConfirmationRequestedEvent {
   choices: ToolConfirmationChoice[];
   /** ISO-8601, server clock. Never compared with the local clock. */
   expires_at: string;
-  /** Remaining seconds when the event was emitted. */
+  /** Remaining seconds when the event was emitted; views count down from the detail read instead. */
   timeout_seconds: number;
   seq?: number;
   parent_agent_id?: string | null;
@@ -242,7 +242,6 @@ export interface ParsedConfirmationRequested {
   category: ToolConfirmationCategory | null;
   choices: ToolConfirmationChoice[];
   expiresAt: string;
-  timeoutSeconds: number;
   parentAgentId: string | null;
 }
 
@@ -262,7 +261,6 @@ export function parseConfirmationRequested(payload: Record<string, unknown>): Pa
         ),
       )
     : [];
-  const timeout = payload.timeout_seconds;
   return {
     stepId,
     callId: _nonEmptyString(payload.call_id),
@@ -274,7 +272,6 @@ export function parseConfirmationRequested(payload: Record<string, unknown>): Pa
     category: _oneOf(TOOL_CONFIRMATION_CATEGORIES, payload.category),
     choices,
     expiresAt: typeof payload.expires_at === "string" ? payload.expires_at : "",
-    timeoutSeconds: typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? timeout : 0,
     parentAgentId: _nonEmptyString(payload.parent_agent_id),
   };
 }

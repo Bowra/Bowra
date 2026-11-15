@@ -369,7 +369,14 @@ async def test_sandbox_requires_actual_input_and_settled_executor_output(assigne
         assert len(output_ids) == 1
         return
     if change == "none":
+        from bowhead_core import artifact_store as artifact_store_module
+
+        opened = []
+        connect = artifact_store_module.diagnostic_connect
+        monkeypatch.setattr(artifact_store_module, "diagnostic_connect", lambda *args, **kwargs: opened.append(1) or connect(*args, **kwargs))
         await revalidate_tool_materials(ctx, [record])
+        # The input and the output are looked up on one store connection, not one each.
+        assert len(opened) == 1
     else:
         with pytest.raises(ValueError):
             await revalidate_tool_materials(ctx, [record])
@@ -427,3 +434,51 @@ async def test_canvas_freezes_full_ledger_and_owned_projection(assigned_case, mo
             await canvas_evidence(ctx)
     else:
         assert (await canvas_evidence(ctx) == saved) is (change == "none")
+
+
+@pytest.mark.parametrize(
+    "reference", ["identifiers", "newline", "chinese", "url", "unknown_newline", "unknown_chinese", "unknown_field", "other_space", "legacy"]
+)
+async def test_canvas_artifact_tokens_preserve_identifiers_and_real_authority(assigned_case, monkeypatch, reference):
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+    ctx = await collect(assigned_case, monkeypatch)
+    artifacts = ArtifactStore(ctx.session_store.db_path, LocalBackend(assigned_case.base.root / "canvas-token-artifacts"))
+    await artifacts.initialize()
+    ctx.artifact_store = artifacts
+    ctx.canvas_store = CanvasStore(ctx.session_store.db_path)
+    await ctx.canvas_store.initialize()
+    canvas = await ctx.canvas_store.ensure_canvas(session_id=ctx.session_id, workspace_id=ctx.workspace_id, user_id=ctx.user_id)
+    artifact = await artifacts.put_bytes(
+        content=b"Observed native output.",
+        filename="output.txt",
+        mime="text/plain",
+        source="python_sandbox",
+        created_by=ctx.user_id,
+        workspace_id="ws_other" if reference == "other_space" else ctx.workspace_id,
+        session_id=ctx.session_id,
+        created_by_turn=ctx.turn_id,
+    )
+    identity = "art_000000000000" if reference.startswith("unknown") else artifact.id
+    text = {
+        "newline": "\n" + identity,
+        "unknown_newline": "\n" + identity,
+        "chinese": "\N{CJK UNIFIED IDEOGRAPH-8BFB}\N{CJK UNIFIED IDEOGRAPH-53D6}" + identity + "\N{IDEOGRAPHIC FULL STOP}",
+        "unknown_chinese": "\N{CJK UNIFIED IDEOGRAPH-8BFB}\N{CJK UNIFIED IDEOGRAPH-53D6}" + identity,
+        "url": f"[Output](http://example.test/api/v1/files/{identity})",
+    }.get(reference, "")
+    payload = {
+        "code": "per_slide_chart_counts = [0, 1, 2]\nnative_chart_shapes_total = 8\n" + text,
+        "stdout_preview": "per_slide_chart_counts",
+        "sql": "native_chart_shapes_total",
+        "artifact_id": identity if reference == "unknown_field" else artifact.id,
+    }
+    await ctx.canvas_store.append_section(canvas_id=canvas.id, kind="code_block", payload=payload, by_turn_id=ctx.turn_id)
+    contract = "ordinary-lead-loop.v14" if reference == "legacy" else "ordinary-lead-loop.v15"
+    if reference.startswith("unknown") or reference in {"other_space", "legacy"}:
+        with pytest.raises(OrdinaryContinuationUnavailable):
+            await canvas_evidence(ctx, contract=contract)
+    else:
+        saved = await canvas_evidence(ctx, contract=contract)
+        assert [item["artifact_id"] for item in saved["artifacts"]] == [artifact.id]
+        assert await canvas_evidence(ctx, contract=contract) == saved

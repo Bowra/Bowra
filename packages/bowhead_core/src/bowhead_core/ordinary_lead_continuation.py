@@ -37,6 +37,19 @@ class OrdinaryContinuationUnavailable(ValueError):
         self.condition = condition
 
 
+class OrdinaryWorkerUnavailable(OrdinaryContinuationUnavailable):
+    """This worker no longer owns the Turn: it was cancelled, its lease moved, or its access ended.
+
+    Other refusals only mean a pause cannot be saved; this one also stops the live loop.
+    """
+
+
+CAPTURE_REFUSED_NOTE = (
+    "No question was created because this run cannot be saved for a later answer. "
+    "Continue with the existing results, or ask the user in your answer which input is still needed."
+)
+
+
 class OrdinaryQuestionUnavailable(OrdinaryContinuationUnavailable):
     """An optional new pause cannot retain this live execution shape."""
 
@@ -216,16 +229,56 @@ def typed_answer(record: OrdinaryContinuationCard) -> OrdinaryQuestionAnswer:
     )
 
 
+_ORDINARY_CARD_SQL = (
+    "json_valid(resume_context_json) AND (json_extract(resume_context_json,'$.__schema_version')=4 "
+    "OR json_extract(resume_context_json,'$.continuation.kind')='ordinary_lead')"
+)
+
+
 async def ordinary_card_id_in_tx(db: aiosqlite.Connection, *, turn_id: str) -> str | None:
     if not await readable_table_exists(db, "clarification_requests"):
         return None
-    row = await _row(
-        db,
-        "SELECT request_id FROM clarification_requests WHERE turn_id=? AND json_valid(resume_context_json) "
-        "AND (json_extract(resume_context_json,'$.__schema_version')=4 OR json_extract(resume_context_json,'$.continuation.kind')='ordinary_lead')",
-        (turn_id,),
-    )
+    row = await _row(db, f"SELECT request_id FROM clarification_requests WHERE turn_id=? AND {_ORDINARY_CARD_SQL}", (turn_id,))
     return row[0] if row else None
+
+
+def _epoch(value: object) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return (moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)).timestamp()
+
+
+async def ordinary_question_wait_in_tx(db: aiosqlite.Connection, *, turn_id: str, now: float) -> tuple[float, float] | None:
+    """Return the epoch window in which the Turn waited for its user's answer.
+
+    The wait starts when Lead's question card is created and ends when the
+    continuation consumes the answer (``injected_at``). A card still pending,
+    or answered but not yet consumed, is waiting until ``now``. A card closed
+    without consumption, an unreadable timestamp or an ambiguous card set
+    returns ``None``, which keeps the caller's original deadline.
+    """
+    if not await readable_table_exists(db, "clarification_requests"):
+        return None
+    async with db.execute(
+        f"SELECT created_at,injected_at,status FROM clarification_requests WHERE turn_id=? AND {_ORDINARY_CARD_SQL} LIMIT 2",
+        (turn_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    if len(rows) != 1:
+        return None
+    created_at, injected_at, status = rows[0]
+    start = _epoch(created_at)
+    if injected_at is not None:
+        end = _epoch(injected_at)
+    else:
+        end = now if status in {"pending", "resolved"} else None
+    if start is None or end is None or end < start:
+        return None
+    return start, end
 
 
 def _cipher_scope(snapshot: OrdinaryLeadResumeContext) -> ReferenceScope:
@@ -273,7 +326,7 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
                 or source is None
                 or source[0] != "team"
                 or helpers[0]["outcome"]["status"] != "completed"
-                or any(tool["kind"] in {"attachment_read", "read_result"} for tool in helpers[0]["tools"])
+                or any(tool["kind"] in {"attachment_read", "read_result", "canvas_result"} for tool in helpers[0]["tools"])
             )
         if extended:
             raise OrdinaryContinuationUnavailable(stage="clarification_capture")
@@ -494,7 +547,7 @@ async def require_live_worker_in_tx(db: aiosqlite.Connection, *, worker: Documen
     try:
         await require_reference_request_scope(db, ReferenceRequestScope(**worker.model_dump(exclude={"turn_id", "generation", "owner_id"})))
     except ValueError as error:
-        raise OrdinaryContinuationUnavailable() from error
+        raise OrdinaryWorkerUnavailable() from error
     await require_current_worker_in_tx(db, worker=worker)
 
 
@@ -517,7 +570,7 @@ async def require_current_worker_in_tx(db: aiosqlite.Connection, *, worker: Docu
         (worker.turn_id, worker.session_id, worker.user_id, worker.workspace_id, worker.team_id, worker.generation, worker.owner_id),
     )
     if row is None:
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryWorkerUnavailable()
 
 
 def _same_scope(record: OrdinaryContinuationCard, worker: DocumentTurnOwner) -> bool:

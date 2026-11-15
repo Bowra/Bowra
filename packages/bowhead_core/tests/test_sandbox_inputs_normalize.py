@@ -14,6 +14,7 @@ import pytest
 from bowhead_core.sandbox_inputs_normalize import (
     normalize_sandbox_inputs,
     normalize_sandbox_tool_args,
+    salvage_flattened_skill_invoke_args,
     salvage_misnested_sandbox_args,
 )
 
@@ -208,6 +209,77 @@ def test_skill_invoke_entry_normalizes_the_nested_inputs() -> None:
     assert out["input"]["code"] == "c"
 
 
+def test_skill_invoke_fields_beside_input_move_inside_it() -> None:
+    """116 t_78ba5d3b1429: `inputs` written beside `input` (the flat entry's habit) was dropped,
+    the runner said no inputs were declared, and the helper repeated the call until it was refused."""
+    args = {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c"}, "inputs": {"rows": "17"}, "purpose": "analysis"}
+    out = normalize_sandbox_tool_args("skill_invoke", args, _ctx(_Allowlist()))
+    assert out["input"] == {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}, "purpose": "analysis"}
+    assert "inputs" not in out and "purpose" not in out
+    assert args["inputs"] == {"rows": "17"}  # The recorded call is not mutated.
+
+
+def test_skill_invoke_without_input_takes_its_fields_from_the_top_level() -> None:
+    args = {"name": "python_sandbox", "script": "runner.py", "code": "c", "inputs": {"rows": {"artifact_id": REAL}}}
+    out, shape, conflicts = salvage_flattened_skill_invoke_args(args)
+    assert out["input"] == {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}
+    assert shape == "flattened_input_code+inputs" and conflicts == ()
+
+
+def test_correct_skill_invoke_call_is_untouched() -> None:
+    args = {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}}
+    out, shape, conflicts = salvage_flattened_skill_invoke_args(args)
+    assert out is args and shape is None and conflicts == ()
+
+
+def test_skill_invoke_field_given_twice_with_different_values_is_named() -> None:
+    from bowhead_core.sandbox_inputs_normalize import skill_invoke_field_conflicts
+
+    same = {"name": "python_sandbox", "input": {"code": "c", "inputs": {"a": {"artifact_id": REAL}}}, "inputs": {"a": {"artifact_id": REAL}}}
+    out, _, conflicts = salvage_flattened_skill_invoke_args(same)
+    assert conflicts == () and "inputs" not in out and out["input"]["inputs"] == {"a": {"artifact_id": REAL}}
+    differ = {**same, "inputs": {"b": {"artifact_id": REAL}}}
+    message = skill_invoke_field_conflicts("skill_invoke", differ)
+    assert message is not None and "`inputs`" in message and "inside `input`" in message
+    assert skill_invoke_field_conflicts("python_exec", differ) is None
+
+
+@pytest.mark.asyncio
+async def test_wrapper_refuses_a_conflicting_skill_invoke_call_before_running() -> None:
+    from bowhead_core.skill_bridge import _wrap_sandbox_inputs_normalization
+
+    called: list = []
+
+    async def _handler(args, ctx):
+        called.append(args)
+        return {"ok": True}
+
+    wrapped = _wrap_sandbox_inputs_normalization("skill_invoke", _handler)
+    out = await wrapped({"name": "python_sandbox", "input": {"code": "c", "inputs": {"a": "17"}}, "inputs": {"b": "17"}}, _ctx(_Allowlist()))
+    assert "error" in out and called == []
+    out = await wrapped({"name": "python_sandbox", "input": {"code": "c"}, "inputs": {"a": "17"}}, _ctx(_Allowlist()))
+    assert out == {"ok": True} and called[0]["input"]["inputs"] == {"a": {"artifact_id": REAL}}
+
+
+def test_model_tool_calls_are_settled_before_they_are_recorded() -> None:
+    """The agent loop settles the call itself, so the recorded arguments, the retained material hash
+    and the runner input are one shape."""
+    from bowhead_core.sandbox_inputs_normalize import settle_skill_invoke_calls
+    from bowhead_core.subagent import ToolCall
+
+    flattened = ToolCall(
+        id="c1", name="skill_invoke", arguments={"name": "python_sandbox", "input": {"code": "c"}, "inputs": {"rows": {"artifact_id": REAL}}}
+    )
+    conflicting = ToolCall(
+        id="c2", name="skill_invoke", arguments={"name": "python_sandbox", "input": {"code": "c", "inputs": {}}, "inputs": {"rows": {}}}
+    )
+    other = ToolCall(id="c3", name="python_exec", arguments={"code": "c", "inputs": {"rows": {"artifact_id": REAL}}})
+    settle_skill_invoke_calls([flattened, conflicting, other])
+    assert flattened.arguments == {"name": "python_sandbox", "input": {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}}
+    assert conflicting.arguments["inputs"] == {"rows": {}}  # Left for the wrapper to refuse by name.
+    assert other.arguments == {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}
+
+
 def test_skill_invoke_for_another_skill_is_untouched() -> None:
     """★ 只管沙箱那个 skill —— 别的 skill 的 input 形状与我们无关。"""
     args = {"name": "canvas-pptx", "input": {"inputs": {"rows": "17"}}}
@@ -225,6 +297,28 @@ def test_non_sandbox_tool_is_untouched() -> None:
 # This sprint already hit two traps (`_month_coverage_note` unwired with 47 checks still green;
 # `_hint_missing_file` effective only for FileNotFoundError). Get handler from **the actual wrapper**
 # and assert normalization occurs before entering the sandbox.
+
+
+def _wrapper_chain(handler, depth: int = 8) -> str:
+    """Qualified names of a registered handler and the functions its closures wrap.
+
+    Other wrappers (presentation facts, material records) sit outside the normalization wrapper,
+    so the outermost qualname alone cannot prove the wiring.
+    """
+    names, frontier = [], [handler]
+    for _ in range(depth):
+        nested = []
+        for fn in frontier:
+            names.append(getattr(fn, "__qualname__", ""))
+            for cell in getattr(fn, "__closure__", None) or ():
+                value = cell.cell_contents
+                if callable(value) and hasattr(value, "__qualname__"):
+                    nested.append(value)
+            wrapped = getattr(fn, "__wrapped__", None)
+            if wrapped is not None:
+                nested.append(wrapped)
+        frontier = nested
+    return " ".join(names)
 
 
 @pytest.mark.asyncio
@@ -254,8 +348,8 @@ async def test_normalization_is_wired_into_the_registered_flat_tool() -> None:
     # Use closure `__qualname__`, **not** object inequality with the bare handler:
     # `build_skill_tools` creates new closures each call, making identity unequal and passing whether wrapped or not.
     # The first version did exactly that; mutation testing **did not fail** (only the source-scan test failed).
-    assert "_wrap_sandbox_inputs_normalization" in spec.handler.__qualname__, (
-        f"扁平沙箱入口的 handler 没被包装 —— 归一没接上（qualname={spec.handler.__qualname__}）"
+    assert "_wrap_sandbox_inputs_normalization" in _wrapper_chain(spec.handler), (
+        f"扁平沙箱入口的 handler 没被包装 —— 归一没接上（chain={_wrapper_chain(spec.handler)}）"
     )
 
     # Also prove the wrapper actually normalizes (behavior).
@@ -270,7 +364,7 @@ async def test_normalization_is_wired_into_the_registered_flat_tool() -> None:
     # skill_invoke must also be wrapped (not just one entry).
     si = reg.get("skill_invoke")
     assert si is not None
-    assert "_wrap_sandbox_inputs_normalization" in si.handler.__qualname__, "skill_invoke 入口没被包装"
+    assert "_wrap_sandbox_inputs_normalization" in _wrapper_chain(si.handler), "skill_invoke 入口没被包装"
 
 
 @pytest.mark.asyncio

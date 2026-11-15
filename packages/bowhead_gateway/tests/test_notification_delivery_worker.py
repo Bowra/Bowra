@@ -273,7 +273,6 @@ def _notify(env, monkeypatch, run, probe=None):
 
     from bowhead_core import routine_notify_tool
 
-    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", "1")
     routine_notify_tool.register_routine_notify_tool(
         ToolRegistry(),
         service_provider=lambda: env.service,
@@ -359,9 +358,8 @@ def test_a_held_alert_email_goes_alone_when_no_result_email_carries_it(env, monk
 
 @pytest.mark.parametrize("called", [True, False])
 def test_a_run_whose_alert_the_daily_limit_refused_still_delivers_its_plain_result(env, monkeypatch, called):
-    # 116 dogfood N8: in "only when flagged" mode a refused alert also withheld the result, so a
+    # Regression check N8: in "only when flagged" mode a refused alert also withheld the result, so a
     # condition that stayed true went silent for the rest of the day.
-    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", "1")
     job, run = _routine(env, monkeypatch, ["owner@example.com"])
     job.notify_channels["deliver"] = "on_alert"
     _five_earlier_alerts(env, job)

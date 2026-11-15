@@ -134,6 +134,7 @@ import {
   Lightbulb as LucideLightbulb,
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export interface ReportViewHandle {
   prepareForExport: (request: {
@@ -716,6 +717,15 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
     [sections],
   );
   const saveErrorMessage = sync.lastError ? sync.lastError.message : null;
+  // An unsaved edit to a chart shown through a figure anchor lives in the sync queue, not in the document;
+  // overlay it so the figure shows the edit before the save returns.
+  const contextSections = useMemo(() => {
+    if (sync.referencedPatches.size === 0) return sections;
+    return sections.map((section) => {
+      const patch = sync.referencedPatches.get(section.id);
+      return patch ? ({ ...section, ...patch, id: section.id, kind: section.kind } as ReportSection) : section;
+    });
+  }, [sections, sync.referencedPatches]);
 
   // design r2 (report-edit-affordance) frame H: one-time guidance bar on first entering edit mode +
   // change marks/editable atoms flash together for 800ms. once semantics: mark seen on display (strictly once);
@@ -1050,7 +1060,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
           : tCanvas("section_deleted"),
       });
     } catch (e) {
-      toast({ kind: "error", text: tCanvas("section_delete_failed"), action: copyDiagnosticsAction(e, "task") });
+      toast({ kind: "error", text: withHttpFailureReason(tCanvas("section_delete_failed"), e), action: copyDiagnosticsAction(e, "task") });
       // eslint-disable-next-line no-console
       console.warn("[chrome menu] delete failed", e);
     } finally {
@@ -1281,7 +1291,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
 
   return (
     <CanvasContextProvider
-      sections={sections}
+      sections={contextSections}
       canvasId={canvasId}
       sessionId={sessionId}
       currentTurnId={currentTurnId}
@@ -1294,6 +1304,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
       registerPresentationOverride={registerPresentationOverride}
       getSectionRev={sync.getSectionRev}
       acceptServerSection={sync.acceptServerSection}
+      patchReferencedSection={isEditMode && canvasId ? sync.patchReferencedSection : undefined}
       onDeleteSection={isEditMode && canvasId ? handleDeleteSection : undefined}
       onMergeWithPrev={isEditMode && canvasId ? handleMergeWithPrev : undefined}
       onSplitAtCursor={isEditMode && canvasId ? handleSplitAtCursor : undefined}

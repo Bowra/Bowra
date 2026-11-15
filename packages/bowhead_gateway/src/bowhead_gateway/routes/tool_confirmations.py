@@ -1,4 +1,4 @@
-"""One owner-only view of every tool call waiting for its requester (``FEATURE_INLINE_TOOL_CONFIRMATION``).
+"""One owner-only view of every tool call waiting for its requester.
 
 GET  /api/v1/tool-confirmations                 — summaries of the caller's pending items, all kinds
 GET  /api/v1/tool-confirmations/{id}            — one item with its kind-specific preview
@@ -6,8 +6,7 @@ POST /api/v1/tool-confirmations/{id}/decision   — approve once, approve for th
 
 The id prefix selects the existing queue (``pmi_`` personal MCP, ``esc_`` email, ``scc_``
 Shopify, ``ttc_`` Team MCP) and each kind keeps its own checks: personal MCP license and
-revalidation, the Shopify feature switches, team scope and read-only guard. The kind
-endpoints stay until Release so a client with stale capabilities keeps working. Only the
+revalidation, the Shopify feature switches, team scope and read-only guard. Only the
 member who started the task sees or decides; there is no administrator bypass.
 """
 
@@ -166,7 +165,7 @@ async def decide(
     if kind == "personal_mcp":
         registry = PersonalMcpStore(store.db_path, license_check=feature_license_checker(request.app, "mcp"))
         try:
-            await personal_mcp_routes.decide(confirmation_id, personal_mcp_routes.DecisionInput(decision=body.decision), user=user, registry=registry)
+            await personal_mcp_routes.decide_call(confirmation_id, body.decision, user=user, registry=registry)
         except HTTPException as exc:
             if exc.status_code in {404, 409}:
                 raise HTTPException(exc.status_code, _NOT_FOUND if exc.status_code == 404 else _UNAVAILABLE) from None

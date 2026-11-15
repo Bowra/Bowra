@@ -1310,6 +1310,9 @@ function Row(props: {
       <div className="kb-cell"><span className="kb-ftype" aria-hidden style={{ background: tm.color }}>{tm.tag}</span></div>
       <div className="kb-cell">
         <div className="kb-fname"><button type="button" className="ftext kb-file-open" title={f.filename} onClick={(e) => { e.stopPropagation(); e.currentTarget.focus(); props.onOpen(e.detail > 0); }}>{kbHighlight(f.filename, query)}</button></div>
+        {f.newer_version ? (
+          <div className="kb-snippet" data-testid="kb-row-newer-version">{t("files_view.newer_version", { version: f.newer_version.version_no })}</div>
+        ) : null}
         {hit && (
           <div className="kb-snippet">
             {loc && <span className="loc" data-testid="kb-hit-loc">{loc}</span>}

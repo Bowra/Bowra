@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   queryResults,
   ResultsApiError,
+  resultItemMatchesKey,
   type ResultItemDTO,
   type ResultsApiErrorCode,
   type ResultsFiltersDTO,
@@ -13,6 +14,20 @@ import {
 } from "@/lib/results-api";
 
 export const RESULTS_EXPLORER_SEARCH_DEBOUNCE_MS = 200;
+
+/**
+ * The item a locate anchor resolved to. A file version's key names its file's
+ * entry: directly when it is the version shown, otherwise through the key the
+ * server resolved the anchor to.
+ */
+export function locatedResultItem(response: ResultsQueryResponse, key: string): ResultItemDTO | null {
+  return response.items.find((item) => resultItemMatchesKey(item, key))
+    ?? (response.resolved_current_key
+      ? response.items.find((item) => item.key === response.resolved_current_key)
+      : undefined)
+    ?? null;
+}
+
 const PAGE_SIZE = 50;
 const DEFAULT_FILTERS: ResultsFiltersDTO = {
   lens: "all",
@@ -506,7 +521,10 @@ export function useResultsQuery({
 
   const locate = useCallback(async (key: string): Promise<ResultItemDTO | null> => {
     if (!enabled || !sessionId) return null;
-    const cached = catalogScopeKeyRef.current === scopeKey ? catalogRef.current.get(key) : null;
+    const cached = catalogScopeKeyRef.current === scopeKey
+      ? catalogRef.current.get(key)
+        ?? Array.from(catalogRef.current.values()).find((item) => resultItemMatchesKey(item, key))
+      : null;
     if (cached) return cached;
     locateControllerRef.current?.abort();
     const controller = new AbortController();
@@ -524,6 +542,7 @@ export function useResultsQuery({
           filters: DEFAULT_FILTERS,
           page_size: PAGE_SIZE,
           anchor_key: key,
+          current_key: key,
         },
         signal: controller.signal,
       });
@@ -532,7 +551,7 @@ export function useResultsQuery({
         || !requestIsCurrent(controller, requestedScope)
       ) return null;
       mergeCatalog(response.items);
-      return response.items.find((item) => item.key === key) ?? null;
+      return locatedResultItem(response, key);
     } catch (error) {
       if (isAbort(error) || locateGenerationRef.current !== generation
         || !requestIsCurrent(controller, requestedScope)) return null;
@@ -575,6 +594,7 @@ export function useResultsQuery({
           filters: targetFilters,
           page_size: PAGE_SIZE,
           anchor_key: key,
+          current_key: key,
         },
         signal: controller.signal,
       });
@@ -588,7 +608,7 @@ export function useResultsQuery({
       setState((current) => reduceResultsPage(current, response, {
         query: targetQuery, filters: targetFilters,
       }, requestedScope));
-      return response.items.find((item) => item.key === key) ?? null;
+      return locatedResultItem(response, key);
     } catch (error) {
       if (isAbort(error) || visibleGenerationRef.current !== generation
         || !requestIsCurrent(controller, requestedScope, requestedKey)
@@ -610,7 +630,7 @@ export function useResultsQuery({
         ) {
           setState((current) => {
             if (responseRef.current === null) return current;
-            const found = fallbackItems.some((item) => item.key === key);
+            const found = fallbackItems.some((item) => resultItemMatchesKey(item, key));
             return {
               ...current,
               error: found ? null : resultsError.code,

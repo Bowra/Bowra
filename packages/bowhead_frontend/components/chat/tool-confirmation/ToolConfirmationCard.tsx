@@ -161,18 +161,16 @@ function formatRemaining(seconds: number): string {
 }
 
 /**
- * Countdown deadline on the local monotonic-enough clock: the server's
- * `remaining_seconds` from the detail read, else the event's `timeout_seconds`
- * at receipt. Never `expires_at` against the local clock (clocks drift).
+ * Countdown deadline on the local clock, anchored to the server's `remaining_seconds`
+ * from the detail read; no countdown until that read succeeds. The event's
+ * `timeout_seconds` is not a fallback: a reload or a resumed stream redelivers the
+ * event long after it was emitted, so it would restart the countdown. Never
+ * `expires_at` against the local clock (clocks drift).
  */
-export function confirmationDeadline(
-  confirmation: StepConfirmation,
-  detail: { remainingSeconds: number; anchorAt: number } | null,
-): number | null {
+export function confirmationDeadline(detail: { remainingSeconds: number; anchorAt: number } | null): number | null {
   if (detail && Number.isFinite(detail.remainingSeconds)) {
     return detail.anchorAt + Math.max(0, detail.remainingSeconds) * 1000;
   }
-  if (confirmation.timeoutSeconds > 0) return confirmation.receivedAt + confirmation.timeoutSeconds * 1000;
   return null;
 }
 
@@ -215,10 +213,7 @@ function PendingConfirmation({ confirmation, agentName }: ToolConfirmationCardPr
   const ready = state.status === "ready" ? state : null;
   const deadline = state.status === "gone"
     ? null
-    : confirmationDeadline(
-        confirmation,
-        ready ? { remainingSeconds: ready.detail.remaining_seconds, anchorAt: ready.anchorAt } : null,
-      );
+    : confirmationDeadline(ready ? { remainingSeconds: ready.detail.remaining_seconds, anchorAt: ready.anchorAt } : null);
   const now = useSecondTick(deadline !== null);
   const remaining = deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
 

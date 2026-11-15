@@ -51,6 +51,7 @@ import { useAppRouter } from "@/lib/use-app-router";
 
 import { withUiHooks } from "./ui-hook-classes";
 import rawStyles from "./integration-pages.module.css";
+import { type HttpFailureReasonOptions, withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Append global ui-integ-* hooks to every class (styles/ui-refresh-pages-settings.css).
 const styles = withUiHooks(rawStyles, "ui-integ");
@@ -186,7 +187,7 @@ export function FeishuIntegrationDetail() {
         setSetup(await fetchFeishuSetupSession(setupId));
       }
     } catch (error) {
-      setLoadError(errorText(error, t("detail_load_failed")));
+      setLoadError(errorText(error, t("detail_load_failed"), { read: true }));
     } finally {
       setLoading(false);
     }
@@ -277,7 +278,7 @@ export function FeishuIntegrationDetail() {
       setHealth(nextHealth);
       setCheckStatus(t("recheck_complete"));
     } catch (error) {
-      setLoadError(errorText(error, t("diagnostics_failed")));
+      setLoadError(errorText(error, t("diagnostics_failed"), { read: true }));
       setCheckStatus(t("recheck_failed"));
     } finally {
       setChecking(false);
@@ -316,8 +317,8 @@ export function FeishuIntegrationDetail() {
         setDiagnostics(nextDiagnostics);
         setHealth(nextHealth);
         setLoadError(null);
-      } catch {
-        setLoadError(t("saved_refresh_failed"));
+      } catch (error) {
+        setLoadError(errorText(error, t("saved_refresh_failed"), { read: true }));
       }
       return true;
     } catch (error) {
@@ -1817,8 +1818,8 @@ function validStage(value: string | null): StageId | null {
   return STAGES.includes(value as StageId) ? (value as StageId) : null;
 }
 
-function errorText(_error: unknown, fallback: string): string {
-  return fallback;
+function errorText(error: unknown, fallback: string, options?: HttpFailureReasonOptions): string {
+  return withHttpFailureReason(fallback, error, options);
 }
 
 function formatSetupExpiry(value: string, locale: string): string {

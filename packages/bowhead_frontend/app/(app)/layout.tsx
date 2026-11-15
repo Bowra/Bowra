@@ -31,6 +31,10 @@ import "../../styles/access-request.css";
 // so it stays ahead of the refresh sheets that must be imported last.
 import "../../styles/builtin-agent-settings.css";
 // Interface styles: legacy inline-style classes first, then the refreshed appearance, imported last.
+// Team frame options: rules are scoped to data attributes on <html> and carry :root:root:root
+// specificity, so they win over the refresh sheets below regardless of import order (those sheets pin
+// their own order).
+import "../../styles/theme-frame.css";
 import "../../styles/ui-controls-legacy.css";
 import "../../styles/ui-refresh.css";
 // Appearance batch 5 (strongly styled/inline overlays, navigation drawer, autocomplete, business badges) follows batches 1–4.

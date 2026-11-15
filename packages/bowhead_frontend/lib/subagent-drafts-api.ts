@@ -1,4 +1,5 @@
 import { apiFetch, readApiError, type ApiError } from "./api-client";
+import { attachHttpCause } from "./user-facing-error";
 import { randomUuid } from "./random-id";
 import { spaceHeader } from "./space-storage";
 import { captureSubagentDraftContext, type SubagentDraftRequestContext } from "./subagent-draft-context";
@@ -256,11 +257,9 @@ function errorDetails(error: ApiError): Record<string, unknown> | undefined {
 async function check(response: Response): Promise<Response> {
   if (response.ok) return response;
   const error = await readApiError(response);
-  throw new SubagentDraftApiError(
-    error.status,
-    error.code,
-    error.message,
-    errorDetails(error),
+  throw attachHttpCause(
+    new SubagentDraftApiError(error.status, error.code, error.message, errorDetails(error)),
+    error,
   );
 }
 

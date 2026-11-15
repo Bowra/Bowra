@@ -276,6 +276,12 @@ export type ReportSection = {
       unverified?: boolean;
       /** Citation indexes associated with the generation-input snapshot. */
       sources?: number[];
+      /** File versions R4: the embedded version, once the section followed a newer version of its file. */
+      version_no?: number;
+      /** The version `data`, `sources` and `unverified` were recorded for. */
+      provenance_version_no?: number;
+      /** A newer version was not embedded (it exceeds the Team's HTML size limit). */
+      version_note?: { reason: "too_large"; version_no: number; maximum_bytes: number } | null;
     }
   | {
       /** #125 Case A: external HTTPS URL iframe. Most public sites show blank due to X-Frame-Options;

@@ -20,6 +20,7 @@ import {
   type ChangePasswordResp,
 } from "@/lib/security-api";
 import { CharIcon } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 
 function _scorePassword(p: string): { score: number; rules: string[] } {
@@ -125,7 +126,7 @@ export function ChangePasswordForm({
                 : t("err_generic")
         : t("err_generic");
       // Do not append error/status codes to this sentence; with diagnostics enabled, put them in the Diagnostics collapsible area.
-      setError(shownError(msg, e));
+      setError(shownError(withHttpFailureReason(msg, e), e));
     } finally {
       setSubmitting(false);
     }

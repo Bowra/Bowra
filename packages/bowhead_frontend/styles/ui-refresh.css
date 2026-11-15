@@ -2169,7 +2169,7 @@
 /* ── Dialogs: solid surface, r4 radius 14, overlay shadow, title 15/650, body 13 ink2, right footer gap 8 ──
  * Families: Dialog / ConfirmDialog / PromptDialog (.settings-dialog), KB .kb-modal, models .mset-modal,
  * skills .sset .modal (including create/upload), files .files-main .modal, memory .memory-modal-box,
- * rule conflict .v29-modal, personal MCP / email confirmation .personal-mcp-confirmation.
+ * rule conflict .v29-modal.
  * Family padding/width unchanged (content layout in page batches); only shell/title/description/footer unified. */
 :root:root
   :is(
@@ -2179,8 +2179,7 @@
     .sset .modal,
     .files-main .modal,
     .memory-modal-box,
-    .v29-modal,
-    .personal-mcp-confirmation
+    .v29-modal
   ) {
   border: 0;
   border-radius: var(--r-4);
@@ -2201,8 +2200,7 @@
     .sset .modal-title,
     .files-main .modal h3,
     .memory-modal-box h2,
-    .v29-modal-title,
-    .personal-mcp-confirmation h2
+    .v29-modal-title
   ) {
   color: var(--c-ink);
   font-family: var(--font-control);
@@ -2265,7 +2263,6 @@
     .files-main .scrim,
     .memory-modal-overlay,
     .v29-modal-backdrop,
-    .personal-mcp-confirmation-backdrop,
     .rc-drawer-scrim,
     .rc-inspect-backdrop,
     .reference-parameter-overlay
@@ -3108,10 +3105,10 @@
   --composer-input-font-size: 0.9375rem;
   --theme-composer-textarea-y: 14px;
   --theme-composer-textarea-x: 16px;
-  border: 1px solid var(--c-separator);
+  border: var(--border-w, 1px) solid var(--c-separator);
   border-radius: var(--r-4);
   background: var(--c-surface);
-  box-shadow: 0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent);
+  box-shadow: var(--elev-raised, 0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent));
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   font-family: var(--font-control);
@@ -3121,7 +3118,7 @@
   border-color: var(--c-focus);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--c-focus) 25%, transparent),
-    0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent);
+    var(--elev-raised, 0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent));
 }
 :root:root .composer-v2:has(:is(textarea, .tiptap):focus-visible) {
   outline: none;
@@ -3179,7 +3176,7 @@
   min-height: 32px;
   padding: 0 10px;
   gap: 8px;
-  border: 1px solid var(--c-control-line);
+  border: var(--border-w, 1px) solid var(--c-control-line);
   border-radius: var(--r-2);
   background: var(--c-fill-1);
   color: var(--c-ink-2);
@@ -3233,7 +3230,7 @@
 }
 :root:root .composer-v2 .v2-send-btn:hover:not(:disabled) {
   transform: none;
-  box-shadow: 0 3px 10px -6px var(--c-accent);
+  box-shadow: var(--elev-raised, 0 3px 10px -6px var(--c-accent));
 }
 :root:root .composer-v2 .v2-send-btn:disabled {
   box-shadow: none;
@@ -3259,7 +3256,7 @@
   font-weight: 600;
 }
 :root:root :is(.composer-recovery-notice, .reference-follow-up-queue) {
-  border: 1px solid var(--c-control-line);
+  border: var(--border-w, 1px) solid var(--c-control-line);
   border-radius: var(--r-4);
   background: var(--c-surface);
   color: var(--c-ink);
@@ -3762,7 +3759,6 @@
     .memory-modal-actions,
     .v29-modal-foot,
     .legacy-credits-modal-foot,
-    .personal-mcp-confirmation-actions,
     .legacy-share-foot,
     .connect-foot,
     .md-ft
@@ -3787,7 +3783,6 @@
           .memory-modal-actions,
           .v29-modal-foot,
           .legacy-credits-modal-foot,
-          .personal-mcp-confirmation-actions,
           .legacy-share-foot,
           .connect-foot,
           .md-ft

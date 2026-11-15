@@ -19,6 +19,7 @@ import { ErrorDiagnosticsInline } from "@/components/error-notice";
 import { copyTextWithFallback } from "@/lib/clipboard";
 import { formatShortDateTime, formatTime } from "@/lib/locale";
 import type { AgentEvalUsageRange } from "@/lib/agents-api";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export interface CiFormat {
   /** Integer with grouping (9,800). */
@@ -127,16 +128,18 @@ export function useCardStatus(): [CardStatusValue | null, (value: CardStatusValu
 export function CardStatus({ status }: { status: CardStatusValue | null }) {
   const t = useTranslations("agents_marketplace");
   const Icon = status?.tone === "success" ? CircleCheck : status?.tone === "error" ? CircleAlert : Info;
+  // An uncoded HTTP failure says why it failed after the card's own sentence.
+  const message = status?.tone === "error" ? withHttpFailureReason(status.message, status.cause) : status?.message;
   // The live regions stay mounted so a message written into them is announced; the visible line repeats the
   // text for sighted users (hidden from assistive technology to avoid reading it twice).
   return (
     <div className="am-ci-status-slot">
-      <span className="sr-only" role="status" aria-live="polite">{status && status.tone !== "error" ? status.message : ""}</span>
-      <span className="sr-only" role="alert" aria-live="assertive">{status?.tone === "error" ? status.message : ""}</span>
+      <span className="sr-only" role="status" aria-live="polite">{status && status.tone !== "error" ? message : ""}</span>
+      <span className="sr-only" role="alert" aria-live="assertive">{status?.tone === "error" ? message : ""}</span>
       {status ? (
         <div className="am-ci-ist" data-tone={status.tone}>
           <Icon size={14} aria-hidden className="am-ci-ist-icon" />
-          <span aria-hidden className="am-ci-ist-text">{status.message}</span>
+          <span aria-hidden className="am-ci-ist-text">{message}</span>
           {status.onRetry || status.cause !== undefined ? (
             <span className="am-ci-ist-actions">
               {status.onRetry ? <Button size="sm" variant="ghost" onClick={status.onRetry}>{t("version_retry")}</Button> : null}

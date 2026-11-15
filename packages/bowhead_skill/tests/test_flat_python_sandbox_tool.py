@@ -51,6 +51,8 @@ def test_flat_tool_registered_by_default() -> None:
         "timeout_sec",
         "purpose",
         "deliverable_outputs",
+        "revises",
+        "work_outputs",
     }
     assert schema["required"] == ["code", "intent"]
     assert schema["properties"]["code"]["type"] == "string"

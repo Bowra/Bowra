@@ -19,11 +19,12 @@ from dataclasses import replace
 import pytest
 import respx
 from bowhead_core.agents.clarification_tool import register_clarification_tool
+from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.subagent import PROFILES
 from bowhead_core.tool_registry import ToolSpec
 from bowhead_gateway.routes import clarifications
 from bowhead_router.types import ToolSchema
-from test_ordinary_lead_question_http import call, response
+from test_ordinary_lead_question_http import call, response, review_round
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
@@ -69,10 +70,15 @@ def _prepare(case, monkeypatch):
 async def test_helper_question_reaches_lead_without_failing_the_turn(http_start, monkeypatch, lead_asks, helper_style, role, setting):
     case = http_start
     orch = _prepare(case, monkeypatch)
+    # Context capture authorizes inputs against the Session's own artifact store (79b123899).
+    artifacts = ArtifactStore(str(case.path), LocalBackend(case.path.parent / "helper-question-uploads"))
+    await artifacts.initialize()
+    case.app.state.artifact_store = orch.artifact_store = artifacts
     if setting == "i18n_off":
         # The paused Turn has no language context; resume must not invent one.
         monkeypatch.setenv("BOWHEAD_I18N_V1_KILL", "1")
     lead_calls, helper_calls = [], []
+    review_calls = []
     helper_profile = case.fixture.case.args["reference_start"].profile_name
     if setting == "system":
         from test_system_reference_baseline import configure
@@ -96,6 +102,9 @@ async def test_helper_question_reaches_lead_without_failing_the_turn(http_start,
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             if len(lead_calls) == 1:
                 return response(
@@ -103,7 +112,7 @@ async def test_helper_question_reaches_lead_without_failing_the_turn(http_start,
                     call(
                         "helper-native",
                         "subagent_spawn",
-                        {"profile": helper_profile, "task": "Compute sales.", "delegation_role": role},
+                        {"profile": helper_profile, "task": "Compute sales.", "delegation_role": role, "required_source_urls": []},
                     ),
                     "tool_calls",
                 )
@@ -162,15 +171,19 @@ async def test_unretained_primary_refuses_the_question_without_failing_the_turn(
     case = http_start
     _prepare(case, monkeypatch)
     lead_calls = []
+    review_calls = []
     helper_profile = case.fixture.case.args["reference_start"].profile_name
 
     def respond(request):
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             if len(lead_calls) == 1:
-                spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "primary"}
+                spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "primary", "required_source_urls": []}
                 return response(body, call("primary-native", "subagent_spawn", spawn), "tool_calls")
             if len(lead_calls) == 2:
                 return response(body, call("question-native", "clarification_ask", {"questions": [QUESTION]}), "tool_calls")
@@ -208,15 +221,19 @@ async def test_a_scheduled_run_pauses_for_a_question_and_resumes_after_the_answe
     case = http_start
     _prepare(case, monkeypatch)
     lead_calls = []
+    review_calls = []
     helper_profile = case.fixture.case.args["reference_start"].profile_name
 
     def respond(request):
         body = json.loads(request.content)
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
+            if review_round(body):
+                review_calls.append(body)
+                return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
             lead_calls.append(body)
             if helper_first and len(lead_calls) == 1:
-                spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "helper"}
+                spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "helper", "required_source_urls": []}
                 return response(body, call("helper-native", "subagent_spawn", spawn), "tool_calls")
             if len(lead_calls) == (2 if helper_first else 1):
                 return response(body, call("question-native", "clarification_ask", {"questions": [QUESTION]}), "tool_calls")

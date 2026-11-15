@@ -786,9 +786,11 @@
     "credits_badge": "Crédits",
     "credits_low": "{pct} % restants · {balance}",
     "credits_critical": "Crédits presque épuisés · {balance}",
+    "credits_exhausted": "Crédits épuisés",
     "credits_button_aria": "Crédits : {value}",
     "credits_plan": "Forfait {plan}",
     "credits_left": "<num>{balance}</num> restants",
+    "credits_over": "<num>{amount}</num> au-delà de l’allocation de la période",
     "credits_usage_label": "Crédits utilisés sur la période",
     "credits_usage_value": "{used} sur {quota} utilisés ({pct} %)",
     "credits_used_of": "{used} sur {quota} utilisés",
@@ -796,7 +798,7 @@
     "credits_resets_on": "Réinitialisation le {date}",
     "credits_state_low": "Crédits bientôt épuisés : il reste {pct} % de l’allocation de la période.",
     "credits_state_critical": "Presque épuisés : il ne reste que {pct} % de l’allocation de la période.",
-    "credits_state_empty": "Plus aucun crédit disponible.",
+    "credits_state_exhausted": "Les crédits de cette période sont épuisés. Les nouvelles demandes reprendront après la réinitialisation, ou un administrateur peut ajouter des crédits.",
     "credits_view_details": "Voir le détail de la consommation",
     "navigation_drawer": "Panneau de navigation",
     "close_drawer": "Fermer le panneau",
@@ -7416,6 +7418,7 @@
         "turn_time_limit_s": "Durée limite par tour (secondes)",
         "step_limit": "Étapes par tâche",
         "tool_call_limit": "Appels d’outils par tour",
+        "model_call_limit": "Appels au modèle par tour",
         "model_call_time_limit_s": "Durée limite d’un appel au modèle (secondes)",
         "max_retries": "Nouvelles tentatives du modèle",
         "providers": "Connexions et déclarations de modèles",
@@ -7491,6 +7494,9 @@
         },
         "model_call_time_limit_s": {
           "null": "Automatique"
+        },
+        "model_call_limit": {
+          "null": "Illimité"
         }
       },
       "eyebrow": "Suggestion de paramètres",
@@ -7604,6 +7610,11 @@
       "tool_calls_desc": "Nombre total d’appels d’outils de tous les agents dans un tour ; chaque outil compte de la même façon.",
       "tool_calls_hint": "{min} – {max} appels",
       "unit_calls": "appels",
+      "model_calls_title": "Appels au modèle par tour",
+      "model_calls_desc": "Nombre total d’appels au modèle de Lead et de tous les assistants dans un tour. Les assistants s’arrêtent 2 appels plus tôt pour que Lead puisse rédiger la réponse.",
+      "model_calls_input_label": "Nombre maximal d’appels au modèle par tour",
+      "model_calls_hint": "{min} – {max} appels. Avec 1 ou 2, les assistants ne peuvent pas s’exécuter.",
+      "model_calls_reset": "Les appels au modèle par tour reviennent à {calls}.",
       "footer": "Une limite arrête le travail inachevé et conserve les résultats connus. La reprise est disponible uniquement pour les exécutions enregistrées compatibles.",
       "error_range": "{field} doit être compris entre {min} et {max}.",
       "invalid_count": "{count, plural, one {# valeur est hors limites. Corrigez-la pour enregistrer.} other {# valeurs sont hors limites. Corrigez-les pour enregistrer.}}",
@@ -7770,6 +7781,10 @@
     "bundle_file_count": "{count, plural, one {# fichier} other {# fichiers}}",
     "bundle_more_indexed": "{count} autres indexés",
     "file_pages": "{count, plural, one {# page} other {# pages}}",
+    "file_updated_version": "Mis à jour vers la version {version}",
+    "file_this_version": "Télécharger la version {version}",
+    "file_this_version_failed": "Échec du téléchargement de la version {version} · Réessayer",
+    "file_this_version_pruned": "La version {version} a été nettoyée ; seules les trois versions les plus récentes sont conservées",
     "duplicate": "Ce fichier est déjà joint",
     "bundle_done": "Terminé"
   },
@@ -8120,7 +8135,10 @@
         "parse_failed": "Échec de l’analyse"
       },
       "preview_source_missing": "Le fichier d’origine était introuvable pendant le traitement ; aucun aperçu n’est donc disponible. S’il a été restauré, réessayez l’analyse.",
-      "preview_processing_failed": "Le traitement a échoué ; aucun aperçu n’est donc disponible. Consultez le motif de l’échec ci-dessus."
+      "preview_processing_failed": "Le traitement a échoué ; aucun aperçu n’est donc disponible. Consultez le motif de l’échec ci-dessus.",
+      "newer_version_title": "Une version plus récente (version {version}) de ce fichier existe",
+      "newer_version_body": "Cette entrée utilise toujours la version ajoutée. Pour utiliser la version plus récente, ajoutez-la depuis Fichiers, puis supprimez cette entrée.",
+      "newer_version_open_files": "Ouvrir Fichiers"
     },
     "files_view": {
       "deep_link_failed": "Impossible d’ouvrir ce fichier. Il a peut-être été supprimé ou vous n’avez pas accès à son espace.",
@@ -8157,7 +8175,8 @@
       "load_failed_title": "Impossible de charger la liste des fichiers",
       "search_failed_title": "Impossible de terminer la recherche approfondie",
       "load_retry": "Réessayer",
-      "refresh_failed": "La liste n’a pas pu être actualisée ; elle affiche les derniers résultats chargés. {error}"
+      "refresh_failed": "La liste n’a pas pu être actualisée ; elle affiche les derniers résultats chargés. {error}",
+      "newer_version": "Version {version} plus récente disponible"
     },
     "errors": {
       "empty_file": "Le fichier est vide",
@@ -9261,7 +9280,9 @@
       "purge_failed": "Le fichier n’a pas pu être supprimé définitivement. Actualisez la corbeille puis réessayez.",
       "preview_failed": "L’aperçu n’a pas pu être généré. Vous pouvez toujours télécharger le fichier original ou réessayer plus tard.",
       "category_failed": "La catégorie du fichier n’a pas pu être modifiée. Actualisez les détails du fichier puis réessayez.",
-      "usages_failed": "Les références au fichier n’ont pas pu être chargées. Réessayez plus tard."
+      "usages_failed": "Les références au fichier n’ont pas pu être chargées. Réessayez plus tard.",
+      "file_in_document": "Un brouillon de document utilise encore ce fichier ou l’une de ses versions. Terminez ou supprimez ce brouillon, puis supprimez le fichier.",
+      "file_in_document_version": "Un brouillon de document utilise encore la version {n} de ce fichier. Terminez ou supprimez ce brouillon, puis supprimez le fichier."
     },
     "table": {
       "filename": "Nom du fichier",
@@ -9387,6 +9408,8 @@
     "kb_col": {
       "added": "Ajouté · {status}",
       "added_plain": "Ajouté",
+      "older_version": "Contient une version antérieure",
+      "add_this_version": "Ajouter la version {version}",
       "not_added": "Non ajouté",
       "view_in_kb": "Voir dans la base de connaissances",
       "view_progress": "Voir la progression",
@@ -9451,7 +9474,8 @@
       "restored": "{name} restauré",
       "restored_n": "{count} fichiers restaurés",
       "purged": "{count} fichiers supprimés définitivement",
-      "purged_partial": "{count} supprimés définitivement · {blocked} conservés, présents dans la base de connaissances"
+      "purged_partial": "{count} supprimés définitivement · {blocked} conservés, présents dans la base de connaissances",
+      "deleted_versions": "{name} et ses {count} versions précédentes supprimés"
     },
     "use_in_chat": "Utiliser dans une nouvelle conversation",
     "upload_uploading": "Importation…",
@@ -9464,7 +9488,9 @@
       "toolRun": "Résultat d’exécution d’un Agent"
     },
     "upload_failed": "L’importation a échoué · {reason}",
-    "usage_split": "Ressources {assets} · Données d’exécution {run}"
+    "usage_split": "Ressources {assets} · Données d’exécution {run}",
+    "version_badge": "v{n}",
+    "version_title": "Version {n} de ce fichier ({count} versions conservées)"
   },
   "results_workspace": {
     "choose_result_title": "Choisir un résultat",
@@ -9600,7 +9626,17 @@
     "unsupported_feedback_recorded": "Cette demande de format a été enregistrée",
     "download_current_version": "Télécharger la version actuelle",
     "download_this_version": "Télécharger cette version",
-    "explorer_retry_locate": "Réessayer le positionnement"
+    "explorer_retry_locate": "Réessayer le positionnement",
+    "quick_version": "Version {number} sur {count}",
+    "file_versions_title": "Versions",
+    "file_versions_scope": "La plus récente d’abord · les trois plus récentes sont conservées",
+    "file_versions_close": "Fermer",
+    "file_versions_failed": "Impossible de charger les versions.",
+    "file_versions_retry": "Réessayer",
+    "file_versions_empty": "Aucune version disponible.",
+    "file_version_label": "Version {number}",
+    "file_version_current": "Actuelle",
+    "file_version_download": "Télécharger la version {number}"
   },
   "data_files": {
     "empty_no_session": "Les fichiers de données générés apparaîtront ici une fois la conversation commencée.",
@@ -9753,6 +9789,9 @@
   "html_artifact": {
     "open_raw": "Ouvrir le HTML brut dans un nouvel onglet",
     "reload": "Recharger le HTML",
+    "updated_version": "Mis à jour vers la version {version}",
+    "provenance_version": "notes sur les données enregistrées pour la version {version}",
+    "version_too_large": "La version {version} de ce fichier dépasse la limite HTML de l’équipe ({size}) ; cette section affiche donc toujours la version précédente. Réduisez le fichier ou demandez à un administrateur de l’équipe d’augmenter la limite.",
     "loading": "Chargement du résultat HTML…",
     "computed_badge": "Contenu statique non vérifié",
     "injected_badge": "Données de génération jointes",
@@ -10479,6 +10518,8 @@
       "agent_step_limit_body": "La tâche a atteint son plafond effectif de décisions du modèle. Consultez les résultats conservés, réduisez le travail restant ou demandez à un administrateur d’ajuster la limite.",
       "agent_tool_call_limit_title": "Plafond d’appels d’outils atteint",
       "agent_tool_call_limit_body": "Le budget d’appels d’outils de ce tour est épuisé. Consultez les résultats avant de commencer le travail restant.",
+      "agent_model_call_limit_title": "Plafond d’appels au modèle atteint",
+      "agent_model_call_limit_body": "Ce tour a épuisé la limite d’appels au modèle de l’équipe. Consultez les résultats avant de commencer le travail restant. Un propriétaire ou un administrateur de l’équipe peut augmenter la limite dans Paramètres de l’équipe › Agents › Limites d’exécution.",
       "agent_stalled_title": "Tâche arrêtée après un blocage local",
       "agent_stalled_body": "Aucune opération active ni aucun état local d’exécution n’a progressé. Consultez les résultats conservés avant de poursuivre.",
       "step_usage": "Décisions du modèle : {used} / {limit}."
@@ -10496,6 +10537,7 @@
         "step_limit": "a atteint la limite d’étapes de l’équipe",
         "time_limit": "a atteint la limite de durée de ce tour",
         "tool_call_limit": "a atteint la limite d’appels d’outils de ce tour",
+        "model_call_limit": "a atteint la limite d’appels au modèle de ce tour",
         "no_progress": "s’est arrêté après plusieurs étapes sans nouveau résultat",
         "budget": "s’est arrêté faute de crédit ; rechargez d’abord le crédit",
         "other": "a atteint une limite d’exécution"
@@ -12033,6 +12075,8 @@
     "band_handoff": "Transmis par {from}",
     "band_elapsed_sec": "{count} s",
     "band_paused": "Toujours en attente du modèle",
+    "band_waiting_confirmation": "En attente de votre confirmation",
+    "band_waiting_requester": "En attente de la confirmation du demandeur",
     "band_model_retry_timeout": "Le modèle n’a pas répondu à temps, nouvelle tentative ({retry}/{max})",
     "band_model_retry_network": "Connexion au service de modèle interrompue, nouvelle tentative ({retry}/{max})",
     "band_model_retry_unavailable": "Service de modèle temporairement indisponible, nouvelle tentative ({retry}/{max})",
@@ -12085,6 +12129,7 @@
       "iteration_limit_exceeded": "Cet agent a utilisé toutes les étapes dont il dispose pour un tour avant d’avoir terminé, et s’est donc arrêté. Répondez « continuer » pour qu’il reprenne à partir d’ici, ou découpez la tâche en étapes plus petites. Le responsable de l’agent ou un administrateur de l’équipe peut aussi augmenter sa limite d’étapes dans les paramètres de l’agent.",
       "tool_failure_limit_exceeded": "Cet Agent d’analyse s’est arrêté après des échecs répétés d’outils. Réessayez plus tard.",
       "tool_call_limit_exceeded": "Cet Agent d’analyse s’est arrêté car ce tour a atteint la limite d’appels d’outils de l’équipe. Poursuivez la tâche ou demandez à un administrateur de l’équipe d’augmenter la limite.",
+      "model_call_limit_exceeded": "Cet Agent d’analyse s’est arrêté car ce tour a atteint la limite d’appels au modèle de l’équipe. Poursuivez la tâche ou demandez à un administrateur de l’équipe d’augmenter la limite.",
       "credit_exhausted": "Cet Agent d’analyse s’est arrêté car le crédit disponible est épuisé. Ajoutez du crédit, puis poursuivez la tâche."
     },
     "collab_errors": {
@@ -12105,6 +12150,7 @@
       "step_limit": "Partiellement terminé : le plafond effectif de décisions du modèle a été atteint. Consultez les résultats conservés avant de poursuivre.",
       "time_limit": "Partiellement terminé : la limite de durée de ce tour est atteinte. La partie terminée figure dans la réponse, et vous pouvez poursuivre.",
       "tool_call_limit": "Partiellement terminé : ce tour a atteint la limite d’appels d’outils de l’équipe. La partie terminée figure dans la réponse, et vous pouvez poursuivre.",
+      "model_call_limit": "Partiellement terminé : ce tour a atteint la limite d’appels au modèle de l’équipe. La partie terminée figure dans la réponse, et vous pouvez poursuivre.",
       "no_progress": "Partiellement terminé : arrêt après plusieurs étapes sans nouveau résultat. La partie terminée figure dans la réponse, et vous pouvez poursuivre.",
       "budget": "Partiellement terminé : le crédit disponible est épuisé. Ajoutez du crédit, puis poursuivez.",
       "other": "Partiellement terminé. Consultez les résultats conservés, le travail restant et les prochaines étapes proposées.",
@@ -13363,13 +13409,11 @@
     }
   },
   "emailSendConfirmation": {
-    "title": "Confirmer l’e-mail",
+    "attachment_newer_version": "une version plus récente ({version}) de ce fichier existe",
     "warning": "Bowhead enverra l’e-mail ci-dessous via le service de messagerie de votre équipe. Un e-mail envoyé ne peut pas être rappelé ; vérifiez donc le destinataire et le contenu, en particulier les chiffres.",
     "to": "À : {to}",
     "attachments": "Pièces jointes",
     "subject": "Objet : {subject}",
-    "expires": "Décidez avant {time}. Sinon, l’e-mail ne sera pas envoyé.",
-    "decisionError": "Votre décision n’a pas été transmise ou cette confirmation a expiré. Consultez la conversation pour connaître le résultat.",
     "reject": "Ne pas envoyer",
     "approve": "Envoyer"
   },
@@ -13435,10 +13479,7 @@
     "noPrivateAgents": "Aucun Agent publié qui vous appartient n’est encore disponible dans cette équipe.",
     "saveBinding": "Enregistrer les associations d’outils personnels",
     "removeBindings": "Retirer toutes les associations personnelles",
-    "confirmTitle": "Confirmer l’appel d’un outil personnel",
     "confirmWarning": "La confirmation transmet tous les arguments ci-dessous à ce service externe. L’action peut modifier ou supprimer des données et être irréversible. Vérifiez les informations envoyées et l’action prévue.",
-    "expires": "Décidez avant {time}. Un appel expiré est ignoré.",
-    "decisionError": "Votre choix n’a pas été transmis ou cet appel n’est plus disponible. Actualisez l’état de confirmation et réessayez.",
     "reject": "Refuser et passer",
     "approveOnce": "Autoriser cet appel",
     "approveSession": "Toujours autoriser dans cette conversation",
@@ -14202,6 +14243,7 @@
       "document_candidate_invalid": "La présentation n’a pas réussi la vérification de structure du fichier. Aucun fichier n’a été publié. Vérifiez le modèle d’origine ou demandez dans le chat un brouillon corrigé.",
       "agent_step_limit": "Plafond de décisions atteint. La tâche a atteint son plafond effectif de décisions du modèle. Consultez les résultats conservés, réduisez le travail restant ou demandez à un administrateur d’ajuster la limite.",
       "agent_tool_call_limit": "Plafond d’appels d’outils atteint. Le budget d’appels d’outils de ce tour est épuisé. Consultez les résultats avant de commencer le travail restant.",
+      "agent_model_call_limit": "Plafond d’appels au modèle atteint. Ce tour a épuisé la limite d’appels au modèle de l’équipe. Consultez les résultats avant de commencer le travail restant. Un propriétaire ou un administrateur de l’équipe peut augmenter la limite dans Paramètres de l’équipe › Agents › Limites d’exécution.",
       "agent_stalled": "Tâche arrêtée après un blocage local. Aucune opération active ni aucun état local d’exécution n’a progressé. Consultez les résultats conservés avant de poursuivre.",
       "tool_arguments_invalid": "Le format des entrées ou les champs de données ne conviennent pas à cette étape. L’agent doit corriger les entrées avant de réessayer.",
       "tool_resource_unavailable": "La source sélectionnée est indisponible. Vérifiez l’accès ou choisissez une source disponible.",
@@ -14934,7 +14976,6 @@
     "content_plugin_created": "Plugin de contenu créé. Sélectionnez-le dans l’éditeur d’Agent ; chaque modification nécessite votre validation."
   },
   "shopifyContentConfirmation": {
-    "title": "Vérifier la modification Shopify",
     "notice": "Vérifiez les modifications complètes avant de les appliquer à votre boutique. Coordonnez-vous avec les autres personnes qui modifient ce contenu.",
     "product": "Produit",
     "page": "Page",
@@ -14942,8 +14983,6 @@
     "after": "Après",
     "defaultValue": "Utilise la valeur Shopify par défaut",
     "emptyValue": "Vide",
-    "expires": "La validation expire à {time}",
-    "decisionError": "Votre décision n’a pas pu être enregistrée. La modification attend votre confirmation.",
     "reject": "Refuser la modification",
     "approve": "Appliquer ces modifications",
     "fields": {
@@ -14955,13 +14994,9 @@
     }
   },
   "teamToolConfirmation": {
-    "title": "Confirmer l’appel d’un outil d’équipe",
-    "notice": "Un agent qui traite votre demande souhaite appeler cet outil d’équipe. L’appel utilise le compte connecté par votre équipe, et tous les arguments ci-dessous sont transmis au service externe.",
     "riskExternalWrite": "Cet outil est classé comme modifiant des données dans le service externe.",
     "riskDestructive": "Cet outil est classé comme pouvant supprimer ou écraser des données ; l’action peut être irréversible.",
     "riskUnknown": "Ni le service ni votre équipe n’a indiqué ce que fait cet outil. Vérifiez les arguments avant de l’autoriser.",
-    "expires": "Décidez avant {time}. Un appel expiré est ignoré.",
-    "decisionError": "Votre choix n’a pas été transmis ou cet appel n’est plus disponible. Consultez le résultat dans la conversation.",
     "reject": "Refuser et passer",
     "approveOnce": "Autoriser cet appel",
     "approveSession": "Toujours autoriser dans cette conversation",
@@ -15263,7 +15298,8 @@
     "d_db65a4d59c05244006c6": "Modèle de texte d’équipe facultatif pour décrire les sources à des fins de navigation. Désactivé par défaut. Appelé uniquement à la publication d’une nouvelle version ou sur demande explicite de génération. La lecture du catalogue et l’enregistrement des modèles ne lancent ni génération ni traitement rétroactif. Retirer l’affectation arrête les nouvelles tâches ; les descriptions existantes encore valides restent utilisables.",
     "d_f6ce942fbba9c47980fe": "Texte complet des nouvelles consignes de travail de l’IA. Conservez exactement chaque ligne dont la modification n’a pas été demandée ; n’effacez avec un texte vide que sur demande explicite. La limite s’applique après suppression des marques d’ordre des octets et des espaces extérieurs.",
     "d_5351928bd1475f951a2a": "Modèles de connaissances, affectations vectorielles/de reclassement actives et nombre de résultats. Les affectations facultatives désactivées explicitement restent désactivées lors de la maintenance automatique ; les descriptions des sources sont désactivées par défaut. Changer les vecteurs exige la confirmation de réindexation initiale. Le serveur gère l’état de l’index.",
-    "d_37d82cf26c6b5a5d5176": "Affectations facultatives désactivées explicitement. Les changements de connexion et les vérifications ne doivent pas les réactiver. Les descriptions des sources restent désactivées par défaut, même sans entrée dans cette liste."
+    "d_37d82cf26c6b5a5d5176": "Affectations facultatives désactivées explicitement. Les changements de connexion et les vérifications ne doivent pas les réactiver. Les descriptions des sources restent désactivées par défaut, même sans entrée dans cette liste.",
+    "d_31ae8f16122466d147cf": "Nombre maximal d’appels au modèle partagés par Lead et tous les assistants dans un tour ; null supprime la limite. La limite d’étapes borne séparément chaque exécution d’agent."
   },
   "sourceNavigation": {
     "title": "Navigation des sources",

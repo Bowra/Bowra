@@ -309,6 +309,8 @@ export default function FilesPage() {
     const names = new Map(items.map((i) => [i.file_id, i.filename]));
     const ok: string[] = [];
     let kbRejected = 0;
+    let inDocument = 0;
+    let inDocumentVersion = 1;
     for (const id of ids) {
       try {
         await deleteFile(id);
@@ -316,8 +318,17 @@ export default function FilesPage() {
       } catch (e) {
         // Backend D2 safeguard: frontend in_kb may be stale (the file was just added to the knowledge base elsewhere)
         if (e instanceof FileInKbError) kbRejected += 1;
+        // A document draft still uses this file or one of its versions (actionable 409, file versions A2)
+        else if ((e as { code?: string }).code === "file_in_document") {
+          inDocument += 1;
+          inDocumentVersion = Number((e as { details?: { version_no?: unknown } }).details?.version_no) || 1;
+        }
         /* Other individual failures do not interrupt the batch */
       }
+    }
+    if (ok.length === 0 && inDocument > 0 && kbRejected === 0) {
+      pushToast(inDocumentVersion > 1 ? t("errors.file_in_document_version", { n: inDocumentVersion }) : t("errors.file_in_document"));
+      return;
     }
     // A single deletion hits the backend safeguard → show the guidance dialog instead of failing silently
     if (ok.length === 0 && kbRejected === 1 && ids.length === 1) {
@@ -371,7 +382,12 @@ export default function FilesPage() {
     if (ok.length === 0 && blocked === 0) pushToast(t("toast.delete_failed", { count: ids.length }));
     else if (ok.length === 0 && blocked > 0) pushToast(t("toast.all_blocked", { count: blocked }));
     else if (blocked > 0) undoToast(t("toast.deleted_partial", { count: ok.length, blocked }));
-    else if (ok.length === 1) undoToast(t("toast.deleted", { name: midTruncate(names.get(ok[0]) ?? "", 24) }));
+    else if (ok.length === 1) {
+      // File versions: deleting a file deletes every version, and Undo restores them together.
+      const earlier = (items.find((i) => i.file_id === ok[0])?.version_count ?? 1) - 1;
+      const name = midTruncate(names.get(ok[0]) ?? "", 24);
+      undoToast(earlier > 0 ? t("toast.deleted_versions", { name, count: earlier }) : t("toast.deleted", { name }));
+    }
     else undoToast(t("toast.deleted_n", { count: ok.length }));
   }, [fetchList, gotoKb, items, pushToast, refreshCounts, refreshUsage, t]);
 
@@ -695,6 +711,11 @@ export default function FilesPage() {
                 <span className="ficon" aria-hidden><CharIcon ch={FAMILY_ICON[f.mime_family] ?? "📎"} icon={FAMILY_LUCIDE[f.mime_family] ?? Paperclip} aria-hidden /></span>
                 <div className="cellname">
                   <span className="fname" title={f.filename}>{midTruncate(f.filename)}</span>
+                  {(f.version_no ?? 1) > 1 ? (
+                    <span className="sugchip" title={t("version_title", { n: f.version_no ?? 1, count: f.version_count ?? f.version_no ?? 1 })}>
+                      {t("version_badge", { n: f.version_no ?? 1 })}
+                    </span>
+                  ) : null}
                   {f.trust.startsWith("export_copy_legacy_") ? (
                     <span className="sugchip" title={t("export_state.hint")}>{t("export_state.badge")}</span>
                   ) : null}

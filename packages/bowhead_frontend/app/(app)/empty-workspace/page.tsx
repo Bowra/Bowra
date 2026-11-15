@@ -19,6 +19,7 @@ import { readApiError } from "@/lib/api-client";
 import { fetchMe, fetchWithRefresh } from "@/lib/auth-api";
 import { appPath } from "@/lib/base-path";
 import { setActiveSpaceId } from "@/lib/space-storage";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 interface InviteItem {
   invite_id: string;
@@ -73,7 +74,7 @@ export default function EmptyWorkspacePage() {
       const d = await r.json();
       enterWorkspace(d.workspace_id);
     } catch (e) {
-      setErr(shownError(t("accept_failed"), e));
+      setErr(shownError(withHttpFailureReason(t("accept_failed"), e), e));
       setBusy(false);
     }
   }, [busy, t]);
@@ -85,7 +86,7 @@ export default function EmptyWorkspacePage() {
       const d = await createWorkspace(name.trim());
       enterWorkspace(d.workspace_id);
     } catch (e) {
-      setErr(shownError(t("create_failed"), e));
+      setErr(shownError(withHttpFailureReason(t("create_failed"), e), e));
       setBusy(false);
     }
   }, [busy, name, t]);

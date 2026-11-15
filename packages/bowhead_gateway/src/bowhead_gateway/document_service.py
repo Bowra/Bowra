@@ -14,7 +14,7 @@ import anyio
 import httpx2
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_execution_binding import AgentExecutionBindingError
-from bowhead_core.agent_run_limits import DEFAULT_LIMITS, get_tool_call_budget
+from bowhead_core.agent_run_limits import DEFAULT_LIMITS, get_model_call_budget, get_tool_call_budget
 from bowhead_core.document_chat_continuation import DocumentPlanningAttemptRef, DocumentTurnOwner
 from bowhead_core.documents.agent_caller import authorize_document_job_caller, read_document_caller_in_tx
 from bowhead_core.documents.authoring_context import CANVAS_REFERENCE, WORD_CANVAS_REFERENCE, WORD_SYSTEM, runtime_api_reference
@@ -291,6 +291,13 @@ class DocumentService:
                     authoring_limits["tool_call_limit"] = tool_budget.limit - tool_budget.used
                     if authoring_limits["tool_call_limit"] <= 0:
                         raise DocumentRequestError("document_authoring_budget_exhausted")
+                # The runner admits each authoring model call against the Turn's shared
+                # model-call budget. The snapshot keeps its earlier shape, so an older worker
+                # can still resume it.
+                authoring_limits.pop("model_call_limit", None)
+                model_budget = get_model_call_budget()
+                if authoring and model_budget is not None and not model_budget.allows(1, is_lead=False):
+                    raise DocumentRequestError("document_authoring_budget_exhausted")
                 snapshot = (
                     DocumentRuntimeSnapshot(
                         schema_version=3 if word else 2 if authoring else 1,

@@ -166,6 +166,7 @@ import { getSteerTarget } from "@/lib/steer-guard";
 import { getTurnSnapshot, failActiveSteps } from "@/lib/turn-store";
 import { parseServerTimeMs, resolveUserMessageTimeMs } from "@/lib/turn-user-time";
 import type { ArchivedTurn } from "@/lib/types";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // prod-bug-bash-039 P1-2: inline concurrency limiter (no new dep). Caps parallel
 // per-turn event hydration to a browser-friendly limit (~6).
@@ -1219,7 +1220,7 @@ function CanvasHomeInner() {
       } catch (error) {
         if (composerDraftScopeKeyRef.current === actionScopeKey) {
           console.warn("composer action auth preflight failed", error);
-          setBanner(tComposer("action_preflight_failed"));
+          setBanner(withHttpFailureReason(tComposer("action_preflight_failed"), error));
         }
         return null;
       }
@@ -1323,7 +1324,7 @@ function CanvasHomeInner() {
       } catch (error) {
         if (composerDraftScopeKeyRef.current === actionScopeKey) {
           console.warn("composer action auth preflight failed", error);
-          setBanner(tComposer("action_preflight_failed"));
+          setBanner(withHttpFailureReason(tComposer("action_preflight_failed"), error));
         }
         return { blocked: true, controller: null };
       }
@@ -3054,7 +3055,7 @@ function CanvasHomeInner() {
       }
     } catch (error) {
       console.warn("turn cancellation failed", error);
-      toast({ kind: "error", text: tComposer("stop_failed") });
+      toast({ kind: "error", text: withHttpFailureReason(tComposer("stop_failed"), error) });
       return false;
     } finally {
       cancelPendingRef.current = false;
@@ -3562,8 +3563,8 @@ function CanvasHomeInner() {
           ));
           return false;
         }
-      } catch {
-        setBanner(tComposer("action_preflight_failed"));
+      } catch (error) {
+        setBanner(withHttpFailureReason(tComposer("action_preflight_failed"), error));
         return false;
       }
     }
@@ -3595,10 +3596,10 @@ function CanvasHomeInner() {
               setExternalComposerPrefill(text);
             }
           })
-          .catch(() => {
+          .catch((error: unknown) => {
             if (composerDraftScopeKeyRef.current !== targetScopeKey) return;
             setExternalComposerPrefill(text);
-            setBanner(tComposer("action_preflight_failed"));
+            setBanner(withHttpFailureReason(tComposer("action_preflight_failed"), error));
           });
         return;
       }
@@ -4158,7 +4159,7 @@ function CanvasHomeInner() {
     } catch (error) {
       console.warn("composer action resend preflight failed", error);
       if (pending.scopeKey === composerDraftScopeKeyRef.current) {
-        setBanner(tComposer("action_preflight_failed"));
+        setBanner(withHttpFailureReason(tComposer("action_preflight_failed"), error));
       }
       return false;
     }
@@ -4225,7 +4226,7 @@ function CanvasHomeInner() {
         } catch (error) {
           if (!(error instanceof ComposerRecoveryUnavailableError)) {
             console.warn("composer rollback draft restore failed", error);
-            setBanner(tComposer("action_unavailable"));
+            setBanner(withHttpFailureReason(tComposer("action_unavailable"), error));
             return false;
           }
           // Keep the mounted V2 transient snapshot. The obsolete process-local
@@ -4342,7 +4343,7 @@ function CanvasHomeInner() {
         if (!(error instanceof ComposerRecoveryUnavailableError)) {
           console.warn("composer fallback resend marker rejected", error);
           if (pending.scopeKey === composerDraftScopeKeyRef.current) {
-            setBanner(tComposer("action_unavailable"));
+            setBanner(withHttpFailureReason(tComposer("action_unavailable"), error));
           }
           return false;
         }
@@ -5376,7 +5377,7 @@ function CanvasHomeInner() {
       trackInteraction("bowhead_sidebar_session_action_total", { action: "rename", outcome: "success", surface: "topbar" });
     } catch (error) {
       trackInteraction("bowhead_sidebar_session_action_total", { action: "rename", outcome: "error", surface: "topbar" });
-      toast({ kind: "error", text: tSessionMenu(sessionRenameErrorKey(error)) });
+      toast({ kind: "error", text: withHttpFailureReason(tSessionMenu(sessionRenameErrorKey(error)), error) });
     }
   };
 

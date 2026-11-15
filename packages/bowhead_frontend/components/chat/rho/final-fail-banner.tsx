@@ -67,6 +67,7 @@ interface Props {
 const FAILURE_GROUPS = {
   agent_step_limit: "agent_step_limit",
   agent_tool_call_limit: "agent_tool_call_limit",
+  agent_model_call_limit: "agent_model_call_limit",
   agent_stalled: "agent_stalled",
   llm_provider_unavailable: "llm_provider_unavailable",
   llm_provider_timeout: "llm_provider_timeout",
@@ -96,7 +97,7 @@ const FAILURE_GROUPS = {
 } as const satisfies Partial<Record<ReasonCode, string>>;
 
 const LIMIT_REASONS = new Set<ReasonCode>([
-  "agent_step_limit", "agent_tool_call_limit",
+  "agent_step_limit", "agent_tool_call_limit", "agent_model_call_limit",
   "wallclock_exceeded", "llm_stream_deadline_exceeded", "token_cap_exhausted",
   "hop_cap_exceeded", "peer_depth_exceeded", "cost_cap_exceeded",
 ]);

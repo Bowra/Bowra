@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 import { resendVerificationEmail } from "@/lib/auth-api";
 import { MailIcon, PublicBanner, useBrandedTranslations } from "./public-shell";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export const RESEND_COOLDOWN_MS = 60_000;
 
@@ -27,10 +28,10 @@ export function AuthVerifyNotice({ email }: { email: string }) {
     try {
       await resendVerificationEmail(email);
       setSentCount((n) => n + 1);
-    } catch {
-      // Public endpoint is no-leak (always 200) — a thrown error is a network/transport
-      // failure, so a generic retry hint is correct here.
-      setErr(t("verify.resend_failed"));
+    } catch (error) {
+      // Public endpoint is no-leak (always 200): a thrown error is a transport failure or a
+      // proxy/service status, so a retry hint follows the reason when one is known.
+      setErr(withHttpFailureReason(t("verify.resend_failed"), error));
     } finally {
       setSending(false);
     }

@@ -129,6 +129,15 @@ describe("KbColumn（文件页「知识库」列）", () => {
     expect(screen.queryByRole("button", { name: "加入知识库" })).toBeNull();
   });
 
+  it("文件版本：知识库里是旧版本时保留状态与跳转，并可添加当前版本", () => {
+    const onAdd = vi.fn();
+    renderZh(<KbColumn file={file({ in_kb: true, kb: kb(), kb_outdated: true, version_no: 3, kind: "deliverable" })} onAdd={onAdd} />);
+    expect(screen.getByText("已加入 · 可用")).toBeInTheDocument();
+    expect(screen.getByTestId("kb-outdated")).toHaveTextContent("知识库里是旧版本");
+    fireEvent.click(screen.getByRole("button", { name: "添加第 3 版" }));
+    expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+
   it("在知识库里但不在你可见的范围：只写已加入，不给状态与跳转", () => {
     renderZh(<KbColumn file={file({ in_kb: true, kb: null })} onAdd={vi.fn()} />);
     expect(screen.getByText("已加入")).toBeInTheDocument();

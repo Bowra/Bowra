@@ -36,6 +36,9 @@ const messages = {
     safe_load_failed: "safe load failed",
     open_safe_preview: "Open safe preview",
     mobile_safe_hint: "safe mobile",
+    updated_version: "Updated to version {version}",
+    provenance_version: "data notes recorded for version {version}",
+    version_too_large: "Version {version} exceeds the {size} limit",
   },
 };
 
@@ -60,6 +63,20 @@ function renderCard(data: E) {
 function mk(over: Partial<E> = {}): E {
   return { id: "e1", kind: "html_artifact", artifact_id: "art_1", title: "Sim", ...over } as E;
 }
+
+describe("HtmlArtifactSection · file versions (R4)", () => {
+  it("names the embedded version and the version its data notes belong to", () => {
+    const { container, getByTestId } = renderCard(mk({ data: { x: 1 }, unverified: false, version_no: 3, provenance_version_no: 1 }));
+    expect(getByTestId("html-artifact-version").textContent).toBe("Updated to version 3");
+    expect(container.textContent).toContain("Generation data attached · No source citations provided · data notes recorded for version 1");
+  });
+
+  it("says why a newer version was not embedded, and shows nothing for an unversioned section", () => {
+    const { getByTestId, queryByTestId } = renderCard(mk({ version_note: { reason: "too_large", version_no: 4, maximum_bytes: 2048 } }));
+    expect(getByTestId("html-artifact-version-note").textContent).toContain("Version 4 exceeds the 2 KB limit");
+    expect(queryByTestId("html-artifact-version")).toBeNull();
+  });
+});
 
 describe("HtmlArtifactSection · D4 EmbedCard chrome", () => {
   it("always shows the AI-generated badge", () => {

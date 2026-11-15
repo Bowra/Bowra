@@ -29,11 +29,11 @@ Skills are invoked **only when the user's request matches the description**:
 # Lead view header (2026-07-03, docs/skills-tools-ssot.md §5-G4):
 # Lead has no skill_read/skill_invoke (role_bindings limits them to analysts); the old header misled it
 # into calling unavailable tools (a remnant of the ω incident). Lead should discover capabilities and route requests.
-LEAD_INDEX_HEADER = """## Available Skills (platform capability catalog — for routing)
+LEAD_INDEX_HEADER = """## Available Skills (platform capability catalog)
 
-These capabilities are loaded and executed by an analyst peer after it is dispatched; you (Lead) have no `skill_read` /
-`skill_invoke`, so do not call them directly. When a capability is needed: route to a peer that can run it and write the skill
-name into the `subagent_spawn` task description. Consider one only when the user's request matches its description:
+A Skill's body is its working method. `skill_read(name)` returns the body of a Skill listed here. Scripts are run by the
+Agent that does the work, and that Agent reads the Skill itself when its name is in the `subagent_spawn` task description;
+you (Lead) have no `skill_invoke`. A Skill is relevant only when the user's request matches its description:
 """
 
 

@@ -159,7 +159,7 @@ def test_empty_text_no_claims(text) -> None:
     assert detect_completion_claims(text) == frozenset()
 
 
-# ── ★ 116 dogfood cross-kind false positive (2026-08-05) ─────────
+# ── ★ Regression check cross-kind false positive (2026-08-05) ─────────
 
 
 def test_pure_export_turn_does_not_trigger_report_claim() -> None:
@@ -318,6 +318,20 @@ def test_results_workspace_multi_format_partial_delivery_is_reconciled() -> None
     chinese = reconcile_overclaimed_text(text, led, ("file",), "zh-CN")
     assert "sales.csv、chart.png、report.docx" in chinese
     assert "HTML 未生成" in chinese
+
+
+def test_a_format_embedded_in_the_delivered_file_is_not_a_missing_file() -> None:
+    """Regression check L4 (the original regression): inline SVG inside the HTML is not a claimed SVG file."""
+    text = "单文件 HTML 网页已生成（2025年全年经营分析报告.html，约 62KB，内联 CSS 与 SVG、零外部依赖，双击即可打开投屏）。"
+    led = _led(files=2, exts={".html", ".json"}, names=("2025年全年经营分析报告.html", "report_data.json"))
+    assert claimed_file_formats(text) == frozenset({".html"})
+    assert overclaimed_kinds(text, led) == ()
+    assert claimed_file_formats("HTML 报告已生成，图表用内嵌 SVG 与 PNG 绘制。") == frozenset({".html"})
+    assert claimed_file_formats("HTML 已生成，图表 SVG 已内嵌其中。") == frozenset({".html"})
+    # Named as its own file, SVG is still checked.
+    claimed = "HTML 和 SVG 文件都已生成。"
+    assert claimed_file_formats(claimed) == frozenset({".html", ".svg"})
+    assert overclaimed_kinds(claimed, led) == ("file",)
 
 
 def test_honest_partial_delivery_does_not_treat_failed_html_as_a_success_claim() -> None:

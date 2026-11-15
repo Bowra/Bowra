@@ -6,6 +6,7 @@
  */
 
 import { apiFetch, readApiError } from "./api-client";
+import { attachHttpCause } from "./user-facing-error";
 import { appPath } from "./base-path";
 import { randomUuid } from "./random-id";
 
@@ -211,7 +212,7 @@ async function _check(r: Response): Promise<Response> {
     const ra = r.headers.get("retry-after");
     retry = ra ? parseInt(ra, 10) : undefined;
   }
-  throw new AdminCreditsError(error.status, error.message, retry, error.code);
+  throw attachHttpCause(new AdminCreditsError(error.status, error.message, retry, error.code), error);
 }
 
 // ─── API wrappers ────────────────────────────────

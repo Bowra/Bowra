@@ -391,6 +391,13 @@ export function useDebouncedSync({
   getSectionRev: (sectionId: string) => number | undefined;
   /** Accept a section returned by a server-side action that bypassed PATCH. */
   acceptServerSection: (section: ReportSection) => void;
+  /**
+   * Queue an edit to a section the editor document does not contain (a chart shown through a figure anchor).
+   * It saves with the next flush, under the same revision, conflict and leave-protection rules as document edits.
+   */
+  patchReferencedSection: (sectionId: string, patch: Partial<ReportSection>) => boolean;
+  /** Unsaved patches queued through `patchReferencedSection`, keyed by section id, for showing them before they save. */
+  referencedPatches: ReadonlyMap<string, Partial<ReportSection>>;
   /** Force override: PATCH again without expected_rev */
   resolveConflictByOverride: () => Promise<void>;
   /** Reload: discard local, dispatch store fetch of latest server content (caller implements) */
@@ -423,6 +430,21 @@ export function useDebouncedSync({
   reorderBaselineRef.current = reorderBaseline;
   // Remember successful new order so later text edits do not repeatedly resend same reorder against old display order.
   const lastReorderRef = useRef<string[] | null>(null);
+  // Edits to sections the document does not hold (a chart a narrative shows through a figure anchor). The PM
+  // diff cannot see them, so they wait here for the next flush; the state copy lets the report show them at once.
+  const referencedPatchesRef = useRef<Map<string, Partial<ReportSection>>>(new Map());
+  const [referencedPatches, setReferencedPatches] = useState<ReadonlyMap<string, Partial<ReportSection>>>(
+    () => new Map(),
+  );
+  const publishReferencedPatches = useCallback(() => {
+    setReferencedPatches(new Map(referencedPatchesRef.current));
+  }, []);
+  /** Drop a queued patch once saved, unless a newer edit replaced it while the request was in flight. */
+  const settleReferencedPatch = useCallback((sectionId: string, sent: Partial<ReportSection>) => {
+    if (referencedPatchesRef.current.get(sectionId) !== sent) return;
+    referencedPatchesRef.current.delete(sectionId);
+    publishReferencedPatches();
+  }, [publishReferencedPatches]);
   // New content arrives (display order changes) → clear last-reorder memory and use new display order.
   useEffect(() => {
     lastReorderRef.current = null;
@@ -608,7 +630,20 @@ export function useDebouncedSync({
     );
     const changed = patches.filter((p) => p.changed);
     const degraded = changed.filter((p) => p.degraded);
-    const savable = changed.filter((p) => !p.degraded);
+    // Referenced sections are absent from the document, so they never degrade; skip any the document now holds.
+    const documentIds = new Set(patches.map((p) => p.sectionId));
+    const referenced: SectionPatch[] = [];
+    for (const [sectionId, patch] of Array.from(referencedPatchesRef.current)) {
+      const base = savedBaseline.find((section) => section.id === sectionId);
+      if (!base || documentIds.has(sectionId)) {
+        referencedPatchesRef.current.delete(sectionId);
+        publishReferencedPatches();
+        continue;
+      }
+      referenced.push({ sectionId, kind: base.kind as SectionPatch["kind"], changed: true, patch });
+    }
+    const savable = [...changed.filter((p) => !p.degraded), ...referenced];
+    const unsavedReferencedIds = () => Array.from(referencedPatchesRef.current.keys());
 
     // ⚠ Degradation gate **blocks only content persistence**, not reorder — data-wise independent operations.
     // Original early return for wholly degraded changes preceded reorder, claiming batch all-or-
@@ -650,7 +685,7 @@ export function useDebouncedSync({
       }
     }
 
-    if (changed.length === 0) {
+    if (changed.length === 0 && referenced.length === 0) {
       update((s) => ({ ...s, dirty: [] }));
       return { ok: true, saved_revisions: {} };
     }
@@ -703,6 +738,7 @@ export function useDebouncedSync({
           res.rev,
         );
         onSaved?.(p.sectionId, res.rev, p.patch);
+        settleReferencedPatch(p.sectionId, p.patch);
       } else if (res.status === "conflict") {
         if (updateState) {
           update((s) => ({
@@ -738,6 +774,7 @@ export function useDebouncedSync({
           (section) => section.id !== p.sectionId,
         );
         revisionsRef.current.delete(p.sectionId);
+        settleReferencedPatch(p.sectionId, p.patch);
         toast({ kind: "info", text: _t("section_deleted_synced") });
         onSectionMissing?.(p.sectionId);
       } else {
@@ -762,7 +799,7 @@ export function useDebouncedSync({
       update((s) => ({
         ...s,
         saving: false,
-        dirty: degraded.map((p) => p.sectionId),
+        dirty: [...degraded.map((p) => p.sectionId), ...unsavedReferencedIds()],
       }));
       return {
         ok: false,
@@ -773,9 +810,10 @@ export function useDebouncedSync({
     }
     _lastDegradedToastKey = null; // All saved ⇒ reset, allowing hint on next genuine degradation
     _clearSaveFailureToast(canvasId); // Old save-failure hint no longer applies
-    update((s) => ({ ...s, saving: false, dirty: [], lastError: null }));
+    // An edit queued while this flush was saving stays dirty; its own debounce saves it.
+    update((s) => ({ ...s, saving: false, dirty: unsavedReferencedIds(), lastError: null }));
     return { ok: true, saved_revisions: savedRevisions };
-  }, [editor, canvasId, enabled, onSaved, onSectionMissing]);
+  }, [editor, canvasId, enabled, onSaved, onSectionMissing, publishReferencedPatches, settleReferencedPatch]);
 
   const flushPatches = useCallback((updateState = true): Promise<FlushResult> => {
     const run = async (): Promise<FlushResult> => {
@@ -807,7 +845,8 @@ export function useDebouncedSync({
         projectSectionsThroughEditor(savedBaselineRef.current, editor.schema),
       );
       const changed = patches.filter((p) => p.changed).map((p) => p.sectionId);
-      setState((s) => ({ ...s, dirty: changed }));
+      const referenced = Array.from(referencedPatchesRef.current.keys()).filter((id) => !changed.includes(id));
+      setState((s) => ({ ...s, dirty: [...changed, ...referenced] }));
 
       if (suspendedRef.current) return;
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -848,6 +887,7 @@ export function useDebouncedSync({
         res.rev,
       );
       onSaved?.(c.sectionId, res.rev, c.localPatch);
+      settleReferencedPatch(c.sectionId, c.localPatch);
       setState((s) => ({ ...s, conflict: null, lastError: null }));
     } else {
       const message =
@@ -868,13 +908,15 @@ export function useDebouncedSync({
         },
       }));
     }
-  }, [state.conflict, canvasId, onSaved]);
+  }, [state.conflict, canvasId, onSaved, settleReferencedPatch]);
 
   const resolveConflictByReload = useCallback(() => {
     // Caller fetches latest sections + reloads (canvas-store)
     if (state.conflict && canvasId) clearSaveConflict(canvasId, state.conflict.sectionId);
+    // Reloading takes the server version of the conflicted section; other queued edits still save.
+    if (state.conflict && referencedPatchesRef.current.delete(state.conflict.sectionId)) publishReferencedPatches();
     setState((s) => ({ ...s, conflict: null }));
-  }, [canvasId, state.conflict]);
+  }, [canvasId, state.conflict, publishReferencedPatches]);
 
   const dismissConflict = useCallback(() => {
     if (state.conflict && canvasId) clearSaveConflict(canvasId, state.conflict.sectionId);
@@ -887,8 +929,12 @@ export function useDebouncedSync({
       debounceTimer.current = null;
     }
     if (state.conflict && canvasId) clearSaveConflict(canvasId, state.conflict.sectionId);
+    if (referencedPatchesRef.current.size > 0) {
+      referencedPatchesRef.current.clear();
+      publishReferencedPatches();
+    }
     setState((s) => ({ ...s, dirty: [], saving: false, lastError: null, conflict: null }));
-  }, [canvasId, state.conflict]);
+  }, [canvasId, state.conflict, publishReferencedPatches]);
 
   const flushNow = useCallback(() => flushPatches(true), [flushPatches]);
   const getSectionRev = useCallback((sectionId: string) => {
@@ -906,11 +952,31 @@ export function useDebouncedSync({
     }
   }, [onSaved]);
 
+  const patchReferencedSection = useCallback((sectionId: string, patch: Partial<ReportSection>): boolean => {
+    if (!editor || !canvasId || !enabled) return false;
+    // A section the document holds saves from its node; a second write path would race the document diff.
+    if (extractTopLevelSectionOrder(editor.getJSON()).includes(sectionId)) return false;
+    if (!savedBaselineRef.current.some((section) => section.id === sectionId)) return false;
+    const queued = { ...(referencedPatchesRef.current.get(sectionId) ?? {}), ...patch } as Partial<ReportSection>;
+    referencedPatchesRef.current.set(sectionId, queued);
+    publishReferencedPatches();
+    setState((s) => (s.dirty.includes(sectionId) ? s : { ...s, dirty: [...s.dirty, sectionId] }));
+    if (suspendedRef.current) return true;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      debounceTimer.current = null;
+      void flushPatches(true);
+    }, debounceMs);
+    return true;
+  }, [editor, canvasId, enabled, debounceMs, flushPatches, publishReferencedPatches]);
+
   return {
     ...state,
     flushNow,
     getSectionRev,
     acceptServerSection,
+    patchReferencedSection,
+    referencedPatches,
     resolveConflictByOverride,
     resolveConflictByReload,
     dismissConflict,

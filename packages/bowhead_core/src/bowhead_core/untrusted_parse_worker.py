@@ -80,6 +80,13 @@ def _run_attachment(control: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _run_pptx_result_view(control: dict[str, Any]) -> dict[str, Any]:
+    from bowhead_core.pptx_result_view import inspect_pptx
+
+    template = Path(control["template_path"]).read_bytes() if control.get("template_path") else None
+    return inspect_pptx(Path(control["data_path"]).read_bytes(), template)
+
+
 def _run_template(control: dict[str, Any]) -> dict[str, Any]:
     from bowhead_core.template_clone import parse_template
 
@@ -106,6 +113,8 @@ def main() -> int:
             result = _run_attachment(control)
         elif kind == "template":
             result = _run_template(control)
+        elif kind == "pptx_result_view":
+            result = _run_pptx_result_view(control)
         else:
             _err(f"unknown kind {kind!r}")
             return 2

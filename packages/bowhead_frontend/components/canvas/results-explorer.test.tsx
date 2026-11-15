@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderIntl } from "@/__tests__/intl-render";
+import { PRODUCT_NAME } from "@/lib/product-identity";
 import type { ResultItemDTO } from "@/lib/results-api";
 import zhMessages from "@/messages/zh-CN.json";
 
@@ -163,6 +164,21 @@ describe("ResultsExplorer", () => {
     expect(screen.queryByText("运行与技术输出")).not.toBeInTheDocument();
   });
 
+  it("selects a revised file's row when the selection names the version it shows", () => {
+    const revised = item("artifact:report_v1", 2, {
+      title: "report.html",
+      route: { type: "artifact", artifact_id: "report_v3", default_mode: "preview" },
+      lineage: { number: 3, count: 3 },
+    });
+    renderIntl(<ResultsExplorer {...props({
+      expandedGroups: ["evidence", "evidence:data"],
+      items: [revised],
+      selectedKey: "artifact:report_v3",
+    })} />);
+
+    expect(screen.getByRole("button", { name: /report\.html/i })).toHaveAttribute("aria-current", "page");
+  });
+
   it("disambiguates duplicate outputs with public execution context", () => {
     renderIntl(<ResultsExplorer {...props({
       expandedGroups: ["deliverables", "evidence", "evidence:data"],
@@ -247,7 +263,7 @@ describe("ResultsExplorer", () => {
   it("explains an unsupported delivery receipt without suggesting regeneration", () => {
     renderIntl(<ResultsExplorer {...props({ items: [], loadedCount: 0, loading: false,
       error: "results_artifact_contract_unsupported", errorDirection: "base" })} />);
-    expect(screen.getByText("这些文件的交付记录需要更新版本支持。请联系管理员更新 Bowhead，然后刷新结果。")).toBeInTheDocument();
+    expect(screen.getByText(`这些文件的交付记录需要更新版本支持。请联系管理员更新 ${PRODUCT_NAME}，然后刷新结果。`)).toBeInTheDocument();
   });
 
   it("does not call an unfiltered locate failure a filter mismatch or offer clearing nonexistent filters", () => {

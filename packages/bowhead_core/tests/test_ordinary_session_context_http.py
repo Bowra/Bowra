@@ -378,7 +378,8 @@ async def test_existing_session_retains_original_context_through_question(
                         "input": {
                             "code": f"print(42)  # {sandbox_artifact_id}"
                             if sandbox_input == "canvas_only"
-                            else "from pathlib import Path\ncontent = Path(INPUTS['source']['path']).read_bytes()\nprint(42 if content else 0)"
+                            else ("per_slide_chart_counts = [0, 1, 2]\nnative_chart_shapes_total = 8\n" if boundary == "chart_identifiers" else "")
+                            + "from pathlib import Path\ncontent = Path(INPUTS['source']['path']).read_bytes()\nprint(42 if content else 0)"
                             if sandbox_input is not None
                             else "print(40 + 2)",
                             **(
@@ -452,11 +453,9 @@ async def test_existing_session_retains_original_context_through_question(
             and row["event_type"] == "tool_result"
             and json.loads(row["payload_json"]).get("tool_name") == "clarification_ask"
         ]
-        if boundary == "canvas_only":
-            assert turn["status"] == "failed" and turn["error_kind"] == "clarification_resume_unavailable"
-            assert not cards
-            return None
-        if boundary == "not_prepared":
+        if boundary in {"canvas_only", "not_prepared"}:
+            # A file ID named only in Canvas text grants no access. The optional
+            # question is refused and the live Turn completes instead of failing.
             assert turn["status"] == "completed" and not cards
             assert len(question_receipts) == 1
             assert question_receipts[0]["result_inline"]["error_kind"] == "clarification_capture_unavailable"
@@ -609,7 +608,7 @@ async def test_existing_session_retains_original_context_through_question(
             "projection_reuse",
             "projection_later",
         }
-        if observed_inputs and boundary in {"projection_capacity", "directory_metadata", "model_config"}:
+        if observed_inputs and boundary in {"projection_capacity", "directory_metadata", "model_config", "chart_identifiers"}:
             success = True
         if boundary == "model_config":
             with sqlite3.connect(case.path) as db:
@@ -699,13 +698,27 @@ async def test_existing_session_retains_original_context_through_question(
         monkeypatch.setenv("FEATURE_CHAT_MULTI_HELPER_QUESTION", "0")
         resolved = await case.client.post(f"/api/v1/clarifications/{cards[0]['request_id']}/resolve", json=answer)
         if not success:
-            assert resolved.status_code == (200 if boundary in {"confirmation_race", "membership_race", "directory_race"} else 409), resolved.text
-            if resolved.status_code == 200:
-                await settled(turn_id)
+            assert resolved.status_code == 200, resolved.text
+            await settled(turn_id)
             refused = next(row for row in rows(case, "turns") if row["id"] == turn_id)
-            assert refused["status"] == (
-                "failed" if boundary in {"confirmation_race", "membership_race", "directory_race"} else "clarification_pending"
-            )
+            if boundary not in {"confirmation_race", "membership_race", "directory_race"}:
+                # Preflight refuses the exact checkpoint, so Lead restarts from the
+                # original request with the answer under current access.
+                saved = next(row for row in rows(case, "clarification_requests") if row["request_id"] == cards[0]["request_id"])
+                assert saved["injected_at"] is not None and saved["continuation_generation"] == 2
+                heads = [row for row in rows(case, "model_context_conversation_heads") if row["session_id"] == session_id]
+                if heads and boundary in {"binding", "owner", "incomplete"}:
+                    # The Session still pins this file, yet its upload record is no longer valid.
+                    # The restarted Turn cannot record its own inputs and stops; no product
+                    # operation produces this state.
+                    assert refused["status"] == "failed" and refused["error"] == "lead_internal_error"
+                    return None
+                assert refused["status"] == "completed", refused["error"]
+                # A head naming the changed earlier file is replaced, never inherited.
+                assert all(row["published_turn_id"] == turn_id for row in heads)
+                return None
+            # A change after preflight still stops inside the worker.
+            assert refused["status"] == "failed"
             if boundary in {"confirmation_race", "membership_race", "directory_race"}:
                 assert next(row for row in rows(case, "turn_agent_execution") if row["id"] == lead["id"])["status"] == "failed"
             assert calls == {"lead": 2 if parallel else 3, "office": 2 if has_current_attachment else 1, "compute": 2}
@@ -738,6 +751,18 @@ async def test_existing_session_retains_original_context_through_question(
         await settled(turn_id)
         completed = next(row for row in rows(case, "turns") if row["id"] == turn_id)
         assert completed["status"] == "completed"
+        # However many generations the Session's Turns have written, the
+        # published view references only its cumulative dependency manifest.
+        generations = {row["id"]: row for row in rows(case, "model_context_generations") if row["session_id"] == session_id}
+        published = [row["generation_id"] for row in rows(case, "model_context_conversation_heads") if row["session_id"] == session_id]
+        assert len(published) == 1
+        reachable, pending = set(), list(published)
+        while pending:
+            identity = pending.pop()
+            if identity not in reachable:
+                reachable.add(identity)
+                pending.extend(json.loads(generations[identity]["source_refs_json"]))
+        assert len(reachable) == 2
         if observed_inputs:
             assert checkpoint.contract == "ordinary-lead-loop.v15"
             assert (checkpoint.preferred_provider, checkpoint.preferred_model) == ("primary", "large")

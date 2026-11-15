@@ -811,7 +811,7 @@ def _make_handler() -> Any:
             # error_message is user-facing; _extract_result_error prefers it, so the step card no longer displays
             # protocol prose such as 「请修正后原样重发；先检查转义…（错误位置 offset=1083，
             # 附近原文：'…"confidence": "high"}]}]}'）. 重发标准 JSON: subagent_return(
-            # payload={...AnalysisPayload})」 to customers (photographed in 116 dogfood on
+            # payload={...AnalysisPayload})」 to customers (photographed in Regression check on
             # 2026-09-07). Same as pbi: normalize before emitting events; keep internal prose out of SSE.
             # ⚠ Deliberately omit error_kind="invalid_args": subagent.py gives it a different meaning,
             # rendering the entire step as success (agent self-corrects arguments and retries, not counted as failure).
@@ -1000,6 +1000,18 @@ def _make_handler() -> Any:
                     "validation_errors": errs[:10],
                 },
             )
+
+        # Filter values Datarc recognized but did not apply: the model must record whether each is in scope
+        # (bi_filter_scope). Best effort: a bug here must never block delivery.
+        try:
+            from bowhead_core.bi_filter_scope import review_scope_checks
+            from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
+
+            _scope_refusal = review_scope_checks(payload, run_invocations(ctx))
+            if _scope_refusal is not None:
+                return note_ordinary_return_rejection(ctx, _scope_refusal)
+        except Exception as _scope_exc:
+            logger.warning("bi_filter_scope.gate_failed turn=%s err=%s", getattr(ctx, "turn_id", ""), _scope_exc)
 
         # ─── report-consistency-gate v3: ground_facts ledger self-reconciliation (flag-gated) ───
         # Report quantities with units must belong to the authorized ledger (actual tool output ∪ formula-verified derivations).
@@ -1697,6 +1709,9 @@ def _make_handler() -> Any:
 
         _cs = getattr(ctx, "canvas_store", None)
         _bus = getattr(ctx, "parent_bus", None) or getattr(ctx, "bus", None)
+        if getattr(ctx, "revision_target_files", None):
+            # Revision targets: this helper revised delivered files; its payload is never a Canvas report card.
+            _eager_on = False
         # Decide before the first automatic report write, using the same
         # user/Plan/Lead precedence as final composition.
         if _eager_on:
@@ -1860,6 +1875,21 @@ def _make_handler() -> Any:
 
                 logger.warning("psi.eager_compose_failed peer=%s err=%s", _get_cur_sub_id_log() or _handler_subagent_id or "?", _e)
                 # Do NOT raise — Lead end-of-turn compose is the safety net
+        # Regression check N8: a title-only revision is applied now, so Lead sees it in canvas_changes before answering.
+        if _cs is not None and _bus is not None and isinstance(payload, dict) and payload.get("title"):
+            try:
+                from bowhead_core.canvas_revise import apply_title_only_revision
+
+                await apply_title_only_revision(
+                    _cs,
+                    _bus,
+                    session_id=getattr(ctx, "session_id", None),
+                    turn_id=getattr(ctx, "turn_id", None),
+                    payload=payload,
+                    language_context=getattr(ctx, "language_context", None),
+                )
+            except Exception:
+                logger.warning("psi.title_only_revision_failed turn=%s", getattr(ctx, "turn_id", None), exc_info=True)
         # Return a summary to the LLM explaining its submission + terminal signal.
         try:
             obj = payload_from_dict(payload)
@@ -2069,6 +2099,25 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
                         "caveats": {
                             "type": "array",
                             "items": {"type": "string"},
+                        },
+                        "filter_scope_checks": {
+                            "type": "array",
+                            "description": (
+                                "Required only when a bi_query result in this run named filter values Datarc recognized but did not apply "
+                                "(its hint says so). One entry per named value. in_scope=true: the user asked for data restricted to it; "
+                                'handling "requeried" (the delivered rows come from a query reporting that condition) or "stated_limit" '
+                                "(the answer says the data cannot be restricted that way); never label unrestricted rows with the value. "
+                                'in_scope=false: incidental wording; handling "incidental".'
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "value": {"type": "string"},
+                                    "in_scope": {"type": "boolean"},
+                                    "handling": {"type": "string", "enum": ["requeried", "stated_limit", "incidental"]},
+                                },
+                                "required": ["value", "in_scope", "handling"],
+                            },
                         },
                         "sources": {
                             "type": "array",

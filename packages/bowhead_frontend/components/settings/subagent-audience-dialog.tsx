@@ -32,6 +32,7 @@ import {
   T,
   avatarColor,
 } from "@/components/share/share-ui";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type PrincipalType = "user" | "group";
 
@@ -153,11 +154,11 @@ export function SubagentAudienceDialog({
           }
           return resolved;
         });
-      } catch {
+      } catch (cause) {
         if (cancelled) return;
         setUsers([]);
         setGroups([]);
-        setDirectoryError(t("audience_directory_failed"));
+        setDirectoryError(withHttpFailureReason(t("audience_directory_failed"), cause, { read: true }));
       } finally {
         if (!cancelled) setDirectoryBusy(false);
       }
@@ -259,11 +260,12 @@ export function SubagentAudienceDialog({
         setError(t("audience_release_managed"));
         return;
       }
-      setError(
+      setError(withHttpFailureReason(
         t("audience_save_failed", {
           error: t("audience_unknown_reason"),
         }),
-      );
+        cause,
+      ));
     } finally {
       saveGuard.current = false;
       setSaving(false);

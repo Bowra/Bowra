@@ -110,13 +110,22 @@ async def test_integer_null_confirm_and_reset_use_original_limits(configuration,
     assert unlimited["ok"] and unlimited["rows"][0]["to"] is None
     assert client.post(f"/api/v1/config-proposals/{unlimited['proposal_id']}/apply", cookies=_as(ctx.owner)).status_code == 200
     assert client.get(URL, cookies=_as(ctx.owner)).json()["step_limit"] is None
+    _, _, model_calls = await propose(ctx.app, ctx.owner, patch={"model_call_limit": None})
+    assert model_calls["ok"] and model_calls["rows"][0]["to"] is None, model_calls
+    assert client.post(f"/api/v1/config-proposals/{model_calls['proposal_id']}/apply", cookies=_as(ctx.owner)).status_code == 200
+    assert client.get(URL, cookies=_as(ctx.owner)).json()["model_call_limit"] is None
     _, _, reset = await propose(ctx.app, ctx.owner, reset_all=True)
     assert reset["ok"] and all(row["operation"] == "reset" for row in reset["rows"]), reset
+    assert {row["field"]: row["to"] for row in reset["rows"]}["model_call_limit"] == 200
     assert client.post(f"/api/v1/config-proposals/{reset['proposal_id']}/apply", cookies=_as(ctx.owner)).status_code == 200
-    assert client.get(URL, cookies=_as(ctx.owner)).json()["is_default"]
+    restored = client.get(URL, cookies=_as(ctx.owner)).json()
+    assert restored["is_default"] and restored["model_call_limit"] == 200
 
 
-@pytest.mark.parametrize("patch", [{"tool_call_limit": True}, {"tool_call_limit": "500"}, {"tool_call_limit": 0}, {"turn_time_limit_s": None}])
+@pytest.mark.parametrize(
+    "patch",
+    [{"tool_call_limit": True}, {"tool_call_limit": "500"}, {"tool_call_limit": 0}, {"turn_time_limit_s": None}, {"model_call_limit": 10_001}],
+)
 async def test_typed_invalid_values_never_create_proposals(configuration, patch):
     _, _, result = await propose(configuration.app, configuration.owner, patch=patch)
     assert not result["ok"] and result["error"] == "invalid_patch", result

@@ -180,7 +180,7 @@ async def _send_email(arguments: dict[str, Any], ctx: ToolExecutionContext) -> d
     ):
         return _failure("invalid_attachments", "Provide at most 5 distinct artifact IDs in attachment_ids. No email was sent.")
     attachments: list[EmailAttachment] = []
-    attachment_details: list[dict[str, str | int]] = []
+    attachment_details: list[dict[str, Any]] = []
     if attachment_ids:
         artifact_store = getattr(ctx, "artifact_store", None)
         if artifact_store is None or not ctx.user_id or not ctx.session_id or not ctx.workspace_id:
@@ -232,6 +232,13 @@ async def _send_email(arguments: dict[str, Any], ctx: ToolExecutionContext) -> d
                     **_failure("email_attachment_read_failed", "The file could not be read. Generate or upload it again before sending."),
                     "artifact_id": aid,
                 }
+        # File versions (R6): the confirmation and the receipt say when an attached file has a newer version.
+        from bowhead_core.artifact_store import newer_version_facts
+
+        newer = await newer_version_facts(artifact_store, attachment_ids)
+        for detail in attachment_details:
+            if detail["artifact_id"] in newer:
+                detail["newer_version"] = newer[str(detail["artifact_id"])]
 
     requester = str(getattr(ctx, "user_id", "") or "")
     on_pending, on_resolved = confirmation_callbacks(
@@ -445,7 +452,7 @@ _UNSENT_REASON: Final[dict[str, dict[str, tuple[str, str]]]] = {
             "如需发送，请在同一条消息里让我重新取数并发送，例如「重新查询这组数据并发邮件给 {to}」。",
         ),
         "email_send_rejected": ("你在发送前确认时拒绝了这封邮件", "如需修改后再发，告诉我要改的地方即可。"),
-        "email_confirmation_expired": ("发送前的确认在时限内没有收到回应", "如仍需发送，请再让我发一次，并在弹出的确认框里确认。"),
+        "email_confirmation_expired": ("发送前的确认在时限内没有收到回应", "如仍需发送，请再让我发一次，并在确认时选择发送。"),
         "email_confirmation_unavailable": ("当前无法请你确认邮件内容", "请在网页端对话里重新让我发送这封邮件。"),
         "email_service_not_configured": ("团队尚未配置邮件服务", "请团队管理员在团队设置的「邮件服务」里完成配置后再让我发送。"),
         "email_service_unavailable": ("团队邮件服务暂时不可用", "请稍后再让我发送，或联系团队管理员检查邮件服务。"),
@@ -480,7 +487,7 @@ _UNSENT_REASON: Final[dict[str, dict[str, tuple[str, str]]]] = {
         ),
         "email_confirmation_expired": (
             "the confirmation request was not answered in time",
-            "Ask me to send it again and confirm it in the dialog that appears.",
+            "Ask me to send it again and confirm it when asked.",
         ),
         "email_confirmation_unavailable": ("the email could not be shown to you for confirmation here", "Ask me to send it again from the web chat."),
         "email_service_not_configured": (
@@ -525,7 +532,7 @@ _UNSENT_REASON: Final[dict[str, dict[str, tuple[str, str]]]] = {
         ),
         "email_confirmation_expired": (
             "die Bestätigung ist nicht innerhalb der vorgesehenen Zeit eingegangen",
-            "Bitten Sie mich erneut um das Senden und bestätigen Sie es im angezeigten Dialog.",
+            "Bitten Sie mich erneut um das Senden und bestätigen Sie es, wenn Sie gefragt werden.",
         ),
         "email_confirmation_unavailable": (
             "der Inhalt der E-Mail konnte Ihnen hier nicht zur Bestätigung angezeigt werden",
@@ -579,7 +586,7 @@ _UNSENT_REASON: Final[dict[str, dict[str, tuple[str, str]]]] = {
         ),
         "email_confirmation_expired": (
             "la demande de confirmation n’a pas reçu de réponse à temps",
-            "Demandez-moi de l’envoyer à nouveau et confirmez dans le dialogue qui s’affiche.",
+            "Demandez-moi de l’envoyer à nouveau, puis confirmez l’envoi lorsque la demande s’affiche.",
         ),
         "email_confirmation_unavailable": (
             "le contenu de l’e-mail n’a pas pu vous être présenté ici pour confirmation",

@@ -673,7 +673,7 @@ class NotificationItemDTO(BaseModel):
     archivedAt: str | None = None
     createdAt: str
     updatedAt: str
-    # FEATURE_NOTIFICATION_REACH: the item's Team, named only when the user belongs to more than
+    # The item's Team, named only when the user belongs to more than
     # one Team (multi-Team authorization on). "personal" items never carry a Team or switch it.
     scope: str = "team"
     teamName: str | None = None
@@ -689,7 +689,7 @@ class NotificationCountDTO(BaseModel):
     actionRequired: int
     updatesUnread: int
     totalBadge: int
-    # FEATURE_NOTIFICATION_REACH: newest delivery time of an unread item the browser may announce;
+    # Newest delivery time of an unread item the browser may announce;
     # the client fetches `browser-candidates` only when this moves.
     latestBrowserCandidateAt: str | None = None
 
@@ -1085,6 +1085,11 @@ class FileListItemDTO(BaseModel):
     # file-management-v2 P3: this row was **shared by someone else**, so read-only. Frontend hides
     # delete / recategorize / add-to-KB entries; services also enforce ownership independently.
     shared_readonly: bool = False
+    # File versions: this entry is the latest version of its file; version_count covers the listing's view.
+    version_no: int | None = None
+    version_count: int | None = None
+    # File versions (Q7): the knowledge base indexes an older version of this file; the user may add this one.
+    kb_outdated: bool = False
     url: str
 
 

@@ -26,6 +26,8 @@ pytestmark = [
         ],
         ("model_config", True, False),
         ("model_config", False, False),
+        ("chart_identifiers", True, True),
+        ("chart_identifiers", False, True),
         ("actual_capacity", False, True),
         ("directory_race", False, True),
         ("bytes", False, True),

@@ -54,6 +54,11 @@ def _unavailable_message(skill: str, operation: str, reason: str, cause: str | N
             return "This Agent's Skill list is unavailable, so its Skills can't be listed. Ask the Agent's owner to release the Agent again."
         if not skill:
             return "This Skill call doesn't name a Skill. Call skill_list to see the Skills this Agent includes, then pass one as 'name'."
+        if cause == "lead_index":
+            return (
+                f"{label} is a working method for the Agent that does the work, and is not in your Skill index. "
+                "Name it in the subagent_spawn task; that Agent reads it."
+            )
         if cause == "read_only":
             return (
                 f"{label} is included in this Agent for reading only, so its scripts can't run here. "

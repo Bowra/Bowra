@@ -21,6 +21,7 @@ import { useCanvasCloseGuard, type CanvasObjectMarker } from "@/components/canva
 import { registerSubagentDraftNavigationGuard } from "@/lib/canvas-navigation-guard";
 import { CreateSubagentCard, type AgentDraftEditorPort, type AgentDraftCanvasState } from "./create-subagent-card";
 import type { AgentDraftSuggestionsModel } from "./agent-draft-suggestions";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Reading order of a suggestion: what the owner names and describes first; the internal identifier last.
 const SUGGESTED_FIELDS: Array<keyof ManualSubagentDraftDefinition> = [
@@ -115,8 +116,10 @@ export function SubagentCanvasDraftEditor({
       const latest = await listCanvasDraftSuggestions(manualDraft.draft_id, context.current);
       if (mountedRef.current && generation === suggestionReadGeneration.current)
         setSuggestions(latest.filter((item) => item.draft_id === manualDraft.draft_id && item.status === "pending"));
-    } catch {
-      if (mountedRef.current && generation === suggestionReadGeneration.current) setError(t("suggestion_load_failed"));
+    } catch (cause) {
+      if (mountedRef.current && generation === suggestionReadGeneration.current) {
+        setError(withHttpFailureReason(t("suggestion_load_failed"), cause, { read: true }));
+      }
     }
   }, [manualDraft.draft_id, t]);
   useEffect(() => {
@@ -205,8 +208,8 @@ export function SubagentCanvasDraftEditor({
       await dismissCanvasDraftSuggestion(draft.draft_id, suggestion.suggestion_id, context.current);
       await refreshSuggestions();
       return true;
-    } catch {
-      if (mountedRef.current && report) setError(t("suggestion_dismiss_failed"));
+    } catch (cause) {
+      if (mountedRef.current && report) setError(withHttpFailureReason(t("suggestion_dismiss_failed"), cause));
       return false;
     } finally {
       operationBusy.current = false;
@@ -233,8 +236,8 @@ export function SubagentCanvasDraftEditor({
         setPurpose(latest.purpose);
         setGenerationOpen(true);
       } else onRequestAiDraft(latest);
-    } catch {
-      if (mountedRef.current) setError(t("suggestion_load_failed"));
+    } catch (cause) {
+      if (mountedRef.current) setError(withHttpFailureReason(t("suggestion_load_failed"), cause, { read: true }));
     } finally {
       if (mountedRef.current) setApplying(false);
     }

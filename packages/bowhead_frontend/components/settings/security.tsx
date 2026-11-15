@@ -14,6 +14,7 @@ import { Notice } from "@/components/ui/notice";
 import { appPath } from "@/lib/base-path";
 import { fetchActiveSessions, type SessionsListResp } from "@/lib/security-api";
 import { CharIconText } from "@/components/char-icon";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Personal security settings: password, signed-in devices, and session control. */
 export function SettingsSecurity() {
@@ -31,7 +32,7 @@ export function SettingsSecurity() {
 
   const load = useCallback(() => {
     void fetchMe().then(setMe).catch((cause) => {
-      setError(t("load_failed"));
+      setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
     });
   }, [t]);
   const loadSessions = useCallback(() => {
@@ -55,7 +56,7 @@ export function SettingsSecurity() {
       flash(t("logout_done", { count: result.revoked_count }));
       setTimeout(() => { window.location.assign(appPath("/login/")); }, 1200);
     } catch (cause) {
-      flash(t("logout_failed"), true);
+      flash(withHttpFailureReason(t("logout_failed"), cause), true);
     } finally {
       setBusy(false);
       setConfirmLogoutEverywhere(false);

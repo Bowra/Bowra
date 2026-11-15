@@ -43,6 +43,7 @@ import type {
 import { safeInternalPath } from "@/lib/safe-next-path";
 import { isNetworkFailure } from "@/lib/transport-error";
 import { appDocumentHref } from "@/lib/use-app-router";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // layout-redesign P5: land back where the user intended after login. Read
 // `?next=` (preferred) or `?return=` from the URL; read window.location directly
@@ -191,7 +192,7 @@ export default function LoginPage() {
       const providerName = oauthProviderName(t, provider);
       setErr(code
         ? t(oauthErrorKey(code), { provider: providerName })
-        : t("error.oauth_failed", { provider: providerName }));
+        : withHttpFailureReason(t("error.oauth_failed", { provider: providerName }), ex));
       setErrDiagnostics(
         ex instanceof AuthApiError || ex instanceof AuthTransportError
           ? authErrorDiagnostics(ex)

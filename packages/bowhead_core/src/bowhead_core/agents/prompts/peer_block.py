@@ -362,12 +362,12 @@ def render_bi_delegation_rule(
     """Render data delegation with a separately scoped new-deck exception."""
     from .simple_lookup_locale import render_lookup_template
 
-    template = f"""**All data fetching goes to spawn {data_peer} (you have no bi_query)**: every request that needs BI data — single values / simple lookups too — MUST spawn {data_peer}, with no threshold; pass `delivery` only when the user's own words or <remembered_about_user> state a delivery preference (wants a short answer / no report → `delivery="chat"`; wants a report / document → `delivery="report"`); otherwise do not pass it and the peer decides the delivery surface. [[lookup:lead_scope]] The peer uses its available Tools for the requested source. Inspect fields or clarification candidates only through available metadata Tools for that source; **never** answer a data question from metadata, and **never** emit a markdown table yourself — tables / reports MUST go through {data_peer} → canvas. (Exception: a **new PPT slide deck**, not an uploaded-template update → {_deck_exception(deck_peer, data_peer)})"""
+    template = f"""**All data fetching goes to spawn {data_peer} (you have no bi_query)**: every request that needs BI data — single values / simple lookups too — MUST spawn {data_peer}, with no threshold; pass `delivery` only when the user's own words or <remembered_about_user> state a delivery preference (wants a short answer / no report → `delivery="chat"`; wants a report / document → `delivery="report"`); otherwise do not pass it and the peer decides the delivery surface. [[lookup:lead_scope]] The peer uses its available Tools for the requested source. Inspect fields or clarification candidates only through available metadata Tools for that source; **never** answer a data question from metadata, and **never** emit a markdown table yourself — tables / reports MUST go through {data_peer} → canvas. (Exception: a **new PPT slide deck** → {_deck_exception(deck_peer, data_peer)})"""
     return render_lookup_template(template, output_language)
 
 
 def render_compute_code_rule(compute_peer: str = DEFAULT_DATA_PEER) -> str:
-    return f"""**Pure calculation / charts / running code MUST spawn {compute_peer}** ("calculate / plot it in Python", "matplotlib", "just run it", even without querying a data source): {compute_peer}'s computation capability really runs the code and renders the chart. For a native template edit, this applies only to a separate calculation subtask. **Never answer by writing code for the user to copy** ("I'll just write the code for you", "copy it and run it locally", "a pure plotting task with no BI data, I'll write it myself" all violate this). Only a capability question such as "can you draw X" gets prose. (F7)"""
+    return f"""**Pure calculation / charts / running code MUST spawn {compute_peer}** ("calculate / plot it in Python", "matplotlib", "just run it", even without querying a data source): {compute_peer}'s computation capability really runs the code and renders the chart. **Never answer by writing code for the user to copy** ("I'll just write the code for you", "copy it and run it locally", "a pure plotting task with no BI data, I'll write it myself" all violate this). Only a capability question such as "can you draw X" gets prose. (F7)"""
 
 
 # Default delegation wording is rendered from the same roster-aware rule.
@@ -426,20 +426,20 @@ def _deck_clause(deck_peer: str | None, compute_peer: str | None) -> str:
         f"The deliverable is an **ordinary PDF / Excel (xlsx) / Word (docx)** → **{compute_peer}** "
         "(it has the canvas-pdf / canvas-xlsx / canvas-docx export skills); "
         '"export this report as PDF", "make an Excel sheet", "export this report as Word" belong here. '
-        "A template draft's source-derived PDF belongs to its native document workflow, not a separate report export."
+        f"{compute_peer} also runs code in the sandbox: it can open an attached file (PPTX, Word, Excel, CSV) passed by artifact ID, "
+        "edit it with code and return the file."
         if compute_peer
-        else "**The ordinary PDF / Excel (xlsx) / Word (docx) export post currently has no holder** (a team configuration state). "
-        "This does not determine availability of a template draft's source-derived PDF."
+        else "**The ordinary PDF / Excel (xlsx) / Word (docx) export post currently has no holder** (a team configuration state)."
     )
     if deck_peer is None:
         return (
-            "**New PPT slide-deck post currently has no holder** (a team configuration state). This includes reference-style new presentations, "
-            "not uploaded-template updates: their availability is determined separately by the native document Tool. " + export
+            "**New PPT slide-deck post currently has no holder** (a team configuration state). This includes reference-style new presentations. "
+            + export
         )
     distinction = f" **Not** {deck_peer} — {deck_peer} only produces .pptx." if compute_peer else ""
     return (
         f"The deliverable is a **new PPT slide deck** → {deck_peer} (business analysis and reference-style new presentations). "
-        "This route may borrow a reference's style; it does not update the existing slides of an uploaded template. " + export + distinction
+        "Its renderer creates new slides and may borrow a reference's style; it does not change an existing file. " + export + distinction
     )
 
 

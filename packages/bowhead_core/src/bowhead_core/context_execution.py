@@ -65,6 +65,7 @@ class ExecutionContextView:
         projection_key: str | None = None,
         source_dependencies: Callable[[], list[Message] | Awaitable[list[Message]]] | None = None,
         inherited_generation: str | None = None,
+        replaced_generation: str | None = None,
     ) -> None:
         self.db_path = db_path
         self.worker = worker
@@ -78,6 +79,7 @@ class ExecutionContextView:
         self.projection_key = projection_key
         self.source_dependencies = source_dependencies
         self.inherited_generation = inherited_generation
+        self.replaced_generation = replaced_generation
         self.last_budget: TargetContextBudget | None = None
         self.last_request: LLMRequest | None = None
         self.view = ContextView()
@@ -168,7 +170,9 @@ class ExecutionContextView:
                         if record.completion.coverage is None or record.parent_id is None:
                             raise ContextStoreError("context_projection_coverage_unavailable")
                         chain.append(ContextReplacement.committed(graph[record.parent_id].messages, record.completion.coverage, record.messages))
-                    identity = record.parent_id
+                    # A published generation records only its manifest; its
+                    # content is already the projected view, so the chain ends.
+                    identity = record.parent_id if record.parent_id is None or record.parent_id in record.source_refs else None
                 restored = ContextView()
                 for replacement in reversed(chain):
                     restored.adopt(replacement)
@@ -398,17 +402,28 @@ class ExecutionContextView:
         self.last_request = result.request
         return result
 
-    async def conversation_publication(self, messages: list[Message]):
+    async def conversation_publication(self, messages: list[Message], *, hygiene: bool = True):
         """Prepare an exact snapshot for the original successful Turn finalizer.
 
         This closure performs no terminal write itself. The caller must invoke
         it before the original status CAS and commit both in the same transaction.
+
+        ``hygiene`` applies the model-facing history rules to an ordinary answer
+        publication. Manual maintenance publishes its summarized view unchanged.
         """
         if self.lane != "ordinary" or self.last_budget is None:
             raise ContextStoreError("context_conversation_candidate_unavailable")
         projected = deepcopy(self.view.project([message for message in messages if not _is_runtime_note(message)]))
         if balanced_boundaries(projected)[-1] != len(projected):
             raise ContextStoreError("context_conversation_has_pending_tools")
+        if hygiene:
+            from bowhead_core.context_hygiene import published_history, record_publication
+
+            # Only the published message list changes. Source references and the
+            # dependency manifest are prepared below from the same inputs as before.
+            published = published_history(projected)
+            projected = published.messages
+            record_publication(published, session_id=self.worker.session_id, turn_id=self.worker.turn_id)
         dependencies = deepcopy(await self._dependencies())
         from bowhead_core.context_publication import ContextPublication
 
@@ -424,5 +439,6 @@ class ExecutionContextView:
             budget=self.last_budget,
             expected_generation=self.generation,
             inherited_generation=self.inherited_generation,
+            replaced_generation=self.replaced_generation,
             prepared_ancestry=ancestry,
         )

@@ -55,11 +55,11 @@ class NotificationTypeSpec:
     allowed_priorities: frozenset[str] = frozenset()
     resolution: str | None = None
     # Channels beyond the in-app list. "browser": an unread item of this type may be announced in
-    # the open app and as a browser notification (FEATURE_NOTIFICATION_REACH), when its priority is
+    # the open app and as a browser notification, when its priority is
     # one of ``browser_priorities``.
     channels: frozenset[str] = frozenset()
     browser_priorities: frozenset[str] = frozenset({"p1"})
-    # "email_escalation" (FEATURE_NOTIFICATION_DELIVERY): a fixed rule, no model. An item still open
+    # "email_escalation": a fixed rule, no model. An item still open
     # and unread this many seconds after a new occurrence is emailed to each recipient, once.
     # "email_delivery": the type can carry an email its owner configured (a scheduled result, an
     # urgent task alert); the producer decides who, the delivery worker sends it.
@@ -204,7 +204,7 @@ _SPECS: tuple[NotificationTypeSpec, ...] = (
     ),
     _spec("scheduled.recovered", "async_job", "p3", reopen=False),
     _spec("routine.delivered", "async_job", "p3", reopen=False, email_delivery=True),
-    # Raised by the task's own Agent through ``routine_notify`` (FEATURE_ROUTINE_NOTIFY): the level it
+    # Raised by the task's own Agent through ``routine_notify``: the level it
     # chose is the priority (info p3, attention p2, urgent p1); attention and urgent may interrupt.
     _spec(
         "routine.alert",

@@ -1183,7 +1183,10 @@ async def compose_canvas_from_payload(
                 # (ψ-E eager / default ghostwritten cards), which previously built tables without writing back, thereby
                 # overwriting canvas-scoped sources with a current-turn-only list.
                 _f_reg = await _get_reg(bus, canvas_store=canvas_store, canvas_id=canvas.id, turn_id=request.turn_id)
-                _f_reg.ingest_payload_sources(payload.get("sources"), tool_invocations)
+                from bowhead_core.canvas_revise import no_document_chrome as _revision_turn
+
+                # A revise/append turn keeps only sources it actually fetched (`revision_payload_sources`).
+                _f_reg.ingest_payload_sources(payload.get("sources"), tool_invocations, revision=_revision_turn(bus))
                 _f_reg.ingest_tool_invocations(tool_invocations)
                 _f_sources, _f_id2idx = _f_reg.sources, _f_reg.id_to_index
                 # Walk every text-bearing field in every section

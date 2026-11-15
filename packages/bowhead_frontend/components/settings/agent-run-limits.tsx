@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Team agent run limits (turn time, step limit per task, tool calls per turn).
+ * Team agent run limits (turn time, step limit per task, tool and model calls per turn).
  * Design: docs/design/agent-run-limits.md §4.1.1 and the "Agent Run Limits Spec" mockup.
  * Owners and Team admins only (the module and the API are admin-only).
  */
@@ -35,16 +35,22 @@ interface Draft {
   stepMode: StepMode;
   steps: string;
   toolCalls: string;
+  modelCallsMode: StepMode;
+  modelCalls: string;
   modelCallMode: CallMode;
   modelCallSeconds: string;
 }
 
-function draftOf(limits: AgentRunLimits, previousSteps?: string): Draft {
+function draftOf(limits: AgentRunLimits, previous?: Pick<Draft, "steps" | "modelCalls">): Draft {
   return {
     minutes: String(Math.round(limits.turnTimeLimitS / 60)),
     stepMode: limits.stepLimit === null ? "unlimited" : "at_most",
-    steps: limits.stepLimit === null ? (previousSteps ?? "100") : String(limits.stepLimit),
+    steps: limits.stepLimit === null ? (previous?.steps ?? "100") : String(limits.stepLimit),
     toolCalls: String(limits.toolCallLimit),
+    modelCallsMode: limits.modelCallLimit === null ? "unlimited" : "at_most",
+    modelCalls: limits.modelCallLimit == null
+      ? (previous?.modelCalls ?? String(limits.defaults.modelCallLimit ?? 200))
+      : String(limits.modelCallLimit),
     modelCallMode: limits.modelCallTimeLimitS == null ? "automatic" : "at_most",
     modelCallSeconds: String(limits.modelCallTimeLimitS ?? 300),
   };
@@ -89,14 +95,21 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
   const minutesOk = Number.isInteger(minutes) && minutes >= minMinutes && minutes <= maxMinutes;
   const stepsOk = draft.stepMode === "unlimited" || (Number.isInteger(steps) && steps >= r.stepLimit.min && steps <= r.stepLimit.max);
   const toolCallsOk = Number.isInteger(toolCalls) && toolCalls >= r.toolCallLimit.min && toolCalls <= r.toolCallLimit.max;
-  const invalidCount = [minutesOk, stepsOk, toolCallsOk, modelCallOk].filter((ok) => !ok).length;
+  // Hidden against a gateway that predates the setting.
+  const modelCallsRange = r.modelCallLimit;
+  const modelCalls = parseInt10(draft.modelCalls);
+  const modelCallsOk = !modelCallsRange || draft.modelCallsMode === "unlimited"
+    || (Number.isInteger(modelCalls) && modelCalls >= modelCallsRange.min && modelCalls <= modelCallsRange.max);
+  const invalidCount = [minutesOk, stepsOk, toolCallsOk, modelCallsOk, modelCallOk].filter((ok) => !ok).length;
 
-  const baseline = draftOf(limits, draft.steps);
+  const baseline = draftOf(limits, draft);
   const dirty =
     draft.minutes !== baseline.minutes ||
     draft.stepMode !== baseline.stepMode ||
     (draft.stepMode === "at_most" && draft.steps !== baseline.steps) ||
     draft.toolCalls !== baseline.toolCalls ||
+    (!!modelCallsRange && draft.modelCallsMode !== baseline.modelCallsMode) ||
+    (!!modelCallsRange && draft.modelCallsMode === "at_most" && draft.modelCalls !== baseline.modelCalls) ||
     draft.modelCallMode !== baseline.modelCallMode ||
     (draft.modelCallMode === "at_most" && draft.modelCallSeconds !== baseline.modelCallSeconds);
   const canSave = dirty && invalidCount === 0 && !busy;
@@ -112,7 +125,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
       const updated = await action(controller.signal);
       if (controller.signal.aborted) return;
       setLimits(updated);
-      setDraft(draftOf(updated, draft.steps));
+      setDraft(draftOf(updated, draft));
       setSaved(true);
     } catch (caught: unknown) {
       if (controller.signal.aborted) return;
@@ -139,6 +152,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           turnTimeLimitS: minutes * 60,
           stepLimit: draft.stepMode === "unlimited" ? null : steps,
           toolCallLimit: toolCalls,
+          ...(modelCallsRange ? { modelCallLimit: draft.modelCallsMode === "unlimited" ? null : modelCalls } : {}),
           ...(callRange ? { modelCallTimeLimitS: draft.modelCallMode === "automatic" ? null : modelCallSeconds } : {}),
         },
         limits.version,
@@ -330,6 +344,52 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
             </span>
           }
         />
+        {modelCallsRange ? <FieldRow
+          className="agent-run-limits__row"
+          titleId="arl-model-calls-title"
+          title={t("model_calls_title")}
+          help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_run_limits.model_call_limit" label={t("model_calls_title")} />}
+          description={t("model_calls_desc")}
+          control={
+            <span className="agent-run-limits__control">
+              <RadioGroup<StepMode>
+                appearance="segmented"
+                busy={busy}
+                orientation="both"
+                className="agent-run-limits__radios"
+                aria-labelledby="arl-model-calls-title"
+                value={draft.modelCallsMode}
+                onValueChange={(modelCallsMode) => edit({ modelCallsMode })}
+              >
+                <Radio value="unlimited" className="agent-run-limits__radio">{t("steps_unlimited")}</Radio>
+                <Radio value="at_most" className="agent-run-limits__radio">{t("steps_at_most")}</Radio>
+              </RadioGroup>
+              <span className="agent-run-limits__num">
+                <input
+                  id="arl-model-calls"
+                  className="settings-input ui-input agent-run-limits__input"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  aria-label={t("model_calls_input_label")}
+                  aria-invalid={!modelCallsOk}
+                  aria-describedby={fieldDescribedBy("arl-model-calls", { hint: true, error: !modelCallsOk })}
+                  value={draft.modelCalls}
+                  disabled={busy || draft.modelCallsMode === "unlimited"}
+                  onChange={(event) => edit({ modelCalls: event.target.value })}
+                />
+                <span>{t("unit_calls")}</span>
+              </span>
+              <span id="arl-model-calls-hint" className="settings-field__hint">
+                {t("model_calls_hint", { min: modelCallsRange.min, max: modelCallsRange.max })}
+              </span>
+              {!modelCallsOk ? (
+                <span id="arl-model-calls-error" className="settings-field__error" role="alert">
+                  {rangeError(t("model_calls_title"), modelCallsRange.min, modelCallsRange.max)}
+                </span>
+              ) : null}
+            </span>
+          }
+        /> : null}
       </form>
       <Notice tone="muted">{t("footer")}</Notice>
       <SaveBar
@@ -338,7 +398,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
         saveDisabled={!canSave}
         message={invalidCount > 0 ? t("invalid_count", { count: invalidCount }) : t("unsaved")}
         onSave={save}
-        onDiscard={() => { setDraft(draftOf(limits, draft.steps)); setError(null); }}
+        onDiscard={() => { setDraft(draftOf(limits, draft)); setError(null); }}
       />
       {confirmingReset ? (
         <ConfirmDialog
@@ -346,7 +406,9 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           description={t("reset_confirm", {
             minutes: Math.round(limits.defaults.turnTimeLimitS / 60),
             calls: limits.defaults.toolCallLimit,
-          }) + (callRange ? ` ${t("model_call_reset")}` : "")}
+          })
+            + (modelCallsRange ? ` ${t("model_calls_reset", { calls: limits.defaults.modelCallLimit ?? t("steps_unlimited") })}` : "")
+            + (callRange ? ` ${t("model_call_reset")}` : "")}
           confirmLabel={t("reset")}
           cancelLabel={t("cancel")}
           busy={busy}

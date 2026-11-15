@@ -247,7 +247,10 @@ async def test_prepared_publication_does_not_adopt_deleted_source_segments(colla
         await SessionStore(view.db_path).mark_completed(**completion(collab, publication))
 
 
-async def test_cancellation_during_authority_recheck_releases_publication_writer(collab, context_case, monkeypatch):
+async def test_authority_recheck_leaves_the_writer_free_and_its_cancellation_publishes_nothing(collab, context_case, monkeypatch):
+    """Current authority is read before the completion transaction, so another writer is never kept waiting on it."""
+    from bowhead_core.context_dependencies import PreparedContextSourceValidator
+
     from bowhead_core import knowledge_source_runtime
 
     view = legacy_view(collab)
@@ -257,15 +260,22 @@ async def test_cancellation_during_authority_recheck_releases_publication_writer
         await db.execute("CREATE TABLE context_independent_writes(id INTEGER PRIMARY KEY)")
         await db.commit()
     entered = asyncio.Event()
+    rechecking = False
+    recheck = PreparedContextSourceValidator.verify_for_adoption
+
+    async def marked_recheck(self, bodies):
+        nonlocal rechecking
+        rechecking = True
+        return await recheck(self, bodies)
 
     async def paused_authority(ctx, proof):
-        try:
-            await asyncio.to_thread(independent_write, view.db_path)
-        except sqlite3.OperationalError as error:
-            assert error.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        # Raises SQLITE_BUSY if the completion transaction were already open.
+        await asyncio.to_thread(independent_write, view.db_path)
+        if rechecking:
             entered.set()
             await asyncio.Event().wait()
 
+    monkeypatch.setattr(PreparedContextSourceValidator, "verify_for_adoption", marked_recheck)
     monkeypatch.setattr(knowledge_source_runtime, "require_evidence", paused_authority)
     task = asyncio.create_task(SessionStore(view.db_path).mark_completed(**completion(collab, publication)))
     await entered.wait()

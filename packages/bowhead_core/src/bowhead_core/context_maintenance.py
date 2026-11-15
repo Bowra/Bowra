@@ -217,7 +217,7 @@ class ContextMaintenance:
             return await continue_without_summary("automatic_compaction_disabled")
         controller = args["controller"]
         decisions = 1 if manual else 2
-        if controller.budget.step_limit is not None and controller.used + decisions > controller.budget.step_limit:
+        if not controller.has_decisions(decisions):
             return await continue_without_summary("insufficient_remaining_decisions")
         if args["timeout"] <= 0:
             return await continue_without_summary("insufficient_remaining_time")

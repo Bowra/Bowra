@@ -12,9 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from bowhead_gateway.results_capabilities import resolve_results_capabilities
 from bowhead_gateway.results_contracts import (
     ContentSharingCapabilityV1,
+    ResultFileVersionV1,
     ResultsCapabilitiesResponseV1,
     ResultsQueryRequestV1,
     ResultsQueryResponseV1,
+    ResultVersionsRequestV1,
+    ResultVersionsResponseV1,
 )
 from bowhead_gateway.results_cursor import ResultsCursorCodec, ResultsCursorUnavailable
 from bowhead_gateway.results_query_http import (
@@ -265,6 +268,64 @@ async def owner_results_query(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "results_read_model_unavailable",
         ) from exc
+
+
+@owner_router.post(
+    "/sessions/{session_id}/results/versions",
+    response_model=ResultVersionsResponseV1,
+)
+async def owner_result_versions(
+    session_id: str,
+    body: ResultVersionsRequestV1,
+    request: Request,
+    response: Response,
+    user: User = Depends(_current_user),
+) -> ResultVersionsResponseV1:
+    """File versions (R2): the live versions of one file in the owner's Results, newest first.
+
+    The same owner fences as the Results query: the session owner, history read
+    access in its Space, and per-row membership, deletion and internal visibility.
+    An unknown or foreign file and a foreign session are indistinguishable (404).
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie"
+    session_store = getattr(request.app.state, "session_store", None)
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if session_store is None or artifact_store is None:
+        raise coded_results_error(status.HTTP_503_SERVICE_UNAVAILABLE, "results_read_model_unavailable")
+    session = await session_store.get_session(session_id)
+    if session is None or session.user_id != user.id:
+        raise coded_results_error(status.HTTP_404_NOT_FOUND, "results_scope_unavailable")
+    from bowhead_gateway.routes.sessions import _require_workspace_access
+
+    try:
+        await _require_workspace_access(
+            request,
+            user_id=user.id,
+            workspace_id=session.workspace_id,
+            operation=SpaceOperation.READ_HISTORY,
+        )
+    except HTTPException as exc:
+        if exc.status_code in {status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND}:
+            raise coded_results_error(status.HTTP_404_NOT_FOUND, "results_scope_unavailable") from exc
+        raise coded_results_error(status.HTTP_503_SERVICE_UNAVAILABLE, "results_read_model_unavailable") from exc
+    versions = await artifact_store.list_result_versions(session_id=session.id, user_id=user.id, artifact_id=body.artifact_id)
+    if not versions:
+        raise coded_results_error(status.HTTP_404_NOT_FOUND, "results_scope_unavailable")
+    return ResultVersionsResponseV1(
+        versions=[
+            ResultFileVersionV1(
+                artifact_id=artifact.id,
+                version_no=artifact.version_no or 1,
+                filename=artifact.filename,
+                mime=artifact.mime,
+                size=artifact.size,
+                created_at=artifact.created_at,
+                latest=index == 0,
+            )
+            for index, artifact in enumerate(versions)
+        ]
+    )
 
 
 __all__ = ["owner_router", "router"]

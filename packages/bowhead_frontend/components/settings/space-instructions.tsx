@@ -26,6 +26,7 @@ import { useSpace } from "@/lib/use-space";
 import { WORKSPACE_INSTRUCTIONS_SAVED_EVENT, type WorkspaceSettingsSavedTarget } from "@/lib/workspace-settings-notifications";
 
 import styles from "./space-instructions.module.css";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -142,7 +143,9 @@ function useSpaceInstructionsEditor(workspaceId: string) {
       return value;
     } catch (reason) {
       if (mounted.current) {
-        setLoadError(reason instanceof ApiError && [403, 404].includes(reason.status) ? t("load_denied") : t("load_failed"));
+        setLoadError(reason instanceof ApiError && [403, 404].includes(reason.status)
+          ? t("load_denied")
+          : withHttpFailureReason(t("load_failed"), reason, { read: true }));
       }
       return null;
     } finally {
@@ -263,7 +266,7 @@ function useSpaceInstructionsEditor(workspaceId: string) {
       } else if (reason instanceof ApiError && reason.status === 403) {
         setMessage({ tone: "danger", icon: "lock", text: t("error_forbidden"), kind: "forbidden" });
       } else {
-        setMessage({ tone: "danger", icon: "alert", text: t("save_failed") });
+        setMessage({ tone: "danger", icon: "alert", text: withHttpFailureReason(t("save_failed"), reason) });
       }
       return null;
     } finally {

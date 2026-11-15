@@ -45,7 +45,7 @@ def input_properties() -> dict[str, Any]:
         "axes": {
             "type": "object",
             "additionalProperties": False,
-            "description": "Plots only. Bind exact x and y fields, never infer them. Category scales have equal spacing. Scatter uses linear x and exactly one y. Combo uses the first declared y as bars and remaining y fields as lines on the same axis. KPI uses exactly one y only. Heatmap/sankey use x and one group_by field as the second dimension. Dual axis explicitly names y_right. Prepare aggregation and Top N upstream.",
+            "description": "Plots only. Bind exact x and y fields, never infer them. Category scales have equal spacing. Scatter uses linear x and exactly one y. Combo uses the first declared y as bars and remaining y fields as lines on the same axis. KPI uses exactly one y only. Heatmap/sankey use x and one group_by field as the second dimension. Dual axis names its right-axis fields in y_right; they are plotted even when omitted from y, and at least one y field stays on the left axis. Prepare aggregation and Top N upstream.",
             "required": ["y"],
             "properties": {
                 "x": {"type": "string"},
@@ -64,7 +64,25 @@ def input_properties() -> dict[str, Any]:
     }
 
 
+def completed_axes(args: dict[str, Any]) -> dict[str, Any]:
+    """A dual_axis request with every y_right field also in axes.y (Regression check M1).
+
+    A field named only in y_right is still explicitly named, so it is plotted on the right axis
+    rather than refused. Returns a copy when it adds fields; the caller's arguments (the model's
+    recorded tool call) stay unchanged, and the saved binding records the completed axes.
+    """
+    axes = args.get("axes")
+    if args.get("force_kind") != "dual_axis" or not isinstance(axes, dict):
+        return args
+    y, right = axes.get("y"), axes.get("y_right")
+    if not isinstance(y, list) or not isinstance(right, list):
+        return args
+    missing = [key for key in right if isinstance(key, str) and key and key not in y]
+    return {**args, "axes": {**axes, "y": [*y, *missing]}} if missing else args
+
+
 def validate_request(args: dict[str, Any], *, analytical: bool = False) -> None:
+    args = completed_axes(args)
     for key in ("series", "hint", "limit", "sort_by"):
         if key in args:
             raise ExplicitPresentationError(
@@ -121,7 +139,9 @@ def validate_request(args: dict[str, Any], *, analytical: bool = False) -> None:
     if kind == "dual_axis":
         right = _keys(axes.get("y_right"), "/axes/y_right")
         if not set(right) < set(y):
-            raise ExplicitPresentationError("y_right must be a nonempty proper subset of axes.y.", "/axes/y_right")
+            raise ExplicitPresentationError(
+                "y_right names the axes.y fields drawn on the right axis; keep at least one y field on the left axis.", "/axes/y_right"
+            )
     elif "y_right" in axes:
         raise ExplicitPresentationError("Only dual_axis accepts y_right.", "/axes/y_right")
     _keys([axes["x"], *groups, *y], "/axes")
@@ -147,6 +167,7 @@ def compile_view(
     observation_keys: list[str] | None = None,
 ) -> ChartSpec:
     """Compile one view without field discovery, column pruning or data reduction."""
+    args = completed_axes(args)
     validate_request(args, analytical=analytical is not None)
     try:
         text = raw.decode("utf-8-sig")
@@ -222,7 +243,9 @@ def compile_view(
             }
             if len(units) > 1:
                 raise ExplicitPresentationError(
-                    "Fields with different declared units cannot share a value axis; declare dual-axis placement or use separate views.", "/axes/y"
+                    "Fields with different declared units cannot share a value axis. Use force_kind dual_axis with every plotted field in "
+                    "axes.y and the right-axis fields also in axes.y_right, or use separate views.",
+                    "/axes/y",
                 )
         if kind == "dual_axis":
             units = {_declared_unit(column) for column in selected if column.key in axes["y"]}

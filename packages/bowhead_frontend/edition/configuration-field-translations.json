@@ -186,6 +186,7 @@
       "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
       "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
       "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_limit": "7d47595f5cac31cae5c3",
       "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
       "team_run_limits.step_limit": "69d088074266b94b4d99",
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
@@ -388,6 +389,7 @@
       "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
       "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
       "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_limit": "7d47595f5cac31cae5c3",
       "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
       "team_run_limits.step_limit": "69d088074266b94b4d99",
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
@@ -590,6 +592,7 @@
       "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
       "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
       "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_limit": "7d47595f5cac31cae5c3",
       "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
       "team_run_limits.step_limit": "69d088074266b94b4d99",
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
@@ -1371,6 +1374,10 @@
     "team_model_retry.max_retries": {
       "key": "d_e48811dee43adbe01b71",
       "revision": "48048c04431e8d4b45a1"
+    },
+    "team_run_limits.model_call_limit": {
+      "key": "d_31ae8f16122466d147cf",
+      "revision": "7d47595f5cac31cae5c3"
     },
     "team_run_limits.model_call_time_limit_s": {
       "key": "d_998a83cbf07e4d34a2c7",

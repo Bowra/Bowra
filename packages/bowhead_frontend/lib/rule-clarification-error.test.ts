@@ -113,4 +113,18 @@ describe("ruleClarificationErrorPresentation", () => {
     expect(presentation.message).not.toBe(copy.entitlementDenied);
     expect(presentation.diagnostics?.code).toBe(code);
   });
+
+  it("says the service is restarting when a proxy answers a submit with 502", async () => {
+    document.documentElement.lang = "en-US";
+    const { readApiError } = await import("./api-client");
+    const error = await readApiError(
+      new Response("<html><body>502 Bad Gateway</body></html>", { status: 502, headers: { "content-type": "text/html" } }),
+    );
+
+    const presentation = ruleClarificationErrorPresentation(error, { surface: "chat", copy });
+
+    expect(presentation.message).toMatch(/^The action could not be completed\. .+temporarily unavailable/);
+    expect(presentation.diagnostics?.status).toBe(502);
+    document.documentElement.lang = "";
+  });
 });

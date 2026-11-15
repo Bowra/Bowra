@@ -106,6 +106,7 @@ _CHAT_FAILURE_REASON_COMPAT = {
     "peer_dispatch_timeout": "terminal_producer_timeout",
     "agent_step_limit": "terminal_producer_timeout",
     "agent_tool_call_limit": "terminal_producer_timeout",
+    "agent_model_call_limit": "terminal_producer_timeout",
     "agent_stalled": "terminal_producer_timeout",
     "canvas_section_not_found": "terminal_projection_missing",
     "canvas_payload_invalid": "terminal_projection_missing",

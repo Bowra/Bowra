@@ -148,6 +148,45 @@ describe("extractInlineArtifacts", () => {
     }
   });
 
+  it("file versions: a card whose file has a newer version carries it, off-origin latest is ignored", () => {
+    const out = extractInlineArtifacts({
+      inline_artifacts: [
+        {
+          kind: "file",
+          id: "art_v1",
+          filename: "report.html",
+          download_url: "/api/v1/files/art_v1",
+          version_no: 1,
+          latest: { id: "art_v3", version_no: 3, filename: "report.html", size_bytes: 900, download_url: "/api/v1/files/art_v3" },
+          pruned: true,
+        },
+        {
+          kind: "file",
+          id: "art_x",
+          filename: "x.html",
+          download_url: "/api/v1/files/art_x",
+          latest: { id: "art_y", version_no: 2, filename: "x.html", download_url: "https://evil.example/x" },
+        },
+        {
+          kind: "image",
+          id: "art_p1",
+          url: "/api/v1/files/art_p1?disposition=inline",
+          download_url: "/api/v1/files/art_p1",
+          latest: { id: "art_p2", version_no: 2, filename: "chart.png", download_url: "/api/v1/files/art_p2", url: "/api/v1/files/art_p2?disposition=inline" },
+        },
+      ],
+    });
+    const [file, other, image] = out;
+    if (file.kind !== "file" || other.kind !== "file" || image.kind !== "image") throw new Error("unexpected kinds");
+    expect(file.data.latest).toEqual({ id: "art_v3", versionNo: 3, filename: "report.html", sizeBytes: 900, downloadUrl: "/api/v1/files/art_v3" });
+    expect(file.data.versionNo).toBe(1);
+    expect(file.data.pruned).toBe(true);
+    expect(other.data.latest).toBeUndefined();
+    expect(image.id).toBe("art_p1");
+    expect(image.data.id).toBe("art_p2");
+    expect(image.data.url).toBe("/api/v1/files/art_p2?disposition=inline");
+  });
+
   it("drops file entry missing filename or download_url", () => {
     const out = extractInlineArtifacts({
       inline_artifacts: [
@@ -242,5 +281,19 @@ describe("extractInlineArtifacts", () => {
       ],
     });
     expect(out.map((a) => a.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("names the file and version each file card delivered (116 recheck N6)", () => {
+    const out = extractInlineArtifacts({
+      inline_artifacts: [
+        { kind: "file", id: "art_v1", filename: "r.html", download_url: "/api/v1/files/art_v1" },
+        { kind: "file", id: "art_v3", filename: "r.html", download_url: "/api/v1/files/art_v3", lineage_id: "art_v1", version_no: 3 },
+      ],
+    });
+    const lineages = out.map((a) => (a.kind === "file" ? a.data.lineage : undefined));
+    expect(lineages).toEqual([
+      { root: "art_v1", versionNo: 1 },
+      { root: "art_v1", versionNo: 3 },
+    ]);
   });
 });

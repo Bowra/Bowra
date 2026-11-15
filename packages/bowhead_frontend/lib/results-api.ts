@@ -67,6 +67,8 @@ export type ResultItemDTO = {
     duplicate_count: number | null;
   };
   position: number;
+  /** File versions: the shown version's number and how many versions of the file match. */
+  lineage?: { number: number; count: number } | null;
   version: {
     format: "pdf" | "pptx" | "xlsx" | "docx";
     available_version_count: number;
@@ -285,8 +287,34 @@ function parseResultItem(value: unknown): ResultItemDTO | null {
     || (value.object_type === "code" && value.viewer_profile !== "code")
     || (value.object_type === "artifact" && ["report", "code"].includes(value.viewer_profile))
   ) return null;
-  if (value.object_type === "artifact" && route.type === "artifact" && value.key !== `artifact:${route.artifact_id}`) return null;
+  const lineage = value.lineage;
+  if (lineage !== undefined && lineage !== null) {
+    if (
+      value.object_type !== "artifact"
+      || !isRecord(lineage)
+      || !Number.isInteger(lineage.number)
+      || !Number.isInteger(lineage.count)
+      || Number(lineage.number) < 1
+      || Number(lineage.count) < Number(lineage.number)
+    ) return null;
+  }
+  if (value.object_type === "artifact" && route.type === "artifact") {
+    // File versions: a revised file is one entry keyed by its first version,
+    // and its route opens the version it shows. Without a lineage the key is
+    // the shown file itself.
+    const keyed = lineage
+      ? value.key.startsWith("artifact:") && value.key.length > "artifact:".length
+      : value.key === `artifact:${route.artifact_id}`;
+    if (!keyed) return null;
+  }
   return value as ResultItemDTO;
+}
+
+/** Whether a Results key names this item, either directly or as the file version it shows. */
+export function resultItemMatchesKey(item: ResultItemDTO, key: string | null | undefined): boolean {
+  if (!key) return false;
+  return item.key === key
+    || (item.route.type === "artifact" && key === `artifact:${item.route.artifact_id}`);
 }
 
 export function parseResultsQueryResponse(value: unknown): ResultsQueryResponse {
@@ -420,4 +448,58 @@ export async function queryResults({
     if (error instanceof ResultsApiError) throw error;
     throw new ResultsApiError("results_response_invalid");
   }
+}
+
+export type ResultFileVersionDTO = {
+  artifact_id: string;
+  version_no: number;
+  filename: string;
+  mime: string;
+  size: number;
+  created_at: string;
+  latest: boolean;
+};
+
+function parseResultFileVersion(value: unknown): ResultFileVersionDTO | null {
+  if (
+    !isRecord(value)
+    || !isString(value.artifact_id)
+    || typeof value.version_no !== "number"
+    || !isString(value.filename)
+    || !isString(value.mime)
+    || typeof value.size !== "number"
+    || !isString(value.created_at)
+    || typeof value.latest !== "boolean"
+  ) return null;
+  return value as ResultFileVersionDTO;
+}
+
+/** File versions (owner Results only): the live versions of the file this artifact belongs to, newest first. */
+export async function listResultVersions({
+  sessionId,
+  artifactId,
+  signal,
+}: {
+  sessionId: string;
+  artifactId: string;
+  signal?: AbortSignal;
+}): Promise<ResultFileVersionDTO[]> {
+  let response: Response;
+  try {
+    response = await appFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/results/versions`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artifact_id: artifactId }),
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ResultsApiError("results_request_failed");
+  }
+  if (!response.ok) throw await resultsErrorFor(response);
+  const value = await response.json() as unknown;
+  const rows = isRecord(value) && Array.isArray(value.versions) ? value.versions.map(parseResultFileVersion) : null;
+  if (!rows || rows.some((row) => row === null)) throw new ResultsApiError("results_response_invalid");
+  return rows as ResultFileVersionDTO[];
 }

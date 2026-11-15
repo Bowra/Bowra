@@ -182,6 +182,12 @@ def builtin_plugins() -> tuple[BuiltinPlugin, ...]:
     return tuple(_registry().values())
 
 
+@lru_cache(maxsize=1)
+def general_plugin_skill_names() -> frozenset[str]:
+    """Built-in Skills that reach an Agent only through a general Plugin's grant."""
+    return frozenset(grant.name for plugin in builtin_plugins() if plugin.family == "general" for grant in plugin.exact_skill_grants)
+
+
 def resolve_system_plugins(refs: list[str], tools: list[str], grants: list[dict[str, Any]] | None) -> tuple[list[str], list[dict[str, Any]] | None]:
     """Compile pinned resource selections; unknown references and conflicts fail closed."""
     from bowhead_core.system_skill_snapshot import parse_system_manifest_skill_grants

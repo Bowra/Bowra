@@ -150,7 +150,7 @@ async def test_new_report_mode_adds_no_line(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 async def test_revise_mode_coerces_delivery_chat_to_report(monkeypatch: pytest.MonkeyPatch) -> None:
-    """116 dogfood R2：Lead 派 canvas-writer 改措辞时说 delivery=chat ⇒ 早判 chat 把画布事件整条压掉。
+    """Regression check R2：Lead 派 canvas-writer 改措辞时说 delivery=chat ⇒ 早判 chat 把画布事件整条压掉。
     就地改/加章必然动画布：档位赢，delivery 收敛成 report，早判不再是 chat。"""
     runner, bus = await _spawn(monkeypatch, {"canvas_mode": "revise", "delivery": "chat"}, store=_StoreWithReport())
     assert lead_canvas_mode(bus) == "revise"
@@ -206,7 +206,7 @@ async def test_flag_on_missing_canvas_mode_rejected_only_when_prior_report_exist
     # Batch B2-3: second missing/invalid args in a turn use the default mode (guarded by test_canvas_revise_b2); test invalid values in a fresh turn/bus.
     ctx.parent_bus = _FakeBus()
     inv = await registry.execute("subagent_spawn", {"profile": "compute", "task": "t", "canvas_mode": "rewrite"}, ctx)
-    assert "不合法" in str(inv.result.get("error")) and "rewrite" in str(inv.result.get("error")), inv.result
+    assert inv.result.get("path") == "canvas_mode" and "rewrite" not in inv.result.get("error", ""), inv.result
     assert not runner.kwargs
     # No report (no store) ⇒ default new_report, dispatch normally.
     runner2, bus2 = await _spawn(monkeypatch, {})

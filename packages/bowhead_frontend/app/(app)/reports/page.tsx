@@ -51,6 +51,7 @@ import { useEntitlement } from "@/lib/entitlement-store";
 import { toast } from "@/lib/use-toast";
 import { appPath } from "@/lib/base-path";
 import type { ExportFmt } from "@/lib/use-canvas-export";
+import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type SortKey = "updated_desc" | "sections_desc" | "title_asc";
 
@@ -270,7 +271,7 @@ export default function ReportsPage() {
       track("bowhead_report_library_total", { action: deleteSessionToo ? "delete_with_session" : "delete" });
     } catch (e) {
       track("bowhead_report_library_total", { action: "delete_fail" });
-      toast({ kind: "error", text: t("delete_failed"), action: copyDiagnosticsAction(e, "route") });
+      toast({ kind: "error", text: withHttpFailureReason(t("delete_failed"), e), action: copyDiagnosticsAction(e, "route") });
     } finally {
       setDeletingId(null);
     }
@@ -286,7 +287,7 @@ export default function ReportsPage() {
       window.dispatchEvent(new Event("bowhead.canvas.changed"));
       track("bowhead_report_library_total", { action: `status_${to}` });
     } catch (e) {
-      toast({ kind: "error", text: t("status_update_failed"), action: copyDiagnosticsAction(e, "route") });
+      toast({ kind: "error", text: withHttpFailureReason(t("status_update_failed"), e), action: copyDiagnosticsAction(e, "route") });
     } finally {
       setStatusBusyId(null);
     }
