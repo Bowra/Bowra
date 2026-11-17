@@ -48,6 +48,88 @@ async def test_long_shared_transactions_report_only_code_locations(tmp_path, mon
     assert "private_payload" not in records[0]
 
 
+async def test_transaction_check_never_asks_sqlite_from_the_event_loop(monkeypatch, caplog):
+    """The check runs while the worker may be inside a statement; it reads only what the worker recorded."""
+    import asyncio
+
+    monkeypatch.setattr(_db, "_TRANSACTION_WARNING_SECONDS", 0.01)
+
+    class WorkerConnection:
+        bowhead_open_transaction = False
+
+        @property
+        def in_transaction(self) -> bool:
+            raise AssertionError("SQLite was asked from the event loop")
+
+    class Borrowed:
+        _conn = WorkerConnection()
+
+        @property
+        def in_transaction(self) -> bool:
+            raise AssertionError("SQLite was asked from the event loop")
+
+    borrowed = Borrowed()
+    with caplog.at_level(logging.WARNING, logger="bowhead_core._db"):
+        stop = _db._watch_shared_transaction(borrowed)
+        try:
+            await asyncio.sleep(0.05)
+            assert not [record for record in caplog.records if "sqlite.shared_transaction_open" in record.getMessage()]
+            borrowed._conn.bowhead_open_transaction = True
+            await asyncio.sleep(0.05)
+        finally:
+            stop()
+    assert len([record for record in caplog.records if "sqlite.shared_transaction_open" in record.getMessage()]) == 1
+
+
+async def test_writer_wait_past_the_transaction_check_keeps_the_event_loop_running(tmp_path, monkeypatch):
+    """A pooled write that waits for the writer longer than the check interval must not stop the loop.
+
+    From SQLite 3.53.3 ``Connection.in_transaction`` waits for the connection mutex, which the worker
+    holds while ``BEGIN IMMEDIATE`` waits. A check that read it stopped the event loop until the wait
+    ended, and the holder needs the event loop to commit.
+    """
+    import asyncio
+    import time
+
+    monkeypatch.setattr(_db, "_TRANSACTION_WARNING_SECONDS", 0.05)
+    path = tmp_path / "wait.db"
+    _make_db(path)
+    stalls: list[float] = []
+
+    async def beat() -> None:
+        previous = time.monotonic()
+        while True:
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
+            stalls.append(now - previous - 0.01)
+            previous = now
+
+    async def holder() -> None:
+        async with open_shared_ctx(str(path)) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute("UPDATE kv SET v='held' WHERE k='a'")
+            await asyncio.sleep(1.0)
+            await db.commit()
+
+    async def waiter() -> None:
+        await asyncio.sleep(0.1)
+        async with open_shared_ctx(str(path)) as db:
+            # Bounds a regression to three seconds instead of the pool's one-minute wait.
+            await db.execute("PRAGMA busy_timeout=3000")
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute("UPDATE kv SET v='waited' WHERE k='b'")
+            await db.commit()
+
+    heartbeat = asyncio.create_task(beat())
+    try:
+        await asyncio.gather(holder(), waiter())
+    finally:
+        heartbeat.cancel()
+    assert max(stalls) < 0.5
+    _db_conn, value = await _value(path, "b")
+    assert value == "waited"
+
+
 @pytest.fixture(autouse=True)
 async def _empty_pool() -> AsyncIterator[None]:
     await close_pooled_readers()
@@ -162,6 +244,8 @@ async def test_pragmas_changed_by_a_borrower_are_reset(tmp_path: Path) -> None:
             async with db.execute(f"PRAGMA {name}") as cur:
                 pragmas[name] = (await cur.fetchone())[0]
         assert pragmas == {"query_only": 0, "foreign_keys": 1, "synchronous": 1, "busy_timeout": 60000, "secure_delete": 1, "legacy_alter_table": 0}
+        # The value the connection tracks for its own retry window follows the reset as well.
+        assert db._conn.bowhead_busy_timeout_ms == 60000
         async with db.execute("SELECT v FROM kv WHERE k='a'") as cur:
             assert type(await cur.fetchone()) is tuple  # row_factory is back to its default.
         with pytest.raises(sqlite3.IntegrityError):  # Foreign keys are actually enforced again.

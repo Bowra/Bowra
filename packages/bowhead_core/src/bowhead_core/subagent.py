@@ -1455,6 +1455,7 @@ PUBLIC_STEP_ERROR_CODES = frozenset(
         "collaboration_unresolved",
         "collaboration_arguments_invalid",
         "collaboration_coordination_reply_only",
+        "collaboration_user_round_update_only",
         "collaboration_wait_requires_settled_batch",
         "collaboration_wait_already_active",
         "collaboration_wait_invalid",
@@ -1512,6 +1513,8 @@ def _tool_failure_summary(invocations: list[Any]) -> str:
 # Coordination rejections a single correction round may repair: wrong fields, or an
 # action (ask/wait) the reply-only round does not admit.
 _COORDINATION_CORRECTABLE = frozenset({"collaboration_arguments_invalid", "collaboration_coordination_reply_only"})
+# The same for a user round (mid-run steering), whose only call is an update to a running participant.
+_USER_ROUND_CORRECTABLE = frozenset({"collaboration_arguments_invalid", "collaboration_user_round_update_only"})
 
 
 def _coordination_brief(context: dict, execution_id: str, running_line: str) -> str:
@@ -3554,6 +3557,13 @@ class SubagentRunner:
             turn_id=getattr(parent_ctx, "turn_id", None),
             team_id=getattr(parent_ctx, "team_id", None),
         )
+        # Conversation result lookup (docs/sprints/result-lookup-2026-11-15): Lead and every helper can
+        # find the conversation's files by name. It is a system part, so it is added after disabling and
+        # is listed in no manifest; only the Agents that work on settings go without it.
+        from bowhead_core.result_lookup import FIND_RESULTS, SETTINGS_PROFILES
+
+        if profile.name not in SETTINGS_PROFILES and FIND_RESULTS not in _run_tool_deny and FIND_RESULTS not in profile.tool_whitelist:
+            profile = replace(profile, tool_whitelist=(*profile.tool_whitelist, FIND_RESULTS))
         # Agent run limits: the Team's step limit replaces manifest,
         # override and custom-Agent step limits for new Lead and helper executions.
 
@@ -4318,6 +4328,8 @@ class SubagentRunner:
         # Hard circuit breaker: failures in a row per tool, across queries, prevents repeated retries
         # on malformed raw_arguments/missing fields. A success of the tool clears its count.
         tool_failure_counts: dict[str, int] = {}
+        # Script errors seen in this run, by signature; a repeat is stated in the tool message (no refusal).
+        error_signatures: dict[tuple[str, str], int] = {}
         TOOL_HARD_LIMIT = 3  # ≥3 failures in a row per tool → hard denial (#95 reduced from 4)
 
         import time as _ct_time
@@ -4326,6 +4338,7 @@ class SubagentRunner:
             DEFAULT_LIMITS,
             NO_PROGRESS_NUDGE_STEPS,
             NO_PROGRESS_STOP_STEPS,
+            PROGRESS_REFERENCE_KINDS,
             REFUSED_DECISION_LIMIT,
             get_run_limits,
             run_time_budget_s,
@@ -4384,6 +4397,42 @@ class SubagentRunner:
         _unreturned_work_noted = False
         # Consecutive model decisions whose every requested call was refused before execution.
         _refused_decisions = 0
+        # Repeated identical calls with identical results: notice at the 3rd and 5th, refuse from
+        # the 8th (docs/sprints/agent-repeat-guard-2026-11-16/tech-design.md). Status reads of
+        # background operations are declared on their ToolSpec and stay outside the chain.
+        from bowhead_core.agent_repeat_guard import RepeatChain
+        from bowhead_core.agent_repeat_guard import notice_text as _repeat_notice_text
+        from bowhead_core.agent_repeat_guard import refusal_text as _repeat_refusal_text
+        from bowhead_core.agent_repeat_guard import result_digest as _repeat_result_digest
+
+        def _repeat_status_poll(name: str) -> bool:
+            view = getattr(parent_ctx, "tool_view", None) or self.tool_registry
+            return view.is_status_poll(name)
+
+        _repeat_chain = RepeatChain.from_invocations(invocations, is_failure=_is_inv_failure, is_status_poll=_repeat_status_poll)
+
+        def _with_repeat_notice(tc: ToolCall, inv: ToolInvocation, content: str, *, failed: bool) -> str:
+            position = _repeat_chain.observe(
+                tc.name,
+                tc.arguments or {},
+                result=_repeat_result_digest(inv.result, inv.error),
+                failed=failed,
+                decision=iteration,
+                status_poll=_repeat_status_poll(tc.name),
+            )
+            notice = _repeat_notice_text(tc.name, position)
+            if notice is None:
+                return content
+            logger.info(
+                "agent_repeat.notice turn=%s sub=%s profile=%s tool=%s position=%d",
+                parent_turn_id,
+                subagent_id,
+                profile.name,
+                tc.name,
+                position,
+            )
+            return f"{content}\n\n{notice}"
+
         # Lead reached REFUSED_DECISION_LIMIT: the next decision answers without Tools.
         _answer_now = False
         # Set when Lead answers now because only its reserved model decisions remain: a
@@ -4753,6 +4802,9 @@ class SubagentRunner:
         _PEER_ITER_EMIT_DELTA_S = 2.0
 
         _bounce_pending = False  # r4: prior final answer bounced by gate; put this iteration's instruction last
+        # Mid-run steering: the Lead wrote an answer that was sent back for correction. From then on the Turn
+        # is finishing that answer, and an instruction runs as a follow-up Turn, as it does during any final answer.
+        _final_answer_written = False
         source_bounce_used = ordinary_checkpoint.source_bounce_used if ordinary_checkpoint is not None else False
 
         async def prepare_ordinary_question(inv: ToolInvocation, *, iteration: int, question_batch: Sequence[ToolCall]) -> None:
@@ -4966,6 +5018,11 @@ class SubagentRunner:
             else iteration_offset,
             profile.max_iterations + 1,
         ):
+            # Wall time of each step before this iteration's model call, logged as agent.precall_ms.
+            # On 116 (1.7.49) a Lead waited 4 min 39 s between lead.prespawn_ms and its first
+            # llm_call.shape with no log line in between.
+            _precall_t0 = time.perf_counter()
+            _precall_marks: list[tuple[str, float]] = []
             from bowhead_core.knowledge_source_runtime import validate_retained_sources
 
             try:
@@ -4975,6 +5032,7 @@ class SubagentRunner:
             except KnowledgeAccessError:
                 _ν_cleanup_ctx()
                 raise
+            _precall_marks.append(("knowledge", time.perf_counter()))
             if runtime_control is not None:
                 runtime_control.progress()
                 if _forced_first_response is None and not runtime_control.can_decide:
@@ -5009,6 +5067,17 @@ class SubagentRunner:
                 # The preceding native batch is fully settled at this boundary.
                 # Keep accepted inbox data in history, and refresh only cards.
                 collaboration_roster = await collaboration.receive(messages)
+            _steer_inbox = None if _is_helper or _answer_now or _final_answer_written else getattr(parent_ctx, "steer_inbox", None)
+            if _steer_inbox is not None:
+                # Mid-run steering. The preceding batch is settled, so instructions the user
+                # queued meanwhile join the transcript, in their own words, before this step's
+                # model call. A Lead told to answer now takes nothing: they run as a follow-up.
+                # Neither does a Lead correcting an answer it already wrote: taken there, the
+                # instruction displaced the correction and the Lead answered it alone, so the
+                # answer the user had watched was replaced by one sentence (116 the regression case).
+                for _steer_text in await _steer_inbox.take(parent_ctx, iteration=iteration):
+                    messages.append(Message(role="user", content=_steer_text))
+            _precall_marks.append(("inbox", time.perf_counter()))
             # Sprint chat-v4-streaming Phase 4B-1: invocation baseline snapshot
             # for clarification sentinel detection.
             #
@@ -5216,7 +5285,7 @@ class SubagentRunner:
                                 _np_seen_success.add(_np_fp)
                                 _np_progressed = True
                     _np_allowlist = get_current_ref_allowlist()
-                    _np_refs_now = _np_allowlist.reference_count() if _np_allowlist is not None else 0
+                    _np_refs_now = _np_allowlist.reference_count(PROGRESS_REFERENCE_KINDS) if _np_allowlist is not None else 0
                     if _np_refs_now > _np_refs_seen:
                         _np_refs_seen = _np_refs_now
                         _np_progressed = True
@@ -5314,6 +5383,7 @@ class SubagentRunner:
                         _ν15_exc,
                     )
 
+            _precall_marks.append(("refs", time.perf_counter()))
             # Unified date anchor: inject real current date before LLM calls for every agent (Lead/compute/specialist).
             # After allowlist XML so _system_aug reassignment above does not lose it; see _current_date_anchor.
             _system_aug = _system_aug + "\n\n" + _current_date_anchor()
@@ -5372,6 +5442,7 @@ class SubagentRunner:
                 from bowhead_core.result_material_history import load_retained_material_supplement
 
                 _material_supplement = await load_retained_material_supplement(parent_ctx, readers=parent_ctx.material_recovery_readers)
+            _precall_marks.append(("supplement", time.perf_counter()))
 
             _document_inputs = ""
             if parent_ctx.document_caller_execution_id and any(schema.name == "template_document_submit" for schema in _request_schemas):
@@ -5492,6 +5563,7 @@ class SubagentRunner:
                     else:
                         _llm_messages = [*_llm_messages, _hint_message]
             parent_bus._team_operation_tool_loads = int(getattr(parent_bus, "_team_operation_tool_loads", 0)) + len(_request_schemas)
+            _precall_marks.append(("sources", time.perf_counter()))
 
             # turn-latency A (2026-08-24): **read-only** prompt-shape logging.
             #
@@ -5639,6 +5711,7 @@ class SubagentRunner:
                         if not prepared_context.needs_more:
                             break
                     llm_req = prepared_context.request
+                _precall_marks.append(("context", time.perf_counter()))
                 if _material_supplement is not None:
                     from bowhead_core.result_material_history import authorize_material_supplement
 
@@ -5651,12 +5724,25 @@ class SubagentRunner:
                             context_budget=None,
                             output_budget=None,
                         )
+                _precall_marks.append(("recheck", time.perf_counter()))
                 if context_view is None and parent_ctx.context_source_observations is not None:
-                    from bowhead_core.report_read_material import validate_report_read
+                    from bowhead_core.report_read_material import report_read_validation_pass, validate_report_read
 
-                    for observation in parent_ctx.context_source_observations.tool_materials.values():
-                        if observation.get("kind") == "report_read":
-                            await validate_report_read(parent_ctx, observation)
+                    # One pass: the report is read once for all of this Turn's report reads.
+                    with report_read_validation_pass():
+                        for observation in parent_ctx.context_source_observations.tool_materials.values():
+                            if observation.get("kind") == "report_read":
+                                await validate_report_read(parent_ctx, observation)
+                with contextlib.suppress(Exception):  # Timing logs must never affect the run.
+                    _precall_marks.append(("report_reads", time.perf_counter()))
+                    logger.info(
+                        "agent.precall_ms turn=%s profile=%s iter=%d total=%.0f %s",
+                        parent_turn_id,
+                        profile.name,
+                        iteration,
+                        (_precall_marks[-1][1] - _precall_t0) * 1000,
+                        " ".join(f"{_name}={(_at - _precall_t0) * 1000:.0f}" for _name, _at in _precall_marks),
+                    )
                 _llm_call_started_at = utc_now_iso()
                 _llm_call_started = time.perf_counter()
                 _llm_timing: dict[str, float | None] = {
@@ -6345,6 +6431,7 @@ class SubagentRunner:
                         # A server-authored runtime note, never the user's reply to that answer.
                         messages.append(Message(role="user", name=RUNTIME_CORRECTION_NOTE_NAME, content=correction.instruction))
                         if profile.name == "lead" and (resp.content or "").strip():
+                            _final_answer_written = True
                             # The rejected final already streamed; supersede it like every Lead bounce.
                             _rejected_hook = getattr(parent_ctx, "_final_answer_rejected", None)
                             if callable(_rejected_hook):
@@ -6365,8 +6452,8 @@ class SubagentRunner:
             # After salvage, whose recovered tool_calls require the same normalization.
             # Standard: docs/design/工具改名迁移.md.
             canonicalize_tool_calls(resp.tool_calls, source=f"agent_loop:{profile.name}")
-            # Same point for argument shape: a skill_invoke field written beside `input` moves into it
-            # before the call is recorded or executed (116 t_78ba5d3b1429).
+            # Same point for argument shape: a python_sandbox skill_invoke field on the wrong side of `input`
+            # moves before the call is recorded or executed (116 the regression case, the regression case).
             settle_skill_invoke_calls(resp.tool_calls)
             if parent_ctx.document_turn_state is not None:
                 parent_ctx.document_turn_state.select(resp.tool_calls)
@@ -6392,7 +6479,11 @@ class SubagentRunner:
             _round_gate = getattr(parent_ctx, "_round_tool_calls_gate", None)
             if _round_gate is not None:
                 try:
-                    _gate_sentinel = await _round_gate(list(resp.tool_calls), profile.name)
+                    # The gate may author and run a whole Auto Plan. That is this run's work in progress,
+                    # so the stall watchdog must not count it (116 1.7.48 the regression case was cancelled
+                    # as agent_stalled 300 s into its plan), just as it does not count a running tool.
+                    with runtime_control.owned() if runtime_control is not None else contextlib.nullcontext():
+                        _gate_sentinel = await _round_gate(list(resp.tool_calls), profile.name)
                 except Exception:  # noqa: BLE001 — gate itself must never fail a turn
                     if getattr(parent_bus, "_d6_is_plan_execution", False):
                         # A committed Auto Plan cannot fall back to the original
@@ -6429,7 +6520,7 @@ class SubagentRunner:
             survived_tcs: list[tuple[ToolCall, tuple[str, str]]] = []  # (tc, query_key)
             # The failure gates count one attempt per tool per decision: calls of one batch are sent
             # before the model sees any result, so three parallel add_chart calls with three different
-            # argument errors are one failed attempt, not three in a row (116 t_78ba5d3b1429).
+            # argument errors are one failed attempt, not three in a row (116 the regression case).
             _batch_failed_tools: set[str] = set()
             _batch_ok_tools: set[str] = set()
             for tc in resp.tool_calls:
@@ -6590,6 +6681,29 @@ class SubagentRunner:
                             name=tc.name,
                         )
                     )
+                    continue
+
+                # Repeated identical call with identical results: refused from the 8th in a row.
+                # A refused call feeds the refused-decision bound below like any other refusal.
+                _repeat_position = _repeat_chain.refusal_position(tc.name, tc.arguments or {}, status_poll=_repeat_status_poll(tc.name))
+                if _repeat_position is not None:
+                    logger.warning(
+                        "agent_repeat.refused turn=%s sub=%s profile=%s tool=%s position=%d",
+                        parent_turn_id,
+                        subagent_id,
+                        profile.name,
+                        tc.name,
+                        _repeat_position,
+                    )
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=_repeat_refusal_text(tc.name, _repeat_position, _repeat_chain.count),
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                        )
+                    )
+                    _repeat_chain.note_refused(iteration)
                     continue
 
                 # Hard circuit breaker: total same-tool failures ≥limit → hard denial.
@@ -6772,12 +6886,83 @@ class SubagentRunner:
                 invocations.extend(coordinated_invocations)
                 retained_messages.extend(retained)
 
-            async def _await_tools(work, has_spawn=any(tc.name == "subagent_spawn" for tc, _ in survived_tcs)):
+            # Mid-run steering while a delegation is open: operation ids of the forwards
+            # this batch's user rounds sent.
+            user_round_forwards: list[str] = []
+
+            async def _user_instruction_round(
+                context: dict,
+                settled: bool,
+                inbox=_steer_inbox,
+                accepted_request=llm_req,
+                selected_preference=user_pref,
+                selected_timeout=llm_timeout,
+                retained_messages=coordination_messages,
+                forwards=user_round_forwards,
+                step=iteration,
+            ) -> bool:
+                texts = await inbox.take(parent_ctx, iteration=step, while_waiting=True)
+                if not texts:
+                    return False
+                # The Lead keeps the instruction, in the user's words, whatever the round does.
+                retained_messages.extend(Message(role="user", content=text) for text in texts)
+                started = time.monotonic()
+                try:
+                    _usage, round_invocations, retained = await self._coordinate_user_instruction(
+                        context=context,
+                        settled=settled,
+                        accepted_request=accepted_request,
+                        profile=profile,
+                        ctx=parent_ctx,
+                        bus=parent_bus,
+                        subagent_id=subagent_id,
+                        user_pref=selected_preference,
+                        timeout=selected_timeout,
+                        window_guard=_window_guard,
+                        prior_coordination=retained_messages,
+                        runtime_control=runtime_control,
+                        record_usage=record_context_usage,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — the Lead acts on the instruction when the batch settles
+                    logger.warning("steer.round_failed turn=%s error_type=%s", parent_turn_id, type(exc).__name__)
+                    return True
+                invocations.extend(round_invocations)
+                retained_messages.extend(retained)
+                accepted = [
+                    inv.result["operation_id"] for inv in round_invocations if isinstance(inv.result, dict) and inv.result.get("user_revision")
+                ]
+                forwards.extend(accepted)
+                logger.info(
+                    "steer.round turn=%s forwarded=%d refused=%d ms=%d",
+                    parent_turn_id,
+                    len(accepted),
+                    len(round_invocations) - len(accepted),
+                    int((time.monotonic() - started) * 1000),
+                )
+                return True
+
+            async def _await_tools(
+                work, has_spawn=any(tc.name == "subagent_spawn" for tc, _ in survived_tcs), inbox=_steer_inbox, user_round=_user_instruction_round
+            ):
                 async def execute():
                     if collaboration is not None and profile.name == "lead" and has_spawn:
-                        return await collaboration.runtime.while_suspended(
-                            work, execution_id=collaboration.execution_id, coordinate=_coordinate_collaboration
-                        )
+                        if inbox is None:
+                            return await collaboration.runtime.while_suspended(
+                                work, execution_id=collaboration.execution_id, coordinate=_coordinate_collaboration
+                            )
+                        # An accepted instruction wakes the waiting Lead through the runtime.
+                        inbox.waker = collaboration.runtime.notify
+                        try:
+                            return await collaboration.runtime.while_suspended(
+                                work,
+                                execution_id=collaboration.execution_id,
+                                coordinate=_coordinate_collaboration,
+                                user_input=user_round,
+                            )
+                        finally:
+                            inbox.waker = None
                     return await work
 
                 if runtime_control is None:
@@ -6869,7 +7054,17 @@ class SubagentRunner:
                     messages.append(
                         Message(
                             role="tool",
-                            content=_serialize(inv, ref_allowlist=_ν15_allowlist),
+                            content=_with_repeated_failure(
+                                _with_repeat_notice(
+                                    _tc,
+                                    inv,
+                                    _serialize(inv, ref_allowlist=_ν15_allowlist),
+                                    failed=_is_inv_failure(inv) or _is_retry_signal,
+                                ),
+                                _tc.name,
+                                inv,
+                                error_signatures,
+                            ),
                             tool_call_id=_tc.id,
                             name=_tc.name,
                         )
@@ -7033,7 +7228,17 @@ class SubagentRunner:
                     messages.append(
                         Message(
                             role="tool",
-                            content=_serialize(inv, ref_allowlist=_ν15_allowlist),
+                            content=_with_repeated_failure(
+                                _with_repeat_notice(
+                                    _tc,
+                                    inv,
+                                    _serialize(inv, ref_allowlist=_ν15_allowlist),
+                                    failed=_is_inv_failure(inv) or _is_retry_signal,
+                                ),
+                                _tc.name,
+                                inv,
+                                error_signatures,
+                            ),
                             tool_call_id=_tc.id,
                             name=_tc.name,
                         )
@@ -7059,6 +7264,19 @@ class SubagentRunner:
 
             _propagate_tool_result_context(batch_ctx, parent_ctx)
 
+            if user_round_forwards and collaboration is not None:
+                # Every delegation of the batch has returned. A forward its recipient never
+                # read changed nothing; the Lead learns that as a fact and decides what to do.
+                unread_revisions = collaboration.runtime.settle_user_revisions(user_round_forwards)
+                if unread_revisions:
+                    coordination_messages.append(
+                        Message(
+                            role="user",
+                            content="Current state (server data): these revisions were sent while the delegation was running, "
+                            "and their recipient finished without reading them:\n"
+                            + json.dumps({"unread_revisions": unread_revisions}, ensure_ascii=False),
+                        )
+                    )
             # Temporary coordination messages enter the base transcript only
             # after every original native call has its actual Tool result.
             messages.extend(coordination_messages)
@@ -8367,6 +8585,153 @@ class SubagentRunner:
                 except Exception:
                     logger.warning("collaboration.owner_fallback_failed turn=%s", ctx.turn_id, exc_info=True)
         return usage, invocations, retained
+
+    async def _coordinate_user_instruction(
+        self,
+        *,
+        context: dict,
+        settled: bool,
+        accepted_request: LLMRequest,
+        profile: SubagentProfile,
+        ctx: ToolExecutionContext,
+        bus: TurnEventBus,
+        subagent_id: str,
+        user_pref: UserModelPref | None,
+        timeout: float,
+        window_guard: Callable,
+        prior_coordination: list[Message],
+        runtime_control: _RuntimeExecution | None = None,
+        record_usage: Callable[[LLMResponse], None] | None = None,
+    ) -> tuple[TokenUsage, list[ToolInvocation], list[Message]]:
+        """One bounded response to a user instruction taken while a delegation is open.
+
+        Mid-run steering. ``prior_coordination`` already ends with the instruction, in the
+        user's words. The round states only facts (the delegation is still running, and who
+        is working) and offers one action: ``agent_message`` ``update`` to a running
+        participant. The Lead decides whether the running work needs the instruction; a
+        forward is recorded as a user revision. When every call of the first response is
+        refused without effect, the Lead sees the refusals as Tool results and answers once
+        more; an accepted call is never repeated. Without a running participant, or once the
+        batch has settled, no model is called.
+        """
+        from bowhead_core.agent_collaboration_runtime import user_round_refusal
+        from bowhead_core.result_material_history import SUPPLEMENT_NAME
+
+        base = ctx.collaboration_execution
+        running = [
+            card
+            for card in context.get("roster", [])
+            if isinstance(card, dict) and card.get("execution_id") != base.execution_id and card.get("status") in {"admitted", "running"}
+        ]
+        if settled or not running:
+            return TokenUsage(), [], []
+        accepted_request = replace(
+            accepted_request,
+            messages=[message for message in accepted_request.messages if message.role != "user" or message.name != SUPPLEMENT_NAME],
+        )
+        frame = CollaborationExecution(base.runtime, base.execution_id, coordination=True, allow_wait=False, user_round=True)
+        coordination_ctx = copy.copy(ctx)
+        coordination_ctx.collaboration_execution = frame
+        coordination_ctx.collaboration_call = None
+        schema = collaboration_tool_spec().schema
+        schema.input_schema["properties"]["action"]["enum"] = ["update"]
+        state = Message(
+            role="user",
+            content="Current state (server data): your delegation call is still running and its result is not available yet. "
+            "Participants working now:\n" + json.dumps({"participants": running}, ensure_ascii=False),
+        )
+        transcript = [*copy.deepcopy(accepted_request.messages), *copy.deepcopy(prior_coordination), state]
+        from bowhead_core.context_compaction import message_digest
+
+        context_view = self._execution_context_view(
+            ctx=ctx,
+            bus=bus,
+            profile=profile,
+            subagent_id=subagent_id,
+            execution_id=frame.execution_id,
+            lane="coordination",
+            runtime_control=runtime_control,
+            projection_key=message_digest(accepted_request.messages),
+        )
+        if context_view is None:
+            window_guard(transcript, system=accepted_request.system or "", extra_texts=(), user_pref=user_pref)
+        request = replace(
+            accepted_request,
+            messages=transcript,
+            tools=[schema],
+            max_output_tokens=min(accepted_request.max_output_tokens or 2048, 2048),
+            trace_id=accepted_request.trace_id + ":coordination",
+            physical_receipt_recorded=False,
+        )
+        usage = TokenUsage()
+        current_request = len(transcript) - 1
+        invocations: list[ToolInvocation] = []
+        written: str | None = None
+        for correction in range(2):
+            if correction:
+                frame.next_step()
+                request = replace(request, messages=transcript, physical_receipt_recorded=False)
+                if context_view is None:
+                    window_guard(transcript, system=request.system or "", extra_texts=(), user_pref=user_pref)
+            response = await self._invoke_coordination_model(
+                request=request,
+                frame=frame,
+                profile=profile,
+                user_pref=user_pref,
+                timeout=timeout,
+                usage=usage,
+                runtime_control=runtime_control,
+                context_view=context_view,
+                prefix_count=len(accepted_request.messages),
+                current_request=current_request,
+                on_usage=record_usage,
+            )
+            if response is None:
+                break
+            written = response.content or ""
+            current: list[ToolInvocation] = []
+            for call in response.tool_calls:
+                if call.name != "agent_message":
+                    invocation = ToolInvocation(tool_name=call.name, arguments=call.arguments, call_id=call.id, result=user_round_refusal())
+                else:
+                    invocation = await self._execute_tool(
+                        call,
+                        coordination_ctx,
+                        bus,
+                        ctx.turn_id,
+                        subagent_id,
+                        running_profile=profile.name,
+                        execution_profile=profile,
+                    )
+                current.append(invocation)
+            invocations.extend(current)
+            # Only a response whose every call was refused without effect is answered again.
+            refused = bool(current) and all(isinstance(inv.result, dict) and inv.result.get("error") in _USER_ROUND_CORRECTABLE for inv in current)
+            if correction or not refused:
+                break
+            transcript.append(
+                Message(
+                    role="assistant", content=response.content or "", tool_calls=response.tool_calls, provider_reasoning=response.provider_reasoning
+                )
+            )
+            transcript.extend(
+                Message(role="tool", name=inv.tool_name, tool_call_id=inv.call_id, content=json.dumps(inv.result, ensure_ascii=False))
+                for inv in current
+            )
+        if written is None:
+            # No response was admitted, so there is nothing to record.
+            return usage, [], []
+        record = CollaborationExecution.input_message(
+            [
+                {
+                    "coordination_response": written,
+                    "receipts": [
+                        {"tool": inv.tool_name, "arguments": inv.arguments, "result": inv.result, "error": inv.error} for inv in invocations
+                    ],
+                }
+            ]
+        )
+        return usage, invocations, [record]
 
     async def _coordination_attempts(
         self,
@@ -10867,6 +11232,12 @@ def _prettify_output_preview(
             )
         return _t("已写入报告", "Written to report")
 
+    if tool_name == "find_results" and isinstance(result, dict) and result.get("ok") is True:
+        found = result.get("total")
+        if isinstance(found, int) and found > 0:
+            return _t(f"找到 {found} 个结果", f"Found {found} result{'s' if found != 1 else ''}")
+        return _t("没有匹配的结果", "No matching results")
+
     if tool_name == "read_report" and isinstance(result, dict):
         if result.get("report_read") is True:
             return _t("已读取报告", "Read report")
@@ -11448,6 +11819,44 @@ def _figure_anchor_id(inv: ToolInvocation, ref_allowlist: Any) -> str | None:
         return None
 
 
+_SCRIPT_TOOLS = frozenset({"python_exec", "python_sandbox", "skill_invoke"})
+_EXCEPTION_LINE = re.compile(r"\s*([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt)\b.*)$")
+_TRACE_FRAME = re.compile(r'File "([^"]+)", line (\d+)')
+
+
+def script_error_signature(result: Any) -> tuple[str, str] | None:
+    """The last exception line of a failed script and, when it is outside the script itself, its last frame."""
+    if not isinstance(result, dict):
+        return None
+    nested = result.get("result_json") if isinstance(result.get("result_json"), dict) else {}
+    text = "\n".join(value for holder in (result, nested) for key in ("stderr", "error") if isinstance(value := holder.get(key), str) and value)
+    exception = next((match.group(1).strip() for line in reversed(text.splitlines()) if (match := _EXCEPTION_LINE.match(line))), None)
+    if exception is None:
+        return None
+    exception = re.sub(r"0x[0-9a-fA-F]+", "0x…", exception)[:160]
+    frames = _TRACE_FRAME.findall(text)
+    where = ""
+    if frames and not frames[-1][0].endswith("user.py"):
+        where = f"{frames[-1][0].rsplit('site-packages/', 1)[-1]}:{frames[-1][1]}"
+    return exception, where
+
+
+def _with_repeated_failure(content: str, tool_name: str, inv: ToolInvocation, seen: dict[tuple[str, str], int]) -> str:
+    """Append one sentence when a script fails with an error this run has already seen. Nothing is refused."""
+    if tool_name not in _SCRIPT_TOOLS or not _is_inv_failure(inv):
+        return content
+    signature = script_error_signature(inv.result)
+    if signature is None:
+        return content
+    earlier = seen.get(signature, 0)
+    seen[signature] = earlier + 1
+    if earlier == 0:
+        return content
+    exception, where = signature
+    note = f"Same error as {earlier} earlier failed call{'s' if earlier > 1 else ''} in this run: {exception}" + (f" (at {where})." if where else ".")
+    return f"{content}\n\n{note}"
+
+
 def _serialize(inv: ToolInvocation, *, ref_allowlist: Any = None) -> str:
     """工具结果 → 送进 LLM 上下文的那个字符串。
 
@@ -11468,6 +11877,9 @@ def _serialize(inv: ToolInvocation, *, ref_allowlist: Any = None) -> str:
         inv.result,
         figure_anchor_id=_figure_anchor_id(inv, ref_allowlist),
     )
+    if isinstance(projected, _mv.ModelText) and inv.material_refs is None:
+        # Already complete model text (a readable Skill); JSON would escape it.
+        return str(projected)
     from bowhead_core.result_materials import recovery_enabled
 
     if recovery_enabled() and isinstance(projected, dict):
@@ -11929,6 +12341,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         def source_context(context):
             child = copy_source_scope(context)
             child.required_web_sources = tuple(sorted(declared_sources))
+            # Only the Lead takes the user's mid-run instructions.
+            child.steer_inbox = None
             return child
 
         data_hint = args.get("data_hint")
@@ -14231,7 +14645,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                             "type": "string",
                             "enum": ["chat", "report"],
                             "description": (
-                                "交付面。**判据只有一条：用户这次有没有要一份「文档」**——报告 / 文档 / 分章节的长篇，或点名要 PDF·Word·Excel·PPT 导出。"
+                                "交付面。**判据只有一条：用户这次有没有要一份「文档」**——报告 / 文档 / 分章节的长篇，或要把这样的长文导出。"
+                                "'report' 产出的是画布报告。用户要的文件（按他的模板填好的 PPTX、新做的演示文稿、表格、CSV）由 peer 直接写成结果文件，"
+                                "chat 和 report 下都会交回，不需要 report。"
                                 "明说要 → 'report'（**必须同时给 `delivery_quote` 引一句原话**）；明说不要报告 / 要简短答复 → 'chat'。"
                                 "**没明说就别传这个参数**：你现在还没取数、没看到任何结果，判不了这轮会产出多少内容——那是 peer 跑完才知道的事，"
                                 "把决定留给它（它会在 payload 里写 delivery_surface）。"

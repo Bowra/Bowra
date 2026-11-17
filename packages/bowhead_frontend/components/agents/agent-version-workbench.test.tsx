@@ -1375,8 +1375,8 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
   });
 
   it.each([false, true])("waits for suites without presenting a conflict (initial=%s)", async (initial) => {
-    let resolve!: (value: typeof manager) => void;
-    vi.mocked(getAgentEvalManager).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { promise, resolve } = Promise.withResolvers<typeof manager>();
+    vi.mocked(getAgentEvalManager).mockReturnValueOnce(promise);
     const suggested = { ...caseProposal, base: initial ? { ...caseProposal.base, suite_revision_id: null, initial_suite_name: "New checks" } : caseProposal.base };
     vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [suggested] });
     renderPanel({ view: "proposals" }, "en-US");
@@ -1393,10 +1393,10 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
   });
 
   it("retries a failed suite read without regenerating the proposal or losing edits", async () => {
-    let resolve!: (value: typeof manager) => void;
+    const { promise, resolve } = Promise.withResolvers<typeof manager>();
     vi.mocked(getAgentEvalManager)
       .mockRejectedValueOnce(new ApiError(503, "Private upstream detail"))
-      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+      .mockReturnValueOnce(promise);
     vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [caseProposal] });
     vi.mocked(acceptAgentProposalSuggestedCases).mockResolvedValue({ decision_id: "acpd_retry", suite_revision_id: "aev_2" });
     const view = renderPanel({ view: "proposals" }, "en-US");

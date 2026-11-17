@@ -247,3 +247,47 @@ async def test_user_store_failure_degrades_to_other_origins(tmp_path, monkeypatc
     )
     entries = await list_effective_skills(ctx, _FakeCatalog([_catalog_spec("builtin-a")]))
     assert [e.name for e in entries] == ["builtin-a", "team-skill"]
+
+
+@pytest.mark.asyncio
+async def test_lead_listing_answers_preferences_from_one_read_and_batches_grants(tmp_path, monkeypatch):
+    """Each Lead start listed custom Skills with one store read per name (11 connections, about 100
+    database round trips; 6-8 s on a busy 116, 1.7.49). The rows read for the listing now answer the
+    user and Team preferences, and grants are decided in one batch, with the same entries."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "1")
+
+    class _ListOnlyStore(_FakeUserStore):
+        async def get(self, *, user_id, name):
+            raise AssertionError("the listing reads the caller's rows once")
+
+    class _Access:
+        batches = 0
+
+        async def explain_decisions(self, ctx, kind, ids, permission):
+            type(self).batches += 1
+            return {rid: {"allowed": rid != "denied", "reason": "explicit_deny" if rid == "denied" else None} for rid in ids}
+
+        async def explain_decision(self, *args, **kwargs):
+            raise AssertionError("grants are decided in one batch")
+
+    off = _write_user_skill(tmp_path, "u1", "off")
+    off.enabled = False
+    rows = [
+        _write_user_skill(tmp_path, "u1", "mine"),
+        _write_user_skill(tmp_path, "u1", "denied"),
+        off,
+        SimpleNamespace(name="team:oskill_team-off", source_type="team_shared", enabled=False, source_path=""),
+        SimpleNamespace(name="team-legacy-off", source_type="team_shared", enabled=False, source_path=""),
+    ]
+    ctx = _ctx(
+        skill_instance_store=_ListOnlyStore(rows),
+        team_skill_store=_FakeTeamStore([_team_rec("team-on"), _team_rec("team-off"), _team_rec("team-legacy-off")]),
+        access_control_store=_Access(),
+        access_context={"team_id": "t1", "user_id": "u1"},
+    )
+
+    entries = await list_effective_skills(ctx, _FakeCatalog([]), include_catalog=False)
+
+    assert [(entry.name, entry.origin) for entry in entries] == [("mine", "user"), ("team-on", "team")]
+    assert _Access.batches == 1

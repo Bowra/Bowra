@@ -3271,10 +3271,11 @@ async def test_mcp_http_runs_exact_native_model_tool_loop_and_projects_evidence(
             assert (await case.fixture.case.store.get_turn(turn_id)).status == "failed"
             return
         await settled(turn_id)
-        assert route.call_count == 2
+        # The MCP call, the prose answer, and the answer to the one unreturned-work note.
+        assert route.call_count == 3
         replay = await case.client.post("/api/v1/chat/send", json=body)
         assert replay.status_code == 200 and replay.json() == response.json()
-        assert route.call_count == 2
+        assert route.call_count == 3
 
     assert external_calls == [("ots_finance", "getMargin", {"year": 2025})]
     if with_attachment:

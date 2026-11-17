@@ -165,6 +165,7 @@ EventType = Literal[
     "plan_failed",  # payload: {plan_id, reason}
     "step_blocked",  # payload: {plan_id, step_id, error_kind, reason} — precondition gate
     "step_failed",  # payload: {plan_id, step_id, error_kind}
+    "steer.applied",  # payload: {items:[{text, queued_at, submission_id?}], position, iteration, while_waiting, waited_ms} — the running Lead took queued instructions into this Turn (mid-run steering); no follow-up Turn runs for them
     "turn.follow_up",  # payload: {follow_up_turn_id, follow_up_stream_url, reason, buffered_count, attachments, execution_generation} — emitted on original bus before close when steer drain spawned a continuation turn; FE subscribes to follow_up_stream_url to continue
     # Phase 1.6 G3 — Lead narrative streaming (PRD §2.2 success metric: ≥80% slow turn narrative visible).
     # Emitted alongside scanner-gated safe_text deltas in lead_orchestrator

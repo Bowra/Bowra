@@ -194,7 +194,8 @@ async def test_single_agent_actual_model_loop_preserves_baseline_and_physical_re
             route = mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
             assert result.ok and result.final_answer == "OK"
-            assert route.call_count == (2 if invocation else 1)
+            # A successful invocation's prose answer gets one unreturned-work note.
+            assert route.call_count == (3 if invocation else 1)
         assert len(calls) == (1 if invocation else 0)
         if invocation:
             assert calls[0][2] == original and not calls[0][1].exists()

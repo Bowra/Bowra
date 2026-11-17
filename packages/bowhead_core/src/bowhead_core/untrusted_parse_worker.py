@@ -83,8 +83,19 @@ def _run_attachment(control: dict[str, Any]) -> dict[str, Any]:
 def _run_pptx_result_view(control: dict[str, Any]) -> dict[str, Any]:
     from bowhead_core.pptx_result_view import inspect_pptx
 
-    template = Path(control["template_path"]).read_bytes() if control.get("template_path") else None
-    return inspect_pptx(Path(control["data_path"]).read_bytes(), template)
+    template, pdf, template_pdf = (
+        Path(control[name]).read_bytes() if control.get(name) else None for name in ("template_path", "pdf_path", "template_pdf_path")
+    )
+    return inspect_pptx(Path(control["data_path"]).read_bytes(), template, pdf, template_pdf)
+
+
+def _run_pptx_render_copy(control: dict[str, Any]) -> dict[str, Any]:
+    import base64
+
+    from bowhead_core.pptx_result_view import chart_point_count_copy
+
+    copy = chart_point_count_copy(Path(control["data_path"]).read_bytes())
+    return {} if copy is None else {"copy_base64": base64.b64encode(copy).decode("ascii")}
 
 
 def _run_template(control: dict[str, Any]) -> dict[str, Any]:
@@ -115,6 +126,12 @@ def main() -> int:
             result = _run_template(control)
         elif kind == "pptx_result_view":
             result = _run_pptx_result_view(control)
+        elif kind == "pptx_render_copy":
+            result = _run_pptx_render_copy(control)
+        elif kind == "pptx_structure":
+            from bowhead_core.pptx_result_view import deck_structure
+
+            result = deck_structure(Path(control["data_path"]).read_bytes())
         else:
             _err(f"unknown kind {kind!r}")
             return 2

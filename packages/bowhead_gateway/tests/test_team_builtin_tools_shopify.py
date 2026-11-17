@@ -14,7 +14,7 @@ from bowhead_core.shopify_client import ADMIN_API_VERSION, ShopifyClient
 from bowhead_core.tool_registry import ToolExecutionContext
 from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import team_builtin_tools as routes
-from bowhead_gateway.routes import tool_confirmations
+from bowhead_gateway.routes import team_plugins, tool_confirmations
 from bowhead_gateway.routes.auth import _current_user
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
@@ -42,6 +42,7 @@ async def setup(tmp_path, monkeypatch):
     app.state.user_store = store
     app.state.skill_catalog = default_catalog()
     app.include_router(routes.router, prefix="/api/v1/team-builtin-tools")
+    app.include_router(team_plugins.router, prefix="/api/v1/team-capabilities")
     state = SimpleNamespace(
         user=User(id="user_1", team_id="team_1", email="user_1@example.com", status="active"),
         calls=[],
@@ -96,6 +97,20 @@ async def setup(tmp_path, monkeypatch):
 _INPUT = {"name": "Commerce", "shop_domain": "fixture-shop.myshopify.com", "client_id": "fixture-client", "client_secret": "fixture-secret"}
 
 
+async def _templates(http) -> dict[str, dict]:
+    response = await http.get("/api/v1/team-builtin-tools/plugin-templates")
+    assert response.status_code == 200, response.text
+    return {item["id"]: item for item in response.json()["templates"]}
+
+
+async def _create_from_template(http, template: dict) -> dict:
+    """Save a template the way the Plugin editor does: through the ordinary create route."""
+    body = {"name": template["id"], "description": "", "tool_refs": template["tool_refs"], "skill_grants": template["skill_grants"]}
+    response = await http.post("/api/v1/team-capabilities", json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 async def test_admin_connection_plugin_and_agent_tool_use_the_same_shop(setup):
     response = await setup.http.post("/api/v1/team-builtin-tools/shopify", json=_INPUT)
     assert response.status_code == 200, response.text
@@ -108,9 +123,11 @@ async def test_admin_connection_plugin_and_agent_tool_use_the_same_shop(setup):
     assert "fixture-secret" not in saved.auth_ref
     assert saved.config["shop_gid"] == "gid://shopify/Shop/1"
     assert await setup.store.get_team_builtin_tool_instance("other_team", tool_id) is None
-    created = await setup.http.post(f"/api/v1/team-builtin-tools/shopify/{tool_id}/plugin")
-    assert created.status_code == 200, created.text
-    plugin = created.json()
+    templates = await _templates(setup.http)
+    assert set(templates) == {f"shopify_analysis:{tool_id}"}
+    # The editor writes "Shopify analysis · <name>"; the connection's own name, without the source prefix.
+    assert templates[f"shopify_analysis:{tool_id}"]["connection_name"] == connection["name"]
+    plugin = await _create_from_template(setup.http, templates[f"shopify_analysis:{tool_id}"])
     assert plugin["status"] == "active"
     assert plugin["skill_grants"][0]["skill_ref"]["id"] == "builtin:shopify-analysis"
     assert plugin["skill_grants"][0]["permissions"] == ["read"]
@@ -149,7 +166,7 @@ async def test_member_cannot_manage_or_read_connection_credentials(setup):
         ("PATCH", f"/api/v1/team-builtin-tools/shopify/{tool_id}", {"connection_revision": 1, "client_secret": "new-secret"}),
         ("PATCH", f"/api/v1/team-builtin-tools/shopify/{tool_id}/status", {"connection_revision": 1, "enabled": False}),
         ("DELETE", f"/api/v1/team-builtin-tools/shopify/{tool_id}", None),
-        ("POST", f"/api/v1/team-builtin-tools/shopify/{tool_id}/plugin", None),
+        ("GET", "/api/v1/team-builtin-tools/plugin-templates", None),
     ]:
         response = await setup.http.request(method, url, json=body)
         assert response.status_code == 403, response.text
@@ -211,12 +228,11 @@ async def test_content_plugin_http_review_and_native_write_keep_analysis_readonl
     setup.state.objects["page"] = original
     connection = (await setup.http.post("/api/v1/team-builtin-tools/shopify", json=_INPUT)).json()
     tool_id = connection["id"]
-    analysis = (await setup.http.post(f"/api/v1/team-builtin-tools/shopify/{tool_id}/plugin")).json()
+    templates = await _templates(setup.http)
+    analysis = await _create_from_template(setup.http, templates[f"shopify_analysis:{tool_id}"])
     assert len(analysis["tool_refs"]) == 11
     assert not any("content_update" in ref for ref in analysis["tool_refs"])
-    response = await setup.http.post(f"/api/v1/team-builtin-tools/shopify/{tool_id}/content-plugin")
-    assert response.status_code == 200, response.text
-    plugin = response.json()
+    plugin = await _create_from_template(setup.http, templates[f"shopify_content:{tool_id}"])
     assert plugin["skill_grants"][0]["skill_ref"]["id"] == "builtin:shopify-content-optimization"
     assert plugin["skill_grants"][0]["permissions"] == ["read"]
     assert f"teammcp.{tool_id}.shopify_apply_content_update" in plugin["tool_refs"]
@@ -264,9 +280,10 @@ async def test_content_plugin_http_review_and_native_write_keep_analysis_readonl
     assert "fixture-secret" not in repr(items) + repr(result) + repr(plugin)
 
 
-async def test_content_plugin_is_unavailable_without_admission_and_members_cannot_create_it(setup, monkeypatch):
+async def test_content_template_is_unavailable_without_admission_and_members_cannot_list_templates(setup, monkeypatch):
     tool_id = (await setup.http.post("/api/v1/team-builtin-tools/shopify", json=_INPUT)).json()["id"]
-    assert (await setup.http.post(f"/api/v1/team-builtin-tools/shopify/{tool_id}/content-plugin")).status_code == 422
+    assert set(await _templates(setup.http)) == {f"shopify_analysis:{tool_id}"}
     monkeypatch.setenv("FEATURE_SHOPIFY_CONTENT_WRITES", "1")
+    assert set(await _templates(setup.http)) == {f"shopify_analysis:{tool_id}", f"shopify_content:{tool_id}"}
     setup.state.user = User(id="owner_1", team_id="team_1", email="owner_1@example.com", status="active")
-    assert (await setup.http.post(f"/api/v1/team-builtin-tools/shopify/{tool_id}/content-plugin")).status_code == 403
+    assert (await setup.http.get("/api/v1/team-builtin-tools/plugin-templates")).status_code == 403

@@ -13,10 +13,12 @@ from bowhead_core import SessionStore, UserMemoryStore
 
 
 @pytest.fixture
-async def app_ctx(tmp_path):
+async def app_ctx(tmp_path, initialize_migrated_core_database):
     from bowhead_core import ArtifactStore, LocalBackend
 
     db = tmp_path / "test.db"
+    # Session detail reads migration-owned context tables (0206); start from the real baseline.
+    initialize_migrated_core_database(db)
     memory = UserMemoryStore(db)
     sess = SessionStore(db)
     art = ArtifactStore(

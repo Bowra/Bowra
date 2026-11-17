@@ -31,7 +31,7 @@ from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Any, ClassVar, Final, Literal, Protocol
 from uuid import uuid4
 
-from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core._db import open_shared_ctx
 from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 logger = logging.getLogger(__name__)
@@ -197,16 +197,26 @@ def _defaults_for_kind(kind: str) -> tuple[str, str]:
 
 @contextlib.asynccontextmanager
 async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None) -> AsyncIterator[aiosqlite.Connection]:
-    """Sprint ι (P1 #1): unified aiosqlite connect helper that:
-    - sets PRAGMA foreign_keys=ON per connection for local relational guards.
-    - reserves single hook for future per-conn settings (busy_timeout, etc.).
+    """The one way this module and its callers reach the file records database.
+
+    Without ``connection`` the block borrows a pooled connection (``open_shared_ctx``)
+    and gives it back afterwards. Opening one instead costs about 30 ms of CPU on
+    the 116 schema, because every new connection parses the whole schema and
+    attaches the other domain files; with a few Turns running, file lookups
+    alone opened about 20 connections a second and filled all four cores
+    (2026-11-15, 1.7.43). A block that raises, is cancelled, or leaves a
+    transaction open still gets its connection closed instead of reused.
+
+    The borrowed connection has ``foreign_keys=ON`` and the pool's other settings.
+    It commits with ``synchronous=FULL``, as a newly opened connection does, so a
+    committed file record survives power loss; the pool restores its own setting
+    when the connection goes back.
 
     A supplied connection remains caller-owned; its row factory is restored
     without committing, rolling back, changing PRAGMAs or opening another connection.
 
-    All call sites in artifact_store.py route through this. Direct
-    `aiosqlite.connect(self.db_path)` in this file is now a lint violation
-    (contract test in test_iota_aiosqlite_contract.py enforces).
+    Every call site in artifact_store.py routes through this; the contract test
+    in test_iota_aiosqlite_contract.py rejects a connection opened anywhere else.
     """
     if connection is not None:
         previous_factory = connection.row_factory
@@ -215,8 +225,10 @@ async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None)
         finally:
             connection.row_factory = previous_factory
         return
-    async with diagnostic_connect(db_path) as db:
-        await db.execute("PRAGMA foreign_keys = ON")
+    async with open_shared_ctx(db_path) as db:
+        # Closed here, not dropped: a dropped cursor is an open read until the loop closes it (see _db._run_setup).
+        async with db.execute("PRAGMA main.synchronous=FULL"):
+            pass
         yield db
 
 
@@ -542,6 +554,11 @@ class ObjectHead:
     etag: str | None
     mime: str | None
     identity: str | None = None
+
+
+# SVG is XML source that a browser executes as a document. It is stored and read as text and
+# served only as an isolated attachment, never through the raster image paths.
+SVG_MIME = "image/svg+xml"
 
 
 # mime → business family (frontend icons / filters)
@@ -2495,15 +2512,8 @@ class ArtifactStore:
         # ASC traversal with later overwrites ⇒ newest artifact for duplicate names (version from the last run).
         return {str(name): str(aid) for aid, name in rows}
 
-    async def list_session_deliverables(self, *, session_id: str, user_id: str, exclude_turn_id: str = "", limit: int = 12) -> list[Artifact]:
-        """Newest ready deliverables this user's earlier Turns produced in a session.
-
-        Revision targets list these for Lead. One indexed join on ``created_by_turn``
-        (not the full Results membership union); Results-internal outputs, template
-        documents and purge-claimed files are excluded so a listed file can be revised.
-        """
-        if not session_id or not user_id:
-            return []
+    async def _session_deliverables_sql(self, *, session_id: str, user_id: str, exclude_turn_id: str) -> tuple[str, tuple[object, ...]]:
+        """``FROM … WHERE`` of a session's revisable deliverables; the list and its count share it so they cannot drift."""
         from bowhead_core.results_artifact_policy import results_internal_artifact_sql
 
         internal, internal_params = results_internal_artifact_sql("a")
@@ -2514,21 +2524,149 @@ class ArtifactStore:
             if await self.versions_supported()
             else ""
         )
+        return (
+            "FROM artifacts a JOIN turns t ON t.id = a.created_by_turn "
+            "WHERE t.session_id = ? AND a.created_by = ? AND a.created_by_turn <> ? "
+            "AND a.kind IN ('deliverable', 'deck_preview') AND a.status = 'ready' AND a.deleted_at IS NULL "
+            "AND COALESCE(a.producer_kind, '') NOT IN ('template_document_v1', 'template_document_internal_v1') "
+            f"AND NOT {internal} "
+            "AND NOT EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) "
+            f"{latest_only}",
+            (session_id, user_id, exclude_turn_id or "", *internal_params),
+        )
+
+    async def list_session_deliverables(self, *, session_id: str, user_id: str, exclude_turn_id: str = "", limit: int = 12) -> list[Artifact]:
+        """Newest ready deliverables this user's earlier Turns produced in a session.
+
+        Revision targets list these for Lead. One indexed join on ``created_by_turn``
+        (not the full Results membership union); Results-internal outputs, template
+        documents and purge-claimed files are excluded so a listed file can be revised.
+        """
+        if not session_id or not user_id:
+            return []
+        scope, params = await self._session_deliverables_sql(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id)
         async with _open_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT a.* FROM artifacts a JOIN turns t ON t.id = a.created_by_turn "  # noqa: S608 — fixed predicate text
-                "WHERE t.session_id = ? AND a.created_by = ? AND a.created_by_turn <> ? "
-                "AND a.kind IN ('deliverable', 'deck_preview') AND a.status = 'ready' AND a.deleted_at IS NULL "
-                "AND COALESCE(a.producer_kind, '') NOT IN ('template_document_v1', 'template_document_internal_v1') "
-                f"AND NOT {internal} "
-                "AND NOT EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) "
-                f"{latest_only}"
-                "ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
-                (session_id, user_id, exclude_turn_id or "", *internal_params, int(limit)),
+                f"SELECT a.* {scope}ORDER BY a.created_at DESC, a.id DESC LIMIT ?",  # noqa: S608 — fixed predicate text
+                (*params, int(limit)),
             ) as cur:
                 rows = await cur.fetchall()
         return [_row_to_artifact(r) for r in rows]
+
+    async def count_session_deliverables(self, *, session_id: str, user_id: str, exclude_turn_id: str = "") -> int:
+        """How many files ``list_session_deliverables`` would list without its limit.
+
+        Lead's delivered-files list states this total when it shows fewer, so a file
+        that is not shown is not taken for one that does not exist.
+        """
+        if not session_id or not user_id:
+            return 0
+        scope, params = await self._session_deliverables_sql(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id)
+        async with _open_db(self.db_path) as db, db.execute(f"SELECT COUNT(*) {scope}", params) as cur:  # noqa: S608 — fixed predicate text
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def find_session_results(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        kinds: Sequence[str] = (),
+        sources: Sequence[str] = (),
+        name: str = "",
+        limit: int = 100,
+    ) -> tuple[list[Artifact], int]:
+        """Files of one conversation that this user can open, newest first, with the total that match.
+
+        The conversation result lookup lists these for an Agent. Membership is the
+        Results membership that ``list_for_session`` and ``revise_files`` resolution use,
+        and the filters are the ones resolution applies, so every listed identifier
+        resolves: ready, live, owned by the user, not Results-internal, not claimed by
+        the purge, and one row per file as its newest live version. ``kinds`` and
+        ``sources`` narrow by the stored ``kind`` and ``source``; ``name`` is a
+        fragment of the file name, matched literally.
+        """
+        if not session_id or not user_id:
+            return [], 0
+        from bowhead_core.results_artifact_policy import results_internal_artifact_sql
+
+        internal, internal_params = results_internal_artifact_sql("a")
+        where = (
+            "WHERE a.deleted_at IS NULL AND a.status = 'ready' AND a.created_by = ? "
+            "AND COALESCE(a.producer_kind, '') <> 'template_document_internal_v1' "
+            f"AND NOT {internal} "
+            "AND NOT EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) "
+        )
+        params: list[object] = [user_id, *internal_params]
+        if await self.versions_supported():
+            # The newest-version rule of ``list_session_deliverables``, unchanged.
+            where += (
+                "AND NOT EXISTS (SELECT 1 FROM artifacts n WHERE n.lineage_id = COALESCE(a.lineage_id, a.id) "
+                "AND COALESCE(n.version_no, 1) > COALESCE(a.version_no, 1) AND n.deleted_at IS NULL AND n.status = 'ready') "
+            )
+        for column, values in (("kind", kinds), ("source", sources)):
+            chosen = [value for value in dict.fromkeys(values) if value]
+            if chosen:
+                where += f"AND a.{column} IN ({', '.join('?' for _ in chosen)}) "
+                params.extend(chosen)
+        fragment = name.strip()
+        if fragment:
+            escaped = fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where += "AND a.filename LIKE ? ESCAPE '\\' "
+            params.append(f"%{escaped}%")
+        select = (
+            "SELECT a.*, COUNT(*) OVER () AS matched_total FROM artifacts a "
+            "JOIN session_artifact_ids s ON s.artifact_id = a.id " + where + "ORDER BY a.created_at DESC, a.id DESC LIMIT ?"
+        )
+        params.append(max(1, int(limit)))
+        indexed_members = """
+        WITH session_artifact_ids AS (
+            SELECT DISTINCT ta.artifact_id FROM turn_attachments ta JOIN turns t ON t.id = ta.turn_id WHERE t.session_id = ?
+            UNION
+            SELECT sa.artifact_id FROM session_attachments sa WHERE sa.session_id = ? AND sa.detached_at IS NULL
+            UNION
+            SELECT a.id FROM artifacts a JOIN turns t ON t.id = a.created_by_turn WHERE t.session_id = ?
+        )
+        """
+        async with _open_db(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            try:
+                async with db.execute(self._results_membership_cte() + select, [*([session_id] * 5), 9223372036854775807, *params]) as cur:
+                    rows = await cur.fetchall()
+            except aiosqlite.OperationalError:
+                # A deployment without canvases or sessions: the indexed sources, as in ``list_for_session``.
+                async with db.execute(indexed_members + select, [*([session_id] * 3), *params]) as cur:
+                    rows = await cur.fetchall()
+        return [_row_to_artifact(row) for row in rows], int(rows[0]["matched_total"]) if rows else 0
+
+    async def session_turn_positions(self, *, session_id: str, artifacts: Sequence[Artifact]) -> dict[str, int]:
+        """Position, among a conversation's ordinary Turns, of the Turn that produced or attached each file.
+
+        Context-maintenance Turns share ``turns.seq`` and are not counted, so the number
+        is the one a user would give the Turn. A file with no such Turn is left out, and
+        a schema without these columns yields an empty answer.
+        """
+        if not session_id or not artifacts:
+            return {}
+        try:
+            async with _open_db(self.db_path) as db:
+                async with db.execute("SELECT id FROM turns WHERE session_id = ? AND operation_kind IS NULL ORDER BY seq", (session_id,)) as cur:
+                    position = {row[0]: index for index, row in enumerate(await cur.fetchall(), 1)}
+                found = {item.id: position[item.created_by_turn] for item in artifacts if item.created_by_turn in position}
+                pending = [item.id for item in artifacts if item.id not in found]
+                if pending:
+                    marks = ", ".join("?" for _ in pending)
+                    async with db.execute(
+                        f"SELECT artifact_id, turn_id FROM turn_attachments WHERE artifact_id IN ({marks})",  # noqa: S608 — placeholders only
+                        pending,
+                    ) as cur:
+                        for artifact_id, turn_id in await cur.fetchall():
+                            if turn_id in position:
+                                found[artifact_id] = min(found.get(artifact_id, position[turn_id]), position[turn_id])
+        except aiosqlite.OperationalError:
+            return {}
+        return found
 
     async def list_deliverables_for_turn(self, turn_id: str) -> list[Artifact]:
         """Return the live ``deliverable`` / ``deck_preview`` artifacts a turn
@@ -2701,8 +2839,8 @@ class ArtifactStore:
     def open_reader(self) -> contextlib.AbstractAsyncContextManager[aiosqlite.Connection]:
         """One connection for a run of lookups that pass it as ``connection=``.
 
-        A lookup without one opens and configures its own connection, about 25 ms
-        each on 116. It reads current rows: no transaction is opened here.
+        A lookup without one borrows a pooled connection for itself. It reads
+        current rows: no transaction is opened here.
         """
         return _open_db(self.db_path)
 
@@ -4173,6 +4311,66 @@ class ArtifactStore:
 
     #: File versions B4 (the user's decision): each file keeps its newest three live versions.
     FILE_VERSIONS_KEPT: ClassVar[int] = 3
+    #: Turn states paused for a question or an approval (context maintenance's pending-operation set
+    #: without "running"). A paused Turn can continue later with the file list it took at its start.
+    PRUNE_PAUSED_TURN_STATUSES: ClassVar[tuple[str, ...]] = (
+        "awaiting_user",
+        "awaiting_approval",
+        "clarification_pending",
+        "approval_pending",
+    )
+    #: A paused Turn holds pruning this long after it paused, whatever its questions' state. Questions
+    #: and approvals expire after 24 hours, so this also covers pause kinds kept outside those stores.
+    PRUNE_PAUSE_HOLD: ClassVar[timedelta] = timedelta(hours=24)
+    #: A question answered or an approval decided this recently is still starting its Turn again.
+    PRUNE_RESUME_HOLD: ClassVar[timedelta] = timedelta(hours=1)
+
+    async def _session_turn_active_sql(self, db: aiosqlite.Connection, artifact_column: str) -> tuple[str, tuple[str, ...]]:
+        """SQL true when the session that produced ``artifact_column``'s row has a Turn that holds pruning.
+
+        A running Turn holds it. A paused Turn holds it only while it can still continue: it paused
+        within ``PRUNE_PAUSE_HOLD``, it has an unanswered question or an undecided approval (scheduled
+        task questions stay unanswered past 24 hours), or one was answered or decided within
+        ``PRUNE_RESUME_HOLD``. Turns left paused after their questions expired or were dismissed stop
+        holding it; on 116, 252 sessions kept such a Turn from months earlier.
+        """
+        now = datetime.now(UTC)
+        pause_cutoff = (now - self.PRUNE_PAUSE_HOLD).isoformat(timespec="seconds")
+        resume_cutoff = (now - self.PRUNE_RESUME_HOLD).isoformat(timespec="seconds")
+        paused = self.PRUNE_PAUSED_TURN_STATUSES
+        continuable = ["active.ended_at IS NULL", "active.ended_at > ?"]
+        params: list[str] = [*paused, pause_cutoff]
+        if await readable_table_exists(db, "clarification_requests"):
+            continuable.append(
+                "EXISTS (SELECT 1 FROM clarification_requests q WHERE q.turn_id = active.id AND (q.status = 'pending' OR q.chosen_at > ?))"
+            )
+            params.append(resume_cutoff)
+        if await readable_table_exists(db, "approvals"):
+            continuable.append("EXISTS (SELECT 1 FROM approvals p WHERE p.turn_id = active.id AND (p.status = 'pending' OR p.decided_at > ?))")
+            params.append(resume_cutoff)
+        return (
+            "EXISTS (SELECT 1 FROM turns origin JOIN turns active ON active.session_id = origin.session_id "  # noqa: S608 — fixed fragments
+            f"WHERE origin.id = {artifact_column} AND (active.status = 'running' OR (active.status IN ({','.join('?' for _ in paused)}) "
+            f"AND ({' OR '.join(continuable)}))))",
+            tuple(params),
+        )
+
+    async def version_prune_deferred(self, lineage_root: str) -> bool:
+        """Whether pruning ``lineage_root`` waits: a Turn of its session is running or can still continue.
+
+        Such a Turn listed the session's files when it started and checks that list again
+        when it publishes its history or resumes; pruning a listed version under it fails
+        that Turn (116 dogfood N12). Every version of a file belongs to one session (§5).
+        """
+        if not lineage_root or not await self.versions_supported():
+            return False
+        async with _open_db(self.db_path) as db:
+            active_sql, active_params = await self._session_turn_active_sql(db, "a.created_by_turn")
+            cur = await db.execute(
+                f"SELECT 1 FROM artifacts a WHERE (a.id = ? OR a.lineage_id = ?) AND {active_sql} LIMIT 1",  # noqa: S608 — fixed fragments
+                (lineage_root, lineage_root, *active_params),
+            )
+            return await cur.fetchone() is not None
 
     async def prune_version_candidates(self, lineage_roots: Sequence[str] | None = None) -> list[str]:
         """Older versions automatic pruning would remove, before the cross-database KB check (file versions B4).
@@ -4231,6 +4429,8 @@ class ArtifactStore:
         - A share grant names one version and covers the whole file (R5). Pruning the version
           that holds it would let the 30-day purge remove the row the grant resolves through,
           and recipients would silently lose the file.
+        - Deferred: no version is pruned while a Turn of the file's session is running or
+          paused and still able to continue (``version_prune_deferred``); a later run prunes it.
         """
         from bowhead_core.artifact_purge import SNAPSHOT_PIN_SQL
         from bowhead_core.artifact_references import active_reference_sql
@@ -4275,14 +4475,15 @@ class ArtifactStore:
         grant_sql = (
             "EXISTS (SELECT 1 FROM resource_grants g WHERE g.resource_kind = 'artifact' AND g.resource_id = artifacts.id AND g.revoked_at IS NULL)"
         )
+        active_sql, active_params = await self._session_turn_active_sql(db, "artifacts.created_by_turn")
         unprotected: list[str] = []
         for start in range(0, len(candidates), 500):
             chunk = candidates[start : start + 500]
             cph = ",".join("?" for _ in chunk)
             cur = await db.execute(
                 f"SELECT id FROM artifacts WHERE id IN ({cph}) AND canvas_id IS NULL AND NOT {reference_sql} AND NOT {snapshot_sql} "  # noqa: S608 — fixed fragments
-                f"AND NOT {grant_sql}",
-                chunk,
+                f"AND NOT {grant_sql} AND NOT {active_sql}",
+                (*chunk, *active_params),
             )
             unprotected.extend(str(row[0]) for row in await cur.fetchall())
         mentioned = await _canvas_mentions(db, unprotected)

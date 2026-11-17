@@ -553,7 +553,8 @@ def test_every_disable_warning_code_has_bilingual_copy() -> None:
 
     from bowhead_core.builtin_subagent_override import DISABLE_WARNINGS
 
-    root = Path(__file__).resolve().parents[3] / "packages" / "bowhead_frontend" / "messages"
+    # The shared catalog source feeds both editions; `messages/` is ignored assembler output (3b87577e9).
+    root = Path(__file__).resolve().parents[3] / "packages" / "bowhead_frontend" / "edition" / "shared-messages"
     for lang in ("zh-CN", "en-US"):
         block = json.loads((root / f"{lang}.json").read_text(encoding="utf-8"))["settings"]["subagents"]["builtin"]
         for code in DISABLE_WARNINGS.values():

@@ -152,8 +152,16 @@ const TEAM_TABS: ReadonlySet<SettingsTabId> = new Set([
   "license", "openapi", "team-appearance", "tools", "capabilities", "subagents", "workflows", "scheduled",
   "feedback-inbox", "team-operations", "reference-retention",
 ]);
-/** Team tabs that have their own route rather than a `teamSettingsPath` segment. */
-const TEAM_OWN_ROUTE_TABS: ReadonlySet<SettingsTabId> = new Set(["tools", "capabilities", "workflows", "subagents"]);
+/**
+ * Team tabs that have their own route rather than a `teamSettingsPath` segment, mapped to that route's segment.
+ * The Team Plugins tab keeps its `capabilities` id; its page lives at `/team/settings/plugins/`.
+ */
+const TEAM_OWN_ROUTE_SEGMENTS: Partial<Record<SettingsTabId, string>> = {
+  tools: "tools",
+  capabilities: "plugins",
+  workflows: "workflows",
+  subagents: "subagents",
+};
 
 export function settingsTabScope(tab: SettingsTabId): SettingsScope {
   if (tab === "access-requests") return "feature";
@@ -169,7 +177,8 @@ export function settingsTabHref(tab: SettingsTabId, fromSetup = false): string {
   if (scope === "feature") return `/settings/${tab}/`;
   if (isSpaceSettingsPage(tab)) return spaceSettingsPath(tab, fromSetup);
   if (isTeamSettingsPathTab(tab)) return teamSettingsPath(tab, fromSetup);
-  if (TEAM_OWN_ROUTE_TABS.has(tab)) return `/team/settings/${tab}/`;
+  const ownSegment = TEAM_OWN_ROUTE_SEGMENTS[tab];
+  if (ownSegment) return `/team/settings/${ownSegment}/`;
   throw new Error(`Unknown Team settings page: ${tab}`);
 }
 
@@ -239,7 +248,7 @@ const TEAM_SEGMENT_TABS: Record<string, SettingsTabId> = {
   "team-operations": "team-operations",
   "reference-retention": "reference-retention",
   tools: "tools",
-  capabilities: "capabilities",
+  plugins: "capabilities",
   workflows: "workflows",
   subagents: "subagents",
 };

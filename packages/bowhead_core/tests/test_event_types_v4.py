@@ -33,6 +33,8 @@ _CHAT_REDESIGN_EVENT_LITERALS = (
     # chat-solidify 2026-07-03: dead emoji_remove / plan_announced removed from EventType.
     # Phase 1.6 G3 — Lead narrative streaming
     "narrative.delta",
+    # Mid-run steering: the running Lead took queued instructions into its Turn.
+    "steer.applied",
 )
 
 

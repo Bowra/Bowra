@@ -50,6 +50,7 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
                             "delivery": "report",
                             "delivery_quote": user_text,
                             "canvas_mode": "new_report",
+                            "required_source_urls": [],
                         },
                     )
                 ],

@@ -116,3 +116,35 @@ async def test_cancelled_inbox_read_preserves_delivery_cursor_and_write_fence(sp
     with pytest.raises(ValueError, match="reference_scope_unavailable"):
         await runtime.context(fixture.lead)
     assert await fixture.count() == 1
+
+
+async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the_worker_fence(split_collab: CollaborationFixture) -> None:
+    """116 1.7.49 the regression case: a helper's completion check failed at once with "SQLite authority
+    lease is busy" while a Space metadata save held the exclusive core lease, and the Auto plan ended
+    blocked. Checking for expired questions and reading obligations writes nothing, so neither may
+    need a writer transaction or the shared core lease."""
+    fixture = split_collab
+    question = await fixture.ask()
+    async with open_shared_ctx(str(fixture.path)) as writer:
+        await writer.execute("BEGIN IMMEDIATE")
+        try:
+            # The Space metadata save bumps the fenced revision, so it holds the exclusive core lease.
+            await writer.execute("UPDATE workspaces SET description=?,revision=revision+1 WHERE id=?", ("Saving", fixture.worker.workspace_id))
+            assert await asyncio.wait_for(fixture.store.expire(fixture.worker), timeout=2) == []
+            obligations = await asyncio.wait_for(fixture.store.obligations(fixture.worker, execution_id=fixture.requester), timeout=2)
+            assert [item["question_id"] for item in obligations] == [question["operation_id"]]
+        finally:
+            await writer.rollback()
+    # A due question still closes in its write transaction.
+    fixture.clock[0] += 61
+    assert len(await fixture.store.expire(fixture.worker)) == 1
+    assert await fixture.store.obligations(fixture.worker, execution_id=fixture.requester) == []
+    async with open_shared_ctx(fixture.store.db_path) as writer:
+        await writer.execute(
+            "UPDATE chat_turn_spawn_dispatch SET cancel_requested_at=? WHERE turn_id=?",
+            ("2026-11-17T00:00:00+00:00", fixture.worker.turn_id),
+        )
+        await writer.commit()
+    for check in (fixture.store.expire(fixture.worker), fixture.store.obligations(fixture.worker, execution_id=fixture.requester)):
+        with pytest.raises(CollaborationUnavailable, match="collaboration_worker_unavailable"):
+            await check

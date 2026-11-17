@@ -265,6 +265,20 @@ describe("real React reference editor and catalog", () => {
     fireEvent.click(option);
     expect(document.body.textContent).toContain("此技能尚未提供可用于快捷引用的只读内容。");
   });
+  it("tells the viewer where to switch a Skill they turned off back on", async () => {
+    const data = structuredClone(fixtures.cases.find((item) => item.name === "personal_skill_personally_disabled")!.response) as any;
+    vi.mocked(apiJson).mockResolvedValue(data);
+    const props = defaults();
+    render(ui(props));
+    await type("/");
+    const option = await screen.findByRole("option");
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+    expect(option.textContent).toContain("你已停用此技能。可在“能力中心 → 技能与流程”中重新启用。");
+    const inputBefore = props.onChange.mock.calls.length;
+    fireEvent.click(option);
+    expect(document.body.textContent).toContain("你已停用此技能。可在“能力中心 → 技能与流程”中重新启用。");
+    expect(props.onChange.mock.calls.length).toBe(inputBefore);
+  });
   it("explains the missing compatible receiver without suggesting a new permission path", async () => {
     const data = structuredClone(fixtures.cases.find((item) => item.name === "team_skill")!.response) as any;
     data.groups[0].items[0].reason_code = "unsupported_binding";
@@ -496,11 +510,11 @@ describe("real React reference editor and catalog", () => {
     expect(await screen.findByRole("combobox", { name: "Ask about your data…" })).toBeTruthy();
     rendered.rerender(ui({
       ...props,
-      placeholder: "↻ Add an instruction—queued until the current response finishes",
-      accessibleName: "Add an instruction—queued until the current response finishes",
+      placeholder: "↻ Add an instruction—applies at the next step, or after this answer",
+      accessibleName: "Add an instruction—applies at the next step, or after this answer",
     }, "en-US"));
     await waitFor(() => expect(
-      screen.getByRole("combobox", { name: "Add an instruction—queued until the current response finishes" }),
+      screen.getByRole("combobox", { name: "Add an instruction—applies at the next step, or after this answer" }),
     ).toBeTruthy());
     // The visible prompt is not announced a second time.
     expect(

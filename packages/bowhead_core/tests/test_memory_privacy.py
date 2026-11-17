@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import aiosqlite
@@ -25,6 +28,7 @@ from bowhead_core.notification_store import NotificationStore
 from bowhead_core.user_memory import UserMemoryStore
 from bowhead_core.user_settings_store import UserSettingsStore
 
+from bowhead_core import memory_privacy
 from bowhead_memory import MemoryCandidateStore
 
 
@@ -771,8 +775,17 @@ async def test_replay_does_not_delete_post_delete_memory_when_marker_exists(
 @pytest.mark.asyncio
 async def test_delete_waits_for_export_read_boundary_before_success(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stores = await _privacy_store(tmp_path)
+
+    @asynccontextmanager
+    async def without_busy_wait(path: str | Path) -> AsyncIterator[aiosqlite.Connection]:
+        async with open_shared_ctx(path) as db:
+            # The export transaction stays open until deletion returns.
+            await db.execute("PRAGMA busy_timeout=0")
+            yield db
+
     user_id = "usr_exporting"
     await stores["memory"].upsert_product_memory(
         user_id=user_id,
@@ -791,11 +804,13 @@ async def test_delete_waits_for_export_read_boundary_before_success(
             """,
             (user_id,),
         )
-        with pytest.raises(PrivacyDeletionNotReadyError):
-            await stores["privacy"].permanent_delete_all(
-                user_id=user_id,
-                idempotency_key=key,
-            )
+        with monkeypatch.context() as patch:
+            patch.setattr(memory_privacy, "open_shared_ctx", without_busy_wait)
+            with pytest.raises(PrivacyDeletionNotReadyError, match="WAL checkpoint is busy"):
+                await stores["privacy"].permanent_delete_all(
+                    user_id=user_id,
+                    idempotency_key=key,
+                )
 
     completed = await stores["privacy"].permanent_delete_all(
         user_id=user_id,

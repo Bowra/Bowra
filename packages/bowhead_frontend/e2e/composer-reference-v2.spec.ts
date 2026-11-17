@@ -73,8 +73,8 @@ test("the reference editor is named by its visible prompt: ordinary, steering an
   await expect(prompt).toHaveText("Ask about your data…");
   await page.evaluate(() => window.referenceV2.configure({ steer: true }));
   // The decorative ↻ stays visible but is not part of the name.
-  await expect(prompt).toHaveText("↻ Add an instruction—queued until the current response finishes");
-  await expect(editor).toHaveAccessibleName("Add an instruction—queued until the current response finishes");
+  await expect(prompt).toHaveText("↻ Add an instruction—applies at the next step, or after this answer");
+  await expect(editor).toHaveAccessibleName("Add an instruction—applies at the next step, or after this answer");
   await page.evaluate(() => window.referenceV2.configure({ steer: false, readOnly: true }));
   await expect(prompt).toHaveText("Sending disabled");
   await expect(editor).toHaveAccessibleName("Sending disabled");

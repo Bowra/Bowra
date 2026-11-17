@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 SENTINEL_PLAN_PROPOSE = "_plan_propose_pending"
 
 
+PLAN_NOT_CREATED = (
+    "No plan card was created and nothing was shown to the user: the request did not resolve into two or more "
+    "separate steps, or planning is turned off for this conversation. This run continues."
+)
+
+
 def is_plan_propose_sentinel(tool_result: Any) -> bool:
     """lead_loop 用它判「Lead 要求出计划」。True → 中止本轮, 走出卡路径。"""
     return isinstance(tool_result, dict) and tool_result.get(SENTINEL_PLAN_PROPOSE) is True
@@ -114,6 +120,7 @@ def _plan_propose_schema() -> ToolSchema:
             "已经跑了一半再弹卡，用户既等了又要再批一次。\n"
             "\n"
             "调用后本轮立即结束并把计划卡交给用户，你不需要再写任何回答。"
+            "没有生成计划卡时，工具返回 plan_created=false，本轮继续。"
         ),
         input_schema={
             "type": "object",
@@ -131,6 +138,11 @@ def _plan_propose_schema() -> ToolSchema:
 async def _plan_propose(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
     reason = str(args.get("reason") or "")[:300]
     logger.info("plan_propose.requested turn=%s reason=%s", getattr(ctx, "turn_id", None), reason)
+    state = getattr(ctx, "_plan_propose_state", None)
+    if isinstance(state, dict) and state.get("declined"):
+        # The card path was asked before this call ran and created nothing; the run goes on.
+        logger.info("plan_propose.declined turn=%s — no card, the run continues", getattr(ctx, "turn_id", None))
+        return {"plan_created": False, "detail": PLAN_NOT_CREATED}
     return {SENTINEL_PLAN_PROPOSE: True, "reason": reason}
 
 

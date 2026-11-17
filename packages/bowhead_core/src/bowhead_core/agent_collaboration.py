@@ -216,13 +216,22 @@ class CollaborationStore:
         self.clock = clock
 
     @asynccontextmanager
-    async def _transaction(self, worker: DocumentTurnOwner, *, write: bool = True, history: bool = False) -> AsyncIterator[aiosqlite.Connection]:
+    async def _transaction(
+        self, worker: DocumentTurnOwner, *, write: bool = True, history: bool = False, live: bool = False
+    ) -> AsyncIterator[aiosqlite.Connection]:
+        """Open a write transaction, or a query-only read.
+
+        ``live`` keeps the write path's current-worker fence and its errors on a read. A
+        read needs neither the writer lock nor the shared core authority lease, which a
+        write transaction pins at its first core read and loses at once beside an
+        authority writer.
+        """
         worker = DocumentTurnOwner.model_validate(worker.model_dump())
         open_database = open_shared_ctx if write else open_pooled_read_ctx
         async with open_database(domain_database_path(self.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
-                if write:
+                if write or live:
                     try:
                         await require_live_worker_in_tx(db, worker=worker)
                     except OrdinaryContinuationUnavailable as exc:
@@ -493,20 +502,32 @@ class CollaborationStore:
         body: str,
         references: tuple[EvidenceReference, ...] = (),
         supersedes: str | None = None,
+        user_revision: bool = False,
         authorize: AuthorizeExchange,
     ) -> dict:
         """Correct an exact reply without rewriting it or reopening its author.
 
         A completed consumer's unresolved requirement belongs to the owner.
         The original completion is retained, but cannot prove root completion.
+
+        ``user_revision`` is set by the Runner, never by a model: the task owner sent
+        this update from a user round, to pass a user's mid-run instruction to a running
+        participant. The receipt keeps the fact, so the recipient's inbox can say so.
         """
         identity = OperationIdentity.model_validate(identity.model_dump())
         content = self._content(body, references)
         arguments = {"action": "update", "recipient_id": recipient_id, "supersedes": supersedes, **content}
+        if user_revision:
+            if supersedes is not None:
+                raise CollaborationUnavailable("collaboration_arguments_invalid")
+            arguments["user_revision"] = True
         async with self._transaction(worker) as db:
             task, policy = await self._task(db, worker)
             self._check_content(content, policy)
             if identity.execution_id == recipient_id:
+                raise CollaborationUnavailable("collaboration_recipient_unavailable")
+            if user_revision and identity.execution_id != task["owner_execution_id"]:
+                # Only the task owner revises a participant's assignment.
                 raise CollaborationUnavailable("collaboration_recipient_unavailable")
             recipient = await _row(
                 db,
@@ -648,9 +669,10 @@ class CollaborationStore:
         """Explain the same completion barrier enforced by the database trigger.
 
         This read guides the model; the final status transition remains atomic
-        against newly accepted questions. It does not grant completion authority.
+        against newly accepted questions. It does not grant completion authority,
+        so it reads without the writer lock or the core lease.
         """
-        async with self._transaction(worker) as db:
+        async with self._transaction(worker, write=False, live=True) as db:
             task, _ = await self._task(db, worker)
             await self._participant(db, worker, execution_id)
             async with db.execute(
@@ -940,7 +962,22 @@ class CollaborationStore:
         An open required dependency closes as `blocked`: a recorded limitation,
         never evidence. Otherwise nobody is prompted to close it, and the
         requester could never complete (116 t_649dfe4abb48).
+
+        Every completion check calls this first, and usually nothing is due. That
+        check is a read, so only due questions open the write transaction (116 1.7.49
+        the regression case: the write transaction lost the core lease to a Space save and
+        the helper failed).
         """
+        async with self._transaction(worker, write=False, live=True) as db:
+            if await _row(db, "SELECT 1 FROM agent_collaboration_turn WHERE turn_id=?", (worker.turn_id,)) is None:
+                raise CollaborationUnavailable()
+            due = await _row(
+                db,
+                "SELECT 1 FROM agent_collaboration_operation WHERE turn_id=? AND action='ask' AND response_status='pending' AND deadline<=? LIMIT 1",
+                (worker.turn_id, self.clock()),
+            )
+        if due is None:
+            return []
         async with self._transaction(worker) as db:
             task = await _row(db, "SELECT * FROM agent_collaboration_turn WHERE turn_id=?", (worker.turn_id,))
             if task is None:
@@ -1183,6 +1220,8 @@ class CollaborationStore:
             receipt["outcome"] = "unavailable"
         elif action == "update":
             receipt.update(supersedes=arguments["supersedes"], affected_recipient_id=arguments["recipient_id"])
+            if arguments.get("user_revision"):
+                receipt["user_revision"] = True
         elif action == "wait":
             receipt["question_ids"] = arguments["question_ids"]
         await db.execute(

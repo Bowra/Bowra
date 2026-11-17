@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from bowhead_core.ordinary_lead_continuation import content_hash
-from bowhead_core.report_read_material import ReportReadObservation, validation_pass_cache
+from bowhead_core.report_read_material import ReportReadObservation, report_read_validation_pass, validation_pass_cache
 from bowhead_core.source_access_projection import canonical_source_identity, collect_source_identities, names_no_source
 
 logger = logging.getLogger(__name__)
@@ -247,72 +247,106 @@ class ReportReadAccess:
             result_hash=content_hash(result),
         )
 
+    async def _pass_read(self, key: tuple[Any, ...], read: Any) -> Any:
+        """Read once per validation pass (``report_read_validation_pass``); outside a pass, always read.
+
+        A pass over a conversation's history meets the same report, sections and recorded sources
+        once per reference. On 116 (1.7.49) a 24-Turn conversation re-read its ~20k events for every
+        Report section reference before each Lead model call, and the Lead waited minutes.
+        """
+        cache = validation_pass_cache()
+        if cache is None:
+            return await read()
+        key = (*key, self.team_id, self.user_id, self.workspace_id, self.session_id)
+        if key not in cache:
+            cache[key] = await read()
+        return cache[key]
+
+    async def _section_map(self, canvas) -> dict[str, Any]:
+        return {s.id: s for s in await self.request.app.state.canvas_store.list_sections(canvas.id, include_hidden=True)}
+
+    async def _session_sources(self) -> list[dict[str, Any]]:
+        from bowhead_gateway.routes.canvas import _build_source_refs_for_session
+
+        return await _build_source_refs_for_session(self.request, self.session_id, strict=True)
+
+    async def _accessible(self, canvas, sections, refs) -> bool:
+        """Whether every source of these sections and references is readable; one projection per pass."""
+
+        async def project() -> bool:
+            projector = await self._sources(canvas, sections, refs)
+            return all(projector.access_by_identity.values())
+
+        return await self._pass_read(("sources", content_hash([sections, refs])), project)
+
+    async def _artifact_access(self, identities: list[str]) -> dict[str, bool]:
+        """Whether each file is authorized for this report and still present, checked in one batch."""
+        from bowhead_gateway.report_artifact_access import authorized_report_artifact_ids
+
+        canvas = await self._pass_read(("canvas",), self._canvas)
+        if canvas is None:
+            # The same source authority also supports Chats without a report.
+            from types import SimpleNamespace
+
+            canvas = SimpleNamespace(user_id=self.user_id, workspace_id=self.workspace_id)
+        allowed = await authorized_report_artifact_ids(self.request, canvas, identities, viewer_id=self.user_id)
+        present = {a.id for a in await self.request.app.state.artifact_store.get_many([i for i in identities if i in allowed])} if allowed else set()
+        return {identity: identity in present for identity in identities}
+
     async def validate(self, observation):
         if any(getattr(observation, name) != getattr(self, name) for name in ("session_id", "workspace_id", "team_id", "user_id")):
             raise ValueError("Report observation scope changed")
         # A pass over a conversation's history meets the same report once per recorded read. It reads the
         # report once and projects each distinct set of sources once; outside a pass every check reads.
-        cache = validation_pass_cache()
-        scope = (self.team_id, self.user_id, self.workspace_id, self.session_id)
-        report = cache.get(("report", scope)) if cache is not None else None
-        if report is None:
-            report = [await self._canvas(), None]
-            if cache is not None:
-                cache["report", scope] = report
-        canvas = report[0]
+        canvas = await self._pass_read(("canvas",), self._canvas)
         if observation.canvas_id is None:
             # An authorized historical empty report stays an empty observation.
             return
         if canvas is None or canvas.id != observation.canvas_id:
             raise ValueError("Report observation unavailable")
-        if report[1] is None:
-            report[1] = {s.id: s for s in await self.request.app.state.canvas_store.list_sections(canvas.id, include_hidden=True)}
-        sections = report[1]
+        sections = await self._pass_read(("sections", canvas.id), lambda: self._section_map(canvas))
         for old in observation.sections:
             current = sections.get(old["id"])
             if current is None or current.quarantined or current.hidden_for_chat_mode != old["hidden"]:
                 raise ValueError("Report observation unavailable")
-        sources = ("sources", scope, content_hash([observation.source_sections, observation.source_refs]))
-        accessible = cache.get(sources) if cache is not None else None
-        if accessible is None:
-            projector = await self._sources(canvas, observation.source_sections, observation.source_refs)
-            accessible = all(projector.access_by_identity.values())
-            if cache is not None:
-                cache[sources] = accessible
-        if not accessible:
+        if not await self._accessible(canvas, observation.source_sections, observation.source_refs):
             raise ValueError("Report source unavailable")
 
+    async def authorize_references(self, references):
+        """``authorize_reference`` for each reference, in one validation pass; files are checked in one batch."""
+        with report_read_validation_pass():
+            cache = validation_pass_cache()
+            files = list(dict.fromkeys(r.locator["artifact_id"] for r in references if r.kind == "artifact"))
+            scope = (self.team_id, self.user_id, self.workspace_id, self.session_id)
+            unchecked = [identity for identity in files if ("artifact", identity, *scope) not in cache]
+            if unchecked:
+                for identity, allowed in (await self._artifact_access(unchecked)).items():
+                    cache["artifact", identity, *scope] = allowed
+            return [await self.authorize_reference(reference) for reference in references]
+
     async def authorize_reference(self, reference):
-        canvas = await self._canvas()
+        canvas = await self._pass_read(("canvas",), self._canvas)
         if reference.kind in {"canvas", "canvas_section"}:
             if canvas is None or canvas.id != reference.locator["canvas_id"]:
                 return False
             if reference.kind == "canvas":
                 return True
-            sections = await self.request.app.state.canvas_store.list_sections(canvas.id, include_hidden=True)
-            section = next((s for s in sections if s.id == reference.locator["section_id"] and not s.quarantined), None)
-            if section is None:
+            sections = await self._pass_read(("sections", canvas.id), lambda: self._section_map(canvas))
+            section = sections.get(reference.locator["section_id"])
+            if section is None or section.quarantined:
                 return False
-            from bowhead_gateway.routes.canvas import _build_source_refs_for_session
-
-            identities = await self._required_sources(section)
-            refs = await _build_source_refs_for_session(self.request, self.session_id, strict=True) if identities else []
+            identities = await self._pass_read(("required", section.id, section.rev), lambda: self._required_sources(section))
+            refs = await self._pass_read(("session_sources",), self._session_sources) if identities else []
             identities = self._authorizable(identities, self._recorded(refs))
-            projector = await self._sources(
+            return await self._accessible(
                 canvas, [{"kind": "narrative", "source_refs": identities}], [r for r in refs if canonical_source_identity(r) in identities]
             )
-            return all(projector.access_by_identity.values())
         if reference.kind == "artifact":
-            from bowhead_gateway.report_artifact_access import authorized_report_artifact_ids
-
-            if canvas is None:
-                # The same source authority also supports Chats without a report.
-                from types import SimpleNamespace
-
-                canvas = SimpleNamespace(user_id=self.user_id, workspace_id=self.workspace_id)
             identity = reference.locator["artifact_id"]
-            if identity not in await authorized_report_artifact_ids(self.request, canvas, [identity], viewer_id=self.user_id):
-                return False
-            return await self.request.app.state.artifact_store.get(identity) is not None
+
+            async def check() -> bool:
+                return (await self._artifact_access([identity]))[identity]
+
+            return await self._pass_read(("artifact", identity), check)
         # Coach references retain their dedicated current-authority carrier.
         return False

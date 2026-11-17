@@ -28,8 +28,10 @@ class _FakeBus:
         self.events: list[Any] = []
         self._pi_turn_state: dict[str, Any] = {}
 
-    async def emit(self, event: Any) -> None:
+    async def emit(self, event: Any) -> bool:
+        # TurnEventBus.emit reports acceptance; required tool results need True.
         self.events.append(event)
+        return True
 
     def find_all(self, event_type: str) -> list[Any]:
         return [e for e in self.events if e.event_type == event_type]
@@ -79,6 +81,7 @@ def _make_ctx(store: ClarificationStore | None = None) -> SimpleNamespace:
         _m137_subagent_payloads=[],
         execution_generation=1,
         execution_owner_id=None,
+        tool_view=None,
     )
 
 
@@ -124,7 +127,9 @@ async def test_peer_question_through_real_lead_dispatch(tmp_path, monkeypatch, q
     adapter.scripted_responses = [
         LLMResponse(
             content="",
-            tool_calls=[ToolCall(id="spawn", name="subagent_spawn", arguments={"profile": "compute", "task": "分析利润"})],
+            tool_calls=[
+                ToolCall(id="spawn", name="subagent_spawn", arguments={"profile": "compute", "task": "分析利润", "required_source_urls": []})
+            ],
             usage=TokenUsage(input_tokens=11, output_tokens=7),
         ),
         LLMResponse(
@@ -300,7 +305,7 @@ async def test_b72_contract_needs_user_input_emits_card_and_pending(_stream_env,
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -372,7 +377,7 @@ async def test_b72_contract_multi_select_propagates(_stream_env) -> None:
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -419,7 +424,7 @@ async def test_b72_contract_missing_payload_falls_through_to_prose(_stream_env) 
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -468,7 +473,7 @@ async def test_b72_contract_other_bail_kinds_still_emit_prose(_stream_env) -> No
             runner = _FakeSubagentRunner(result=sub_result)
             runtime = LeadRuntime(
                 router=SimpleNamespace(),
-                tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+                tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
                 parent_bus=bus,
                 parent_ctx=ctx,
                 subagent_runner=runner,
@@ -521,7 +526,7 @@ async def test_b72_contract_store_unavailable_falls_through_to_prose(_stream_env
     runner = _FakeSubagentRunner(result=sub_result)
     runtime = LeadRuntime(
         router=SimpleNamespace(),
-        tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+        tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
         parent_bus=bus,
         parent_ctx=ctx,
         subagent_runner=runner,

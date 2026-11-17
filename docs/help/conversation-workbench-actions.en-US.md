@@ -4,9 +4,13 @@ This article covers drag and drop, shortcuts, and hints on the conversation page
 
 ## Reuse earlier generated files
 
-Ask Bowhead to present files it generated earlier in the conversation when you need them again. The original file names and download controls identify each file. Reusing a retained file does not generate another copy.
+Ask Bowra to present files it generated earlier in the conversation when you need them again. The original file names and download controls identify each file. Reusing a retained file does not generate another copy.
+
+You can refer to an earlier file by part of its name. This also works for a file you uploaded and for one of many files produced in a single reply: Bowra looks the file up in the conversation. When several files have similar names, say which one you mean.
 
 Opening a conversation or its results may wait briefly while another update finishes. If it still cannot load, reopen the conversation and follow the displayed error. Do not resend the original task merely to retrieve an existing file.
+
+For a configured sandbox, see [Fill or update a PowerPoint template](powerpoint-templates.en-US.md).
 
 ## Cancel an unanswered question
 
@@ -16,11 +20,11 @@ If earlier questions cannot be checked, select **Retry** to refresh their status
 
 ## Compact a long conversation
 
-Open the conversation title’s **⋯** menu and choose **Compact context** when the conversation is idle. Bowhead summarizes eligible older material for the next message and keeps the original conversation visible. A quiet activity line shows progress and the result; the existing Stop control cancels this operation. Your unsent draft stays in the composer.
+Open the conversation title’s **⋯** menu and choose **Compact context** when the conversation is idle. Bowra summarizes eligible older material for the next message and keeps the original conversation visible. A quiet activity line shows progress and the result; the existing Stop control cancels this operation. Your unsent draft stays in the composer.
 
 Manual compaction works even when the model’s **Auto-compact** setting is off and does not change that setting. It may use model credits. If there is nothing useful to reduce, no summary call is made. Wait for active work or pending decisions to finish; dedicated recovery flows may be unavailable.
 
-If the connection is interrupted, Bowhead checks the original request when you reopen the conversation. Select **Compact context** again to check it or explicitly retry the same saved request. A missing or unreadable saved request cannot be resent automatically. Review the operation’s activity before starting another task.
+If the connection is interrupted, Bowra checks the original request when you reopen the conversation. Select **Compact context** again to check it or explicitly retry the same saved request. A missing or unreadable saved request cannot be resent automatically. Review the operation’s activity before starting another task.
 
 ## Choose an Agent, method or result
 
@@ -131,7 +135,7 @@ The failure card explains the recorded reason, such as a model timeout, too many
 
 If the card says a system error interrupted the turn, try its **Retry** action. If it happens again, expand **Technical details**, copy the diagnostic information, and send it to your team administrator so they can locate the failed turn.
 
-If the assistant writes a Tool request as ordinary text, Bowhead may ask it to correct the response within the task's existing limits. Text alone does not run that operation. If correction fails, follow the failure card and check completed steps before retrying.
+If the assistant writes a Tool request as ordinary text, Bowra may ask it to correct the response within the task's existing limits. Text alone does not run that operation. If correction fails, follow the failure card and check completed steps before retrying.
 
 A completed step does not mean the entire request finished. Review the work already visible before sending again. If the task cannot continue and you choose **Edit and send**, sending starts a new request; it does not resume the original task. If the failure stage was not recorded, the card says so.
 

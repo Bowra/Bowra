@@ -47,7 +47,7 @@ import { apiFetch, readApiError } from "./api-client";
 import { refreshAccessToken } from "./auth-api";
 import { getPlanningModePref } from "./planning-mode-pref";
 import { useComposerCapabilities } from "./use-composer-capabilities";
-import { getTurnSnapshot, resetTurn } from "./turn-store";
+import { getTurnSnapshot, pendingSteerAcks, resetTurn } from "./turn-store";
 import {
   formatTurnDuration,
   resolveLiveTurnDurationMs,
@@ -2498,8 +2498,8 @@ function attachStream(
           // Continuation user = user's interjection (🤝 steer text); helper already archived
           // previous s.user, so never reuse it as continuation user (duplicates rendering). Empty stays null, filled by continuation
           // stream turn_started.user_text (backend-merged text).
-          const steerText = (s.turnId ? (getTurnSnapshot(s.turnId)?.emojiAcks ?? []) : [])
-            .filter((a) => a.emoji === "🤝" && a.text)
+          // Instructions the answer already took (mid-run steering) are part of that Turn, not of this one.
+          const steerText = pendingSteerAcks(s.turnId ? getTurnSnapshot(s.turnId) : undefined)
             .map((a) => String(a.text))
             .join("；");
           return archiveAndFreshTurn(s, {
@@ -3486,6 +3486,7 @@ function attachStream(
       "plan_proposed", "plan_running", "plan_completed", "plan_blocked",
       "plan_failed", "step_blocked", "step_failed",
       "emoji_ack",  // emoji_remove removed with dead event names (backend never emitted it)
+      "steer.applied",
       "turn.follow_up",
       // Phase 1.6 G3 — Lead narrative streaming. EventSource silently drops
       // unlisted events, so the dispatcher in turn-store-dispatch.ts never sees

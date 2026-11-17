@@ -168,6 +168,8 @@ async def test_lead_delegates_kb_without_duplicate_search_but_retains_fallback(m
             LLMResponse(content="", tool_calls=[ToolCall(id="search", name="kb_search", arguments={"query": "Skill"})]),
             LLMResponse(content="", tool_calls=[ToolCall(id="spawn", name="subagent_spawn", arguments={"profile": "kb-analyst"})]),
             LLMResponse(content="No relevant authorized evidence found."),
+            # Successful delegation receives one original-scope review before the Lead finishes.
+            LLMResponse(content="No relevant authorized evidence found."),
         ]
     )
     ctx = ToolExecutionContext(workspace_id="ws_test", user_id="u_test", member_uid="m_test", turn_id="t_lead_kb", session_id="s_test", datarc=None)

@@ -122,7 +122,17 @@ async def test_reference_plan_native_confirmation(http_start, monkeypatch, scena
                         )
                     await db.rollback()
             if scenario == "unknown":
-                raise httpx2.ReadTimeout("provider response was lost", request=request)
+                # A transport failure is settled not applied and retried (4a2f0ab7e); a
+                # reply without usage leaves the delivery outcome unknown.
+                message = {"role": "assistant", "content": "unconfirmed"}
+                if not body.get("stream"):
+                    return httpx2.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
+                events = [{"choices": [{"delta": message, "finish_reason": None}]}, {"choices": [{"delta": {}, "finish_reason": "stop"}]}]
+                return httpx2.Response(
+                    200,
+                    text="".join("data: " + json.dumps(event) + "\n\n" for event in events) + "data: [DONE]\n\n",
+                    headers={"content-type": "text/event-stream"},
+                )
             if scenario == "revoked_between":
                 with sqlite3.connect(case.path) as db:
                     db.execute("UPDATE agent_assignment SET personal_state='disabled'")
@@ -356,7 +366,8 @@ async def test_reference_plan_native_confirmation(http_start, monkeypatch, scena
     # separate execution Turn has finished. It must retain the Plan handoff.
     assert await case.fixture.case.store.recover_expired_chat_spawn_dispatches() == []
     receipts = [row for row in rows(case, "chat_reference_model_invocations") if row["turn_id"] == proposal_id]
-    assert len(primary_calls) == len(receipts) == (3 if scenario == "skill_read" else 2)
+    # After its successful skill_read, the step's prose answer gets one unreturned-work note.
+    assert len(primary_calls) == len(receipts) == (4 if scenario == "skill_read" else 2)
     assert len({row["execution_id"] for row in receipts}) == 2
     assert {row["status"] for row in receipts} == {"completed"}
     assert "Calculate the profit margin" in json.dumps(primary_calls[0])

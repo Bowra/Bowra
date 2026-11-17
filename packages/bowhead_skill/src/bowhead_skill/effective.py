@@ -176,6 +176,29 @@ async def team_skill_user_enabled(ctx: Any, rec: Any, *, strict: bool = False) -
         return True
 
 
+def _team_preference_enabled(preferences: dict[str, Any], rec: Any) -> bool:
+    """``team_skill_user_enabled`` answered from the caller's already-read rows."""
+    preference = preferences.get(f"team:{getattr(rec, 'id', '')}")
+    if preference is None:
+        legacy = preferences.get(str(getattr(rec, "name", "")))
+        preference = legacy if getattr(legacy, "source_type", None) == "team_shared" else None
+    return preference is None or bool(preference.enabled)
+
+
+async def _visible_by_grants(ctx: Any, names: list[str], *, strict: bool = False) -> dict[str, bool]:
+    """The grants half of ``skill_visible`` for several listed names, decided in one batch."""
+    if not names:
+        return {}
+    try:
+        from bowhead_core.skill_access import skills_visible_by_grants  # type: ignore[import-not-found]
+
+        return await skills_visible_by_grants(ctx, names)
+    except Exception:
+        if strict:
+            raise
+        return dict.fromkeys(names, True)
+
+
 async def skill_visible(ctx: Any, catalog: SkillCatalog, name: str, *, strict: bool = False) -> bool:
     """main workspace-permission：user_enabled + grants 可见性过滤（catalog/user 条目用）."""
     if not await user_enabled(ctx, catalog, name, strict=strict):
@@ -227,13 +250,19 @@ async def list_effective_skills(
     seen = set(global_names)
     uid = getattr(ctx, "user_id", None)
     store = getattr(ctx, "skill_instance_store", None)
+    # One read of the caller's rows answers every per-name lookup below: user records, `team:<id>`
+    # preferences and legacy name keys share this table. Each Lead start read them one connection
+    # at a time (11 connections, about 100 database round trips; 6-8 s on a busy 116, 1.7.49).
+    preferences: dict[str, Any] | None = None
     if store is not None and uid:
         try:
             instances = await store.list_for_user(user_id=uid)
+            preferences = {str(getattr(inst, "name", "")): inst for inst in instances}
         except Exception:
             if strict:
                 raise
             instances = []
+        candidates = []
         for inst in instances:
             name = str(getattr(inst, "name", ""))
             if not is_user_skill_instance(inst) or name in seen:
@@ -245,7 +274,13 @@ async def list_effective_skills(
             # skill-import batch 1: pending imports stay out of the catalog (the Lead block and peer skill_list share this source).
             if import_pending(inst):
                 continue
-            if not await skill_visible(ctx, catalog, name, strict=strict):
+            # skill_visible's user_enabled half: outside the catalog a user record answers with its own flag.
+            if not bool(inst.enabled):
+                continue
+            candidates.append(inst)
+        granted = await _visible_by_grants(ctx, [str(inst.name) for inst in candidates], strict=strict)
+        for inst in candidates:
+            if not granted[str(inst.name)]:
                 continue
             spec = load_user_skill_spec(inst, str(uid))
             if spec is None:
@@ -274,7 +309,10 @@ async def list_effective_skills(
                 if not name or name in seen or not visible:
                     continue
                 # audit #17: list/invoke symmetry; per-user disabling filters team skills too.
-                if not await team_skill_user_enabled(ctx, rec, strict=strict):
+                if preferences is not None:
+                    if not _team_preference_enabled(preferences, rec):
+                        continue
+                elif not await team_skill_user_enabled(ctx, rec, strict=strict):
                     continue
                 out.append(
                     EffectiveSkill(

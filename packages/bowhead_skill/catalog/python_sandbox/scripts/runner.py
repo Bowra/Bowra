@@ -51,11 +51,14 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -249,8 +252,9 @@ def _k_guess_dtype(values: list) -> str:
 
 
 #: Helpers copied into workdir on each run (available inside the sandbox via `from <module_name> import ...`).
-#: dirty_table = excel RC-6 dirty-table reading; period_growth = comparable periods for growth / YoY rankings.
-_SANDBOX_HELPERS = ("dirty_table.py", "period_growth.py")
+#: dirty_table = excel RC-6 dirty-table reading; period_growth = comparable periods for growth / YoY rankings;
+#: pptx_fill = describing and filling an existing PowerPoint file (text, tables, charts).
+_SANDBOX_HELPERS = ("dirty_table.py", "period_growth.py", "pptx_fill.py")
 
 
 def _stage_sandbox_helpers(workdir: Path) -> None:
@@ -669,7 +673,12 @@ def _missing_declared_deliverables(
     """
     if purpose != "deliverable":
         return []
-    produced = {str(output.get("name")) for output in outputs if isinstance(output, dict) and output.get("artifact_id") and output.get("name")}
+    # A nested output is matched by its declared entry (`path`), a top-level one by its name.
+    produced = {
+        str(output.get("path") or output.get("name"))
+        for output in outputs
+        if isinstance(output, dict) and output.get("artifact_id") and (output.get("path") or output.get("name"))
+    }
     return sorted(deliverable_outputs - produced)
 
 
@@ -1347,9 +1356,71 @@ def _bh_near(_bh_want, _bh_cols):
     return _bh_hits[:3]
 
 
+# -- L5: an index past a python-pptx table states the table's size --
+# In template-filling regression checks, repeated script failures involved one
+# IndexError from `table.cell(r, c)` with r past the last row. python-pptx names neither the index nor
+# the table size, and the model blamed merged cells until it rebuilt the table. Replayed locally from the
+# first such failure, the same model repeated the error 2-13 more times without this line (four runs)
+# and 0-4 times with it (eight runs).
+def _bh_table_index_fact(_bh_tb):
+    _bh_frame = None
+    while _bh_tb is not None:
+        _bh_fr = _bh_tb.tb_frame
+        if _bh_fr.f_code.co_filename.endswith('/pptx/table.py') and _bh_fr.f_code.co_name in ('cell', '__getitem__'):
+            _bh_frame = _bh_fr
+            break
+        _bh_tb = _bh_tb.tb_next
+    if _bh_frame is None:
+        return
+    _bh_loc = _bh_frame.f_locals
+    _bh_self = _bh_loc.get('self')
+    _bh_kind = type(_bh_self).__name__
+    _bh_tr = None
+    if _bh_frame.f_code.co_name == 'cell':
+        _bh_tbl = getattr(_bh_self, '_tbl', None)
+        _bh_row = _bh_loc.get('row_idx')
+        _bh_asked = 'table.cell(%r, %r)' % (_bh_row, _bh_loc.get('col_idx'))
+    elif _bh_kind == '_RowCollection':
+        _bh_tbl = getattr(_bh_self, '_tbl', None)
+        _bh_row = _bh_loc.get('idx')
+        _bh_asked = 'table.rows[%r]' % (_bh_row,)
+    elif _bh_kind == '_ColumnCollection':
+        _bh_tbl = getattr(_bh_self, '_tbl', None)
+        _bh_row = None
+        _bh_asked = 'table.columns[%r]' % (_bh_loc.get('idx'),)
+    elif _bh_kind == '_CellCollection':
+        _bh_tr = getattr(_bh_self, '_tr', None)
+        _bh_tbl = _bh_tr.getparent() if _bh_tr is not None else None
+        _bh_row = None
+        _bh_asked = 'table.rows[%s].cells[%r]' % (
+            list(_bh_tbl.tr_lst).index(_bh_tr) if _bh_tbl is not None else '?',
+            _bh_loc.get('idx'),
+        )
+    else:
+        return
+    if _bh_tbl is None:
+        return
+    _bh_rows = len(_bh_tbl.tr_lst)
+    _bh_cols = len(_bh_tbl.tblGrid.gridCol_lst)
+    _bh_table = getattr(_bh_self, '_parent', None) if _bh_frame.f_code.co_name != 'cell' else _bh_self
+    if _bh_kind == '_CellCollection':
+        _bh_table = getattr(getattr(getattr(_bh_self, '_parent', None), '_parent', None), '_parent', None)
+    _bh_shape = getattr(_bh_table, '_graphic_frame', None)
+    _bh_named = (" table '%s' (id %s)" % (_bh_shape.name, _bh_shape.shape_id)) if _bh_shape is not None else ' this table'
+    _bh_msg = '[runner] %s was requested;%s has %d rows x %d columns (indexes start at 0).' % (
+        _bh_asked, _bh_named, _bh_rows, _bh_cols
+    )
+    if isinstance(_bh_row, int) and _bh_row >= _bh_rows:
+        _bh_msg += ' pptx_fill.resize_table changes the row count.'
+    print(_bh_msg, file=_bh_sys.stderr)
+
+
 def _bh_excepthook(_bh_t, _bh_v, _bh_tb):
     _bh_prev_excepthook(_bh_t, _bh_v, _bh_tb)
     try:
+        if issubclass(_bh_t, IndexError):
+            _bh_table_index_fact(_bh_tb)
+            return
         if not issubclass(_bh_t, KeyError):
             return
         # `_BhInputs.__missing__` 抛的那三档文案已经自解释，别再叠一层把它冲淡。
@@ -1726,6 +1797,155 @@ def _is_collectable_output(path: Path) -> bool:
     return not path.is_symlink() and path.is_file()
 
 
+# Declared nested deliverables (docs/sprints/sandbox-nested-deliverables-2026-11-16/tech-design.md §4.2–§4.3).
+# tools.py validates `deliverable_outputs` (bowhead_skill.sandbox_deliverables); this stdlib-only runner
+# repeats the path checks before it reads anything, and never follows a link out of the bind mount.
+_RESERVED_TOP_DIRS = frozenset({_INPUTS_DIRNAME, "skill"})
+_SKIPPED_DIR_NAMES = frozenset({"__pycache__"})
+_MAX_DECLARED_DEPTH = 4
+_MAX_FOLDER_FILES = 2000
+_FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+_NOT_SAVED_MAX_LINES = 12
+_NOT_SAVED_SCAN_LIMIT = 10_000
+_NOT_SAVED_HINT = (
+    "These files were written below the top level and were not saved: {files}. Every call starts with an empty working "
+    "directory and discards it afterwards. To deliver one, write it at the top level, or list its path (or its folder as "
+    "'folder/') in deliverable_outputs with purpose='deliverable'."
+)
+
+
+class _DeclaredOutputError(Exception):
+    """A declared nested deliverable that cannot be delivered; the message states why."""
+
+
+def _declared_nested(entry: str) -> tuple[tuple[str, ...], bool] | None:
+    """Parts and folder flag of a nested entry (`dir/name` or `dir/`); None for a top-level file name."""
+    is_folder = entry.endswith("/")
+    body = entry[:-1] if is_folder else entry
+    parts = tuple(body.split("/"))
+    if not is_folder and len(parts) == 1:
+        return None
+    if (
+        not body
+        or "\\" in entry
+        or "\x00" in entry
+        or body.startswith("/")
+        or any(part in {"", ".", ".."} for part in parts)
+        or len(parts) > _MAX_DECLARED_DEPTH
+        or parts[0] in _RESERVED_TOP_DIRS
+        or any(part in _SKIPPED_DIR_NAMES for part in parts)
+    ):
+        raise _DeclaredOutputError("is not a relative path inside the working directory")
+    return parts, is_folder
+
+
+def _walk_declared(workdir: Path, parts: tuple[str, ...]) -> Path:
+    """Resolve a declared path one component at a time, refusing a link anywhere on the way."""
+    current = workdir
+    for part in parts:
+        current = current / part
+        try:
+            mode = os.lstat(current).st_mode
+        except FileNotFoundError:
+            raise _DeclaredOutputError("was not written") from None
+        if stat.S_ISLNK(mode):
+            raise _DeclaredOutputError(f"goes through a symbolic link: {current.relative_to(workdir).as_posix()}")
+    return current
+
+
+def _declared_file(workdir: Path, parts: tuple[str, ...]) -> Path:
+    path = _walk_declared(workdir, parts)
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode):
+        raise _DeclaredOutputError("is not a regular file")
+    if info.st_size <= 0:
+        raise _DeclaredOutputError("is empty")
+    if info.st_size > _MAX_OUTPUT_BYTES:
+        raise _DeclaredOutputError(f"is larger than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+    return path
+
+
+def _pack_declared_folder(workdir: Path, parts: tuple[str, ...], out_dir: Path) -> tuple[Path, int]:
+    """Pack a declared folder into `<folder>.zip` in `out_dir`; archive paths start with the folder's name.
+
+    Sorted members and fixed timestamps make the same content give the same bytes. A link or a
+    non-regular file anywhere inside fails the folder and is named; `__pycache__` is skipped.
+    """
+    root = _walk_declared(workdir, parts)
+    if not stat.S_ISDIR(os.lstat(root).st_mode):
+        raise _DeclaredOutputError("is not a folder")
+    members: list[tuple[Path, str]] = []
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
+        for name in dirnames:
+            if stat.S_ISLNK(os.lstat(here / name).st_mode):
+                raise _DeclaredOutputError(f"contains a symbolic link: {(here / name).relative_to(workdir).as_posix()}")
+        dirnames[:] = sorted(name for name in dirnames if name not in _SKIPPED_DIR_NAMES)
+        for name in sorted(filenames):
+            path = here / name
+            info = os.lstat(path)
+            rel = path.relative_to(workdir)
+            if stat.S_ISLNK(info.st_mode):
+                raise _DeclaredOutputError(f"contains a symbolic link: {rel.as_posix()}")
+            if not stat.S_ISREG(info.st_mode):
+                raise _DeclaredOutputError(f"contains something that is not a regular file: {rel.as_posix()}")
+            total += info.st_size
+            members.append((path, "/".join(rel.parts[len(parts) - 1 :])))
+            if len(members) > _MAX_FOLDER_FILES:
+                raise _DeclaredOutputError(f"has more than {_MAX_FOLDER_FILES} files")
+            if total > _MAX_OUTPUT_BYTES:
+                raise _DeclaredOutputError(f"holds more than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+    if not members:
+        raise _DeclaredOutputError("is empty")
+    target = out_dir / f"{parts[-1]}.zip"
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path, arcname in sorted(members, key=lambda member: member[1]):
+            info = zipfile.ZipInfo(arcname, date_time=_FIXED_ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, path.read_bytes())
+    if target.stat().st_size > _MAX_OUTPUT_BYTES:
+        raise _DeclaredOutputError(f"packs to an archive larger than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+    return target, len(members)
+
+
+def _unsaved_nested_files(workdir: Path, pre_existing: set[str], declared: list[tuple[tuple[str, ...], bool]]) -> list[str]:
+    """New files below the top level that no entry covers, grouped per top-level folder."""
+    per_top: dict[str, list[str]] = {}
+    seen = 0
+    for top in sorted(path.name for path in workdir.iterdir()):
+        if top in pre_existing or top in _RESERVED_TOP_DIRS or top in _SKIPPED_DIR_NAMES:
+            continue
+        try:
+            if not stat.S_ISDIR(os.lstat(workdir / top).st_mode):
+                continue  # Top-level files belong to the collector; a link is never followed.
+        except OSError:
+            continue
+        for dirpath, dirnames, filenames in os.walk(workdir / top, followlinks=False):
+            dirnames[:] = sorted(name for name in dirnames if name not in _SKIPPED_DIR_NAMES)
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                try:
+                    if not stat.S_ISREG(os.lstat(path).st_mode):
+                        continue
+                except OSError:
+                    continue
+                rel_parts = path.relative_to(workdir).parts
+                if any(rel_parts[: len(parts)] == parts if is_folder else rel_parts == parts for parts, is_folder in declared):
+                    continue
+                per_top.setdefault(top, []).append("/".join(rel_parts))
+                seen += 1
+                if seen >= _NOT_SAVED_SCAN_LIMIT:
+                    break
+            if seen >= _NOT_SAVED_SCAN_LIMIT:
+                break
+        if seen >= _NOT_SAVED_SCAN_LIMIT:
+            break
+    lines = [f"{top}/ ({len(names)} files)" if len(names) > 3 else ", ".join(names) for top, names in per_top.items()]
+    return lines[:_NOT_SAVED_MAX_LINES]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
@@ -1823,6 +2043,18 @@ def main() -> int:
     _deliverable_outputs = frozenset(
         str(name) for name in (_raw_deliverable_outputs if isinstance(_raw_deliverable_outputs, list) else []) if isinstance(name, str) and name
     )
+    # Declared nested files and folders; their paths are checked again before anything is read.
+    _nested_deliverables: list[tuple[str, tuple[str, ...], bool]] = []
+    _nested_reported: dict[str, str] = {}
+    if _output_purpose == "deliverable":
+        for _entry in sorted(_deliverable_outputs):
+            try:
+                _split = _declared_nested(_entry)
+            except _DeclaredOutputError as exc:
+                _nested_reported[_entry] = f"declared deliverable {_entry} {exc}"
+                continue
+            if _split is not None:
+                _nested_deliverables.append((_entry, *_split))
     _raw_work_outputs = payload.get("_work_outputs")
     _work_outputs = (
         frozenset(str(name) for name in (_raw_work_outputs if isinstance(_raw_work_outputs, list) else []) if isinstance(name, str) and name)
@@ -2044,6 +2276,49 @@ def main() -> int:
         else:
             output_data_errors.append(f"sandbox file {p.name} Data artifact upload failed")
 
+    # 4b. Declared nested files and folders: resolved without following links; a folder is packed
+    # into one `<folder>.zip` in a host temporary directory, never inside the shared /workdir.
+    if _nested_deliverables:
+        top_level_new = {p.name for p in workdir.iterdir() if p.name not in pre_existing and _is_collectable_output(p)}
+        with tempfile.TemporaryDirectory(prefix="bowhead-declared-") as packed_dir:
+            for entry, parts, is_folder in _nested_deliverables:
+                saved_name = f"{parts[-1]}.zip" if is_folder else parts[-1]
+                file_count: int | None = None
+                try:
+                    if saved_name in top_level_new:
+                        raise _DeclaredOutputError(f"would be saved as {saved_name}, which this run also wrote at the top level")
+                    if is_folder:
+                        source, file_count = _pack_declared_folder(workdir, parts, Path(packed_dir))
+                    else:
+                        source = _declared_file(workdir, parts)
+                except _DeclaredOutputError as exc:
+                    _nested_reported[entry] = f"declared deliverable {entry} {exc}"
+                    continue
+                rec = _upload_artifact(
+                    source,
+                    gateway,
+                    session_id=_session_id,
+                    kind="deliverable",
+                    created_by_turn=_created_by_turn,
+                    token=_artifact_fetch_token,
+                    version_of=_revises.get(entry),
+                )
+                if rec and rec.get("version_error"):
+                    latest = f"; the latest version is {rec['latest_id']}" if rec.get("latest_id") else ""
+                    _nested_reported[entry] = (
+                        f"declared deliverable {entry} was not stored as a new version of {_revises.get(entry)}: {rec['version_error']}{latest}"
+                    )
+                elif rec:
+                    rec["path"] = entry
+                    if file_count is not None:
+                        rec["files"] = file_count
+                    elif preview := _preview_structured(source):
+                        rec["preview"] = preview
+                    outputs.append(rec)
+                else:
+                    _nested_reported[entry] = f"sandbox file {saved_name} Data artifact upload failed"
+    output_data_errors.extend(_nested_reported.values())
+
     # 5. Stitch result.json
     result = {
         **run_result,
@@ -2052,17 +2327,27 @@ def main() -> int:
             {"key": key, "artifact_id": item["artifact_id"], "size": item["size"], "sha256": item["sha256"]} for key, item in resolved.items()
         ],
     }
-    missing_deliverables = _missing_declared_deliverables(
-        outputs,
-        purpose=_output_purpose,
-        deliverable_outputs=_deliverable_outputs,
-    )
+    missing_deliverables = [
+        name
+        for name in _missing_declared_deliverables(
+            outputs,
+            purpose=_output_purpose,
+            deliverable_outputs=_deliverable_outputs,
+        )
+        if name not in _nested_reported
+    ]
     if missing_deliverables:
         output_data_errors.append("declared deliverable outputs were not produced and persisted: " + ", ".join(missing_deliverables))
     for output_data_error in output_data_errors:
         _fail_data_materialization(result, output_data_error)
     if _skill_mode:
         _relay_skill_result(workdir, result)
+    else:
+        # A direct code run says which nested files it wrote but did not keep (§4.3); ok is unchanged.
+        not_saved = _unsaved_nested_files(workdir, pre_existing, [(parts, is_folder) for _, parts, is_folder in _nested_deliverables])
+        if not_saved:
+            result["not_saved"] = not_saved
+            result["stderr"] = (result.get("stderr") or "") + "\n[runner] " + _NOT_SAVED_HINT.format(files="; ".join(not_saved))
     # follow-up② command-mode deliverable-presence guard (design D3.5) addresses LLM-behavior P0 silent false
     # success: exit0 without top-level outputs fails with a model-legible hint (often after copying the relative
     # `output/` directory from SKILL.md into the unscanned skill subtree). Never return ok:true/outputs:[] (s_3389df456f cases).
@@ -2075,7 +2360,7 @@ def main() -> int:
         result["error"] = ((result.get("error") + "; ") if result.get("error") else "") + _hint
         result["stderr"] = (result.get("stderr") or "") + "\n[runner] " + _hint
     _mark_input_errors(result, input_errors)
-    _hint_missing_file(result, resolved)
+    _hint_missing_file(result, resolved, workdir)
     _materialize_data_outputs(
         workdir=workdir,
         result=result,
@@ -2090,7 +2375,33 @@ def main() -> int:
     return 0
 
 
-def _hint_missing_file(result: dict, resolved: dict) -> None:
+_MISSING_PATH_RE = re.compile(r"No such file or directory: '([^'\n]+)'")
+
+
+def _missing_folder_hint(err: str, workdir: Path | None = None) -> str | None:
+    """Hint for a missing path whose folder (other than inputs/) is absent from this call's working directory."""
+    match = _MISSING_PATH_RE.search(err)
+    if match is None or "INPUTS[" in match.group(1):
+        return None
+    path = match.group(1)
+    if path.startswith("/workdir/"):
+        path = path[len("/workdir/") :]
+    while path.startswith("./"):
+        path = path[2:]
+    parts = [part for part in path.split("/") if part]
+    if path.startswith("/") or len(parts) < 2 or parts[0].lower() == _INPUTS_DIRNAME:
+        return None  # An input path guess keeps the input hints below.
+    if workdir is not None and ((workdir / parts[0]).is_symlink() or (workdir / parts[0]).exists()):
+        return None  # The folder exists in this call; the existing hints apply.
+    return (
+        f"{path} is inside the folder {parts[0]}/, which does not exist in this call. Every call starts in an empty working "
+        "directory: folders and files created by earlier calls are gone. Create the folder in the same code before writing "
+        "into it (os.makedirs(folder, exist_ok=True)) or write at the top level; to read a file from an earlier call, pass "
+        "its artifact_id in inputs and read INPUTS['<key>']['path'], or keep it with work_outputs."
+    )
+
+
+def _hint_missing_file(result: dict, resolved: dict, workdir: Path | None = None) -> None:
     """代码报 FileNotFoundError 时，把**真实可用的输入清单**贴回去让模型自纠.
 
     2026-08-18 某客户实测的失败形状：compute agent 拿到 bi_query 的 artifact 后**没有声明
@@ -2103,6 +2414,12 @@ def _hint_missing_file(result: dict, resolved: dict) -> None:
     """
     err = (result.get("stderr") or "") + (result.get("error") or "")
     if "FileNotFoundError" not in err and "No such file or directory" not in err:
+        return
+    # 116 the regression case: writing work/game.html failed because an earlier call had created work/.
+    # A missing folder other than inputs/ is about the fresh working directory, not undeclared inputs.
+    if (folder_hint := _missing_folder_hint(err, workdir)) is not None:
+        result["stderr"] = (result.get("stderr") or "") + "\n[runner] " + folder_hint
+        result["error"] = ((result.get("error") + "; ") if result.get("error") else "") + folder_hint
         return
     # compute-agent-optimize batch 1: on 116 over 30 days, 25% (28/112) of FileNotFoundError cases quoted
     # `INPUTS['x']['path']` as a **string literal**; the "filename" in the error was

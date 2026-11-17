@@ -75,6 +75,20 @@ def test_history_is_user_assistant_pairs_oldest_first() -> None:
 
 
 @pytest.mark.unit
+def test_instructions_a_turn_took_while_running_follow_its_request() -> None:
+    # Mid-run steering: a completed and a cancelled Turn each took instructions; a third took none.
+    turns = [_turn(1, user="Draw the chart."), _turn(2, status="cancelled", user="Compare regions."), _turn(3)]
+    taken = {"t1": ["Use green bars.", "  Add a title.  ", " "], "t2": ["Only East China."], "t9": ["never rendered"]}
+
+    th = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE, instructions=taken)
+
+    users = [m["content"] for m in th.messages if m["role"] == "user"]
+    assert users == ["Draw the chart.\n\nUse green bars.\n\nAdd a title.", "Compare regions.\n\nOnly East China.", "问题3"]
+    without = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE)
+    assert [m["content"] for m in without.messages if m["role"] == "user"] == ["Draw the chart.", "Compare regions.", "问题3"]
+
+
+@pytest.mark.unit
 def test_current_turn_is_excluded() -> None:
     th = build_turn_history([_turn(1), _turn(2)], exclude_turn_id="t2", budget_tokens=0, estimate=_ONE)
     assert th.turns_used == 1 and th.messages[0]["content"] == "问题1"
@@ -964,6 +978,46 @@ async def test_final_answer_gate_bounces_zero_tool_turn_that_states_unsourced_fi
     assert getattr(captured["ctx"], "_lead_narrative_superseded", False) is True
     assert await gate(made_up, "lead", []) is not None, "r10：上限是 2，第二次仍退"
     assert await gate(made_up, "lead", []) is None, "第三次被上限挡住"
+
+
+@pytest.mark.asyncio
+async def test_final_answer_gate_lets_a_restated_or_negated_report_change_pass(
+    monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
+) -> None:
+    """116 N13 follow-up (the regression case / the regression case): a zero-tool version answer restated the title change an
+    earlier turn reported, and honest answers said no report was made; both were bounced twice as report work."""
+    from bowhead_core.turn_runner import TurnRunner
+
+    helpers = _turn_runner_helpers()
+    _make_orch, _req = helpers._make_orch, helpers._req
+
+    monkeypatch.setenv(_FLAG, "1")
+    captured: dict[str, Any] = {}
+
+    class _Runner:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+            self.router = getattr(inner, "router", None)
+
+        async def run(self, **kw: Any) -> Any:
+            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
+            return await self._inner.run(**kw)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
+    ss = _session_store_with(
+        [_turn(1, user="把画布上那份报告的大标题改成《2025年度经营复盘》", answer="画布报告的大标题已改为《2025年度经营复盘》，其余章节均未改动。")],
+        [],
+    )
+    orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner), session_store=ss)
+    await TurnRunner(orch).run(_req("HTML报告现在一共有几个版本？不用重新生成文件。"))
+    gate = captured["gate"]
+    assert gate is not None
+    assert await gate("另外画布上那份报告是另一份产物，标题已改为《2025年度经营复盘》。", "lead", []) is None
+    assert await gate("本轮没有查询数据，也没有生成报告。", "lead", []) is None
+    assert await gate("画布上那份报告的标题已改为《别的标题》。", "lead", []) is not None, "a change no earlier answer reported"
 
 
 @pytest.mark.asyncio

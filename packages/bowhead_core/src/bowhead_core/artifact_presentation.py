@@ -270,7 +270,10 @@ async def normalize_producer_declaration(tool_name: str, arguments: dict, result
     if tool_name == "skill_invoke" and arguments.get("name") == "latex-report":
         requested = {"main.tex", "report.pdf"}
     elif inner.get("purpose") == "deliverable" and isinstance(inner.get("deliverable_outputs"), list):
-        requested = {name for name in inner["deliverable_outputs"] if isinstance(name, str)}
+        from bowhead_skill.sandbox_deliverables import deliverable_saved_name
+
+        # A nested file or folder entry is saved under its base name or as <folder>.zip.
+        requested = {deliverable_saved_name(name.strip()) for name in inner["deliverable_outputs"] if isinstance(name, str) and name.strip()}
     else:
         return result
     outputs = result.get("output_artifacts")

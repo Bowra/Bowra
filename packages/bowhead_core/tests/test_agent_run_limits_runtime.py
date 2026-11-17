@@ -54,15 +54,31 @@ class _LoopingRouter:
         yield LLMChunk(finish_reason="tool_use")
 
 
-def _registry() -> ToolRegistry:
+def _registry(*, changing: bool = False, status_poll: bool = False) -> ToolRegistry:
+    """``read`` returns its key; with ``changing`` every call also returns a new reading."""
     registry = ToolRegistry()
+    readings = iter(range(1, 10_000))
 
     async def read(arguments: dict[str, object], _ctx: ToolExecutionContext) -> dict[str, object]:
-        return {"ok": True, "value": arguments.get("key")}
+        return {"ok": True, "value": arguments.get("key"), **({"reading": next(readings)} if changing else {})}
 
-    registry.register(ToolSpec(schema=ToolSchema(name="read", description="Read", input_schema={"type": "object"}), handler=read))
+    registry.register(
+        ToolSpec(schema=ToolSchema(name="read", description="Read", input_schema={"type": "object"}), handler=read, status_poll=status_poll)
+    )
     register_subagent_return_tool(registry)
     return registry
+
+
+class _NoCanvasStore:
+    """A session without a Canvas: the reference refresh still adds a `tl` reference per tool call."""
+
+    async def get_canvas_by_session(self, _session_id: str) -> None:
+        return None
+
+
+class _NoArtifactStore:
+    async def list_for_session(self, *_args: object, **_kwargs: object) -> list[object]:
+        return []
 
 
 async def _run(
@@ -73,6 +89,8 @@ async def _run(
     max_iterations: int = 40,
     profile_name: str = "run-limits-test",
     model_budget: rl.TurnModelCallBudget | None = None,
+    registry: ToolRegistry | None = None,
+    with_reference_refresh: bool = False,
     **run_options,
 ):
     profile = SubagentProfile(
@@ -91,7 +109,7 @@ async def _run(
     model_budget_token = rl.set_model_call_budget(model_budget)
     deadline_token = set_turn_deadline(time.monotonic() + (limits.turn_time_limit_s if limits else 1800))
     try:
-        return await SubagentRunner(router=router, tool_registry=_registry()).run(
+        return await SubagentRunner(router=router, tool_registry=registry or _registry()).run(
             profile_name=profile.name,
             task="Read until done",
             parent_turn_id="t_run_limits",
@@ -103,6 +121,7 @@ async def _run(
                 turn_id="t_run_limits",
                 session_id="s_test",
                 datarc=None,  # type: ignore[arg-type]
+                **({"canvas_store": _NoCanvasStore(), "artifact_store": _NoArtifactStore()} if with_reference_refresh else {}),
             ),
             **run_options,
         )
@@ -207,11 +226,54 @@ async def test_forced_tools_do_not_consume_model_steps(monkeypatch):
     assert [inv.tool_name for inv in result.tool_invocations] == ["read", "subagent_return"]
 
 
-async def test_repeated_calls_are_advisory_with_runtime_controls(monkeypatch):
+def _tool_messages(request: LLMRequest) -> list[str]:
+    return [str(message.content) for message in request.messages if message.role == "tool"]
+
+
+async def test_identical_repeats_get_notices_then_are_refused_and_wrap_up(monkeypatch):
+    """The same call with the same result: notices at 3 and 5, not run from the 8th, and the
+    refused-decision bound ends the run as partial (tech design §3.3–§3.4, AR-06 as amended)."""
     router = _LoopingRouter(steps_before_return=35, distinct=False)
     result = await _run(monkeypatch, router, rl.AgentRunLimits(tool_call_limit=1000), max_iterations=12)
+    assert (result.completion, result.stop_reason) == ("partial", "no_progress"), result.error
+    refusal_decisions = rl.REFUSED_DECISION_LIMIT
+    executed = rl.REPEAT_REFUSE_FROM - 1
+    assert [inv.tool_name for inv in result.tool_invocations] == ["read"] * executed
+    assert len(router.requests) == executed + refusal_decisions + 1  # then the tool-free summary
+    assert router.requests[-1].tool_choice == "none"
+    final_tools = _tool_messages(router.requests[-1])
+    notices = [message for message in final_tools if "[repeat notice]" in message]
+    assert [notice.split("This is call ")[1].split(" ")[0] for notice in notices] == ["3", "5"]
+    refusals = [message for message in final_tools if message.startswith("not_run:")]
+    assert [refusal.split("this is call ")[1].split(" ")[0] for refusal in refusals] == ["8", "9", "10"]
+
+
+async def test_identical_calls_with_changing_results_stay_advisory(monkeypatch):
+    """AR-06 for useful work: the same arguments with a new result each time are never refused;
+    the corrected progress counter still nudges once (tool-log references are not progress)."""
+    router = _LoopingRouter(steps_before_return=35, distinct=False)
+    result = await _run(
+        monkeypatch,
+        router,
+        rl.AgentRunLimits(tool_call_limit=1000),
+        max_iterations=12,
+        registry=_registry(changing=True),
+        with_reference_refresh=True,
+    )
     assert result.ok, result.error
     assert len(router.requests) == 36
+    final_tools = _tool_messages(router.requests[-1])
+    assert not [message for message in final_tools if "[repeat notice]" in message or message.startswith("not_run:")]
+    nudges = [m for m in router.requests[-1].messages if m.role == "user" and "steps produced no new results" in str(m.content)]
+    assert len(nudges) == 1
+
+
+async def test_status_poll_tool_is_never_refused(monkeypatch):
+    router = _LoopingRouter(steps_before_return=20, distinct=False)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(tool_call_limit=1000), registry=_registry(status_poll=True))
+    assert result.ok, result.error
+    assert len(router.requests) == 21
+    assert not [message for message in _tool_messages(router.requests[-1]) if "[repeat notice]" in message or message.startswith("not_run:")]
 
 
 async def test_lead_uses_the_shared_ceiling_beyond_twelve(monkeypatch):

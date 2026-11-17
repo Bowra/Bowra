@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { chooseSegment, segmentDisabled, segmentedValue } from "@/__tests__/segmented-field";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { renderIntl } from "@/__tests__/intl-render";
 import { NextIntlClientProvider } from "next-intl";
 import messages from "@/messages/en-US.json";
@@ -241,4 +241,21 @@ it("a late confirmation receipt cannot read back into a reopened same-key page",
   expect(getWorkspaceMetadata).not.toHaveBeenCalled();
   expect((name as HTMLInputElement).value).toBe(original.name);
   expect(bridge.hasOriginal(suggestion)).toBe(false);
+});
+
+it("a busy server keeps the edits and says nothing was saved", async () => {
+  // The added reason follows <html lang>, which the app keeps equal to the next-intl locale.
+  document.documentElement.lang = "en-US";
+  onTestFinished(() => {
+    document.documentElement.lang = "";
+  });
+  mount();
+  const description = await screen.findByRole("textbox", { name: labels.description_label });
+  const busy = "The server was busy with other work, so this change was not saved and nothing was lost. Try again in a few seconds.";
+  vi.mocked(updateWorkspaceMetadata).mockRejectedValueOnce(new ApiError(503, busy, { code: "store_busy" }));
+  fireEvent.change(description, { target: { value: "Edited description" } });
+  fireEvent.click(screen.getByRole("button", { name: messages.common.save }));
+  // The page's "Refresh and try again" would drop the edits; the busy reason gives the only next step.
+  await waitFor(() => expect(screen.getByText(`Could not save changes. ${busy}`)).not.toBeNull());
+  expect((description as HTMLTextAreaElement).value).toBe("Edited description");
 });

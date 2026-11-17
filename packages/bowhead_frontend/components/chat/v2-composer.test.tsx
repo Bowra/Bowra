@@ -2625,6 +2625,43 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       expect(textarea.readOnly).toBe(false);
     });
 
+    it("onSteer: clears an accepted instruction sent right after the last keystroke", async () => {
+      // 116 the regression case: Enter inside the draft autosave delay left the accepted text in the composer.
+      let stored: { message: string; attachments: AttachmentRef[]; revision: string; updatedAt: string } | null = null;
+      let writes = 0;
+      recoveryMocks.read.mockImplementation(async () => structuredClone(stored));
+      recoveryMocks.write.mockImplementation(async (_scope, draft, expectedRevision) => {
+        if ((stored?.revision ?? null) !== expectedRevision) return { status: "conflict" };
+        stored = draft.message || draft.attachments.length
+          ? { ...draft, revision: `revision-${++writes}`, updatedAt: new Date().toISOString() }
+          : null;
+        return { status: "written", revision: stored?.revision ?? null };
+      });
+      recoveryMocks.clear.mockImplementation(async (_scope, revision) => {
+        if (stored?.revision !== revision) return false;
+        stored = null;
+        return true;
+      });
+      let acceptSteer!: (accepted: boolean) => void;
+      const onSteer = vi.fn(() => new Promise<boolean>((resolve) => {
+        acceptSteer = resolve;
+      }));
+      render(<V2Composer onSend={() => {}} onSteer={onSteer} running draftPersistenceScope={DRAFT_SCOPE} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+      await waitFor(() => expect(textarea.readOnly).toBe(false));
+
+      fireEvent.change(textarea, { target: { value: "only the top three" } });
+      fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+      await waitFor(() => expect(onSteer).toHaveBeenCalled());
+      // The autosave delay passes while the instruction is still on its way.
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+      acceptSteer(true);
+
+      await waitFor(() => expect(textarea.value).toBe(""));
+      expect(stored).toBeNull();
+      expect(textarea.readOnly).toBe(false);
+    });
+
     it("onSteer: accepts an attachment-only draft with its complete reference", async () => {
       const onSteer = vi.fn(async () => true);
       const attachment = {

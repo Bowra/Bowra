@@ -31,6 +31,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "packages/bowhead_frontend"
 SANDBOX_NODE_DIR = ROOT / "packages/bowhead_skill/catalog/python_sandbox/node_deps"
+# Browser libraries bundled into the sandbox image; only production entries ship (esbuild is a build-only dev entry).
+SANDBOX_BROWSER_DIR = ROOT / "packages/bowhead_skill/catalog/python_sandbox/browser_libs"
 UV_LOCK = ROOT / "uv.lock"
 COMPONENTS_FILE = ROOT / "config/third_party/image_components.json"
 DOCKERFILES = {
@@ -49,7 +51,7 @@ TEXTS_HEADING = "## Copyright Notices and License Texts"
 MISSING_HEADING = "### Components without a bundled license text"
 REGENERATE_HINT = "make install-frontend && uv sync --all-packages --no-dev, then make third-party-notices"
 # Bump whenever the generated output changes for the same inputs, so --check asks for a regeneration.
-GENERATOR_VERSION = 8
+GENERATOR_VERSION = 9
 
 # Package manager -> (install subcommand, inventory bucket).
 PACKAGE_MANAGERS = {
@@ -84,6 +86,7 @@ UV_ARCHIVE = Path.home() / ".cache/uv/archive-v0"
 SCOPE_FRONTEND = "frontend"
 SCOPE_BACKEND = "backend"
 SCOPE_SANDBOX_NODE = "sandbox-node"
+SCOPE_SANDBOX_BROWSER = "sandbox-browser"
 SCOPE_VENDORED = "vendored"
 
 LICENSE_FILE_RE = re.compile(r"^(licen[cs]e|copying|notice|unlicense)([.-].*)?$", re.IGNORECASE)
@@ -192,6 +195,7 @@ REVIEW_COPY = {
         SCOPE_FRONTEND: "前端生产依赖",
         SCOPE_BACKEND: "后端运行时依赖",
         SCOPE_SANDBOX_NODE: "sandbox 预置 Node 包",
+        SCOPE_SANDBOX_BROWSER: "sandbox 预置浏览器库",
         SCOPE_VENDORED: "前端源码内嵌",
     },
 }
@@ -219,6 +223,7 @@ REVIEW_COPY_EN = {
         SCOPE_FRONTEND: "Frontend production dependency",
         SCOPE_BACKEND: "Backend runtime dependency",
         SCOPE_SANDBOX_NODE: "Sandbox Node dependency",
+        SCOPE_SANDBOX_BROWSER: "Sandbox browser library",
         SCOPE_VENDORED: "Vendored source material",
     },
 }
@@ -459,7 +464,7 @@ def _inventory_dockerfiles() -> dict[str, Path]:
 def inventory_fingerprint() -> str:
     """Fingerprint determined only by lockfiles, Dockerfiles and the component registry."""
     payload: dict[str, Any] = {}
-    for label, directory in (("npm-frontend", FRONTEND_DIR), ("npm-sandbox", SANDBOX_NODE_DIR)):
+    for label, directory in (("npm-frontend", FRONTEND_DIR), ("npm-sandbox", SANDBOX_NODE_DIR), ("npm-sandbox-browser", SANDBOX_BROWSER_DIR)):
         entries = _npm_production_entries(directory / "package-lock.json")
         payload[label] = sorted([_npm_name(k, v), v.get("version", ""), _npm_lock_license(v)] for k, v in entries.items())
     packages, _ = _python_runtime_packages()
@@ -928,6 +933,7 @@ def render_notices(deps: list[Dep], fingerprint: str) -> str:
         ("Frontend production dependencies (npm)", [d for d in deps if d.scope == SCOPE_FRONTEND]),
         ("Backend runtime dependencies (PyPI)", [d for d in deps if d.scope == SCOPE_BACKEND]),
         ("python_sandbox preinstalled Node packages (npm)", [d for d in deps if d.scope == SCOPE_SANDBOX_NODE]),
+        ("python_sandbox preinstalled browser libraries (npm, bundled into single files)", [d for d in deps if d.scope == SCOPE_SANDBOX_BROWSER]),
         (image_title, [d for d in deps if d.ecosystem in {"system", "image"} or (d.ecosystem == "pypi" and d.scope.startswith("bowhead-"))]),
         ("Third-party material vendored into source", [d for d in deps if d.ecosystem == "vendored"]),
     ]
@@ -1095,7 +1101,13 @@ def _dockerfile_notes(copy: dict[str, Any] = REVIEW_COPY) -> list[str]:
 def write(*, allow_missing: bool) -> int:
     fingerprint = inventory_fingerprint()
     try:
-        deps = _collect_npm(FRONTEND_DIR, SCOPE_FRONTEND) + _collect_python() + _collect_npm(SANDBOX_NODE_DIR, SCOPE_SANDBOX_NODE) + _collect_images()
+        deps = (
+            _collect_npm(FRONTEND_DIR, SCOPE_FRONTEND)
+            + _collect_python()
+            + _collect_npm(SANDBOX_NODE_DIR, SCOPE_SANDBOX_NODE)
+            + _collect_npm(SANDBOX_BROWSER_DIR, SCOPE_SANDBOX_BROWSER)
+            + _collect_images()
+        )
     except MissingMetadataError as exc:
         sys.stderr.write(f"error: {exc}\nfix: {REGENERATE_HINT}\n")
         return 1

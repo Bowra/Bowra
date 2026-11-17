@@ -45,6 +45,17 @@ UNBOUNDED_STEPS = 1_000_000
 # stop after this many.
 NO_PROGRESS_NUDGE_STEPS = 8
 NO_PROGRESS_STOP_STEPS = 12
+# Reference kinds whose growth counts as progress. Tool-log (`tl`), `code`, `data` and `doc`
+# references are left out: every tool call adds a `tl` reference and every sandbox run adds a
+# code section and a stdout Data artifact, so a repeated call would always look like progress.
+# A new successful call already counts through its arguments
+# (docs/sprints/agent-repeat-guard-2026-11-16/tech-design.md §3.1).
+PROGRESS_REFERENCE_KINDS = frozenset({"chart", "image", "design"})
+# Repeated identical calls with identical results (agent_repeat_guard): a notice is appended to
+# the result at these chain positions, and from REPEAT_REFUSE_FROM the call is refused before
+# execution, which feeds the refused-decision bound below.
+REPEAT_NOTICE_AT = (3, 5)
+REPEAT_REFUSE_FROM = 8
 # Bounded Tool-error policy for calls refused before execution (whitelist, Skill scope,
 # repeated-failure gates, dispatch guards). Refusals never reach the executed-failure
 # counters, and runtime-control runs have no step stop, so a model that keeps requesting

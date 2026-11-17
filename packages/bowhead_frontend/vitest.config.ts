@@ -13,6 +13,9 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
+    // Node 25 enables its own Web Storage by default; that global localStorage shadows jsdom's
+    // and has no methods without --localstorage-file. Tests must use the jsdom implementation.
+    execArgv: ["--no-experimental-webstorage"],
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/e2e/**", "**/.next/**", "**/out-*/**", "**/dist/**"],

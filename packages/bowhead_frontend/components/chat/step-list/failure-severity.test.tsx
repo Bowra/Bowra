@@ -271,6 +271,7 @@ describe("agent messaging and new-presentation failures name the cause", () => {
   // 116 s_beffa22dce1f showed "this step failed without a specific error" for both.
   const CASES = {
     collaboration_coordination_reply_only: "collab_errors.format",
+    collaboration_user_round_update_only: "collab_errors.format",
     collaboration_unresolved: "collab_errors.waiting",
     collaboration_reply_closed: "collab_errors.closed",
     collaboration_operation_limit: "collab_errors.limit",

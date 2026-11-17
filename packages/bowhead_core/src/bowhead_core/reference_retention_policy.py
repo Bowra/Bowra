@@ -13,7 +13,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.user_store import _read_team_role_in_tx
 
 MAX_REFERENCE_RETENTION_DAYS = 180
@@ -56,6 +56,7 @@ async def get_retention_policy(db_path: str | Path, *, team_id: str, user_id: st
         return await read_retention_policy_in_connection(db, team_id=team_id)
 
 
+@repeat_when_authority_busy()
 async def set_retention_policy(db_path: str | Path, *, team_id: str, user_id: str, days: int, expected_version: int) -> ReferenceRetentionPolicy:
     if type(days) is not int or not 1 <= days <= MAX_REFERENCE_RETENTION_DAYS or type(expected_version) is not int or expected_version < 0:
         raise ReferenceRetentionPolicyError("reference_retention_policy_invalid", 422)

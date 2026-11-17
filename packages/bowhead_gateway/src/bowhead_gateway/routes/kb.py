@@ -1884,15 +1884,20 @@ async def _delete_file_core(
     user: User,
     *,
     action=None,
+    include_deleted: bool = False,
 ) -> None:
     """Per-file delete (scope-check + perms + soft-delete + cascade + audit).
 
     Shared by the single DELETE endpoint and bulk_delete. Raises HTTPException
     on a permission/not-found failure so bulk can capture it per item.
     kb-management REQ-1.4a.
+
+    Web deletes keep answering a removed file exactly like a missing one. Only
+    the Knowledge management Tool passes ``include_deleted`` so a replayed
+    removal can reconcile its committed membership operation and cleanup.
     """
     files_store = _get_files_store(request)
-    file = await _kb_scope_check(file_id, ctx, files_store, request, include_deleted=True)
+    file = await _kb_scope_check(file_id, ctx, files_store, request, include_deleted=include_deleted)
 
     if not KbPermission.can_delete(file, ctx, ctx.role):
         raise _kb_error(403, "kb_file_access_denied")

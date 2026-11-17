@@ -159,16 +159,27 @@ async def select_reference_receiver(
             )
     except Exception as exc:
         raise ReferenceReceiverSelectionError("reference_receiver_selection_unavailable") from exc
+    return choices[_selected_candidate_index(response.content, candidate_count=len(choices))].resource
+
+
+def _selected_candidate_index(content: object, *, candidate_count: int) -> int:
+    """Read the routing choice; only ``candidate_index`` carries authority.
+
+    Models wrap JSON in a code fence even in JSON mode and sometimes add a reason
+    field. Both are presentation, so they are tolerated. A missing, non-integer or
+    out-of-range index still fails closed: no default receiver is ever chosen.
+    """
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```").removeprefix("json").removeprefix("JSON").removesuffix("```").strip()
     try:
-        payload = json.loads(str(response.content or ""))
-    except (TypeError, ValueError) as exc:
+        payload = json.loads(text)
+    except ValueError as exc:
         raise ReferenceReceiverSelectionError("reference_receiver_selection_invalid") from exc
-    if not isinstance(payload, dict) or set(payload) != {"candidate_index"}:
+    index = payload.get("candidate_index") if isinstance(payload, dict) else None
+    if type(index) is not int or not 0 <= index < candidate_count:
         raise ReferenceReceiverSelectionError("reference_receiver_selection_invalid")
-    index = payload["candidate_index"]
-    if type(index) is not int or not 0 <= index < len(choices):
-        raise ReferenceReceiverSelectionError("reference_receiver_selection_invalid")
-    return choices[index].resource
+    return index
 
 
 def _resource_only_input(

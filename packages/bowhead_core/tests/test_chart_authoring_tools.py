@@ -299,6 +299,15 @@ async def test_other_session_cannot_read_chart(chart):
     assert (await read_chart({"section_id": result["section_id"]}, ctx))["error"] == "chart_unavailable"
 
 
+async def test_unknown_chart_lists_the_current_charts(chart):
+    """116 the regression case: a helper sent a made-up chart ID twice and was only told to choose a current chart."""
+    _, ctx, result = chart
+    for tool in (read_chart, edit_chart):
+        refused = await tool({"section_id": "69", "expected_rev": 1, "changes": {"title": "x"}}, ctx)
+        assert refused["error"] == "chart_unavailable"
+        assert refused["hint"] == f"Choose a current chart in this session. Current charts: {result['section_id']} (Values)."
+
+
 async def test_edit_without_live_event_channel_does_not_write(chart):
     store, ctx, result = chart
     section = (await store.list_sections(result["canvas_id"]))[0]

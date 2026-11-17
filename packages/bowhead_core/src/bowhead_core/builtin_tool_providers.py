@@ -35,6 +35,23 @@ class CatalogOperation:
 
 
 @dataclass(frozen=True)
+class PluginTemplate:
+    """A preset Team Plugin for one connection: which of its operations and which built-in Skill.
+
+    Templates only fill the Plugin editor; the administrator saves through the ordinary create path,
+    which checks selectability and names as for any Plugin.
+    """
+
+    kind: str
+    operations: tuple[str, ...]
+    skill: str
+
+
+def _no_templates(_tool: Any) -> tuple[PluginTemplate, ...]:
+    return ()
+
+
+@dataclass(frozen=True)
 class BuiltinToolProvider:
     name: str
     # Operations this connection exposes (empty = inactive) — config, not per-member state.
@@ -46,6 +63,8 @@ class BuiltinToolProvider:
     dependency_revision: str
     # Whether this turn may carry the provider's tools at all (e.g. attended runs only).
     turn_allows: Callable[[Any], bool]
+    # Preset Plugins offered in the Team Plugin editor for one active connection.
+    plugin_templates: Callable[[Any], tuple[PluginTemplate, ...]] = _no_templates
 
 
 def _datarc() -> BuiltinToolProvider:
@@ -202,6 +221,7 @@ def _shopify() -> BuiltinToolProvider:
     from bowhead_core.builtin_shopify_tool import (
         OPERATIONS,
         build_builtin_shopify_specs,
+        shopify_plugin_templates,
         shopify_source_label,
         shopify_tool_ref,
         supported_operations,
@@ -232,6 +252,7 @@ def _shopify() -> BuiltinToolProvider:
         },
         dependency_revision="shopify-content-v1",
         turn_allows=lambda _ctx: True,
+        plugin_templates=shopify_plugin_templates,
     )
 
 
@@ -239,6 +260,18 @@ def providers() -> tuple[BuiltinToolProvider, ...]:
     from bowhead_core.builtin_shopify_tool import feature_enabled
 
     return (_datarc(), _google(), _powerbi()) + ((_shopify(),) if feature_enabled() else ())
+
+
+def builtin_skill_available(name: str) -> bool:
+    """Whether a built-in Skill can work in this deployment.
+
+    A Skill written for one built-in connection is offered for selection only while that connection can
+    be enabled; outside pickers, existing grants keep resolving as before.
+    """
+    from bowhead_core.builtin_shopify_tool import shopify_skill_available
+
+    available = shopify_skill_available(name)
+    return True if available is None else available
 
 
 def active_by_provider(rows: list[Any], ctx: Any | None) -> list[tuple[BuiltinToolProvider, list[Any]]]:

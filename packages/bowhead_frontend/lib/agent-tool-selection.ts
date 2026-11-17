@@ -1,3 +1,5 @@
+import { localizedToolText } from "./tool-display";
+
 /** Shared reason copy for all Agent authoring pickers; the server owns eligibility. */
 export function toolSelectionLockedReasonKey(reason: string) {
   if (reason === "approval_executor_unavailable") return "draft_locked_approval_executor";
@@ -5,6 +7,21 @@ export function toolSelectionLockedReasonKey(reason: string) {
   if (reason === "risk_metadata_unknown") return "draft_locked_risk_unknown";
   if (reason === "precise_skill_scope_required") return "draft_locked_precise_skill_scope";
   return "draft_locked_unavailable";
+}
+
+/**
+ * Whether a catalog Tool matches a picker search: its displayed name and description, its reference and,
+ * for a Team Tool, its connection name. Both Agent and Plugin editors search this way.
+ */
+export function authoringToolMatches(
+  tool: Parameters<typeof localizedToolText>[0] & { stable_ref: string; source_display_name?: string | null },
+  query: string,
+  locale: string,
+): boolean {
+  const needle = query.trim().toLocaleLowerCase(locale);
+  if (!needle) return true;
+  const copy = localizedToolText(tool, locale);
+  return [copy.name, copy.description, tool.stable_ref, tool.source_display_name ?? ""].join(" ").toLocaleLowerCase(locale).includes(needle);
 }
 
 /**

@@ -125,6 +125,8 @@ def validate_kinds(tools: list[dict[str, Any]]) -> None:
             raise ValueError(f"Tool {name!r} is user-visible and must declare risk.")
         if risk is not None and risk not in TOOL_RISK_VALUES:
             raise ValueError(f"Tool {name!r} has risk {risk!r}; expected one of {TOOL_RISK_VALUES}.")
+        if t.get("system_capability") is not None and (kind != "part" or t["system_capability"] is not True):
+            raise ValueError(f"Tool {name!r}: system_capability is `true` on a part, or absent.")
 
 
 def render_tool_kinds_py(tools: list[dict[str, Any]]) -> str:
@@ -456,6 +458,9 @@ def render_tool_display_ts(tools: list[dict[str, Any]]) -> str:
         lines.append(f'    kind: "{t["kind"]}",')
         if t.get("risk"):
             lines.append(f'    risk: "{t["risk"]}",')
+        if t.get("system_capability"):
+            # A part every Agent has: listed to Team owners as always on, never selected or disabled.
+            lines.append("    systemCapability: true,")
         lines.append("  },")
     lines.append("};")
     lines.append("")

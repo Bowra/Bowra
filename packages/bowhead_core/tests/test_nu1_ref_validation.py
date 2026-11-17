@@ -380,7 +380,7 @@ class _MockArtifactStore:
     def __init__(self, arts: list[Any]) -> None:
         self._arts = arts
 
-    async def list_for_session(self, *, session_id: str, user_id: str) -> list[Any]:
+    async def list_for_session(self, *, session_id: str, user_id: str, limit: int = 100) -> list[Any]:
         return self._arts
 
 

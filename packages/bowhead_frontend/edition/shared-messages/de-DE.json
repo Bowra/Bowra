@@ -283,6 +283,7 @@
       "unsupported_binding": "Die Version oder die Abhängigkeiten dieser Ressource sind für die aktuelle Auswahl nicht verfügbar.",
       "skill_unsupported_binding": "Kein verfügbarer Agent kann diesen Skill mit der aktuellen Auswahl verwenden. Wählen Sie einen dafür konfigurierten Agent, auch über ein Plugin, oder eine erlaubte schreibgeschützte Methode für diese Aufgabe. Bitten Sie andernfalls den Agent-Verantwortlichen um die Konfiguration. Persönliche Skills erfordern „Nur ich“.",
       "skill_readonly_unavailable": "Dieser Skill hat noch keine schreibgeschützten Inhalte für Schnellreferenzen.",
+      "skill_personally_disabled": "Sie haben diesen Skill deaktiviert. Unter „Fähigkeitszentrum → Skills und Workflows“ können Sie ihn wieder aktivieren.",
       "agent_unsupported_binding": "Dieser Agent kann derzeit nicht direkt ausgewählt werden. Bitten Sie Lead im Gespräch, ihn hinzuzuziehen.",
       "resource_unavailable": "Diese Ressource ist derzeit nicht verfügbar.",
       "catalog_adapter_unavailable": "Diese Ressourcenkategorie ist noch nicht verfügbar.",
@@ -872,7 +873,6 @@
       "load_failed": "Fähigkeiten konnten nicht geladen werden. Versuchen Sie es erneut.",
       "retry": "Erneut versuchen",
       "catalog_search": "Katalog durchsuchen",
-      "catalog_description": "Ressourceninformationen ansehen und Ressourcen in der Agentenkonfiguration auswählen. Zugriff und Ausführung werden getrennt geprüft.",
       "builtin_source": "Integriert",
       "team_source": "Team",
       "runtime_access": "Der Zugriff wird bei der Verwendung geprüft.",
@@ -910,7 +910,6 @@
       "builtin_plugins": "Integrierte Plugins",
       "team_plugins": "Team-Plugins",
       "team_plugins_empty": "Es sind noch keine Team-Plugins aktiviert.",
-      "system_plugin_usage": "Bowhead stellt diese Plugins bereit. Sie können sie für Ihre eigenen Agents auswählen.",
       "system_plugins": {
         "settings-personal-appearance": {
           "name": "Persönliches Erscheinungsbild",
@@ -931,6 +930,10 @@
         "settings-space-instructions": {
           "name": "KI-Arbeitsanweisungen",
           "description": "Pflegt die Anweisungen, denen jede Unterhaltung im aktuellen Bereich folgt, im Rahmen Ihrer Bereichsberechtigungen."
+        },
+        "settings-team-administration": {
+          "name": "Team-Verwaltungseinstellungen",
+          "description": "Laufzeitlimits, Modellkonfiguration und Wiederholungen von Modellaufrufen des Teams mit Team-Administratorrechten pflegen."
         }
       },
       "external_tools": "Externe Tools",
@@ -958,7 +961,6 @@
         "tool_usage": "Agenten und geplante Aufgaben, die es nutzen",
         "overview_my_disabled": "{count, plural, =0 {Sie haben kein Plugin deaktiviert} one {Sie haben # Plugin deaktiviert} other {Sie haben # Plugins deaktiviert}}",
         "my_disabled": "Für mich aus",
-        "settings_only": "Wird nur vom System-Einstellungsassistenten verwendet.",
         "disable": "Ausschalten",
         "enable": "Einschalten",
         "undo": "Rückgängig",
@@ -977,6 +979,8 @@
         "tool_switch": "„{name}“ ein- oder ausschalten",
         "enabled": "Ein",
         "not_enabled": "Nicht eingeschaltet",
+        "system_capabilities": "Systemfunktionen",
+        "always_on": "Immer aktiv",
         "enable_risk_title": "„{name}“ einschalten?",
         "enable_risk_irreversible": "Agents schreiben oder senden mit diesem Tool Inhalte nach außen; das lässt sich eventuell nicht rückgängig machen.",
         "enable_risk_audit": "Jeder Aufruf wird im Audit-Protokoll erfasst.",
@@ -1008,7 +1012,10 @@
       "manage_workflows_button": "Team-Skills und Workflows verwalten",
       "manage_tools_button": "Werkzeugquellen verwalten",
       "manage_capabilities_button": "Team-Plugins verwalten",
-      "settings_plugin_usage": "Wird nur vom Systemeinstellungs-Assistenten verwendet."
+      "catalog_description_plugins": "Ein Plugin bündelt Tools und Skills, damit Sie sie beim Konfigurieren eines Agenten gemeinsam auswählen können.",
+      "catalog_description_tools": "Hier stehen die Tools, die Agenten aufrufen können. Wählen Sie sie beim Konfigurieren eines Agenten aus.",
+      "settings_plugins": "Vom Einstellungsassistenten verwendet",
+      "settings_plugins_hint": "Nur der Systemassistent für Einstellungen verwendet diese Plugins; sie lassen sich nicht für eigene Agenten auswählen. Schalten Sie eines aus, ändert der Assistent diese Art von Einstellungen nicht mehr für Sie."
     },
     "answer_language_link": "Antwortsprache einstellen"
   },
@@ -3221,7 +3228,7 @@
     "draft_merging": "Wird zusammengeführt…",
     "placeholder": "Fragen Sie etwas zu Ihren Daten…",
     "readonly_placeholder": "Senden deaktiviert",
-    "steer_placeholder": "↻ Anweisung hinzufügen – wird in die Warteschlange gestellt, bis die aktuelle Antwort fertig ist",
+    "steer_placeholder": "↻ Anweisung hinzufügen – wird beim nächsten Schritt angewendet, sonst nach dieser Antwort",
     "steer_send_label": "Anweisung hinzufügen",
     "steer_send_title": "Diese Anweisung zur aktuellen Antwort hinzufügen (⏎)",
     "stopped_draft_restored": "Gestoppt · ursprüngliche Eingabe zum Bearbeiten und erneuten Senden wiederhergestellt",
@@ -3364,10 +3371,9 @@
       "cancel": "Abbrechen",
       "name": "Name",
       "description": "Beschreibung",
-      "added_tools": "Hinzugefügte Tools",
-      "system_tools": "System-Tools",
       "no_added_tools": "Keine hinzugefügten Tools verfügbar. Konfigurieren und aktivieren Sie zuerst eine Tool-Quelle in den Teameinstellungen.",
-      "skills": "Skills",
+      "resources_loading": "Auswählbare Tools und Skills werden geladen …",
+      "resources_load_failed": "Die auswählbaren Tools und Skills konnten nicht geladen werden. Ihre Eingaben bleiben erhalten.",
       "save": "Plugin speichern",
       "active": "Verfügbar",
       "disabled": "Deaktiviert",
@@ -3379,12 +3385,44 @@
       "delete_failed": "Dieses Plugin konnte nicht gelöscht werden. Möglicherweise wurde es inzwischen geändert. Prüfen Sie die Liste und versuchen Sie es erneut.",
       "resource_count": "{count} Ressourcen",
       "manage": "Team-Plugins verwalten",
-      "unavailable_resource": "Nicht verfügbare Ressource",
       "load_failed": "Team-Plugins konnten nicht geladen werden. Bitte aktualisieren.",
       "save_failed": "Dieses Plugin konnte nicht gespeichert werden. Prüfen Sie Ressourcen und Berechtigungen.",
       "read_only": "Dieses Plugin ist derzeit schreibgeschützt.",
       "selected_resources": "Ausgewählte Ressourcen",
-      "changed_skills": "Für {names} sind neue Versionen verfügbar. Entfernen Sie sie und wählen Sie sie erneut aus, um die aktuellen Versionen zu verwenden."
+      "changed_skills": "Für {names} sind neue Versionen verfügbar. Entfernen Sie sie und wählen Sie sie erneut aus, um die aktuellen Versionen zu verwenden.",
+      "resources_title": "Tools und Skills",
+      "selected_summary": "{tools, plural, one {# Tool} other {# Tools}} · {skills, plural, one {# Skill} other {# Skills}} ausgewählt",
+      "search_label": "Tools und Skills durchsuchen",
+      "search_placeholder": "Nach Name, Zweck oder Quelle suchen…",
+      "no_match": "Keine Tools oder Skills passen zu „{query}“.",
+      "group_count": "{selected} von {total} ausgewählt",
+      "group_connection": "Teamverbindung",
+      "group_builtin": "Integrierte Tools",
+      "skill_source_team": "Team-Skill",
+      "skill_source_builtin": "Integrierter Skill",
+      "locked_set_category": "Kategorie in den Tool-Einstellungen bestätigen",
+      "unavailable_title": "Nicht mehr verfügbare Auswahl",
+      "unavailable_reason": "Nicht mehr verfügbar",
+      "readonly_team_tools": "Team-Tools",
+      "readonly_builtin_tools": "Integrierte Tools",
+      "template_label": "Mit einer Vorlage beginnen",
+      "template_blank": "Leer",
+      "template_replace_title": "Eingaben ersetzen?",
+      "template_replace_description": "Die Vorlage ersetzt Name, Beschreibung und die ausgewählten Tools und Skills.",
+      "template_replace_confirm": "Ersetzen",
+      "template_load_failed": "Vorlagen konnten nicht geladen werden.",
+      "templates": {
+        "shopify_analysis": {
+          "option": "Shopify-Analyse · {connection}",
+          "name": "Shopify-Analyse - {connection}",
+          "description": "Schreibgeschützte Analyse von Bestellungen, Produkten, Lagerbeständen und Shop-Inhalten dieses Shops."
+        },
+        "shopify_content": {
+          "option": "Shopify-Inhaltsoptimierung · {connection}",
+          "name": "Shopify-Inhaltsoptimierung - {connection}",
+          "description": "Verbessert Produkt- und Seiteninhalte dieses Shops; die anfragende Person prüft jede Änderung, bevor sie angewendet wird."
+        }
+      }
     },
     "reference_retention": {
       "title": "Aufbewahrung von Referenzmaterial",
@@ -4314,6 +4352,8 @@
       "cap_cat_orchestrate": "Orchestrierung",
       "cap_cat_media": "Bilder",
       "cap_cat_unknown": "Sonstige",
+      "cap_cat_system": "Systemfunktionen",
+      "system_capabilities_desc": "Jeder Agent verfügt darüber. Sie sind immer aktiv und lassen sich weder einrichten noch ausschalten.",
       "kind_openapi": "OpenAPI",
       "kind_mcp": "MCP",
       "auth_none": "Keine Authentifizierung",
@@ -9168,7 +9208,7 @@
     "hdr_clear_report_changed": "Der Bericht wurde geändert. Es wurde nichts geleert. Versuchen Sie es mit dem aktuellen Bericht erneut.",
     "hdr_delete_report": "Bericht löschen",
     "steer_you": "Sie",
-    "steer_ack": "Eingereiht · wird nach der aktuellen Antwort angewendet",
+    "steer_ack": "Eingereiht · wird beim nächsten Schritt angewendet, sonst nach dieser Antwort",
     "readonly_account": "Dieses Konto ist schreibgeschützt.",
     "readonly_streaming": "Bericht wird erstellt. Bearbeitung ist derzeit nicht verfügbar.",
     "readonly_no_context": "Für diesen Bericht gibt es keinen speicherbaren Kontext.",
@@ -14172,7 +14212,6 @@
       "document_revision_inputs_unsupported": "Eine Dokumentüberarbeitung kann keine neuen Anhänge oder anderen Referenzen enthalten. Entfernen Sie diese oder starten Sie eine neue Anfrage.",
       "document_revision_unavailable": "Die Dokumentüberarbeitung ist derzeit nicht verfügbar. Ihre Nachricht bleibt erhalten.",
       "context_maintenance_unsupported": "Dieser Chat oder dieses Modell unterstützt keine Kontextkomprimierung. Wählen Sie ein unterstütztes Modell und senden Sie zuerst eine Nachricht.",
-      "context_maintenance_inputs_unsupported": "Die Kontextkomprimierung darf keine Frage, Anhänge oder ausstehende Aktion enthalten. Verwenden Sie das Chatmenü.",
       "context_conversation_head_changed": "Der Chat hat sich geändert. Starten Sie die Komprimierung erneut mit dem aktuellen Kontext.",
       "context_maintenance_session_busy": "In diesem Chat läuft noch eine Aufgabe. Warten Sie vor der Komprimierung auf deren Abschluss.",
       "context_maintenance_pending_operation": "Dieser Chat enthält eine offene Frage, Genehmigung oder gespeicherte Fortsetzung. Bearbeiten Sie diese zuerst."
@@ -14948,8 +14987,6 @@
   },
   "shopify_tool": {
     "operation_count": "{count} verfügbare Vorgänge",
-    "create_plugin": "Create analysis Plugin",
-    "plugin_created": "Plugin created. Select it in the Agent editor to use this shop.",
     "edit": "Edit",
     "disable": "Disable",
     "enable": "Enable",
@@ -14966,14 +15003,12 @@
     "cancel": "Cancel",
     "verify_save": "Verify and save",
     "delete_title": "Delete {name}?",
-    "delete_note": "Agents and Plugins using this connection will lose access to this shop.",
+    "delete_note": "Agenten und Plugins, die diese Verbindung nutzen, verlieren den Zugriff auf diesen Shop.",
     "changed": "The connection changed. Refresh the list and retry.",
-    "name_conflict": "A connection or Plugin with this name already exists.",
+    "name_conflict": "Eine Verbindung oder ein Plugin mit diesem Namen existiert bereits.",
     "access_denied": "Shopify denied access. Check the installed app and granted permissions.",
     "failed": "Could not complete the operation. Check the app configuration and try again.",
-    "picker_desc": "Read shop data and content for selected Agents.",
-    "create_content_plugin": "Inhalts-Plugin erstellen",
-    "content_plugin_created": "Inhalts-Plugin erstellt. Wählen Sie es im Agent-Editor; jede Änderung muss von Ihnen geprüft werden."
+    "picker_desc": "Shopdaten und Inhalte für ausgewählte Agenten lesen."
   },
   "shopifyContentConfirmation": {
     "notice": "Prüfen Sie die vollständigen Änderungen vor dem Speichern im Shop. Stimmen Sie sich mit anderen Bearbeitern desselben Inhalts ab.",

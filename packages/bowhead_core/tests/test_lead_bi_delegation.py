@@ -72,7 +72,8 @@ def test_full_prompt_has_no_lead_side_bi_query_guidance() -> None:
     assert "Batch ≥ 并行 tool_calls" not in on
     # Knowledge-boundary routing parentheses
     assert "(用 bi_query / kb_search)" not in on
-    assert "(dispatch compute / use kb_search)" in on
+    # f259484e2 names the KB route by the admitted knowledge mode; the default roster delegates to kb-analyst.
+    assert "(dispatch compute / delegate document retrieval to kb-analyst)" in on
     # Few-shot data example uses spawn, no longer referring to the retired hard-threshold concept
     assert '- "<metric> for <month>" → subagent_spawn(profile="compute"' in on
     assert "硬阈值" not in on

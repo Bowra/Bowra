@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from bowhead_core.agent_run_limits import AgentRunLimits, AgentRuntimeControls
 from bowhead_core.events import TurnEventBus
+from bowhead_core.output_recovery import CORRECTION_LIMIT
 from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentRunner
 from bowhead_core.subagent_return_tool import register_subagent_return_tool
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
@@ -108,7 +110,7 @@ async def test_coach_empty_closeout_is_bounded_and_never_repeats_saved_effect(mo
             llm_agent_type="analyst",
             tool_whitelist=("save_once",),
             system_prompt="Save the requested personal Skill and report its original receipt.",
-            max_iterations=1 if closeout == "exhausted" else 4,
+            max_iterations=4,
         ),
     )
     registry = ToolRegistry()
@@ -129,19 +131,25 @@ async def test_coach_empty_closeout_is_bounded_and_never_repeats_saved_effect(mo
             ),
         ]
     )
+    ctx = ToolExecutionContext(
+        workspace_id="ws_test", member_uid="m_test", user_id="u_test", turn_id="t_coach_closeout", session_id="s_test", datarc=None
+    )
+    if closeout == "exhausted":
+        # The Team step limit, not the profile's own bound, now limits every run.
+        ctx.agent_runtime_budget = AgentRuntimeControls(system_step_limit=2).budget(AgentRunLimits())
     result = await SubagentRunner(router=router, tool_registry=registry).run(
         profile_name="agent-coach",
         task="Create a personal Skill",
         parent_turn_id="t_coach_closeout",
         parent_bus=TurnEventBus(),
-        parent_ctx=ToolExecutionContext(
-            workspace_id="ws_test", member_uid="m_test", user_id="u_test", turn_id="t_coach_closeout", session_id="s_test", datarc=None
-        ),
+        parent_ctx=ctx,
     )
     assert saves == ["operation-original"]
     assert len(router.requests) == (2 if closeout == "exhausted" else 3)
     if closeout == "exhausted":
-        assert not result.final_answer
+        # No closeout decision remains: the run stops at its limit and reports only retained work.
+        assert not result.ok and result.stop_reason == "step_limit"
+        assert "operation-original" not in (result.final_answer or "")
         return
     assert router.requests[-1].tools == []
     assert any("operation-original" in message.content for message in router.requests[-1].messages)
@@ -163,7 +171,7 @@ async def test_lead_empty_answer_has_one_safe_retry_and_never_claims_success(mon
             llm_agent_type="lead",
             system_prompt="Answer the request.",
             tool_whitelist=("read_once",),
-            max_iterations=0 if outcome == "budget" else 4,
+            max_iterations=4,
         ),
     )
     registry = ToolRegistry()
@@ -182,26 +190,31 @@ async def test_lead_empty_answer_has_one_safe_retry_and_never_claims_success(mon
         ]
         if outcome == "dispatch":
             responses.insert(0, LLMResponse(content=""))
+    elif outcome == "length":
+        # Truncated output first receives the bounded output-recovery corrections.
+        responses.extend(LLMResponse(content="", finish_reason="length") for _ in range(1 + CORRECTION_LIMIT))
     elif outcome != "budget":
-        responses.append(
-            LLMResponse(content="Recovered answer." if outcome == "recovered" else "", finish_reason="length" if outcome == "length" else "stop")
-        )
+        responses.append(LLMResponse(content="Recovered answer." if outcome == "recovered" else ""))
     router = ScriptedRouter(responses)
     bus = TurnEventBus()
+    ctx = ToolExecutionContext(
+        workspace_id="ws_test", user_id="u_test", member_uid="m_test", turn_id="t_lead_empty", session_id="s_test", datarc=None
+    )
+    if outcome == "budget":
+        # The Team step limit, not the profile's own bound, now limits every run.
+        ctx.agent_runtime_budget = AgentRuntimeControls(system_step_limit=1).budget(AgentRunLimits())
     result = await SubagentRunner(router=router, tool_registry=registry).run(
         profile_name="lead",
         task="Answer the question",
         parent_turn_id="t_lead_empty",
         parent_bus=bus,
-        parent_ctx=ToolExecutionContext(
-            workspace_id="ws_test", user_id="u_test", member_uid="m_test", turn_id="t_lead_empty", session_id="s_test", datarc=None
-        ),
+        parent_ctx=ctx,
     )
-    assert len(router.requests) == (1 if outcome == "budget" else 3 if outcome == "dispatch" else 2)
+    assert len(router.requests) == {"budget": 1, "dispatch": 3, "length": 2 + CORRECTION_LIMIT}.get(outcome, 2)
     assert reads == ([True] if outcome in {"after_tool", "dispatch"} else [])
     assert result.ok is (outcome in {"recovered", "after_tool", "dispatch"})
     if not result.ok:
-        assert result.error == ("lead_output_exhausted" if outcome == "length" else "lead_empty_answer")
+        assert result.error == {"length": "lead_output_exhausted", "budget": "run_limit_step_limit"}.get(outcome, "lead_empty_answer")
         assert not result.final_answer
     timings = [e.payload for e in bus.snapshot() if e.event_type == "llm.call_timing"]
     assert sum(t.get("empty_answer_retry", False) for t in timings) == (0 if outcome in {"budget", "after_tool"} else 1)

@@ -516,6 +516,22 @@ describe("ToolsManager interaction boundaries", () => {
     expect(screen.getByText("搜索知识库")).toBeTruthy();
     expect(screen.queryByText("查询数据")).toBeNull();
   });
+
+  it("lists the capabilities every Agent has as always on, without a switch", async () => {
+    await renderLoadedTools();
+
+    const system = screen.getByTestId("system-capabilities");
+    expect(within(system).getByText("系统能力")).toBeTruthy();
+    expect(within(system).getByText("查找会话结果")).toBeTruthy();
+    expect(within(system).getByText(/始终开启/)).toBeTruthy();
+    expect(within(system).queryByRole("switch")).toBeNull();
+
+    // The same search box filters it, and a search that matches nothing else still shows it.
+    fireEvent.change(screen.getByRole("searchbox", { name: "按源名 / 工具名过滤…" }), { target: { value: "查找会话" } });
+    expect(within(screen.getByTestId("system-capabilities")).getByText("查找会话结果")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox", { name: "按源名 / 工具名过滤…" }), { target: { value: "知识库" } });
+    expect(screen.queryByTestId("system-capabilities")).toBeNull();
+  });
 });
 
 describe("ToolsManager 卡片「⋯」（外观段第四批）", () => {

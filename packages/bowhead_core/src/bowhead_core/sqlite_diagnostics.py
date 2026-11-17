@@ -7,6 +7,7 @@ result rows and exception messages never enter a diagnostic event.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import hashlib
 import json
@@ -18,6 +19,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -170,21 +172,54 @@ class _OperationContext:
 
 _CONTEXT: contextvars.ContextVar[_OperationContext | None] = contextvars.ContextVar("sqlite_diagnostic_context", default=None)
 _SAFE_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
+_RUNTIME_FILES = frozenset({"sqlite_diagnostics.py", "sqlite_domain_runtime.py", "_db.py"})
+# Frames that stand between this runtime and the code that asked for the statement: the driver, whose
+# ``context.py`` carries ``async with db.execute(...)``, and the standard library, whose ``contextlib.py``
+# carries every pooled borrow and whose ``asyncio`` carries ``wait_for``. Third-party and application
+# packages installed below the standard library directory are not part of it.
+_DRIVER_DIRECTORY = str(Path(aiosqlite.__file__).parent) + os.sep
+_STANDARD_LIBRARY = str(Path(contextlib.__file__).parent) + os.sep
+_INSTALLED_PACKAGES = ("site-packages" + os.sep, "dist-packages" + os.sep)
+
+
+def _between_runtime_and_caller(filename: str) -> bool:
+    if filename.startswith(_DRIVER_DIRECTORY) or filename.rpartition(os.sep)[2] in _RUNTIME_FILES:
+        return True
+    return filename.startswith(_STANDARD_LIBRARY) and not filename.startswith(_INSTALLED_PACKAGES, len(_STANDARD_LIBRARY))
+
+
+def _frame_name(frame: FrameType) -> str:
+    safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "?", Path(frame.f_code.co_filename).name)[:80]
+    safe_function = re.sub(r"[^A-Za-z0-9_.-]", "?", frame.f_code.co_name)[:80]
+    return f"{safe_filename}:{frame.f_lineno}:{safe_function}"
 
 
 def _operation_context() -> _OperationContext:
     frame = sys._getframe(1)
     callsite = "unavailable"
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    # Whatever runs the task (the event loop, the server, a test runner) did not ask for the statement.
+    task_root = getattr(task.get_coro(), "cr_frame", None) if task is not None else None
+    runtime_frame = None
     for _ in range(24):
         if frame is None:
             break
-        filename = Path(frame.f_code.co_filename).name
-        if filename not in {"sqlite_diagnostics.py", "sqlite_domain_runtime.py", "_db.py", "core.py", "cursor.py"}:
-            safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "?", filename)[:80]
-            safe_function = re.sub(r"[^A-Za-z0-9_.-]", "?", frame.f_code.co_name)[:80]
-            callsite = f"{safe_filename}:{frame.f_lineno}:{safe_function}"
+        filename = frame.f_code.co_filename
+        if not _between_runtime_and_caller(filename):
+            callsite = _frame_name(frame)
+            break
+        if filename.rpartition(os.sep)[2] in _RUNTIME_FILES:
+            runtime_frame = frame
+        if frame is task_root:
+            frame = None
             break
         frame = frame.f_back
+    if callsite == "unavailable" and frame is None and runtime_frame is not None:
+        # The runtime issued this statement itself, for example when a pooled connection is returned.
+        callsite = _frame_name(runtime_frame)
     ids = tuple(
         (key, value)
         for key, value in structlog.contextvars.get_contextvars().items()
@@ -223,6 +258,10 @@ class DiagnosticConnection(sqlite3.Connection):
         self.bowhead_transaction_id: str | None = None
         self.bowhead_transaction_started: float | None = None
         self.bowhead_transaction_mode = "unknown"
+        # ``in_transaction`` as of the last finished operation, kept by the thread that runs the statements.
+        # Another thread reads this instead of asking SQLite: from SQLite 3.53.3 ``in_transaction`` takes the
+        # connection mutex, which is held for the whole of a statement, including one that waits for the writer.
+        self.bowhead_open_transaction = False
         self.bowhead_busy_timeout_ms = int(float(kwargs.get("timeout", args[1] if len(args) > 1 else 5.0)) * 1000)
         self.bowhead_recent_sql: str | None = None
         self.bowhead_recent_phase = "unavailable"
@@ -236,6 +275,7 @@ class DiagnosticConnection(sqlite3.Connection):
         except BaseException:
             log.error("sqlite.connection_close_failed", connection_id=self.bowhead_connection_id)
             raise
+        self.bowhead_open_transaction = False
         if self._slot is not None:
             self._slot.release()
 
@@ -297,6 +337,12 @@ class DiagnosticConnection(sqlite3.Connection):
                 self.bowhead_transaction_id = None
                 self.bowhead_transaction_mode = "unknown"
             return result
+        finally:
+            try:
+                self.bowhead_open_transaction = self.in_transaction
+            except sqlite3.ProgrammingError:
+                # The connection is closed; nothing is open on it.
+                self.bowhead_open_transaction = False
 
     def _report(self, error: sqlite3.Error, phase: str, started: float) -> None:
         try:

@@ -138,7 +138,10 @@ def test_plugin_editor_preserves_exact_identity_current_role_and_original_writer
     from test_agent_coach_plugins import administrator, create
 
     administrator(resources)
-    result = create(resources)
+    # The original Plugin editor accepts only Skills its picker offers, with the permissions the
+    # picker derives. Coach's own agent-authoring method is kept out of pickers (e6dce8a3a), so
+    # use a script-free picker method whose read grant matches.
+    result = create(resources, method="doc-coauthoring")
     reference = {"kind": "capability", "id": result["result_target"]["id"], "revision": "1"}
     parent = {"kind": "agent_draft", "id": saved_draft[3].id, "version": saved_draft[3].row_version}
     view = _run(resources.editors.read(reference, parent, exact=True))

@@ -20,7 +20,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 if TYPE_CHECKING:
@@ -68,6 +68,7 @@ class WorkspaceSettingsStore:
             row = await cur.fetchone()
             return row[0] if row else None
 
+    @repeat_when_authority_busy()
     async def set(self, workspace_id: str, key: str, value: str) -> None:
         async with open_shared_ctx(self._path) as db:
             await db.execute(
@@ -79,6 +80,7 @@ class WorkspaceSettingsStore:
             )
             await db.commit()
 
+    @repeat_when_authority_busy()
     async def delete(self, workspace_id: str, key: str) -> None:
         async with open_shared_ctx(self._path) as db:
             await db.execute(
@@ -87,6 +89,7 @@ class WorkspaceSettingsStore:
             )
             await db.commit()
 
+    @repeat_when_authority_busy()
     async def compare_and_apply(self, workspace_id: str, changes: dict[str, tuple[str | None, str | None]]) -> dict[str, str | None] | None:
         """Apply a field batch atomically, preserving changes made after proposal.
 

@@ -16,11 +16,13 @@ def test_compute_prompt_has_output_chart_signpost() -> None:
     """批 2 后 fallback 与 live 同源，这条同时守住两边的 signpost。
 
     措辞按 live compute.md 的实况断言：sandbox 产物带真 art id（`output_artifacts`）+
-    「出数据不出图，画图走 add_chart」这条指路。"""
+    「出数据不出图，画图走 add_chart」这条指路。c164afa1d rewrote the Chinese
+    「别 savefig」 sentence as the English native-presentation contract, which still
+    sends sandbox CSV output to add_chart and says why a generated PNG is worse."""
     p = _build_compute_system_prompt()
     assert "output_artifacts" in p, "compute peer must be told sandbox outputs carry real art_ ids"
-    assert "add_chart" in p
-    assert "savefig" in p, "必须仍在教「别 savefig 出 PNG，出数据喂 add_chart」"
+    assert "use `add_chart` with the exact authorized CSV artifact from query or sandbox output" in p
+    assert "generated PNGs lose native source inspection" in p, "must still steer away from PNG output towards add_chart data"
 
 
 def test_peer_block_has_no_prefetch_rule() -> None:

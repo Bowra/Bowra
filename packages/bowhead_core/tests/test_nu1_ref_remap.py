@@ -21,7 +21,8 @@ from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry
 
 
 def _inv(tool_name: str, call_id: str, result: Any) -> SimpleNamespace:
-    return SimpleNamespace(tool_name=tool_name, call_id=call_id, result=result, nested=None)
+    # Mirror ToolInvocation: delivery review (default on) reads `error` on every run invocation.
+    return SimpleNamespace(tool_name=tool_name, call_id=call_id, result=result, error=None, nested=None)
 
 
 def _sec(sid: str, kind: str, payload: dict[str, Any]) -> SimpleNamespace:
@@ -202,7 +203,7 @@ class _ArtifactStore:
     def __init__(self, ids: list[str]) -> None:
         self._ids = ids
 
-    async def list_for_session(self, *, session_id: str, user_id: str) -> list[Any]:
+    async def list_for_session(self, *, session_id: str, user_id: str, limit: int = 100) -> list[Any]:
         return [SimpleNamespace(id=i) for i in self._ids]
 
 

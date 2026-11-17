@@ -17,6 +17,7 @@ from bowhead_core.overclaim_guard import (
     claimed_file_count,
     claimed_file_formats,
     detect_completion_claims,
+    detect_report_work_claims,
     overclaimed_kinds,
     peer_facts_and_directive,
     reconcile_overclaimed_text,
@@ -209,6 +210,18 @@ def test_peer_facts_always_carried() -> None:
         "verified": {"files": True, "reused_files": True, "canvas_sections": True, "memories": True},
     }
     assert addendum == ""
+
+
+def test_delivered_files_are_named_with_their_identifiers_when_there_are_any() -> None:
+    """A later Turn revises a file by identifier, so the helper result names both for each delivered file."""
+    ledger = DeliverableLedger(files=3, file_names=("r.pdf", "rows.csv"), delivered=(("art_1", "r.pdf"),))
+    facts, _ = peer_facts_and_directive(ledger, "The report is ready.")
+    assert facts["delivered_files"] == [{"artifact_id": "art_1", "name": "r.pdf"}]
+    assert facts["files"] == 3
+    # Unverified files, or a Turn that delivered none, add nothing.
+    assert "delivered_files" not in peer_facts_and_directive(DeliverableLedger(files=2, file_names=("rows.csv",)), "")[0]
+    unverified = DeliverableLedger(files=1, files_verified=False, delivered=(("art_1", "r.pdf"),))
+    assert "delivered_files" not in peer_facts_and_directive(unverified, "")[0]
 
 
 def test_prior_source_and_new_pdf_are_available_without_claiming_new_source_generation():
@@ -629,3 +642,131 @@ def test_ingestion_status_does_not_hide_an_unfulfilled_export_claim() -> None:
 @pytest.mark.parametrize("text", ["没有生成 PDF，Word 已导出，可下载。", "没有生成 PDF 但 Word 已导出，可下载。", "没有数据，但 PDF 已生成。"])
 def test_negated_export_does_not_hide_a_different_positive_file_claim(text: str) -> None:
     assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ("file",)
+
+
+# ── 116 dogfood N13: every "no file" footer on 116 was a false alarm ─────────────
+# The seven Turns on 116 that ended with "本轮没有成功生成可下载文件" all said nothing about a new file:
+# a capability, advice, an honest "no file", a pointer to the file list, or an earlier Turn's version.
+
+N13_NO_CLAIM_ANSWERS = [
+    # Capability ("用一句话介绍一下你能做什么").
+    "我可以帮你查询和分析当前工作区里的经营数据，做同比环比、多维拆解，产出可下载的报告、图表和 PPT，也能检索你上传的文档。",
+    # Advice ("你觉得这个agent还需要什么呢").
+    "- 导出侧：canvas-pptx / pptx 相关技能，才能按模板产出可下载的演示稿。",
+    # Honest no-file answers.
+    "还有一处需要如实说明：本轮**没有产出任何可下载文件**——检查是只读的，成品 PPTX 和 PDF 都还没生成。",
+    "指标算出来了，但**文件没做出来**——这一轮您拿不到可下载的 PPTX。",
+    "本轮 `produced.files = 0`，即没有可下载文件登记成功，报告本身在画布上可打开、可导出。",
+    # Pointer to the native file list.
+    "下载链接以原生文件列表为准；两个 title 都被标为冲突。",
+]
+
+
+@pytest.mark.parametrize("text", N13_NO_CLAIM_ANSWERS)
+def test_answers_that_claim_no_new_file_are_not_flagged(text: str) -> None:
+    assert "file" not in detect_completion_claims(text), text
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我已为你生成可下载的 PDF 文件。",
+        "已帮你导出可下载的 PDF 文件。",
+        "没做出 Word，但 PDF 已生成。",
+        "没有可下载的 Word，PDF 已导出。",
+    ],
+)
+def test_a_real_claim_beside_the_new_wording_is_still_flagged(text: str) -> None:
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ("file",), text
+
+
+N13_ANSWER = (
+    "HTML 报告一共 4 个版本，最新的是第 4 版（文件名「2025年经营分析报告.html」，90432 字节，约 10 分钟前生成）。\n"
+    "补充一点：第4版那次交付的回执显示执行中断，但文件本身已生成并登记为第4版。"
+)
+
+
+def _earlier(*files: tuple[str, int]) -> DeliverableLedger:
+    return DeliverableLedger(files=0, session_files=files)
+
+
+def test_a_version_an_earlier_turn_wrote_is_not_this_turns_missing_file() -> None:
+    # Without the session's files the sentence still reads as a claim this Turn failed.
+    assert overclaimed_kinds(N13_ANSWER, DeliverableLedger(files=0)) == ("file",)
+    assert overclaimed_kinds(N13_ANSWER, _earlier(("2025年经营分析报告.html", 4))) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "第5版文件已生成。",  # No such version yet.
+        "第4版已导出为 PDF 文件。",  # A format the earlier files do not have is a new file.
+        "已生成 2025年经营分析报告.html。",  # A name alone does not tell a failed regeneration from the old file.
+        "第4版保持不变，新的 PDF 已导出。",  # Each completion clause must describe an earlier file.
+        "第4版文件已生成，新的 PDF 也已导出。",
+    ],
+)
+def test_claims_about_new_files_stay_checked_in_a_session_with_earlier_files(text: str) -> None:
+    assert overclaimed_kinds(text, _earlier(("2025年经营分析报告.html", 4))) == ("file",), text
+
+
+def test_an_earlier_file_named_as_still_downloadable_is_not_flagged() -> None:
+    text = "「2025年经营分析报告.html」可直接下载。"
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ("file",)
+    assert overclaimed_kinds(text, _earlier(("2025年经营分析报告.html", 4))) == ()
+
+
+# 116 dogfood N13 follow-up: zero-tool answers that the final-answer gate bounced twice as report work.
+NEGATED_REPORT_WORK = [
+    "按你的要求，只做了这一步纯计算，没有读取任何外部数据，也没有生成报告或文件。",
+    "本轮没有查询数据、没有做计算，也没有生成报告。",
+    "品类维度「种类大类」取值为「女装」。未生成报告，也未生成任何文件。",
+    "这些文件已保留供后续使用，按要求未打包、未作为交付物、未写报告。",
+    "其余章节正文、KPI、图表、表格、结论与顺序均未改动，也没有重新取数或重算数字。",
+]
+
+
+@pytest.mark.parametrize("text", NEGATED_REPORT_WORK)
+def test_answers_that_say_no_report_work_was_done_are_not_report_claims(text: str) -> None:
+    assert not detect_report_work_claims(text), text
+    assert "report" not in detect_completion_claims(text), text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "其余均未改动，已重算第二章。",  # The negated anchor must not swallow the affirmed one after it.
+        "报告均未改动，标题已改为《新标题》。",
+        "不仅生成了报告，还导出了文件。",
+        "我已经为你生成了一份报告。",
+        "没有重新取数，但第二章已修订。",
+        "各章均已按不含税口径重算。",  # 不含 qualifies the basis; it does not negate the work.
+    ],
+)
+def test_report_work_beside_a_negation_is_still_a_claim(text: str) -> None:
+    assert detect_report_work_claims(text), text
+
+
+TITLE_CHANGE_ANSWER = "画布报告的大标题已改为《2025年度经营复盘》，其余章节均未改动，也没有重新取数或重算数字。"
+VERSION_ANSWER = "HTML 报告一共 5 个版本。另外画布上那份报告是另一份产物，标题已改为《2025年度经营复盘》，与这个 HTML 文件不同步。"
+
+
+def test_a_change_an_earlier_answer_reported_is_not_this_turns_report_work() -> None:
+    assert detect_report_work_claims(VERSION_ANSWER)
+    assert not detect_report_work_claims(VERSION_ANSWER, [TITLE_CHANGE_ANSWER])
+
+
+@pytest.mark.parametrize(
+    "earlier",
+    [
+        "画布报告的标题都没能改为《2025年度经营复盘》，可以重试。",  # Earlier failure, not an earlier change.
+        "画布报告的大标题已改为《2025年度复盘》。",  # A different target.
+    ],
+)
+def test_a_change_without_an_earlier_matching_report_stays_a_claim(earlier: str) -> None:
+    assert detect_report_work_claims(VERSION_ANSWER, [earlier])
+
+
+def test_a_restated_change_does_not_cover_new_work_in_the_same_answer() -> None:
+    assert detect_report_work_claims(VERSION_ANSWER + "第二章已按新口径重算。", [TITLE_CHANGE_ANSWER])

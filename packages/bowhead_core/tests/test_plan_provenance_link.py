@@ -40,7 +40,7 @@ class _CapturingRunner:
 
 
 def _manifest(name: str = "compute"):
-    return SimpleNamespace(name=name, prompt_file=None, max_iterations=6)
+    return SimpleNamespace(name=name, prompt_file=None, max_iterations=6, tools=SimpleNamespace(allow=()))
 
 
 def _ctx():

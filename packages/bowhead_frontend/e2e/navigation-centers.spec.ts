@@ -76,7 +76,7 @@ test("member discovery and personal resources retain capability context on deskt
 }) => {
   await prepare(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/capabilities/?type=capabilities");
+  await page.goto("/capabilities/?type=plugins");
   await expect(page.getByRole("heading", { name: "Research" })).toBeVisible();
   await expect(page.getByTestId("unified-sidebar").getByRole("navigation", { name: "主导航" })).toBeVisible();
   const center = page.getByTestId("capability-center");
@@ -272,7 +272,7 @@ test("existing Owner deep links keep their primary entry when the market is unav
 
 for (const [resource, label, selected] of [
   ["tools", "工具源", "tools_catalog"],
-  ["capabilities", "插件", "capabilities_catalog"],
+  ["plugins", "插件", "capabilities_catalog"],
   ["workflows", "团队流程", "skills"],
   ["subagents", "系统内置智能体", "agents"],
 ]) {
@@ -339,7 +339,7 @@ for (const width of [900, 390]) {
     await expect(surface.getByTestId(`${prefix}-tools_catalog`)).toHaveAttribute("aria-current", "page");
     await page.screenshot({ path: `/tmp/capability-organize-${width}-${testInfo.project.name}.png` });
     await surface.getByTestId(`${prefix}-capabilities_catalog`).click();
-    await expect(page).toHaveURL(/capabilities\/?\?type=capabilities$/);
+    await expect(page).toHaveURL(/capabilities\/?\?type=plugins$/);
     await expect(page.getByRole("heading", { name: "Research", exact: true })).toBeVisible();
     if (width < 768) await expect(page.getByTestId("sessions-drawer")).toHaveCount(0);
   });

@@ -13,6 +13,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderIntl } from "@/__tests__/intl-render";
 import zhMessages from "@/messages/zh-CN.json";
 import { SKELETON_DELAY_MS } from "@/components/ui/loading-skeleton";
+import * as metrics from "@/lib/metrics";
 import type { SessionGroup } from "@/lib/types";
 
 import {
@@ -76,6 +77,7 @@ const GROUPS: SessionGroup[] = [
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -388,7 +390,7 @@ describe("WorkRecovery older sessions", () => {
 });
 
 /** Answers /api/v1/search from `responses` in order; anything else (metrics) gets an empty 204. */
-function searchFetch(...responses: Response[]) {
+function searchFetch(...responses: (Response | Promise<Response>)[]) {
   const searchCalls: RequestInit[] = [];
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -545,7 +547,7 @@ describe("WorkRecovery sidebar search", () => {
   });
 
   it("keeps the button focusable while loading and moves focus to the new and then the last result", async () => {
-    let releaseSecond: (response: Response) => void = () => {};
+    const secondPage = Promise.withResolvers<Response>();
     const searchCalls = searchFetch(
       searchResponse([
         {
@@ -559,29 +561,34 @@ describe("WorkRecovery sidebar search", () => {
         { kind: "file", unavailable: false, items: [] },
         { kind: "knowledge", unavailable: false, items: [] },
       ]),
+      secondPage.promise,
+      searchResponse([
+        {
+          kind: "session",
+          unavailable: false,
+          total: null,
+          next_cursor: null,
+          items: [sessionHit("s2", "复购二")],
+        },
+      ]),
     );
-    renderRecovery({ query: "复购" });
-    const button = await screen.findByRole("button", {
-      name: "显示更多会话（还有 2 个）",
+    // Activate the button after the first results commit, before the paging effect runs.
+    vi.spyOn(metrics, "trackInteraction").mockImplementationOnce(() => {
+      const button = screen.getByRole("button", { name: "显示更多会话（还有 2 个）" });
+      button.focus();
+      button.click();
     });
-    vi.mocked(fetch).mockImplementationOnce(
-      () => new Promise<Response>((resolve) => (releaseSecond = resolve)),
-    );
-    button.focus();
-    fireEvent.click(button);
+    renderRecovery({ query: "复购" });
+    const button = await screen.findByRole("button", { name: "显示更多会话（还有 2 个）" });
     await waitFor(() =>
       expect(button.getAttribute("aria-disabled")).toBe("true"),
     );
     expect(button.hasAttribute("disabled")).toBe(false);
     expect(document.activeElement).toBe(button);
     fireEvent.click(button);
-    expect(
-      vi
-        .mocked(fetch)
-        .mock.calls.filter(([url]) => String(url).includes("/api/v1/search")),
-    ).toHaveLength(2);
+    expect(searchCalls).toHaveLength(2);
 
-    releaseSecond(
+    secondPage.resolve(
       searchResponse([
         {
           kind: "session",
@@ -600,20 +607,8 @@ describe("WorkRecovery sidebar search", () => {
     expect(document.querySelector(".unified-work-announcer")?.textContent).toBe(
       "已加载 1 个，显示 2 / 共 3 个",
     );
-    expect(searchCalls).toHaveLength(1);
 
     // The last page repeats a row: the button disappears and focus lands on the last result.
-    vi.mocked(fetch).mockImplementationOnce(async () =>
-      searchResponse([
-        {
-          kind: "session",
-          unavailable: false,
-          total: null,
-          next_cursor: null,
-          items: [sessionHit("s2", "复购二")],
-        },
-      ]),
-    );
     fireEvent.click(
       screen.getByRole("button", { name: "显示更多会话（还有 1 个）" }),
     );
@@ -623,6 +618,7 @@ describe("WorkRecovery sidebar search", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("link", { name: /复购二/ }),
     );
+    expect(searchCalls).toHaveLength(3);
   });
 
   it("moves focus to Retry when the next page fails", async () => {

@@ -27,6 +27,7 @@ from bowhead_core.skill_model_invocation import reference_model_invocation_scope
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry
 from bowhead_router.input_admission import LLMInputAdmissionError
+from bowhead_router.output_budget import ContextCapacityError
 from bowhead_router.types import LLMRequest, Message
 from test_reference_mcp_prompt_materialization import _claimed_case, _remote_result
 from test_skill_model_access import call, receiver, router_for, success
@@ -195,11 +196,13 @@ async def test_invalid_material_or_current_authority_blocks_native_send(prompt_c
     adapter = adapter_for("openai")
     router = router_for(adapter)
     if change == "budget":
-        router.set_context_windows({("primary", "large"): 8192})
+        # The shared final-request budget refuses a window that cannot hold the
+        # protected Prompt material and the output reservation.
+        router.set_context_windows({("primary", "large"): 1024})
     try:
         with receiver(identity), reference_model_invocation_scope(access=policy.access, ctx=case.ctx), respx.mock(assert_all_called=False) as mock:
             route = mock.post(url__regex=r"https://api\..*").mock(return_value=success("openai", "invoke"))
-            with pytest.raises(LLMInputAdmissionError):
+            with pytest.raises(ContextCapacityError if change == "budget" else LLMInputAdmissionError):
                 await call(router, request(policy))
         assert route.call_count == 0 and rows(case, "chat_reference_model_invocations") == []
     finally:
@@ -370,12 +373,14 @@ async def test_unknown_model_result_cannot_be_resent_or_reported_as_success(prom
     adapter = adapter_for("openai")
     runner = SubagentRunner(router=router_for(adapter), tool_registry=ToolRegistry(), team_subagent_store=case.users)
 
-    def timeout(request):
-        raise httpx2.ReadTimeout("unknown delivery", request=request)
+    def unconfirmed(request):
+        # A transport failure is settled not applied and retried (4a2f0ab7e); a reply
+        # without usage leaves the delivery outcome unknown.
+        return httpx2.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "unconfirmed"}, "finish_reason": "stop"}]})
 
     try:
         with respx.mock() as mock:
-            route = mock.post(url__regex=r"https://api\..*").mock(side_effect=timeout)
+            route = mock.post(url__regex=r"https://api\..*").mock(side_effect=unconfirmed)
             with pytest.raises(InvocationOutcomeUnknownError):
                 await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
             with pytest.raises(TerminalDurabilityAbort):

@@ -2663,6 +2663,9 @@ async def _send_impl(
                         steer_receipt.turn_id,
                         exc,
                     )
+                from bowhead_gateway.turn_service import wake_waiting_lead
+
+                await wake_waiting_lead(steer_receipt.turn_id)
             return ChatSendResponse.model_validate(steer_receipt.response)
 
         if body.submission_kind == "replay":

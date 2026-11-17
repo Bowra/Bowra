@@ -4,6 +4,8 @@ A revised deliverable is recorded as a new version of the same file: the writer 
 target, the store checks its scope inside the insert transaction, and history stays linear.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import aiosqlite
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend, VersionTargetRefused
@@ -17,7 +19,7 @@ async def _legacy_store(tmp_path) -> ArtifactStore:
     async with aiosqlite.connect(artifact_store.db_path) as db:
         # Minimal shapes of tables owned by other stores (turns: session_store; purge claims: migration 0046).
         await db.executescript(
-            "CREATE TABLE IF NOT EXISTS turns (id TEXT PRIMARY KEY, session_id TEXT);"
+            "CREATE TABLE IF NOT EXISTS turns (id TEXT PRIMARY KEY, session_id TEXT, status TEXT NOT NULL DEFAULT 'completed', ended_at TEXT);"
             "CREATE TABLE IF NOT EXISTS artifact_purge_claims (artifact_id TEXT PRIMARY KEY);"
         )
         await db.executemany("INSERT INTO turns(id, session_id) VALUES (?, ?)", [("t1", "s1"), ("t2", "s1"), ("t3", "s1"), ("t9", "s9")])
@@ -382,6 +384,82 @@ async def test_a_run_record_mentioning_a_version_does_not_protect_it(store: Arti
     assert await store.prune_versions([old], kb_protected=set()) == 1
 
 
+@pytest.mark.parametrize("status", ["running", "awaiting_user", "clarification_pending", "approval_pending"])
+async def test_pruning_waits_while_a_turn_of_the_session_is_running_or_paused(store: ArtifactStore, status: str) -> None:
+    """116 dogfood N12: a Turn lists the session's files at its start and checks them again when it publishes.
+
+    Pruning v1 while the Turn that wrote v4 was still running failed that Turn at its end, so a file
+    waits until no Turn of its session is running or paused.
+    """
+    v = await _chain(store, ["t1", "t2", "t3", "t4"])
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("INSERT INTO turns(id, session_id, status) VALUES ('t_other', 's9', 'running')")
+        await db.commit()
+    assert not await store.version_prune_deferred(v[0].id), "A Turn of another session does not hold this file"
+    candidates = await store.prune_version_candidates([v[0].id])
+    assert candidates == [v[0].id]
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE turns SET status = ? WHERE id = 't4'", (status,))
+        await db.commit()
+    assert await store.version_prune_deferred(v[0].id)
+    assert await store.prune_version_candidates([v[0].id]) == []
+    assert await store.prune_versions(candidates, kb_protected=set()) == 0, "The write transaction rechecks the session"
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE turns SET status = 'completed' WHERE id = 't4'")
+        await db.commit()
+    assert not await store.version_prune_deferred(v[0].id)
+    assert await store.prune_versions(candidates, kb_protected=set()) == 1
+
+
+def _ago(**delta: float) -> str:
+    return (datetime.now(UTC) - timedelta(**delta)).isoformat(timespec="seconds")
+
+
+async def test_a_turn_left_paused_after_its_questions_ended_stops_holding_pruning(store: ArtifactStore) -> None:
+    """On 116 (1.7.45), 252 sessions kept a Turn paused from months earlier.
+
+    Their questions had expired or been dismissed, so those Turns can never continue, yet they
+    kept every version of the session's files. A paused Turn holds pruning only while it can
+    still continue: it paused within a day, a question or approval is still open (a scheduled
+    task's question stays open until the task's next run), or one was answered within the hour.
+    """
+    v = await _chain(store, ["t1", "t2", "t3", "t4"])
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.executescript(
+            "CREATE TABLE clarification_requests (request_id TEXT PRIMARY KEY, turn_id TEXT, status TEXT, chosen_at TEXT);"
+            "CREATE TABLE approvals (id TEXT PRIMARY KEY, turn_id TEXT, status TEXT, decided_at TEXT);"
+        )
+        await db.execute("UPDATE turns SET status = 'clarification_pending', ended_at = ? WHERE id = 't4'", (_ago(hours=2),))
+        await db.commit()
+    assert await store.version_prune_deferred(v[0].id), "Paused two hours ago: the question can still be answered"
+
+    async def holds(question: tuple[str, str | None] | None = None, approval: tuple[str, str | None] | None = None) -> bool:
+        async with aiosqlite.connect(store.db_path) as db:
+            await db.execute("UPDATE turns SET ended_at = ? WHERE id = 't4'", (_ago(days=40),))
+            await db.execute("DELETE FROM clarification_requests")
+            await db.execute("DELETE FROM approvals")
+            if question is not None:
+                await db.execute("INSERT INTO clarification_requests VALUES ('q1', 't4', ?, ?)", question)
+            if approval is not None:
+                await db.execute("INSERT INTO approvals VALUES ('a1', 't4', ?, ?)", approval)
+            await db.commit()
+        deferred = await store.version_prune_deferred(v[0].id)
+        assert deferred == (await store.prune_version_candidates([v[0].id]) == []), "Both checks apply the same rule"
+        return deferred
+
+    assert not await holds(), "No question was recorded (a plan proposal continues in a new Turn)"
+    assert not await holds(question=("expired", None))
+    assert not await holds(question=("dismissed", None))
+    assert not await holds(question=("resolved", _ago(hours=3))), "Answered long ago: that Turn already continued"
+    assert await holds(question=("pending", None)), "A scheduled task's question stays open past a day"
+    assert await holds(question=("resolved", _ago(minutes=5))), "Just answered: the Turn is starting again"
+    assert await holds(approval=("pending", None))
+    assert await holds(approval=("approved", _ago(minutes=5)))
+    assert not await holds(approval=("approved", _ago(hours=3)))
+    assert not await holds(approval=("expired", None))
+    assert await store.prune_versions([v[0].id], kb_protected=set()) == 1
+
+
 async def test_a_reference_added_after_listing_still_protects(store: ArtifactStore) -> None:
     """The write transaction recomputes and rechecks: a version referenced meanwhile is kept."""
     v = await _chain(store, ["t1", "t2", "t3", "t4"])
@@ -406,3 +484,16 @@ async def test_restoring_a_deleted_file_does_not_bring_back_pruned_versions(stor
     assert await store.soft_delete(v[3].id, user_id="u")
     assert await store.force_restore([v[2].id]) == 3, "KB reconciliation restores the file it was deleted with, not pruned versions"
     assert await _live(store, [x.id for x in v]) == {v[1].id, v[2].id, v[3].id}
+
+
+def test_a_declared_nested_file_or_folder_counts_by_its_saved_name() -> None:
+    from types import SimpleNamespace
+
+    from bowhead_core.delivered_files import _declared
+
+    invocation = SimpleNamespace(
+        arguments={"code": "...", "purpose": "deliverable", "deliverable_outputs": ["site/", "build/report.pdf", "game.html"]}
+    )
+    assert _declared(invocation, "site.zip") and _declared(invocation, "report.pdf") and _declared(invocation, "game.html")
+    assert not _declared(invocation, "index.html")
+    assert not _declared(SimpleNamespace(arguments={"purpose": "analysis", "deliverable_outputs": ["site/"]}), "site.zip")

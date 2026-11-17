@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core._db import repeat_when_authority_busy
 from bowhead_core.agent_draft_send_target import AgentDraftSendTarget
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
@@ -913,6 +914,30 @@ class TerminalProtocolStore:
                 if connection.in_transaction:
                     await connection.rollback()
 
+    @repeat_when_authority_busy(spent=None)
+    async def _ensure_core_auth_scope_epochs(self, context: AuthFenceResolveContext) -> None:
+        """Insert the missing core revocation epochs in one transaction.
+
+        ``terminal_authority_scope_epochs`` is fenced and ``INSERT OR IGNORE`` fences even when every
+        row exists, so each chat send asks for the exclusive core lease here. The inserts are
+        idempotent, so a lost lease repeats the transaction; a spent wait re-raises the conflict,
+        which send admission already reports.
+        """
+        async with open_terminal_protocol_connection(self._core_db_path) as core:
+            await core.execute("BEGIN IMMEDIATE")
+            try:
+                for scope in sorted(context.required_scopes, key=AuthFenceScope.sort_key):
+                    if scope.scope_kind is AuthFenceScopeKind.SESSION_VISIBILITY:
+                        continue
+                    await core.execute(
+                        "INSERT OR IGNORE INTO terminal_authority_scope_epochs(scope_kind,team_id,scope_ref,epoch,row_version,updated_at) VALUES (?,?,?,1,1,?)",
+                        (scope.scope_kind.value, scope.team_id, scope.scope_ref, _iso_utc(self._now())),
+                    )
+                await core.commit()
+            except BaseException:
+                await core.rollback()
+                raise
+
     async def ensure_auth_scope_epochs(self, context: AuthFenceResolveContext) -> AuthFenceVector:
         """惰性建立完整 fixed-scope vector；fault 时与 ensure 一起 rollback。"""
 
@@ -923,20 +948,7 @@ class TerminalProtocolStore:
         if split:
             # Core revocation epochs must commit before the execution writer
             # starts. Only idempotent epoch initialization happens here.
-            async with open_terminal_protocol_connection(self._core_db_path) as core:
-                await core.execute("BEGIN IMMEDIATE")
-                try:
-                    for scope in sorted(context.required_scopes, key=AuthFenceScope.sort_key):
-                        if scope.scope_kind is AuthFenceScopeKind.SESSION_VISIBILITY:
-                            continue
-                        await core.execute(
-                            "INSERT OR IGNORE INTO terminal_authority_scope_epochs(scope_kind,team_id,scope_ref,epoch,row_version,updated_at) VALUES (?,?,?,1,1,?)",
-                            (scope.scope_kind.value, scope.team_id, scope.scope_ref, _iso_utc(self._now())),
-                        )
-                    await core.commit()
-                except BaseException:
-                    await core.rollback()
-                    raise
+            await self._ensure_core_auth_scope_epochs(context)
         async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")

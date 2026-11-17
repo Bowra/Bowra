@@ -283,7 +283,6 @@ export async function lookupComposerChatAction(
 // listed: several of them can be projected after the action was committed.
 const DEFINITIVE_PRE_ADMISSION_REJECTION_CODES = new Set([
   "context_maintenance_unsupported",
-  "context_maintenance_inputs_unsupported",
   "context_conversation_head_changed",
   "context_maintenance_session_busy",
   "context_maintenance_pending_operation",

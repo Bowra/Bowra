@@ -191,6 +191,7 @@ async def test_assigned_baseline_read_uses_original_shared_question_without_repl
                     "profile": case.fixture.case.args["reference_start"].profile_name,
                     "task": "Read the assigned method, then ask which quarter to use.",
                     "delegation_role": "primary",
+                    "required_source_urls": [],
                 },
             )
         if len(calls) == 2:

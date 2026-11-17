@@ -102,6 +102,22 @@ def guaranteed_node_packages() -> list[dict[str, str]]:
     return out
 
 
+def guaranteed_browser_libraries() -> list[dict[str, str]]:
+    """Image contract: single-file browser builds baked into the sandbox for offline HTML deliverables.
+
+    Each entry is ``{name, version, path, global, sha256}``: ``path`` is the file inside the sandbox,
+    ``global`` is the name it defines when it runs as a classic ``<script>``, and ``sha256`` pins the
+    built bundle. The install source is ``catalog/python_sandbox/browser_libs/package.json`` (a UT
+    keeps them in step).
+    """
+    keys = ("name", "version", "path", "global", "sha256")
+    out: list[dict[str, str]] = []
+    for e in _raw_spec().get("guaranteed_browser_libraries", []):
+        if isinstance(e, dict) and all(e.get(key) for key in keys):
+            out.append({key: str(e[key]) for key in keys})
+    return out
+
+
 @lru_cache(maxsize=1)
 def _raw_spec() -> dict[str, Any]:
     """读 SSOT JSON（catalog 目录随包不可变 → lru_cache 一次）."""

@@ -632,6 +632,12 @@ def _binding(ctx: ToolExecutionContext) -> CoachBinding | None:
 # None (no trusted effect contract) marks Tools that persist records, emit Canvas
 # events or start/cancel work: they never take the read-only durable shortcut and
 # are refused by the generic durable dispatcher instead of running unrecorded.
+# Status reads of background operations: polling them while the operation runs is expected, so
+# they are exempt from the repeated-call guard (ToolSpec.status_poll, agent_repeat_guard).
+_COACH_STATUS_POLL_TOOLS: Final[frozenset[str]] = frozenset(
+    {"agent_ci_get", "agent_operation_get", "agent_skill_operation_get", "agent_plugin_operation_get"}
+)
+
 _COACH_TOOL_EFFECTS: Final[dict[str, ToolEffectSpec | None]] = {
     # Writes or emitted events.
     "agent_resource_open": None,
@@ -1251,5 +1257,6 @@ def register_agent_coach_tools(registry: ToolRegistry) -> None:
                 risk_level="low",
                 needs_approval=False,
                 effect_spec=_COACH_TOOL_EFFECTS[name],
+                status_poll=name in _COACH_STATUS_POLL_TOOLS,
             )
         )

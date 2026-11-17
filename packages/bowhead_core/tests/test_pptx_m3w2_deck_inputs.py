@@ -51,7 +51,7 @@ class FakeArtifactStore:
         self.put_calls: list[dict] = []
         self.read_ids: list[str] = []
 
-    async def list_for_session(self, *, session_id: str, user_id: str) -> list[FakeArt]:
+    async def list_for_session(self, *, session_id: str, user_id: str, limit: int = 100) -> list[FakeArt]:
         return self._arts
 
     async def get(self, artifact_id: str) -> FakeArt | None:

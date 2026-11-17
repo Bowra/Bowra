@@ -164,10 +164,3 @@ export async function deleteShopifyTool(id: string): Promise<void> {
   await checked(await apiFetch(`/api/v1/team-builtin-tools/shopify/${encodeURIComponent(id)}`, { method: "DELETE" }));
 }
 
-export async function createShopifyPlugin(id: string): Promise<{ id: string }> {
-  return (await checked(await apiFetch(`/api/v1/team-builtin-tools/shopify/${encodeURIComponent(id)}/plugin`, { method: "POST" })).then((item) => item.json())) as { id: string };
-}
-
-export async function createShopifyContentPlugin(toolId: string): Promise<{ id: string }> {
-  return (await checked(await apiFetch(`/api/v1/team-builtin-tools/shopify/${encodeURIComponent(toolId)}/content-plugin`, { method: "POST" })).then((item) => item.json())) as { id: string };
-}

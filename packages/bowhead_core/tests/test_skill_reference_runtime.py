@@ -19,7 +19,7 @@ import respx
 from bowhead_core.chat_reference_runtime import ReferencePrimaryRuntime
 from bowhead_core.events import TerminalDurabilityAbort, TurnEventBus
 from bowhead_core.skill_reference_execution import claim_reference_skill_primary_for_worker
-from bowhead_core.subagent import SubagentResult, SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentResult, SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
 from bowhead_router.errors import InvocationOutcomeUnknownError
 from bowhead_router.input_admission import LLMInputAdmissionError
@@ -181,6 +181,10 @@ async def test_mixed_runner_reads_exact_file_then_streams_with_a_second_context(
         assert body["stream"] is True
         tool = next(message for message in body["messages"] if message["role"] == "tool")
         assert "BODY_method" in tool["content"] and "FOREIGN_NAME_CACHE" not in tool["content"]
+        if len(sent) == 3:
+            # A prose ending after successful Tool work gets one runtime note (ce9390072);
+            # the same prose answer then ends the run.
+            assert UNRETURNED_WORK_NOTE in body["messages"][-1]["content"]
         return success("openai", "stream")
 
     try:
@@ -188,16 +192,18 @@ async def test_mixed_runner_reads_exact_file_then_streams_with_a_second_context(
             route = mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             runner = SubagentRunner(router=router, tool_registry=registry, team_subagent_store=case.users)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
-            assert result.ok and route.call_count == 2
+            assert result.ok and route.call_count == 3
         calls = rows(case, "chat_reference_model_invocations")
-        assert len(calls) == 2 and all(call["status"] == "completed" for call in calls)
-        assert len({call["context_id"] for call in calls}) == len(rows(case, "chat_reference_model_contexts")) == 2
+        assert len(calls) == 3 and all(call["status"] == "completed" for call in calls)
+        assert len({call["context_id"] for call in calls}) == len(rows(case, "chat_reference_model_contexts")) == 3
         assert {call["execution_id"] for call in calls} == {case.primary.binding.execution_id}
     finally:
         await adapter.close()
 
 
-@pytest.mark.parametrize("failure", ["timeout", "cancel", "missing_usage"])
+# A transport failure (timeout, connect, read) settles as not applied and the Router
+# retries it (c320fdee4, 4a2f0ab7e); test_skill_model_invocation covers that path.
+@pytest.mark.parametrize("failure", ["unclassified", "cancel", "missing_usage"])
 async def test_unknown_model_cannot_produce_success_or_reinvoke(runtime_case, failure):
     case = runtime_case
     adapter = adapter_for("openai")
@@ -207,8 +213,8 @@ async def test_unknown_model_cannot_produce_success_or_reinvoke(runtime_case, fa
         seen.append(request)
         if failure == "cancel":
             raise asyncio.CancelledError()
-        if failure == "timeout":
-            raise httpx2.ReadTimeout("PRIVATE_PROVIDER", request=request)
+        if failure == "unclassified":
+            return httpx2.Response(503, json={"error": {"message": "PRIVATE_PROVIDER"}})
         return httpx2.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "unconfirmed"}, "finish_reason": "stop"}]})
 
     try:

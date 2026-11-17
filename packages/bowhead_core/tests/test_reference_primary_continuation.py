@@ -10,6 +10,7 @@ import pytest
 from bowhead_core.chat_reference_delegation import PRIMARY_DISPATCH_LIMIT
 from bowhead_core.chat_reference_runtime import ReferenceDispatchRefused
 from bowhead_core.events import TurnEventBus
+from bowhead_core.report_chrome_text import chrome_text
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import build_default_registry
 from test_reference_lead_delegation import lead_case as _lead_case
@@ -247,7 +248,13 @@ async def _lead_turn(case, monkeypatch, script: list[tuple[str, str]], *, produc
                         "function": {
                             "name": "subagent_spawn",
                             "arguments": json.dumps(
-                                {"profile": primary.binding.runtime_profile_name, "task": value, "delegation_role": "primary"}, ensure_ascii=False
+                                {
+                                    "profile": primary.binding.runtime_profile_name,
+                                    "task": value,
+                                    "delegation_role": "primary",
+                                    "required_source_urls": [],
+                                },
+                                ensure_ascii=False,
                             ),
                         },
                     }
@@ -376,10 +383,13 @@ async def test_lead_past_the_limit_keeps_the_completed_answer(lead_case, monkeyp
     script: list[tuple[str, str]] = []
     for seq in range(1, PRIMARY_DISPATCH_LIMIT + 1):
         script += [("spawn", f"step {seq}"), ("text", f"Result {seq}.")]
-    script += [("spawn", "one more step"), ("text", "Here is what the Agent finished; @-mention it again to continue.")]
+    final = "Here is what the Agent finished; @-mention it again to continue."
+    # The refused dispatch makes the delivery review check Lead's closing answer once.
+    script += [("spawn", "one more step"), ("text", final), ("text", final)]
     result, bus, log, _ = await _lead_turn(case, monkeypatch, script)
     assert result.status == "completed"
-    assert result.final_answer == "Here is what the Agent finished; @-mention it again to continue."
+    # Lead's answer is kept; the refused step is disclosed as unverified work after it.
+    assert result.final_answer == final + "\n\n" + chrome_text("delivery_unverified", "en-US")
     refused = _spawn_results(result)[-1]
     assert refused["ok"] is False and refused["error_code"] == "reference_primary_dispatch_limit_reached"
     assert "@-mention" in refused["error"]
@@ -401,7 +411,14 @@ async def test_lead_with_a_failed_primary_ends_with_a_specific_failure(lead_case
     result, _, log, _ = await _lead_turn(
         case,
         monkeypatch,
-        [("spawn", "Do the work"), ("text", ""), ("spawn", "Try again"), ("text", "I could not get a result.")],
+        [
+            ("spawn", "Do the work"),
+            ("text", ""),
+            ("spawn", "Try again"),
+            ("text", "I could not get a result."),
+            # The refused dispatch makes the delivery review check Lead's closing answer once.
+            ("text", "I could not get a result."),
+        ],
     )
     assert result.status == "failed"
     assert result.error == "reference_primary_incomplete"
@@ -593,14 +610,16 @@ async def test_parallel_continuation_spawns_in_one_lead_round_keep_the_turn(lead
         if "subagent_spawn" not in json.dumps(body.get("tools", [])):
             return ("slow_text", "Primary result.")
         lead_calls.append(body)
+        # The refused sibling makes the delivery review check Lead's closing answer once; Lead keeps it.
         return [("spawn", "Draft the card"), ("spawn2", "Continue the follow-up"), ("text", "Card drafted and follow-up finished.")][
-            len(lead_calls) - 1
+            min(len(lead_calls), 3) - 1
         ]
 
     result, _, log, _ = await _lead_turn(case, monkeypatch, [], responder=responder)
     # Both calls run in one parallel batch; the Turn completes with the answer.
     assert result.status == "completed"
-    assert result.final_answer == "Card drafted and follow-up finished."
+    assert result.final_answer == "Card drafted and follow-up finished.\n\n" + chrome_text("delivery_unverified", "en-US")
+    assert len(lead_calls) == 4
     continuations = _rows(case, "chat_reference_primary_continuations")
     # The primary's run is held open, so the sibling overlaps it and is refused
     # (by the pre-check or by the writer), never a Turn-ending abort.

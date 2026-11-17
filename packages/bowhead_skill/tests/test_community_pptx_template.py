@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -104,6 +105,7 @@ def _render(
     (workdir / "input.json").write_text(json.dumps(payload), encoding="utf-8")
     result = subprocess.run(
         [sys.executable, str(skill / "scripts/render_from_canvas.py"), "--input", str(workdir / "input.json"), "--workdir", str(workdir)],
+        env={**os.environ, "TMPDIR": str(workdir.parent)},
         capture_output=True,
         text=True,
         timeout=60,

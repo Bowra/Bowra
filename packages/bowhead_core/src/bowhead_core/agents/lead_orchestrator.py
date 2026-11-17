@@ -243,6 +243,12 @@ _BARE_ART_RE = re.compile(
     r"\s*[\(（\[【]?\s*(?:artifact(?:_id)?\s*[=:：]\s*|artifact\s+)?art_[a-fA-F0-9]{8,}\s*[\)）\]】]?",
     re.IGNORECASE,
 )
+# Prose form: a bracket is captured so a pair goes with the ID and a lone one stays
+# (116 the regression case: "（the regression case，约25小时前生成）" lost its opening bracket).
+_PROSE_ART_RE = re.compile(
+    r"(?P<lead>[ \t]*)(?P<open>[\(（\[【])?[ \t]*(?:artifact(?:_id)?[ \t]*[=:：][ \t]*|artifact[ \t]+)?art_[a-fA-F0-9]{8,}(?:[ \t]*(?P<close>[\)）\]】]))?",
+    re.IGNORECASE,
+)
 _INLINE_CODE_RE = re.compile(r"(?<!`)(?P<delimiter>`{1,2})(?P<content>[^`\r\n]*)(?P=delimiter)(?!`)")
 # prod-bug-bash-039 #6 (0.39.2 citation reform): [cite:N] is the NEW LLM-facing
 # citation marker, replacing complex [data:art_<hex>]. Backend rewrites old
@@ -294,12 +300,12 @@ def _strip_bare_artifact_ids(text: str) -> str:
     and revision IDs follow the shared `strip_internal_object_ids` rule (116
     t_7edbc155f8d8 exposed `sec_…` in the final answer).
     """
-    from bowhead_core.analysis_payload import strip_internal_object_ids
+    from bowhead_core.analysis_payload import remove_id_matches, strip_internal_object_ids
 
     parts = _FENCE_SPLIT_RE.split(text)
     for index in range(0, len(parts), 2):
         parts[index] = _INLINE_CODE_RE.sub(lambda match: "" if _BARE_ART_RE.fullmatch(match.group("content")) else match.group(0), parts[index])
-    return strip_internal_object_ids(_BARE_ART_RE.sub("", "".join(parts)))
+    return strip_internal_object_ids(remove_id_matches("".join(parts), _PROSE_ART_RE))
 
 
 def _strip_data_markers(text: str) -> str:
@@ -5474,6 +5480,7 @@ async def _compose_turn_output_unchecked(
             from bowhead_core import metrics as _m_led
             from bowhead_core.deliverable_ledger import build_deliverable_ledger
             from bowhead_core.overclaim_guard import (
+                detect_completion_claims,
                 overclaimed_kinds,
                 reconcile_overclaimed_text,
                 reconcile_unverified_claims,
@@ -5489,6 +5496,8 @@ async def _compose_turn_output_unchecked(
                 canvas_store=getattr(_pctx_led, "canvas_store", None),
                 memory_notes_store=getattr(_pctx_led, "memory_notes_store", None),
                 invocations=getattr(result, "tool_invocations", None),
+                # A file claim may describe a file an earlier Turn delivered (116 dogfood N13).
+                include_session_files="file" in detect_completion_claims(text_for_chat),
             )
             if _ledger.worked_but_produced_nothing:
                 # Dispatched work left nothing (original sprint C shape). Without answer claim, guard misses it;
@@ -6426,9 +6435,19 @@ async def _lead_loop(
                 from bowhead_core.result_material_history import load_material_history
 
                 _material_history = await load_material_history(runtime.parent_ctx, [t.id for t in _turns_all if t.id != sctx.turn_id])
+                # Mid-run steering: a Turn's request includes the instructions it took while running.
+                # Same window as the spawn records above; unavailable input does not block the Turn.
+                _instructions_by_turn: dict[str, list[str]] | None = None
+                _applied_reader = getattr(_ss_hist, "list_turn_applied_instructions", None)
+                if callable(_applied_reader):
+                    try:
+                        _instructions_by_turn = await _applied_reader([str(t.id) for t in _turns_all if str(t.id) != str(sctx.turn_id)][-60:])
+                    except Exception as _ai_e:  # noqa: BLE001 — history keeps the original requests
+                        logger.warning("lead.turn_history_instructions_failed turn=%s err=%s", sctx.turn_id, _ai_e)
                 _th = _build_turn_history(
                     _turns_all,
                     exclude_turn_id=sctx.turn_id,
+                    instructions=_instructions_by_turn,
                     budget_tokens=_hist_budget_tokens,
                     hysteresis=_HIST_HYST,
                     make_message=lambda role, content: _HMessage(role=role, content=content),
@@ -6991,39 +7010,53 @@ async def _lead_loop(
     # Plan execution cannot reach here (plan_execution_id early return above).
     # Hit →same tool-shaped synthetic sentinel →**existing** scanner below →card path;
     # new trigger, no new mechanism, no bypass of _maybe_propose_plan off guard.
-    if planning_auto_from_mode(_planning_mode) and not _is_resume:
-        from .plan_propose_tool import multi_peer_sentinel
+    #
+    # 2026-11-16: the same invariant now covers the Lead's own `plan_propose` call, in every mode. The
+    # call used to end the run first and ask the card path afterwards; when that path created no card
+    # (one step, planning off, authoring failed) the Lead had written nothing and the user got the
+    # empty-answer fallback (observed in a regression). The gate decides before the call runs; a
+    # declined proposal lets the round run and the tool states that no card was created.
+    _multi_peer_gate = planning_auto_from_mode(_planning_mode) and not _is_resume
+    _plan_propose_state: dict[str, bool] = {"declined": False}
+    # Shallow copies of the Turn context share this object, so the tool handler sees the decision.
+    runtime.parent_ctx._plan_propose_state = _plan_propose_state  # type: ignore[attr-defined]
+    from .plan_propose_tool import multi_peer_sentinel
 
-        async def _round_gate(tool_calls: list[Any], profile_name: str) -> dict[str, Any] | None:
-            """★**先决定，后提交**——这条闸会**丢掉模型已经选好的 tool_calls**，所以
-            它必须在中止那一刻就知道答案，不能先中止再去问。
+    async def _round_gate(tool_calls: list[Any], profile_name: str) -> dict[str, Any] | None:
+        """★**先决定，后提交**——这条闸会**丢掉模型已经选好的 tool_calls**，所以
+        它必须在中止那一刻就知道答案，不能先中止再去问。
 
-            第一版是反的：命中「≥2 个不同 peer」就立刻中止本轮，然后才去
-            `author_plan` 问「这到底是不是项目」。答案回来是「不是」时**已经没有东西
-            可回退**（模型的动作被扔了、本轮 final_answer 是空的），用户拿到的是
-            「本次没有产出可展示的内容」——116 真机 1.1.3 实测。
-            不变量：**会终止 turn 的闸，判据必须在终止那一刻已决。** 既有两个哨兵
-            都满足（它们是模型自己调的，调用本身就是决定）；这条不是，所以要自己先问。
+        第一版是反的：命中「≥2 个不同 peer」就立刻中止本轮，然后才去
+        `author_plan` 问「这到底是不是项目」。答案回来是「不是」时**已经没有东西
+        可回退**（模型的动作被扔了、本轮 final_answer 是空的），用户拿到的是
+        「本次没有产出可展示的内容」——116 真机 1.1.3 实测。
+        不变量：**会终止 turn 的闸，判据必须在终止那一刻已决。** 既有两个哨兵
+        都满足（它们是模型自己调的，调用本身就是决定）；这条不是，所以要自己先问。
 
-            现在：条件命中 → 真跑一遍出卡路径（authoring + 判据 + 出卡/执行）→
-            **只有真出了结果才中止本轮**；判「不是项目」就返回 None，这一轮的
-            tool_calls **照常执行，就像闸不存在一样**。空 turn 于是结构上不可能。
-            代价 = 假阳时多等一次 author_plan（几秒），且只发生在模型本来就要
-            派 ≥2 个专家的 turn 上（spike §4-② 已定价接受）。
-            """
-            # parent_ctx shared across profiles: only Lead's own dispatch run.
-            if profile_name != "lead":
-                return None
-            if multi_peer_sentinel(tool_calls) is None:
-                return None
-            _decided = await _maybe_propose_plan(sctx, user_text, runtime)
-            if _decided is None:
-                return None  # Not project →same turn continues, nothing consumed
-            # Card created (Auto already executed)—return result directly from _lead_loop.
-            runtime.parent_ctx._plan_gate_result = _decided  # type: ignore[attr-defined]
-            return {"_plan_gate_committed": True}
+        现在：条件命中 → 真跑一遍出卡路径（authoring + 判据 + 出卡/执行）→
+        **只有真出了结果才中止本轮**；判「不是项目」就返回 None，这一轮的
+        tool_calls **照常执行，就像闸不存在一样**。空 turn 于是结构上不可能。
+        代价 = 假阳时多等一次 author_plan（几秒），且只发生在模型本来就要
+        派 ≥2 个专家的 turn 上（spike §4-② 已定价接受）。
+        """
+        # parent_ctx shared across profiles: only Lead's own dispatch run.
+        if profile_name != "lead":
+            return None
+        _asked = any(getattr(call, "name", "") == "plan_propose" for call in tool_calls)
+        if _asked and _plan_propose_state["declined"]:
+            return None  # Already answered in this run; the tool repeats the fact without authoring again.
+        if not _asked and (not _multi_peer_gate or multi_peer_sentinel(tool_calls) is None):
+            return None
+        _decided = await _maybe_propose_plan(sctx, user_text, runtime)
+        if _decided is None:
+            if _asked:
+                _plan_propose_state["declined"] = True
+            return None  # Not project →same turn continues, nothing consumed
+        # Card created (Auto already executed)—return result directly from _lead_loop.
+        runtime.parent_ctx._plan_gate_result = _decided  # type: ignore[attr-defined]
+        return {"_plan_gate_committed": True}
 
-        runtime.parent_ctx._round_tool_calls_gate = _round_gate  # type: ignore[attr-defined]
+    runtime.parent_ctx._round_tool_calls_gate = _round_gate  # type: ignore[attr-defined]
 
     # r4 final gate: **zero dispatch** yet claims "已修订 / 已重算 / 见画布" →bounce for another pass (r10 at most twice/turn).
     # 116 R6 (s_f3f23fd0a472 turns 8–10): final overclaim_guard knows zero canvas writes, yet only appends
@@ -7208,7 +7241,11 @@ async def _lead_loop(
         # only that directive prohibits revised/recalculated/canvas claims (review P2: r8 displaced it).
         # Review fix: criterion claims report work **this turn**, not mere canvas pointer—
         # 116 R6 "全报告各段…均按新口径重算重画" missed by old criterion; "上一轮的报告已在画布" legitimate pointer, no bounce.
-        if _report_work_claimed(text):
+        # Earlier answers let a restated change ("标题已改为《…》", reported by the turn that made it) pass.
+        _earlier_answers = [
+            _m.content for _m in _history_msgs or [] if getattr(_m, "role", None) == "assistant" and isinstance(getattr(_m, "content", None), str)
+        ]
+        if _report_work_claimed(text, _earlier_answers):
             return _bounce("spawn_delivered_nothing" if spawns else "no_spawn")
         # r8 (116 sixth dogfood turn): **zero-tool** final reports numbers unsourced in conversation ⇒bounce.
         # Observed 2/4: user asks no requery, tell X directly, X absent; half the time Lead invents without dispatch
@@ -7280,6 +7317,9 @@ async def _lead_loop(
                 postdispatch_resume=reference_postdispatch_resume,
             )
         else:
+            from bowhead_core.steer_inbox import attach_steer_inbox
+
+            await attach_steer_inbox(runtime.parent_ctx, bus=runtime.parent_bus, turn_id=sctx.turn_id)
             result = await runner.run(
                 profile_name="lead",
                 **({"exact_binding": _context_lead_binding} if _context_lead_binding is not None else {}),
@@ -9173,19 +9213,31 @@ _CONTINUE_INSTRUCTION = "The user clicked Continue: finish the unfinished part o
 
 async def _add_delivered_files_block(ctx: Any, turn_id: str, add_block: Callable[..., None], *, checkpoints: Sequence[Any]) -> None:
     """Revision targets: list this session's earlier deliverables so Lead can name them (FEATURE_REVISION_TARGETS)."""
-    from bowhead_core.delivered_files import list_delivered_files, render_delivered_files_block, revision_targets_enabled
+    from bowhead_core.delivered_files import (
+        DELIVERED_FILES_LIMIT,
+        count_delivered_files,
+        list_delivered_files,
+        render_delivered_files_block,
+        revision_targets_enabled,
+    )
 
     store = getattr(ctx, "artifact_store", None)
     if not revision_targets_enabled() or store is None:
         return
+    scope = {"session_id": str(getattr(ctx, "session_id", "") or ""), "user_id": str(getattr(ctx, "user_id", "") or ""), "exclude_turn_id": turn_id}
     try:
-        files = await list_delivered_files(
-            store, session_id=str(getattr(ctx, "session_id", "") or ""), user_id=str(getattr(ctx, "user_id", "") or ""), exclude_turn_id=turn_id
-        )
+        files = await list_delivered_files(store, **scope)
     except Exception as exc:  # noqa: BLE001 — without the list, Lead revises files as before
         logger.warning("delivered_files.prepare_failed turn=%s err=%s", turn_id, type(exc).__name__)
         return
-    block = render_delivered_files_block(files, checkpoints=checkpoints)
+    total = None
+    if len(files) >= DELIVERED_FILES_LIMIT:
+        # Only a full list can have left files out; the count uses the list's own predicate.
+        try:
+            total = await count_delivered_files(store, **scope)
+        except Exception as exc:  # noqa: BLE001 — the list stands without its total
+            logger.warning("delivered_files.count_failed turn=%s err=%s", turn_id, type(exc).__name__)
+    block = render_delivered_files_block(files, checkpoints=checkpoints, total=total)
     if block:
         add_block(block, zero_evidence=False)
 

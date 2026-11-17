@@ -9,7 +9,7 @@ from bowhead_core.agent_execution_binding import project_system_agent_revision
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.reference_receiver_metadata import ReferenceReceiverMetadata
 from bowhead_core.reference_skill_compatibility import ReferenceSkillMetadata, reference_skill_modes
-from bowhead_core.subagent import PROFILES, _system_profile_snapshot
+from bowhead_core.subagent import SubagentProfile, _system_profile_snapshot
 from test_skill_read_extensions import policy_for
 
 pytestmark = pytest.mark.unit
@@ -17,8 +17,9 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def behavior():
+    profile = SubagentProfile(name="graph-test", llm_agent_type="compute", tool_whitelist=(), system_prompt="Read the selected method.")
     return project_system_agent_revision(
-        team_id="org_graph_test", profile_name="compute", definition=_system_profile_snapshot(PROFILES["compute"])
+        team_id="org_graph_test", profile_name=profile.name, definition=_system_profile_snapshot(profile)
     ).behavior_descriptor
 
 

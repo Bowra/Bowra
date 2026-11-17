@@ -474,6 +474,7 @@ async def _versioned_file(store: ArtifactStore):
     await sessions.ensure_session(session_id="s_v", workspace_id=_WS, user_id=_OWNER)
     for turn in ("t1", "t2", "t3", "t4", "t5", "t6", "t7"):
         await sessions.record_turn(turn_id=turn, session_id="s_v", user_text="revise the report")
+        await sessions.mark_completed(turn_id=turn, intent=None, final_answer="done", tokens_input=0, tokens_output=0, cost_usd=0.0)
         await sessions.finalize_turn(session_id="s_v", current_turn_id=turn, next_turn_id=None)
 
     async def version(turn: str, target: str | None = None):

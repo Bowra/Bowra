@@ -649,9 +649,9 @@
       "owner": "terminal-protocol-reviewers",
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
     },
-    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_completed|turn_status": {
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>._complete_in_tx|turn_status": {
       "owner": "terminal-protocol-reviewers",
-      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version Moved on 2026-11-16 review: 41f6f9e01 moved the unchanged running->completed UPDATE from mark_completed into its private _complete_in_tx helper, called only by mark_completed inside the same fenced completion transaction."
     },
     "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_failed|turn_status": {
       "owner": "terminal-protocol-reviewers",
@@ -1011,9 +1011,9 @@
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
     },
-    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_chart|unresolved": {
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._draw_chart|unresolved": {
       "owner": "terminal-protocol-reviewers",
-      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Moved on 2026-11-16 review: 32f51a94d moved the add_chart body, including this nonterminal Canvas forwarding emit, into _draw_chart; _add_chart now only delegates."
     },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_external_iframe|unresolved": {
       "owner": "terminal-protocol-reviewers",
@@ -1384,6 +1384,78 @@
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>.admit_retry|unresolved": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed nonterminal llm.retry_scheduled progress on the original Turn, scoped to the running subagent; emit failure never cancels the admitted retry and root terminal publication remains protocol-adapter owned"
+    },
+    "chat_task_spawn|packages/bowhead_router/src/bowhead_router/invocation.py|<module>._settle_later|create_task:settle": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 84deb4c64 late physical-usage settlement. When the answer was already returned but its usage receipt could not be completed because SQLite was busy, a tracked background task retries only observation.complete for that exact receipt with bounded delays. It never re-invokes the model, changes the Turn, emits events or authorizes retry; a refused or abandoned settlement is only logged.",
+      "effect_scope": "exact_physical_invocation_usage_receipt",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "existing_invocation_settlement_only"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/agent_eval_job_store.py|<module>._start_split_scratch_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Domain-layout branch of the reviewed start_scratch_turn (aea6191e3). After re-checking the current unexpired job lease, it creates or re-reads only the origin=agent_eval scratch Session and legacy seq-1 scratch Turn in the execution domain, sets that Session's active_turn_id to the same scratch Turn, then links the job under the re-checked lease generation. Any foreign Session, owner, origin or active Turn raises scope mismatch; it cannot claim a Chat Session or create a v1 Turn."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/ordinary_lead_continuation.py|<module>.cancel_ordinary_pause_in_tx|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed c3de56c2a question dismissal. Called only by ClarificationStore inside the transaction that CASes the pending card and records the invalidation outbox. It cancels only the exact legacy (terminal_protocol_version 0) clarification_pending Turn whose dispatch is already terminal/failed at the same execution generation with no cancel request, then marks that dispatch drain_pending so common recovery writes the terminal stream. A newer active Turn or a consumed pause is refused."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.claim_steer_head|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 54e2729ab steer intake. Inside BEGIN IMMEDIATE it re-reads the running Turn's live steer buffer and removes exactly the head items that Turn recorded as steer.applied, guarded by WHERE active_turn_id equal to the same Turn. It never changes active_turn_id or Turn status; a lost dispatch or changed buffer rolls back and leaves the instructions queued."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_file_versions.py|<module>._emit_patched|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 4b53a2141 nonterminal canvas.section_patched follow-up for an embedded HTML file moved to its latest version, on the original Turn bus. Emit failure is only logged and leaves the stored Canvas unchanged; root terminal publication remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_revise.py|<module>.apply_title_only_revision|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 478f12cb4 nonterminal canvas.opened pointer after a title-only report revision patched the stored heading. The emit is suppressed on failure and never constructs a root outcome; root terminal publication remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/config_copilot_chat_tools.py|<module>.emit_saved_card|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 4d7dffd43 nonterminal config.lite_propose card with status applied for a suggestion the Configuration Agent already saved through the original service, emitted on the parent Turn bus so Chat offers Undo. A lost card only removes Undo and never the save receipt; root terminal publication remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/context_manual.py|<module>.run_manual_context.activity|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 79b123899 manual context maintenance activity relay. Non-committed agent.context progress is forwarded to the execution view's own durable context_activity publisher; committed activity is held for the finalizer. It constructs no root outcome."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/context_manual.py|<module>.run_manual_context|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 79b123899 manual context maintenance agent.context events: a no-change skipped activity, and committed completions redelivered once from their existing durable identity after the legacy finalizer accepted the Turn. Both persist before delivery with stable durable_event_id and construct no root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/context_manual.py|<module>.run_manual_context|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 79b123899 manual context maintenance close, the same edge as turn_runner._run_inner done for the explicitly admitted context-maintenance Turn. Legacy Turns persist completed state through the runner finalizer before emitting done (a rejected finalization raises instead); native Terminal Turns emit through terminal_runtime.bus, where the protocol adapter and finalizer own the receipt. It runs no business Tool and publishes no answer."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/notification_service.py|<module>._emit_item|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical name collision: NotificationService.emit writes a NotificationDraft to the notification store in one transaction. It never touches a Turn event bus, Turn, Session or execution."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/notification_service.py|<module>.emit_access_admin_decided|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical name collision: NotificationService.emit writes a NotificationDraft to the notification store in one transaction. It never touches a Turn event bus, Turn, Session or execution."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/notification_service.py|<module>.emit_routine_alert|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical name collision: NotificationService.emit writes a NotificationDraft to the notification store in one transaction. It never touches a Turn event bus, Turn, Session or execution."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/notification_service.py|<module>.refresh_access_digest|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical name collision: NotificationService.emit writes a NotificationDraft to the notification store in one transaction. It never touches a Turn event bus, Turn, Session or execution."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/steer_inbox.py|<module>.take|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 54e2729ab nonterminal steer.applied event on the running Turn's own bus, persisted before delivery and before claim_steer_head removes the same items. A closing bus takes nothing and leaves the buffer to finalization; root terminal publication remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._execution_context_view.context_activity|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 79b123899 nonterminal agent.context activity for the exact execution, lane and profile, persisted before delivery with a stable durable_event_id; an unpublished event raises instead of claiming progress. Root terminal publication remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/tool_confirmation_events.py|<module>._emit|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed 52e8618fd best-effort nonterminal confirmation_requested and confirmation_resolved cards on the waiting tool step's bus. They carry labels only; a missing card never approves or runs a call because only the confirmation queue decides. Root terminal publication remains protocol-adapter owned."
     }
   },
   "manifest_version": 8,

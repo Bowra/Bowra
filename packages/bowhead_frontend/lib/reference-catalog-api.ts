@@ -15,7 +15,8 @@ export type ReferenceCatalogReason =
   | "unsupported_binding"
   | "resource_unavailable"
   | "catalog_adapter_unavailable"
-  | "catalog_metadata_unavailable";
+  | "catalog_metadata_unavailable"
+  | "personally_disabled";
 export type ReferenceCatalogGroupId =
   "team_agents" | "system_agents" | "skills" | "capabilities" | "mcp";
 export type ParameterResourceRef = Extract<ResourceRef, { kind: "skill" | "capability" | "mcp_tool" | "mcp_prompt" }>;
@@ -142,6 +143,7 @@ const REASONS: ReferenceCatalogReason[] = [
   "resource_unavailable",
   "catalog_adapter_unavailable",
   "catalog_metadata_unavailable",
+  "personally_disabled",
 ];
 const KINDS: ResourceRef["kind"][] = [
   "agent",
@@ -556,6 +558,8 @@ export async function getReferenceCatalog(
     selected_refs: snapshot.selectedRefs,
     entry_mode: snapshot.entryMode,
     submission_protocol: "chat-references.v1",
+    // Version 2 adds personally_disabled; older pages keep receiving resource_unavailable.
+    reason_code_version: 2,
     ...(snapshot.exactResource ? { exact_resource: snapshot.exactResource } : {}),
   });
   if (new TextEncoder().encode(body).byteLength > 32 * 1024)

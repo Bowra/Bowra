@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import csv as _csv
+import functools
 import io as _io
 import json
 import logging
@@ -354,10 +355,24 @@ def _requested_view_binding(plan: dict[str, Any] | None, view_id: str) -> str | 
     return None
 
 
-async def _add_chart(
+async def _add_chart(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
+    """The add_chart Tool: accept mistakes with one reading (chart/compat.py), then draw exactly."""
+    from bowhead_core.chart.compat import accept_request
+
+    receipts: list[dict[str, str]] = []
+    request = accept_request(args, shared_fields=_composition_shared_fields(), receipts=receipts)
+    result = await _draw_chart(request, ctx, _receipts=receipts)
+    if receipts and isinstance(result, dict) and "error" not in result:
+        listed = result.get("presentation_fallbacks", [])
+        result = {**result, "presentation_fallbacks": [*listed, *(entry for entry in receipts if entry not in listed)]}
+    return result
+
+
+async def _draw_chart(
     args: dict[str, Any],
     ctx: ToolExecutionContext,
     *,
+    _receipts: list[dict[str, str]] | None = None,
     _prepare_only: bool = False,
     _prepared_frame: bool = False,
     _analytical: dict[str, Any] | None = None,
@@ -374,7 +389,8 @@ async def _add_chart(
         unsupported = set(args) & {"series", "hint", "limit", "sort_by", "columns", "axes", "group_by", "force_kind"}
         if unsupported:
             return {
-                "error": f"Explicit composition does not accept {sorted(unsupported)}; declare each view's columns or axes/group_by.",
+                "error": f"Explicit composition does not accept {sorted(unsupported)}; declare each view's columns or axes/group_by."
+                + _composed_view_problems({key: value for key, value in args.items() if key not in unsupported}),
                 "error_kind": "invalid_chart_expression",
             }
     if "views" not in args:
@@ -453,29 +469,10 @@ async def _add_chart(
     if "views" in args:
         fallbacks: list[dict[str, str]] = []
         try:
-            views, layout = composition(args, fallbacks=fallbacks)
+            views, layout = composition(args, fallbacks=fallbacks, shared_fields=_composition_shared_fields())
         except (ValueError, TypeError, RecursionError) as exc:
             return {"error": str(exc), "error_kind": "invalid_chart_expression"}
-        base = {
-            key: value
-            for key, value in args.items()
-            if key
-            not in {
-                "views",
-                "layout",
-                "series",
-                "force_kind",
-                "sort_by",
-                "limit",
-                "hint",
-                "title",
-                "subtitle",
-                "presentation_plan",
-                "columns",
-                "axes",
-                "group_by",
-            }
-        }
+        base = {key: value for key, value in args.items() if key not in _COMPOSITION_ROOT_ONLY}
         prepared: list[dict[str, Any]] = []
         dataset_cache: list[_PreparedChartDataset] = []
         frame_targets = {vid for item in (plan_input or {}).get("interactions", []) if item["preset"] == "frame_player" for vid in item["view_ids"]}
@@ -486,9 +483,10 @@ async def _add_chart(
         }
         analytical_targets = {item["view_id"]: item for item in (plan_input or {}).get("analytical_views", [])}
         for view in views:
-            result = await _add_chart(
+            result = await _draw_chart(
                 {**base, **{key: value for key, value in view.items() if key != "id"}},
                 ctx,
+                _receipts=_receipts,
                 _prepare_only=True,
                 _dataset_cache=dataset_cache,
                 _prepared_frame=view["id"] in frame_targets,
@@ -512,24 +510,26 @@ async def _add_chart(
                 "error_kind": "invalid_chart_expression",
             }
         if len(views) == 1 and not analytical_targets:
-            result = await _add_chart(
+            result = await _draw_chart(
                 {
                     **base,
                     **{key: value for key, value in views[0].items() if key != "id"},
                     **({"presentation_plan": plan_input} if plan_input else {}),
                 },
                 ctx,
+                _receipts=_receipts,
                 _dataset_cache=dataset_cache,
             )
             result = {**result, "normalized": "single_view"}
         else:
-            result = await _add_chart(
+            result = await _draw_chart(
                 {
                     **base,
                     **{key: value for key, value in views[0].items() if key != "id"},
                     **({"presentation_plan": plan_input} if plan_input else {}),
                 },
                 ctx,
+                _receipts=_receipts,
                 _composed_views=prepared,
                 _prepared_frame=views[0]["id"] in frame_targets,
                 _binding_id=_requested_view_binding(plan_input, views[0]["id"]),
@@ -623,16 +623,12 @@ async def _add_chart(
 
     units = args.get("column_units", {})
     numeric_columns = {column.key: column for column in cols if column.type == "numeric"}
-    if not isinstance(units, dict) or any(
-        key not in numeric_columns
-        or not isinstance(unit, str)
-        or not unit.strip()
-        or len(unit) > 32
-        or (unit.strip() == "%" and not numeric_columns[key].percent_scale)
-        for key, unit in units.items()
-    ):
+    if _receipts is not None and isinstance(units, dict):
+        units = _drop_units_without_numeric_column(units, cols, numeric_columns, _receipts)
+    if unit_problems := _column_unit_problems(units, cols, numeric_columns):
         return {
-            "error": "column_units must map existing numeric columns to nonempty units of at most 32 characters; % requires an explicit percentage shape",
+            "error": "column_units must map existing numeric columns to nonempty units of at most 32 characters; % requires an explicit percentage shape. "
+            + " ".join(unit_problems),
             "error_kind": "invalid_chart_expression",
             "path": "/column_units",
         }
@@ -731,9 +727,18 @@ async def _add_chart(
             analytical=_analytical,
             full_table=_prepared_frame or _preserve_observations or _analytical is not None,
             observation_keys=observation_keys,
+            fallbacks=_receipts,
         )
     except ExplicitPresentationError as exc:
-        return {"error": str(exc), "error_kind": "invalid_chart_expression", "path": exc.path}
+        message = str(exc)
+        if exc.missing:
+            # 116 the regression case: a helper charted a brand table while asking for a dimension field, and
+            # sent the same call again; the field list alone did not show it had picked the wrong data.
+            message += (
+                f" data_artifact_id {input_aid!r} is {getattr(art, 'filename', '') or aid!r} ({aid}); those are its fields."
+                " If the fields are in another result, pass that result's id instead." + _available_data_hint(ctx)
+            )
+        return {"error": message, "error_kind": "invalid_chart_expression", "path": exc.path}
 
     for field in ("show_legend", "show_data_labels"):
         if field in args:
@@ -1903,6 +1908,94 @@ def _prior_chart_with_same_data(prior: list[Any], spec: Any, spec_of: Any) -> st
         except Exception:  # noqa: S112
             continue
     return None
+
+
+#: add_chart fields of a composed request that stay at the root; every other root field is copied
+#: into each view.
+_COMPOSITION_ROOT_ONLY = frozenset(
+    {
+        "views",
+        "layout",
+        "series",
+        "force_kind",
+        "sort_by",
+        "limit",
+        "hint",
+        "title",
+        "subtitle",
+        "presentation_plan",
+        "columns",
+        "axes",
+        "group_by",
+    }
+)
+
+
+@functools.cache
+def _composition_shared_fields() -> frozenset[str]:
+    """The add_chart fields given once beside `views` that apply to every view."""
+    return frozenset(_add_chart_schema().input_schema["properties"]) - _COMPOSITION_ROOT_ONLY
+
+
+def _composed_view_problems(args: dict[str, Any]) -> str:
+    """The request problems of each composed view, appended to a refusal of the composition root.
+
+    Root fields beside `views` are refused before any view is checked, so the next call used to meet
+    the views' own problems one at a time (116 the regression case: root fields, then x_scale, then the
+    combo y fields). Views a plan declares analytical are checked against that plan later.
+    """
+    plan = args.get("presentation_plan")
+    if isinstance(plan, dict) and plan.get("analytical_views"):
+        return ""
+    try:
+        views, _layout = composition(args, fallbacks=[], shared_fields=_composition_shared_fields())
+    except ValueError as exc:
+        # The views' own structure is wrong (116 the regression case: column_types inside a view); say so
+        # now instead of leaving it for the next call.
+        return f" Also fix: {exc}"
+    except (TypeError, RecursionError):
+        return ""
+    found: list[str] = []
+    for view in views:
+        try:
+            validate_request({key: value for key, value in view.items() if key != "id"})
+        except ExplicitPresentationError as exc:
+            found.append(f"View {view['id']}: {exc}")
+    return (" Also fix: " + " ".join(found)) if found else ""
+
+
+def _drop_units_without_numeric_column(
+    units: dict[str, Any], cols: list[Any], numeric_columns: dict[str, Any], receipts: list[dict[str, str]]
+) -> dict[str, Any]:
+    """A unit for a column that is absent or not numeric describes nothing drawn; ignore it and say so."""
+    from bowhead_core.chart.compat import receipt
+
+    keys = {column.key for column in cols}
+    for key in units:
+        if key not in numeric_columns:
+            reason = "is not a column of this data" if key not in keys else "is not numeric"
+            receipt(receipts, "unit_ignored", f"/column_units/{key}", f"{key!r} {reason}; ignored its unit.")
+    return {key: unit for key, unit in units.items() if key in numeric_columns}
+
+
+def _column_unit_problems(units: Any, cols: list[Any], numeric_columns: dict[str, Any]) -> list[str]:
+    """Name each `column_units` entry that cannot be applied, and why (116 the regression case)."""
+    if not isinstance(units, dict):
+        return ["Give column_units as an object from column key to unit."]
+    keys = [column.key for column in cols]
+    problems: list[str] = []
+    for key, unit in units.items():
+        if key not in keys:
+            problems.append(f"{key!r} is not a column of this data.")
+        elif key not in numeric_columns:
+            problems.append(f"{key!r} is not a numeric column.")
+        elif not isinstance(unit, str) or not unit.strip() or len(unit) > 32:
+            problems.append(f"{key!r} needs nonempty unit text of at most 32 characters.")
+        elif unit.strip() == "%" and not numeric_columns[key].percent_scale:
+            problems.append(f"{key!r} uses unit % without a percentage shape; declare percent_fraction or percent_points for it in column_types.")
+    if any(key not in keys for key in units):
+        problems.append(f"Columns of this data: {keys}.")
+    return problems
 
 
 def _available_data_hint(ctx: ToolExecutionContext) -> str:

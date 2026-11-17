@@ -322,3 +322,45 @@ async def test_enforced_resource_grants_require_complete_authority(setup, monkey
     result = await specs(setup)["teammcp.ibt_one.shopify_shop_context"].handler({}, setup.ctx)
     assert result["error_code"] == "shopify_permission_denied"
     assert not api.requests
+
+
+def test_shopify_skills_are_offered_only_while_their_switches_are_on(monkeypatch):
+    from bowhead_core.builtin_tool_providers import builtin_skill_available
+
+    monkeypatch.delenv("FEATURE_SHOPIFY_PLUGIN", raising=False)
+    monkeypatch.delenv("FEATURE_SHOPIFY_CONTENT_WRITES", raising=False)
+    assert not builtin_skill_available("shopify-analysis")
+    assert not builtin_skill_available("shopify-content-optimization")
+    assert builtin_skill_available("web-research")
+    monkeypatch.setenv("FEATURE_SHOPIFY_PLUGIN", "1")
+    assert builtin_skill_available("shopify-analysis")
+    assert not builtin_skill_available("shopify-content-optimization")
+    monkeypatch.setenv("FEATURE_SHOPIFY_CONTENT_WRITES", "1")
+    assert builtin_skill_available("shopify-content-optimization")
+
+
+def test_plugin_templates_keep_the_former_presets(monkeypatch):
+    """The Plugin editor's templates select what the removed Tools-page buttons saved."""
+    from bowhead_core.shopify_content import CONTENT_OPERATIONS
+
+    monkeypatch.setenv("FEATURE_SHOPIFY_PLUGIN", "1")
+    monkeypatch.delenv("FEATURE_SHOPIFY_CONTENT_WRITES", raising=False)
+    tool = SimpleNamespace(
+        provider="shopify",
+        status="enabled",
+        config={"granted_scopes": ["read_products", "read_orders", "read_inventory", "read_content", "write_content"]},
+    )
+    (analysis,) = module.shopify_plugin_templates(tool)
+    assert analysis.kind == "shopify_analysis" and analysis.skill == "shopify-analysis"
+    assert analysis.operations == tuple(op for op in module.supported_operations(tool) if op not in CONTENT_OPERATIONS)
+
+    monkeypatch.setenv("FEATURE_SHOPIFY_CONTENT_WRITES", "1")
+    analysis, content = module.shopify_plugin_templates(tool)
+    assert not set(analysis.operations) & CONTENT_OPERATIONS
+    assert content.kind == "shopify_content" and content.skill == "shopify-content-optimization"
+    assert set(content.operations) == (set(module.supported_operations(tool)) & CONTENT_OPERATIONS) | {
+        "shopify_shop_context",
+        "shopify_list_products",
+        "shopify_list_pages",
+    }
+    assert module.shopify_plugin_templates(SimpleNamespace(**{**vars(tool), "status": "disabled"})) == ()

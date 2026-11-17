@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Canvas results alignment style contracts (technical design “Canvas results preview alignment”).
  *

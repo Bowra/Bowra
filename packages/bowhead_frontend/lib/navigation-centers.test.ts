@@ -44,7 +44,7 @@ describe("navigation ownership and authorization", () => {
       user("member", { subagent_creator: true, subagent_management_v2: true, personal_mcp: true }),
     );
     expect(groups.map((group) => group.key)).toEqual(["capability_resources"]);
-    expect(groups[0].items.map((item) => item.route)).toEqual(["/skills/", "/capabilities/?type=tools", "/capabilities/?type=capabilities", "/connections/", "/team/settings/scheduled/"]);
+    expect(groups[0].items.map((item) => item.route)).toEqual(["/skills/", "/capabilities/?type=tools", "/capabilities/?type=plugins", "/connections/", "/team/settings/scheduled/"]);
     const personal = capabilityOverviewGroups(user("member", { subagent_management_v2: true })).find((group) => group.key === "capability_personal");
     expect(personal?.items.map((item) => item.route)).toContain("/agents/manage/created/");
     expect(
@@ -86,8 +86,8 @@ describe("navigation ownership and authorization", () => {
       expect(centerActiveForRoute("/capabilities/", search)).toBe("overview");
     }
     expect(centerActiveForRoute("/capabilities/", "type=tools")).toBe("tools_catalog");
-    expect(centerActiveForRoute("/capabilities/", "type=capabilities")).toBe("capabilities_catalog");
-    for (const [path, expected] of [["/team/settings/tools/", "tools_catalog"], ["/team/settings/capabilities/", "capabilities_catalog"], ["/team/settings/workflows/", "skills"], ["/team/settings/scheduled/", "scheduled"]]) {
+    expect(centerActiveForRoute("/capabilities/", "type=plugins")).toBe("capabilities_catalog");
+    for (const [path, expected] of [["/team/settings/tools/", "tools_catalog"], ["/team/settings/plugins/", "capabilities_catalog"], ["/team/settings/workflows/", "skills"], ["/team/settings/scheduled/", "scheduled"]]) {
       expect(centerActiveForRoute(`/bowhead${path}`, "", "/bowhead")).toBe(expected);
     }
   });

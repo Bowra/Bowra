@@ -11,7 +11,7 @@ const DESTINATIONS = {
   agents: { route: "/team/settings/subagents/", label: "manage_builtins", button: "manage_builtins_button", gate: "subagent_creator" },
   skills: { route: "/team/settings/workflows/", label: "manage_workflows", button: "manage_workflows_button", gate: "workflow_creator" },
   tools: { route: "/team/settings/tools/", label: "manage_tools", button: "manage_tools_button" },
-  capabilities: { route: "/team/settings/capabilities/", label: "manage_capabilities", button: "manage_capabilities_button" },
+  plugins: { route: "/team/settings/plugins/", label: "manage_capabilities", button: "manage_capabilities_button" },
 } as const;
 
 type ManagedResource = keyof typeof DESTINATIONS;

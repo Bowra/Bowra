@@ -163,7 +163,8 @@ def test_start_draft_recovers_one_owned_target_then_saves_reviewable_fields(reso
     assert conflict["error"] == "idempotency_key_reused"
     adapter = _run(resources.authoring.draft_adapter(created["target"]))
     baseline = _run(adapter.inspect())
-    patch = {key: value for key, value in saved_draft[3].definition.items() if key not in {"visibility", "output_schema_text"}}
+    # The step limit follows the Team run limits and is no longer a Coach-authored field (f879d4630).
+    patch = {key: value for key, value in saved_draft[3].definition.items() if key not in {"visibility", "output_schema_text", "max_iterations"}}
     patch["name"] = "coach-created"
     proposal = _run(adapter.propose(patch, request_id="initial-fields", turn_id="t_coach"))
     assert proposal["ok"] and not proposal["applied"], proposal

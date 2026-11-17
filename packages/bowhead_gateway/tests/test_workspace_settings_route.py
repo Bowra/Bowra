@@ -225,6 +225,38 @@ class TestMetadataRequiresSpaceAdmin:
             assert updated.json()["name"] == "Renamed"
 
     @pytest.mark.asyncio
+    async def test_metadata_save_that_never_gets_the_lease_answers_busy(self, app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+        from bowhead_core.error_catalog import default_error_catalog_dir, load_error_catalog
+        from bowhead_gateway.error_handler import register_error_handlers
+
+        from bowhead_core import _db, sqlite_domain_runtime
+
+        register_error_handlers(app)
+        app.state.error_catalog = load_error_catalog(default_error_catalog_dir())
+        monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+
+        async def lose_lease(self: UserStore, **kwargs: object) -> None:
+            raise sqlite_domain_runtime._busy()
+
+        monkeypatch.setattr(UserStore, "write_admin_audit_log", lose_lease)
+        transport = httpx2.ASGITransport(app=app)
+        async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+            headers = {"x-bowhead-user-id": app.state.admin_id}
+            current = await c.get(f"/api/v1/workspace-settings/{app.state.ws_id}/metadata", headers=headers)
+            busy = await c.patch(
+                f"/api/v1/workspace-settings/{app.state.ws_id}/metadata",
+                json={"description": "Retail data", "expected_revision": current.json()["revision"]},
+                headers={**headers, "Accept-Language": "zh-CN"},
+            )
+            assert busy.status_code == 503
+            assert busy.headers["Retry-After"] == "2"
+            assert busy.json()["detail"]["code"] == "store_busy"
+            assert "没有保存" in busy.json()["detail"]["message"]
+            after = await c.get(f"/api/v1/workspace-settings/{app.state.ws_id}/metadata", headers=headers)
+            assert after.json()["revision"] == current.json()["revision"]
+            assert after.json()["description"] == current.json()["description"]
+
+    @pytest.mark.asyncio
     async def test_team_admin_cannot_update_metadata_without_space_membership(self, app: FastAPI) -> None:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:

@@ -151,4 +151,6 @@ def test_spawn_schema_tells_lead_not_to_pick_the_method() -> None:
     spec = registry.get("subagent_spawn")
     assert spec is not None
     desc = spec.schema.input_schema["properties"]["task"]["description"]
-    assert "计算方法也别替用户选" in desc
+    # 4abe0095b translated the rule to English; the method choice still stays with the specialist.
+    assert "leave field names, analysis depth and comparable calculation methods to the specialist unless the user specified them" in desc
+    assert "'find the fastest growth' does not specify first-to-last month change or compound growth" in desc

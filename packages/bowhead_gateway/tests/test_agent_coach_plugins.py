@@ -17,19 +17,19 @@ def administrator(resources):
         db.execute("UPDATE team_members SET role='team_admin' WHERE team_id=? AND user_id=?", (resources.user.team_id, resources.user.id))
 
 
-def exact_method(resources):
-    page = _run(resources.search(kind="skill", query="agent-authoring", offset=0, limit=50))
-    item = next(item for item in page["items"] if item["reference"]["id"] == "builtin:agent-authoring")
+def exact_method(resources, name="agent-authoring"):
+    page = _run(resources.search(kind="skill", query=name, offset=0, limit=50))
+    item = next(item for item in page["items"] if item["reference"]["id"] == f"builtin:{name}")
     return _run(resources.get(reference=item["reference"]))["resource"]["exact_read_grant"]
 
 
-def create(resources, *, key="one"):
+def create(resources, grant, *, key="one"):
     return _run(
         resources.plugins.call(
             "agent_plugin_save",
             {
                 "target": None,
-                "patch": {"name": "Shared methods", "skill_grants": [exact_method(resources)]},
+                "patch": {"name": "Shared methods", "skill_grants": [grant]},
                 "expected_impact": None,
                 "request_id": key,
             },
@@ -38,13 +38,17 @@ def create(resources, *, key="one"):
     )
 
 
-def test_real_compiler_preserves_exact_grant_and_focused_edit(resources):
+def test_real_compiler_rebases_grant_and_preserves_it_on_edit(resources):
     administrator(resources)
-    saved = create(resources)
+    grant = exact_method(resources)
+    older = {**grant, "revision": "sha256:" + "0" * 64}
+    assert older["revision"] != grant["revision"]
+    saved = create(resources, older)
     assert saved["ok"] and saved["dependency_validation"]["status"] == "ready", saved
     assert not saved["agent_bound"] and not saved["executed"]
     inspected = _run(resources.plugins.call("agent_plugin_inspect", {"plugin_id": saved["result_target"]["id"]}, turn_id="t_later"))
     before = inspected["plugin"]
+    assert before["skill_grants"] == [grant]
     args = {"target": inspected["target"], "expected_impact": inspected["impact"]["fingerprint"], "patch": {"description": "Clarified purpose"}}
     preview = _run(resources.plugins.call("agent_plugin_validate", args, turn_id="t_later"))
     assert not preview["persisted"] and preview["candidate"]["skill_grants"] == before["skill_grants"]
@@ -56,40 +60,25 @@ def test_real_compiler_preserves_exact_grant_and_focused_edit(resources):
     assert changed["result_target"]["revision"] == 2
     current = _run(resources.plugins.call("agent_plugin_inspect", {"plugin_id": before["id"]}, turn_id="t_later"))
     assert current["plugin"]["name"] == before["name"] and current["plugin"]["skill_grants"] == before["skill_grants"]
-    assert create(resources)["operation_id"] == saved["operation_id"]
+    assert create(resources, older)["operation_id"] == saved["operation_id"]
     with pytest.raises(ValueError, match="plugin_name_conflict"):
-        create(resources, key="duplicate_name")
+        create(resources, grant, key="duplicate_name")
     recovered = _run(resources.plugins.call("agent_plugin_operation_get", {"operation_id": saved["operation_id"]}, turn_id="t_recovery"))
     assert not recovered["current_result_matches"]
 
 
-def test_older_skill_revision_is_saved_at_the_validated_current_revision(resources):
-    administrator(resources)
-    grant = exact_method(resources)
-    older = {**grant, "revision": "sha256:" + "0" * 64}
-    assert older["revision"] != grant["revision"]
-    saved = _run(
-        resources.plugins.call(
-            "agent_plugin_save",
-            {"target": None, "patch": {"name": "Shared methods", "skill_grants": [older]}, "expected_impact": None, "request_id": "older"},
-            turn_id="t_original",
-        )
-    )
-    assert saved["ok"] and saved["dependency_validation"]["status"] == "ready", saved
-    inspected = _run(resources.plugins.call("agent_plugin_inspect", {"plugin_id": saved["result_target"]["id"]}, turn_id="t_later"))
-    assert inspected["plugin"]["skill_grants"] == [grant]
-
-
 def test_current_administrator_and_chat_access_are_required(resources, saved_draft):
+    grant = exact_method(resources)
     with pytest.raises(ValueError, match="team_admin_required"):
-        create(resources)
+        create(resources, grant)
     administrator(resources)
-    saved = create(resources)
+    saved = create(resources, grant)
+    assert saved["ok"] and saved["dependency_validation"]["status"] == "ready", saved
     with sqlite3.connect(resources.store.db_path) as db:
         db.execute("UPDATE teams SET created_by_user_id=? WHERE id=?", (saved_draft[5].id, resources.user.team_id))
         db.execute("UPDATE team_members SET role='member' WHERE team_id=? AND user_id=?", (resources.user.team_id, resources.user.id))
     with pytest.raises(ValueError, match="team_admin_required"):
-        create(resources)
+        create(resources, grant)
     assert (
         _run(resources.plugins.call("agent_plugin_operation_get", {"operation_id": saved["operation_id"]}, turn_id="t_later"))["state"] == "succeeded"
     )

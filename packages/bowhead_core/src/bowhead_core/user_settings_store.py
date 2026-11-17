@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from bowhead_memory.privacy_guard import ensure_memory_write_allowed
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 if TYPE_CHECKING:
@@ -79,6 +79,7 @@ class UserSettingsStore:
             row = await cur.fetchone()
             return (str(row[0]), str(row[1])) if row else (None, None)
 
+    @repeat_when_authority_busy()
     async def set(self, user_id: str, key: str, value: str) -> None:
         async with open_shared_ctx(self._path) as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -96,6 +97,7 @@ class UserSettingsStore:
             )
             await db.commit()
 
+    @repeat_when_authority_busy()
     async def update_value(
         self,
         user_id: str,
@@ -139,6 +141,7 @@ class UserSettingsStore:
                 await db.rollback()
                 raise
 
+    @repeat_when_authority_busy()
     async def delete(self, user_id: str, key: str) -> None:
         async with open_shared_ctx(self._path) as db:
             await db.execute("BEGIN IMMEDIATE")

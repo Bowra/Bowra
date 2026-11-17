@@ -70,6 +70,8 @@ function referenceItemReasonKey(item: ReferenceCatalogItem): string {
     return "reason.skill_readonly_unavailable";
   }
   if (item.kind === "skill" && item.reason_code === "unsupported_binding") return "reason.skill_unsupported_binding";
+  if (item.reason_code === "personally_disabled")
+    return item.kind === "skill" ? "reason.skill_personally_disabled" : "reason.resource_unavailable";
   return referenceReasonKey(item.kind === "agent", item.reason_code);
 }
 

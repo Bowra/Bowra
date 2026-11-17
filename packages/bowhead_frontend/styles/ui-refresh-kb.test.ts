@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for P2 batch 5 (two-level knowledge base navigation, knowledge base dialog interiors):
  * styles/ui-refresh-kb.css.

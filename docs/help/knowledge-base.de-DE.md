@@ -52,6 +52,8 @@ Beim Hinzufügen zur Wissensdatenbank wird die Datei nicht verschoben oder kopie
 
 Das Hochladen unter Dateien oder Anhängen im Chat speichert nur die Datei. Eine Einstufung als langfristiges Material fügt sie nicht zur Wissensdatenbank hinzu. Wählen Sie **Zur Wissensdatenbank hinzufügen**, laden Sie sie auf der Wissensseite hoch oder bitten Sie den Agent ausdrücklich um das Hinzufügen einer bestimmten Datei mit gewünschter Sichtbarkeit. Der Agent prüft Ihre ursprüngliche Anfrage und aktuellen Berechtigungen; unklare Ziele müssen geklärt werden. Erst nach der Verarbeitung ist die Datei durchsuchbar. ZIP-Anhänge im Chat bleiben eine einzelne Datei und werden nicht entpackt oder indexiert. Importieren Sie enthaltene Dokumente über die Wissensseite. Das Entfernen aus der Wissensdatenbank behält die Originaldatei. Eine alte Anfrage fügt sie nach dem Entfernen nicht erneut hinzu; eine neue ausdrückliche Anfrage kann dies tun.
 
+Wird eine Datei unter **Dateien** überarbeitet, behält die Wissensdatenbank die hinzugefügte Version und weist auf eine neuere hin. Wählen Sie unter **Dateien** die Aktion **Version N hinzufügen** und den gewünschten Bereich. Sobald die neue Version bereit ist, können Sie den alten Eintrag entfernen, wenn er nicht mehr in der Suche erscheinen soll.
+
 ## Dateistatus
 
 | Status           | Bedeutung                                                                                                                                                                                                                                                                                 |

@@ -129,3 +129,41 @@ async def test_a_new_version_schedules_pruning_of_its_file(client_store, monkeyp
     assert scheduled == [], "A first version has nothing to prune"
     assert _upload(client, version_of=first).status_code == 200
     assert scheduled == [first]
+
+
+async def test_scheduled_pruning_waits_until_no_turn_of_the_session_is_running_or_paused(monkeypatch):
+    """116 dogfood N12: the version is written inside a Turn, so its file is pruned after that Turn settles."""
+    import asyncio
+
+    from bowhead_gateway import file_versions_pruning as pruning
+
+    pruned: list[list[str] | None] = []
+    checks: list[str] = []
+
+    class _Store:
+        async def version_prune_deferred(self, root):
+            checks.append(root)
+            return len(checks) <= 2  # The Turn that wrote the version ends after two checks.
+
+    async def prune(app, lineage_roots=None):
+        pruned.append(lineage_roots)
+        return 1
+
+    monkeypatch.setattr(pruning, "prune_file_versions", prune)
+    monkeypatch.setattr(pruning, "_DEFER_POLL_SECONDS", 0)
+    app = SimpleNamespace(state=SimpleNamespace(artifact_store=_Store()))
+    pruning.schedule_file_version_prune(app, "art_root")
+    pruning.schedule_file_version_prune(app, "art_root")
+    await asyncio.gather(*app.state._file_version_prune_tasks)
+    assert pruned == [["art_root"]], "One waiting prune per file, run once the session settled"
+
+    class _Busy:
+        async def version_prune_deferred(self, root):
+            return True
+
+    monkeypatch.setattr(pruning, "_DEFER_MAX_WAIT_SECONDS", 0)
+    app.state.artifact_store = _Busy()
+    pruning.schedule_file_version_prune(app, "art_root")
+    await asyncio.gather(*app.state._file_version_prune_tasks)
+    assert pruned == [["art_root"]], "A session that stays busy leaves the file to the nightly run"
+    assert app.state._file_version_prune_pending == set()

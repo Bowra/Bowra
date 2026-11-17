@@ -21,7 +21,7 @@ from bowhead_core.agent_collaboration_runtime import (
     collaboration_tool_spec,
 )
 from bowhead_core.events import TurnEventBus
-from bowhead_core.subagent import PROFILES, SubagentRunner, _materialize_system_profile_snapshot, register_subagent_tool
+from bowhead_core.subagent import PROFILES, UNRETURNED_WORK_NOTE, SubagentRunner, _materialize_system_profile_snapshot, register_subagent_tool
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_core.user_store import UserStore
 from bowhead_router.invocation import begin_physical_invocation
@@ -243,6 +243,10 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
                     disposition="resolved",
                     reason="The definition matches the assigned period.",
                 )
+            if step == 6:
+                # A helper that worked and answered in prose gets one unreturned-work note; the same answer is accepted.
+                assert any(message.content == UNRETURNED_WORK_NOTE for message in request.messages)
+                return LLMResponse(content="Verified refund analysis.")
             assert step == 5
             assert len([item for item in inbox(request) if item.get("action") == "reply"]) == 1
             return LLMResponse(content="Verified refund analysis.")
@@ -250,6 +254,9 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
             assert independent_work == ["done"], "The responder runs only after the requester releases the sole permit"
             question = next(item for item in inbox(request) if item.get("action") == "ask")
             return tool("reply", question_id=question["operation_id"], body="Shipping is excluded.")
+        if step == 2:
+            assert any(message.content == UNRETURNED_WORK_NOTE for message in request.messages)
+            return LLMResponse(content="Refund definition verified.")
         assert step == 1
         return LLMResponse(content="Refund definition verified.")
 
@@ -269,14 +276,15 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
     finally:
         requester.cancel()
         await asyncio.gather(requester, return_exceptions=True)
-    assert all(result.ok for result in results), [result.error for result in results]
+    assert all(result.ok for result in results), ([result.error for result in results], harness.provider.failures)
     assert results[0].final_answer == "Verified refund analysis."
     assert not any("Premature completion" in str(event.payload) for event in harness.bus.snapshot())
     assert not semaphore.locked()
     assert await collab.store.obligations(collab.worker, execution_id=collab.lead) == []
     assert not harness.registry.has("agent_message"), "Per-execution assembly must not modify the process registry"
     async with open_shared_ctx(collab.path) as db, db.execute("SELECT model_attempts,tool_attempts FROM agent_collaboration_turn") as cursor:
-        assert tuple(await cursor.fetchone()) == (8, 1)
+        # Six requester and two responder calls, plus one unreturned-work note answer for each helper.
+        assert tuple(await cursor.fetchone()) == (10, 1)
 
 
 @pytest.mark.parametrize("first_response", ["ask", "prose"])
@@ -492,7 +500,8 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
         }
     result = await asyncio.wait_for(harness.run(collab.lead, context_changes=context_changes), 10)
     assert harness.provider.failures == []
-    assert spawn_count == 1 and child_returned.is_set() and child_round == 7
+    # Round 8 answers the one unreturned-work note after the child's prose result.
+    assert spawn_count == 1 and child_returned.is_set() and child_round == 8
     assert len(coordinated) == len(set(coordinated)) == 2
     for question_id in coordinated:
         question = await collab.read({"operation_id": question_id})
@@ -531,8 +540,8 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
             item["call_id"] for item in review_contexts[0]["successful_calls"]
         }
         assert not {item.call_id for item in failed}.intersection(item["call_id"] for item in review_contexts[0]["successful_calls"])
-    assert result.tokens_input == (36 if invalid_first_reply else 33) + 3 * review_rounds
-    assert result.tokens_output == (24 if invalid_first_reply else 22) + 2 * review_rounds
+    assert result.tokens_input == (39 if invalid_first_reply else 36) + 3 * review_rounds
+    assert result.tokens_output == (26 if invalid_first_reply else 24) + 2 * review_rounds
     assert result.tokens_input == 3 * len(harness.provider.requests), "Usage includes the original child, coordination correction and bounded review"
 
 

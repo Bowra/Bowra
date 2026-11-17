@@ -44,6 +44,7 @@ EXEMPT = {
     # Per-revision upgrade tests: each imports or stamps its own migration's revision and parent.
     "packages/bowhead_core/tests/test_ordinary_multi_helper.py",
     "packages/bowhead_gateway/tests/test_alembic_model_runtime_parameters.py",
+    "packages/bowhead_core/tests/test_observed_continuation_migration.py",
     # Upgrades from the parent of `0179_account_deletion` to seed rows that predate account deletion.
     "packages/bowhead_core/tests/test_account_deletion.py",
 }
@@ -117,12 +118,16 @@ def _pinned_head_literals(*, include_exempt: bool = False) -> dict[str, set[str]
     return found
 
 
+#: Module-level mappings in `sqlite_domains.py` that record the revision a table or column was born in.
+_BIRTH_REVISION_AUTHORITIES = frozenset({"APPENDED_TABLES", "APPENDED_COLUMNS"})
+
+
 def _head_copy_candidates(source: str, relative_path: str) -> set[str]:
     if relative_path == "packages/bowhead_core/src/bowhead_core/sqlite_domains.py":
         lines = source.splitlines(keepends=True)
-        # Table birth revisions are immutable admission boundaries, not copies of the current head.
+        # Table and column birth revisions are immutable admission boundaries, not copies of the current head.
         for node in ast.parse(source).body:
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "APPENDED_TABLES":
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id in _BIRTH_REVISION_AUTHORITIES:
                 lines[node.lineno - 1 : node.end_lineno] = ["\n"] * (node.end_lineno - node.lineno + 1)
         source = "".join(lines)
     return set(REVISION_LITERAL.findall(source))
@@ -133,6 +138,9 @@ def test_birth_revision_authority_does_not_exempt_other_head_copies() -> None:
     head = _actual_head()
     authority = f'APPENDED_TABLES: dict = {{"example": ("content", "{head}")}}\n'
     assert _head_copy_candidates(authority, path) == set()
+    columns = f'APPENDED_COLUMNS: dict = {{"example": (("column",), "{head}")}}\n'
+    assert _head_copy_candidates(columns, path) == set()
+    assert _head_copy_candidates(columns + f'COPIED_HEAD = "{head}"\n', path) == {head}
     assert _head_copy_candidates(authority + f'COPIED_HEAD = "{head}"\n', path) == {head}
     assert _head_copy_candidates(authority, "other.py") == {head}
 

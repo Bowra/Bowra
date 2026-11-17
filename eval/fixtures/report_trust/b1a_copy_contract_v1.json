@@ -45,6 +45,8 @@
     {"section_kind": "*", "path": ["source_refs", "*"], "category": "identity"},
     {"section_kind": "sources", "path": ["entries", "*"], "category": "source_object"},
     {"section_kind": "chart", "path": ["spec", "source_meta"], "category": "source_object"},
+    {"section_kind": "chart", "path": ["spec", "presentation_plan", "evidence_notes", "*", "source_ref"], "category": "source_object"},
+    {"section_kind": "chart", "path": ["spec", "presentation_plan", "dataset", "artifact_id"], "category": "identity"},
     {"section_kind": "chart", "path": ["data_source"], "category": "source_object"},
     {"section_kind": "html_artifact", "path": ["sources", "*"], "category": "ordinal"}
   ]

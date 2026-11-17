@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.agent_dependency_compiler import parse_exact_skill_grants
 from bowhead_core.resource_dependency_projection import invalidate_working_copy_projection_conn
 from bowhead_core.sqlite_domains import domain_database_path
@@ -26,6 +26,12 @@ class TeamPluginError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+#: Plugin writes repeat as a whole when a running Turn holds the authority lease (on 116, 1.7.47,
+#: two of three Plugin writes returned 500 with four Turns running). Each attempt rechecks
+#: existence, row version and name in its own transaction.
+_repeat_when_authority_busy = repeat_when_authority_busy(lambda: TeamPluginError("capability_store_busy"))
 
 
 def selected_plugin_ids(definition: Mapping[str, Any]) -> tuple[str, ...]:
@@ -103,6 +109,7 @@ class TeamPluginStore:
                 row = await cursor.fetchone()
             return await self._read_conn(db, row) if row is not None else None
 
+    @_repeat_when_authority_busy
     async def create(
         self, *, team_id: str, actor_user_id: str, name: str, description: str, tool_refs: Sequence[str], skill_grants: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any]:
@@ -122,6 +129,7 @@ class TeamPluginStore:
             await db.commit()
             return result
 
+    @_repeat_when_authority_busy
     async def update(
         self,
         *,
@@ -199,6 +207,14 @@ class TeamPluginStore:
         return await self._read_conn(db, row)
 
     async def set_enabled(self, *, team_id: str, plugin_id: str, enabled: bool, expected_row_version: int) -> dict[str, Any]:
+        # Only the transaction repeats: after it commits, a repeat would meet its own new row version.
+        await self._write_status(team_id=team_id, plugin_id=plugin_id, enabled=enabled, expected_row_version=expected_row_version)
+        item = await self.get(team_id, plugin_id)
+        assert item is not None
+        return item
+
+    @_repeat_when_authority_busy
+    async def _write_status(self, *, team_id: str, plugin_id: str, enabled: bool, expected_row_version: int) -> None:
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -212,10 +228,8 @@ class TeamPluginStore:
             except BaseException:
                 await db.rollback()
                 raise
-        item = await self.get(team_id, plugin_id)
-        assert item is not None
-        return item
 
+    @_repeat_when_authority_busy
     async def delete(self, *, team_id: str, plugin_id: str, expected_row_version: int) -> None:
         """Remove a Plugin and current draft selections, preserving immutable Agent releases."""
         async with open_shared_ctx(self.db_path) as db:

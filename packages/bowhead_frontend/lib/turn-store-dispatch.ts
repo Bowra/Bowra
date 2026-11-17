@@ -81,6 +81,7 @@ import {
   pushLiteBeat,
   pushPickerBeat,
   pushPlanBeat,
+  pushSteerBeat,
   applyTurnBlockedPlan,
   applyTurnDocumentRevision,
   clearModelRetry,
@@ -888,6 +889,32 @@ export function dispatchToTurnStore(
 
     // chat-solidify 2026-07-03: removed case "emoji_remove"; the backend never emitted it (dead name removed).
 
+    case "steer.applied": {
+      // Mid-run steering: the running answer took queued instructions. They appear in the
+      // Turn at this point, after the narrative written so far. Live frames carry no
+      // card_id; replay backfills it.
+      const turnId = cardId ?? pickTurnId(payload) ?? streamTurnId ?? null;
+      if (!turnId) return false;
+      if (shouldSkipAppliedSeq(turnId, payload)) return true;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      // `position` is the ordinal of the first item among the instructions this Turn took,
+      // so each instruction keeps one identity however often its event is delivered.
+      const position = typeof payload.position === "number" && Number.isFinite(payload.position) ? payload.position : null;
+      const fallback = typeof payload.seq === "number" ? `s${payload.seq}` : `i${String(payload.iteration ?? "")}`;
+      _invalidateNarrativeSeg(turnId);
+      items.forEach((item, index) => {
+        if (!item || typeof item !== "object") return;
+        const { text, queued_at: queuedAt } = item as { text?: unknown; queued_at?: unknown };
+        if (typeof text !== "string" || !text) return;
+        pushSteerBeat(turnId, {
+          key: position === null ? `${fallback}:${index}` : `p${position + index}`,
+          text,
+          ...(typeof queuedAt === "string" && queuedAt ? { queuedAt } : {}),
+        });
+      });
+      return true;
+    }
+
     case "turn.follow_up": {
       // turn.follow_up is consumed at the gateway / runner layer to
       // chain SSE subscription to the follow-up stream URL. turn-store
@@ -1050,6 +1077,7 @@ const MODEL_RETRY_PRESERVING_EVENTS: ReadonlySet<string> = new Set([
   "agent.collaboration",
   "agent.context",
   "emoji_ack",
+  "steer.applied",
   // A tool handler waiting for (or receiving) the user's decision is not model output.
   "confirmation_requested",
   "confirmation_resolved",

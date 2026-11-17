@@ -6,7 +6,7 @@ Built-in names default to English and use the available Chinese labels when your
 
 ## Browse and use
 
-Members can open **Capability Center → Plugins** to see enabled Plugins. **Built-in Plugins** are Tool bundles that ship with Bowra, such as Data analysis, Reports and canvas, and Web research; each name shows its version. You can choose built-in Plugins for your own Agents, including Email and Google delivery. Settings Plugins (appearance, answer language and similar) are used only by the system settings assistant. You can turn them off like other Plugins; the settings assistant then no longer changes that kind of setting for you. You cannot select them for your own Agents.
+Members can open **Capability Center → Plugins** to see enabled Plugins. **Built-in Plugins** are Tool bundles that ship with Bowra, such as Data analysis, Reports and canvas, and Web research; each name shows its version. You can choose built-in Plugins for your own Agents, including Email and Google delivery. Settings Plugins (appearance, answer language and similar) are used only by the system settings assistant and are listed last, in the collapsed **Used by the settings assistant** group. You can turn them off like other Plugins; the settings assistant then no longer changes that kind of setting for you. You cannot select them for your own Agents.
 
 **Team Plugins** shows the team's enabled selections and their contents; the section appears only when your team has team Plugins. When creating or editing your own Agent, open **What it can use**, select a team Plugin, and save. You can also select individual Tools and Skills.
 
@@ -22,9 +22,9 @@ A Plugin helps select resources. Whether a Tool or Skill can actually run still 
 
 ## Manage Plugins
 
-Team owners and admins first see the existing list by choosing **Manage Team Plugins** in **Capability Center → Plugins**. This manager includes disabled team Plugins so administrators can enable them again. If there are no team Plugins yet, the page shows an empty state; select **Create Plugin** in the upper right to add one. Select a Plugin name to edit it, or select **Cancel** to return to the list. Enter a name and description, select Tools and Skills, then save.
+Team owners and admins first see the existing list by choosing **Manage Team Plugins** in **Capability Center → Plugins**. This manager includes disabled team Plugins so administrators can enable them again. If there are no team Plugins yet, the page shows an empty state; select **Create Plugin** in the upper right to add one. Select a Plugin name to edit it, or select **Cancel** to return to the list. Enter a name and description, select Tools and Skills, then save. When a built-in connection offers a preset, such as Shopify, choose it under **Start from a template** to fill in the form first; nothing is saved until you save.
 
-Tools are separated into **Added Tools** and **System Tools**. Added Tools include enabled built-in third-party connections and team Tool Sources. Each operation shows its connection, so you can select only the ones the Plugin needs. Disabled or unavailable operations cannot be added. If a Tool already in a Plugin becomes unavailable, clear its selection while editing before saving.
+Tools and Skills are listed in groups: one group for each team connection (team Tool Sources and enabled built-in third-party connections), then built-in Tools grouped as on the Tools page, then Skills. Each group shows how many of its items are selected, and groups that already contain a selection open automatically. Type in the search field to find an item by name, purpose, or source. An item that cannot be selected says why; when an admin can fix it, for example by confirming a Tool's category, the reason links to that setting. If a Tool or Skill already in the Plugin becomes unavailable, it appears at the top under **Selections no longer available**; clear it, then save.
 
 Editing an existing Plugin updates the resources used by Agents that selected it on their next run. Before disabling one, tell affected Agent owners to update their configuration.
 

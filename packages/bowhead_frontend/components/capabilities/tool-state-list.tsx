@@ -20,7 +20,7 @@ import {
   type DisableImpact,
 } from "@/lib/builtin-resources-api";
 import type { Locale } from "@/lib/locale";
-import { toolDisplay, visibleBuiltinToolStates } from "@/lib/tool-display";
+import { systemCapabilities, toolDisplay, visibleBuiltinToolStates } from "@/lib/tool-display";
 import { toast } from "@/lib/use-toast";
 import { TOOL_GROUP_OF_PLUGIN as GROUP_OF_PLUGIN, TOOL_GROUP_ORDER as GROUP_ORDER } from "@/components/ui/resource-picker";
 import { ImpactBody } from "./plugin-state-list";
@@ -103,6 +103,9 @@ export function ToolStateList({
   };
 
   const detailsTool = detailsFor ? (rows.find((row) => row.name === detailsFor) ?? null) : null;
+  // Capabilities the runtime gives every Agent. They have no state to save, so they are listed
+  // after the switchable Tools with "Always on" where a switch would be.
+  const system = systemCapabilities(locale).filter((tool) => `${tool.name} ${tool.blurb}`.toLocaleLowerCase().includes(needle));
   const groups = GROUP_ORDER.map((key) => ({ key, rows: rows.filter((row) => row.group === key) })).filter((group) => group.rows.length > 0);
   return (
     <section aria-label={r("builtin_tools")}>
@@ -154,6 +157,26 @@ export function ToolStateList({
           </ul>
         </section>
       ))}
+      {system.length > 0 ? (
+        <section aria-label={r("system_capabilities")} className={styles.toolGroup} data-testid="system-capabilities">
+          <h3 className={styles.groupTitle}>
+            {r("system_capabilities")} <span className={styles.headingCount}>{system.length}</span>
+          </h3>
+          <ul className={styles.list}>
+            {system.map((tool) => (
+              <li key={tool.ref}>
+                <div>
+                  <h3>{tool.name}</h3>
+                  <p>{tool.blurb}</p>
+                </div>
+                <div className={styles.meta}>
+                  <small>{r("always_on")}</small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {detailsTool ? (
         <ToolDetails
           tool={detailsTool}

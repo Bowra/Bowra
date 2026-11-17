@@ -82,6 +82,23 @@ def _attr(value: Any) -> str:
 # ([[feedback_comment_states_intent_not_outcome]]); now align the comment and code.
 _DOC_MAX_ITEMS = 40
 
+# Where the entries a cut list left out can be found (docs/sprints/result-lookup-2026-11-15, FR18).
+# Chart, image, code and design entries are Canvas sections, which read_report lists in full; data
+# entries are files; a knowledge chunk comes back by searching again. The rules block below is not
+# changed: it teaches list numbers only, on purpose (see the note there).
+# How many of a conversation's files the list loads, newest first. A listing that comes back full may be cut.
+_SESSION_LISTING_LIMIT = 100
+
+_MORE_REFS = {
+    "chart": "read_report",
+    "image": "read_report",
+    "code": "read_report",
+    "design": "read_report",
+    # The data list holds delivered files and uploads beside query extracts, and a name alone searches them all.
+    "data": "find_results with part of the file name",
+    "doc": "kb_search",
+}
+
 
 def _cap_for(kind: str, max_items: int) -> int:
     return _DOC_MAX_ITEMS if kind == "doc" else max_items
@@ -137,10 +154,16 @@ class RefAllowlist:
         # ⚠ Do not reset while rendering: entries only grow; every kind ever seen is overwritten on every render.
         # Resetting makes no observable difference (mutation check: removing it fails no tests). That is dead code; omit it.
         self.last_render_stats: dict[str, tuple[int, int, bool]] = {}
+        # Kinds whose source listing came back full: the conversation may hold more than the list knows, so a cut
+        # notice gives that count as a lower bound (116, 2026-11-16: "total=100" for a conversation with 144 files).
+        self._lower_bound_kinds: set[str] = set()
 
-    def reference_count(self) -> int:
-        """How many distinct references this run has seen (grows when new output appears)."""
-        return len(self._real_to_simple)
+    def reference_count(self, kinds: Iterable[str] | None = None) -> int:
+        """How many distinct references this run has seen, optionally only of ``kinds``."""
+        if kinds is None:
+            return len(self._real_to_simple)
+        wanted = frozenset(kinds)
+        return sum(1 for kind, _real_id in self._real_to_simple if kind in wanted)
 
     def add(self, kind: str, real_id: str, **meta: Any) -> int:
         """Idempotent — returns existing simple-id if (kind, real_id) seen.
@@ -293,7 +316,10 @@ class RefAllowlist:
             data_arts = await artifact_store.list_for_session(
                 session_id=session_id,
                 user_id=user_id,
+                limit=_SESSION_LISTING_LIMIT,
             )
+            if len(data_arts or []) >= _SESSION_LISTING_LIMIT:
+                self._lower_bound_kinds.add("data")
             catalog_reads = 0
             for art in data_arts or []:
                 if not hasattr(art, "id"):
@@ -454,6 +480,10 @@ class RefAllowlist:
                 catalog = bounded_catalog(meta.get("chart_catalog")) if kind == "data" else None
                 if catalog is not None:
                     parts.append(f'  <chart_catalog data_ref="{sid}">{_attr(json.dumps(catalog, ensure_ascii=False))}</chart_catalog>')
+            if len(items) < len(_all):
+                # A cut list says so and where the rest is; a silent cut read as "nothing older exists".
+                total = f"{len(_all)}+" if kind in self._lower_bound_kinds else str(len(_all))
+                parts.append(f'  <more kind="{kind}" shown="{len(items)}" total="{total}" find_with="{_MORE_REFS[kind]}" />')
         parts.append("</available_refs>")
         parts.append("")
         parts.append("<allowlist_rules>")

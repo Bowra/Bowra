@@ -15,6 +15,28 @@
   font-weight: 600;
   color: var(--c-ink-3);
 }
+/* Collapsible groups: the native disclosure triangle with a full-width hit area. */
+.groupSummary {
+  display: list-item;
+  min-height: 28px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.groupSummary:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+details.group[open] > .groupSummary {
+  margin-bottom: 2px;
+}
+.groupKind {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.groupKind::before {
+  content: "· ";
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -35,9 +57,14 @@
   background: var(--c-accent-tint);
   border-color: color-mix(in srgb, var(--c-accent) 38%, transparent);
 }
+/* A locked card dims its control and text but not its reason: the reason says why and must stay readable
+   (ink-3 at 0.55 opacity measured 2.4:1; at full strength the reason measures 8.8:1 light, 10.8:1 dark). */
 .card[data-disabled="true"] {
-  opacity: 0.55;
   cursor: not-allowed;
+}
+.card[data-disabled="true"] > input,
+.card[data-disabled="true"] .body > :not(.reason) {
+  opacity: 0.55;
 }
 .card input {
   margin: 3px 0 0;
@@ -66,6 +93,18 @@
 }
 .reason {
   color: var(--c-warn-ink, var(--c-ink-2)) !important;
+}
+.reason a {
+  color: var(--c-accent);
+  text-decoration: underline;
+}
+/* Long descriptions (often authored by external servers) stay three lines; the full text is in the title. */
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 .empty {
   margin: 0;

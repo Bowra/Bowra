@@ -819,6 +819,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "📊",
         "category": "canvas",
     },
+    "find_results": {
+        "display_zh": "查找会话结果",
+        "display_en": "Find conversation results",
+        "blurb_zh": "按名称和类别查找本会话的文件，返回编号，不返回内容。",
+        "blurb_en": "Finds this conversation's files by name and kind. Returns identifiers, not content.",
+        "display_de": "Gesprächsergebnisse finden",
+        "blurb_de": "Findet Dateien dieses Gesprächs nach Name und Art. Liefert Kennungen, keine Inhalte.",
+        "display_fr": "Rechercher les résultats de la conversation",
+        "blurb_fr": "Recherche les fichiers de cette conversation par nom et type. Renvoie des identifiants, pas le contenu.",
+        "sigil": "🔎",
+        "category": "orchestrate",
+    },
     "get_current_user": {
         "display_zh": "当前用户资料",
         "display_en": "Current user profile",

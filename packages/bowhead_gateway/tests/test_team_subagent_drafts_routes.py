@@ -29,7 +29,6 @@ from bowhead_gateway.routes import team_subagent_drafts as drafts
 from bowhead_gateway.routes import team_subagents
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gateway_legacy_database import upgrade
 from starlette.requests import Request
 
 from bowhead_gateway import subagent_draft_chat_editor as chat_editor
@@ -52,12 +51,14 @@ class _ReplayService:
         )
 
 
-def _setup(tmp_path, monkeypatch):
+@pytest.fixture
+def draft_setup(tmp_path, initialize_migrated_core_database):
+    return _setup(tmp_path, initialize_migrated_core_database)
+
+
+def _setup(tmp_path, initialize_migrated_core_database):
     db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path)
     user_store = UserStore(str(db_path))
     _run(user_store.initialize())
     draft_store = SubagentDraftStore(
@@ -208,8 +209,8 @@ def _client(
     return TestClient(app)
 
 
-def test_list_resumable_drafts_is_owner_scoped_and_excludes_discarded(tmp_path, monkeypatch):
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_list_resumable_drafts_is_owner_scoped_and_excludes_discarded(draft_setup):
+    user_store, draft_store, schema_store, owner, other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     with _client(user_store, draft_store, schema_store, other) as client:
         response = client.get(_BASE)
@@ -265,8 +266,8 @@ def test_draft_routes_answer_503_while_the_draft_schema_is_not_migrated(tmp_path
         assert response.json()["detail"]["error"]["code"] == "subagent_draft_store_unavailable"
 
 
-def test_draft_routes_answer_503_without_a_jwt_keyring(tmp_path, monkeypatch) -> None:
-    user_store, _draft_store, _schema_store, owner, _other = _setup(tmp_path, monkeypatch)
+def test_draft_routes_answer_503_without_a_jwt_keyring(draft_setup, monkeypatch) -> None:
+    user_store, _draft_store, _schema_store, owner, _other = draft_setup
     for name in ("BOWHEAD_JWT_SECRET", "BOWHEAD_JWT_SECRETS"):
         monkeypatch.delenv(name, raising=False)
     with _lazy_store_client(user_store, owner) as client:
@@ -275,9 +276,9 @@ def test_draft_routes_answer_503_without_a_jwt_keyring(tmp_path, monkeypatch) ->
     assert response.json()["detail"]["error"]["code"] == "subagent_draft_store_unavailable"
 
 
-def test_draft_list_never_titles_a_draft_with_its_identifier(tmp_path, monkeypatch) -> None:
+def test_draft_list_never_titles_a_draft_with_its_identifier(draft_setup) -> None:
     """A blank draft's generated identifier ("agent-d9db64") is not a title; the client shows "Untitled draft"."""
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     now = _now()
     with sqlite3.connect(user_store.db_path) as connection:
         connection.execute("INSERT INTO workspaces(id,team_id,name,created_at,updated_at) VALUES (?,?,?,?,?)", ("ws_a", owner.team_id, "A", now, now))
@@ -315,8 +316,8 @@ def test_draft_list_never_titles_a_draft_with_its_identifier(tmp_path, monkeypat
     assert listed.json()["items"][0]["title"] == ""
 
 
-def test_manual_draft_v2_saves_and_resumes_only_in_its_space(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_manual_draft_v2_saves_and_resumes_only_in_its_space(draft_setup, monkeypatch) -> None:
+    user_store, draft_store, schema_store, owner, other = draft_setup
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY", "1")
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY_PCT", "100")
     now = _now()
@@ -452,8 +453,8 @@ def test_manual_draft_v2_saves_and_resumes_only_in_its_space(tmp_path, monkeypat
         assert recovered.json()["actions"]["edit"] is False
 
 
-def test_ai_draft_converts_to_same_manual_id_and_creates_in_bound_space(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_ai_draft_converts_to_same_manual_id_and_creates_in_bound_space(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     now = _now()
     with sqlite3.connect(user_store.db_path) as connection:
@@ -529,8 +530,8 @@ def test_ai_draft_converts_to_same_manual_id_and_creates_in_bound_space(tmp_path
         assert client.get(f"{_BASE}/{draft.id}?schema_version=2", headers={"X-Space-Id": "ws_a"}).status_code == 404
 
 
-def test_chat_edits_saved_manual_draft_in_same_space(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_chat_edits_saved_manual_draft_in_same_space(draft_setup, monkeypatch) -> None:
+    user_store, draft_store, schema_store, owner, other = draft_setup
     monkeypatch.setenv("FEATURE_SUBAGENT_DRAFT_CHAT_EDIT", "1")
     monkeypatch.setenv("FEATURE_SUBAGENT_DRAFT_CHAT_EDIT_PCT", "100")
     now = _now()
@@ -574,12 +575,12 @@ def test_chat_edits_saved_manual_draft_in_same_space(tmp_path, monkeypatch) -> N
         )
 
 
-def test_draft_review_locks_unavailable_approval_tool_and_blocks_creation(tmp_path, monkeypatch):
+def test_draft_review_locks_unavailable_approval_tool_and_blocks_creation(draft_setup, monkeypatch):
     from types import SimpleNamespace
 
     from bowhead_core.openapi_tool_source import TeamToolEntry
 
-    user_store, draft_store, schema_store, owner, _other = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     ref = "teammcp.crm.update"
 
     async def load(_team_id, _store):
@@ -623,8 +624,8 @@ def test_draft_review_locks_unavailable_approval_tool_and_blocks_creation(tmp_pa
     assert repaired.json()["definition"]["tool_refs"] == ["bi_query"]
 
 
-def test_draft_review_preserves_recommendation_provenance_until_selection_changes(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, _other = _setup(tmp_path, monkeypatch)
+def test_draft_review_preserves_recommendation_provenance_until_selection_changes(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     draft = _create_ready_draft(
         user_store,
         draft_store,
@@ -686,8 +687,8 @@ def test_draft_review_preserves_recommendation_provenance_until_selection_change
     )
 
 
-def test_unmet_required_need_survives_edits_until_a_covering_tool_is_selected(tmp_path, monkeypatch):
-    user_store, draft_store, schema_store, owner, _other = _setup(tmp_path, monkeypatch)
+def test_unmet_required_need_survives_edits_until_a_covering_tool_is_selected(draft_setup):
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     issue = {
         "schema_version": 1,
         "code": REQUIRED_CAPABILITY_UNMET,
@@ -728,14 +729,8 @@ def test_unmet_required_need_survives_edits_until_a_covering_tool_is_selected(tm
     assert repaired.json()["actions"]["create"] is True
 
 
-def test_static_drafts_route_precedes_subagent_id_and_replays(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    user_store, draft_store, schema_store, owner, _other = _setup(
-        tmp_path,
-        monkeypatch,
-    )
+def test_static_drafts_route_precedes_subagent_id_and_replays(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     client = _client(user_store, draft_store, schema_store, owner)
     client.app.state.subagent_draft_service = _ReplayService(draft)
@@ -756,14 +751,8 @@ def test_static_drafts_route_precedes_subagent_id_and_replays(
     assert response.json()["draft_id"] == draft.id
 
 
-def test_draft_detail_is_owner_only_without_existence_leak(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    user_store, draft_store, schema_store, owner, other = _setup(
-        tmp_path,
-        monkeypatch,
-    )
+def test_draft_detail_is_owner_only_without_existence_leak(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
 
     owner_response = _client(
@@ -785,14 +774,8 @@ def test_draft_detail_is_owner_only_without_existence_leak(
     assert other_response.json()["detail"]["error"]["code"] == ("subagent_draft_not_found")
 
 
-def test_final_create_is_private_and_atomically_consumes_draft(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    user_store, draft_store, schema_store, owner, _other = _setup(
-        tmp_path,
-        monkeypatch,
-    )
+def test_final_create_is_private_and_atomically_consumes_draft(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     client = _client(user_store, draft_store, schema_store, owner)
 
@@ -857,10 +840,10 @@ _BLOCKED_SKILL = {
 }
 
 
-def test_blocked_publication_names_the_blocked_skill(tmp_path, monkeypatch) -> None:
+def test_blocked_publication_names_the_blocked_skill(draft_setup, monkeypatch) -> None:
     from bowhead_core.agent_revision_store import AgentPublicationBlockedError
 
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     client = _client(user_store, draft_store, schema_store, owner)
 
@@ -881,8 +864,8 @@ def test_blocked_publication_names_the_blocked_skill(tmp_path, monkeypatch) -> N
 
 
 @pytest.mark.integration
-def test_python_draft_creates_a_revision_with_exact_skill_scope(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+def test_python_draft_creates_a_revision_with_exact_skill_scope(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     with sqlite3.connect(user_store.db_path) as db:
         db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=? WHERE singleton=1", ("2026-09-07T00:00:00+00:00",))
     assert _run(schema_store.release_semantics_active())
@@ -904,8 +887,8 @@ def test_python_draft_creates_a_revision_with_exact_skill_scope(tmp_path, monkey
 
 
 @pytest.mark.integration
-def test_code_computation_plugin_draft_creates_without_storing_the_derived_grant(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+def test_code_computation_plugin_draft_creates_without_storing_the_derived_grant(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     with sqlite3.connect(user_store.db_path) as db:
         db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=? WHERE singleton=1", ("2026-09-07T00:00:00+00:00",))
     assert _run(schema_store.release_semantics_active())
@@ -948,9 +931,9 @@ def test_code_computation_plugin_draft_creates_without_storing_the_derived_grant
 
 
 @pytest.mark.integration
-def test_directly_selected_python_tool_with_a_plugin_creates_with_its_skill_grant(tmp_path, monkeypatch) -> None:
+def test_directly_selected_python_tool_with_a_plugin_creates_with_its_skill_grant(draft_setup) -> None:
     """Picking Run code next to a Plugin must not need a separate Skill pick (novice walkthrough B1)."""
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     with sqlite3.connect(user_store.db_path) as db:
         db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=? WHERE singleton=1", ("2026-09-07T00:00:00+00:00",))
     draft = _create_ready_draft(user_store, draft_store, owner, tool_refs=["python_sandbox"], builtin_plugin_ids=["builtin:web-research"])
@@ -990,18 +973,19 @@ def test_directly_selected_python_tool_with_a_plugin_creates_with_its_skill_gran
 
 
 @pytest.mark.integration
-def test_plugin_method_survives_original_draft_creation_and_exact_run_admission(tmp_path, monkeypatch) -> None:
+def test_plugin_method_survives_original_draft_creation_and_exact_run_admission(draft_setup, monkeypatch) -> None:
     from pathlib import Path
 
     from bowhead_core.agent_execution_binding import _resolved_team_definition_json
-    from bowhead_core.skill_upload import bundle_sha256
+    from bowhead_core.skill_upload import builtin_bundle_sha256
 
     from bowhead_core import system_plugins
 
+    # Builtin revisions exclude Python caches (3816214d1); another test may have run the scripts.
     method = {
         "skill_ref": {"kind": "builtin", "id": "builtin:canvas-pptx", "name": "canvas-pptx"},
         "permissions": ["read"],
-        "revision": "sha256:" + bundle_sha256(Path(__file__).parents[2] / "bowhead_skill/catalog/canvas-pptx"),
+        "revision": "sha256:" + builtin_bundle_sha256(Path(__file__).parents[2] / "bowhead_skill/catalog/canvas-pptx"),
         "distribution": "reference",
     }
     registry = dict(system_plugins._registry())
@@ -1010,7 +994,7 @@ def test_plugin_method_survives_original_draft_creation_and_exact_run_admission(
     plugin = system_plugins.BuiltinPlugin.model_validate(raw)
     registry[plugin.ref] = plugin
     monkeypatch.setattr(system_plugins, "_registry", lambda: registry)
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     with sqlite3.connect(user_store.db_path) as db:
         db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=? WHERE singleton=1", ("2026-09-07T00:00:00+00:00",))
     draft = _create_ready_draft(user_store, draft_store, owner, tool_refs=[], builtin_plugin_ids=["builtin:code-computation"])
@@ -1050,14 +1034,8 @@ def test_plugin_method_survives_original_draft_creation_and_exact_run_admission(
     assert retained == method
 
 
-def test_validate_body_does_not_persist_or_bump_version(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    user_store, draft_store, schema_store, owner, _other = _setup(
-        tmp_path,
-        monkeypatch,
-    )
+def test_validate_body_does_not_persist_or_bump_version(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, _other = draft_setup
     draft = _create_ready_draft(user_store, draft_store, owner)
     client = _client(user_store, draft_store, schema_store, owner)
 
@@ -1098,8 +1076,8 @@ def test_validate_body_does_not_persist_or_bump_version(
     assert persisted.definition["name"] == "weekly-sales-review"
 
 
-def test_text_only_draft_review_confirm_create_and_replay(tmp_path, monkeypatch):
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_text_only_draft_review_confirm_create_and_replay(draft_setup, monkeypatch):
+    user_store, draft_store, schema_store, owner, other = draft_setup
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY", "1")
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY_TEAM_IDS", owner.team_id)
     warning = {"code": TEXT_ONLY_CONFIRMATION, "message": "Confirm supplied text only."}
@@ -1146,8 +1124,8 @@ def test_text_only_draft_review_confirm_create_and_replay(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("server_proposal,enabled", [(False, True), (True, False)])
-def test_empty_draft_cannot_be_created_without_server_proposal_and_current_rollout(tmp_path, monkeypatch, server_proposal, enabled):
-    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+def test_empty_draft_cannot_be_created_without_server_proposal_and_current_rollout(draft_setup, monkeypatch, server_proposal, enabled):
+    user_store, draft_store, schema_store, owner, _ = draft_setup
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY", "1" if enabled else "0")
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY_TEAM_IDS", owner.team_id)
     warnings = [{"code": TEXT_ONLY_CONFIRMATION, "message": "Confirm text only."}] if server_proposal else []
@@ -1179,8 +1157,8 @@ def test_empty_draft_cannot_be_created_without_server_proposal_and_current_rollo
     assert _run(user_store.get_team_subagent_by_name(owner.team_id, "weekly-sales-review", only_enabled=False)) is None
 
 
-def test_canvas_suggestion_is_owner_space_bound_and_applied_by_selected_fields(tmp_path, monkeypatch) -> None:
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+def test_canvas_suggestion_is_owner_space_bound_and_applied_by_selected_fields(draft_setup) -> None:
+    user_store, draft_store, schema_store, owner, other = draft_setup
     now = _now()
     with sqlite3.connect(user_store.db_path) as connection:
         connection.execute(
@@ -1393,7 +1371,7 @@ class _RecordingBus:
         return True
 
 
-def test_chat_request_drafts_a_private_subagent_with_default_configuration(tmp_path, monkeypatch) -> None:
+def test_chat_request_drafts_a_private_subagent_with_default_configuration(draft_setup) -> None:
     """An owner confirms conversational suggestions before private creation."""
     from types import SimpleNamespace
 
@@ -1401,7 +1379,7 @@ def test_chat_request_drafts_a_private_subagent_with_default_configuration(tmp_p
     from bowhead_core.subagent_draft_service import SubagentDraftService
     from bowhead_core.tool_registry import ToolRegistry
 
-    user_store, draft_store, schema_store, owner, other = _setup(tmp_path, monkeypatch)
+    user_store, draft_store, schema_store, owner, other = draft_setup
     now = _now()
     with sqlite3.connect(user_store.db_path) as connection:
         connection.execute(

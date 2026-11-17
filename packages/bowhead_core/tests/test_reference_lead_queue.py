@@ -55,6 +55,7 @@ async def test_reference_follow_up_keeps_the_accepted_orchestration(http_start, 
                         "profile": "compute" if receiver == "system" and follow_up(body) else case.fixture.case.args["reference_start"].profile_name,
                         "task": "Analyze the provided figures.",
                         "delegation_role": "primary",
+                        "required_source_urls": [],
                     },
                     stream=body.get("stream", False),
                 )

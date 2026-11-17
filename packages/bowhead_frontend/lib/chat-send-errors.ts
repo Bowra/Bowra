@@ -7,7 +7,6 @@ import { staticTranslator } from "./locale-messages";
  */
 export const CHAT_SEND_BACKEND_CODES = [
   "context_maintenance_unsupported",
-  "context_maintenance_inputs_unsupported",
   "context_conversation_head_changed",
   "context_maintenance_session_busy",
   "context_maintenance_pending_operation",

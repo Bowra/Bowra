@@ -987,6 +987,13 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "attachment_read",
             "TOOL_EFFECT_READ_ONLY",
         ),
+        # Conversation result lookup: lists file records of the conversation and writes nothing.
+        (
+            "result_lookup.py",
+            "register_result_lookup",
+            "FIND_RESULTS",
+            "TOOL_EFFECT_READ_ONLY",
+        ),
         (
             "agents/report_tools.py",
             "register_report_tools",

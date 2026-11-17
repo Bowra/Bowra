@@ -399,6 +399,28 @@ def test_ws_apply_failure_then_retry_preserves_state_and_audit(
     assert audited_keys == {"week_start_day", "default_data_language"}
 
 
+def test_ws_apply_that_never_gets_the_storage_lock_answers_store_busy(
+    client: TestClient, app: FastAPI, user_store: _FakeUserStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A spent lock wait wrote nothing: the proposal stays confirmable and the answer says why."""
+    from bowhead_core._db import SQLiteStoreBusy
+    from bowhead_gateway.error_handler import register_error_handlers
+
+    register_error_handlers(app)
+    pid = _seed(app, form_id="workspace_i18n", workspace_id="ws_1", rows=_WS_ROWS)
+
+    async def busy_apply(*args: Any, **kwargs: Any) -> None:
+        raise SQLiteStoreBusy
+
+    monkeypatch.setattr(app.state.workspace_settings_store, "compare_and_apply", busy_apply)
+    resp = client.post(f"/api/v1/config-proposals/{pid}/apply")
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "2"
+    assert resp.json()["detail"]["code"] == "store_busy"
+    assert client.get(f"/api/v1/config-proposals/{pid}").json()["status"] == "proposed"
+    assert user_store.admin_audits == []
+
+
 # ── 9/10: State conflict matrix and CAS loser ───────────────
 
 

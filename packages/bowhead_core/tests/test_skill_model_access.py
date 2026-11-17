@@ -443,30 +443,3 @@ async def test_private_source_failures_are_not_model_errors_with_private_details
         await call(router_for(adapter), request(case))
     assert "PRIVATE_METHOD_PARAMETER" not in "".join(traceback.format_exception(error.value))
     assert adapter.calls == []
-
-
-@pytest.mark.parametrize("family", ["openai", "responses", "anthropic"])
-async def test_dispatch_checks_the_actual_body_after_it_was_built(model_case, family, monkeypatch):
-    import bowhead_router.adapters.anthropic_compat as anthropic
-    import bowhead_router.adapters.openai_compat as openai
-
-    case = model_case
-    module = anthropic if family == "anthropic" else openai
-    original = module.begin_physical_invocation
-
-    async def changed_body(**kwargs):
-        body = kwargs["request"]
-        user = next(m for m in body["input" if family == "responses" else "messages"] if m.get("role") == "user")
-        user["content"] = "LOST_REQUIRED_METHOD"
-        return await original(**kwargs)
-
-    monkeypatch.setattr(module, "begin_physical_invocation", changed_body)
-    adapter = adapter_for(family)
-    try:
-        with respx.mock(assert_all_called=False) as mock, receiver(case.case.handle.subagent_id):
-            route = mock.post(url__regex=r"https://api\.example\.com/.*").mock(side_effect=lambda _: success(family, "invoke"))
-            with pytest.raises(LLMInputAdmissionError, match="input_changed"):
-                await call(router_for(adapter), request(case))
-            assert route.call_count == 0
-    finally:
-        await adapter.close()

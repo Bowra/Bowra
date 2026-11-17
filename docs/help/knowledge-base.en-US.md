@@ -63,6 +63,8 @@ The **Add to knowledge base** window checks for an active Team embedding model b
 
 Uploading to Files or attaching a file in chat only stores the file; classification as long-term material does not add it to knowledge. Choose **Add to knowledge base**, upload from the Knowledge page, or explicitly ask the Agent to add an exact file and specify its visibility. The Agent checks your original request and current permissions; ambiguous requests need clarification. Processing must finish before the file is searchable. Chat ZIP attachments stay as one archive and are not unpacked or indexed; use the Knowledge page to import documents inside a ZIP. **Remove from knowledge base** keeps the original file. An old addition request cannot add it again after removal; a new explicit addition can.
 
+When a file is revised in **Files**, the knowledge base keeps the version you previously added and indicates when a newer one is available. In **Files**, choose **Add version N** to add the new version to the intended scope. Check that it is ready before removing the older entry if you no longer want it returned in search.
+
 ## File status
 
 After the team changes its embedding model, the Files view shows a team index notice while the index is updating or if the latest update failed. This is separate from each file's processing status. On failure, a team owner or administrator can choose **Review and retry** to inspect and confirm the target; other members should contact a team administrator. The notice is hidden when no index update is pending.

@@ -232,7 +232,8 @@ async def test_capability_runtime_settles_from_actual_image_artifact(capability_
                 parent_ctx=case.context,
                 parent_bus=TurnEventBus(),
             )
-            assert route.call_count == 2
+            # The image call, the prose answer, and the answer to the one unreturned-work note.
+            assert route.call_count == 3
     finally:
         await adapter.close()
 

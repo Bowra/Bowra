@@ -33,18 +33,18 @@ import { PersonalOverview, PluginOverview, SkillsOverview, ToolOverview, useReso
 import { teamRoleForUser } from "@/lib/settings-navigation";
 import styles from "./capability-center.module.css";
 
-type CatalogType = "tools" | "capabilities";
+type CatalogType = "tools" | "plugins";
 
-/** The member catalog a Discover URL shows (`?type=tools|capabilities`), or null for the overview views. */
+/** The member catalog a Discover URL shows (`?type=tools|plugins`), or null for the overview views. */
 function catalogTypeFromQuery(query: Pick<URLSearchParams, "get">): CatalogType | null {
   const view = query.get("view");
   const type = query.get("type");
   if (view === "team" || view === "my") return null;
-  return type === "tools" || type === "capabilities" ? type : null;
+  return type === "tools" || type === "plugins" ? type : null;
 }
 
 function pageTitleKey(catalogType: CatalogType | null): "tools_catalog" | "capabilities_catalog" | "title" {
-  return catalogType === "tools" ? "tools_catalog" : catalogType === "capabilities" ? "capabilities_catalog" : "title";
+  return catalogType === "tools" ? "tools_catalog" : catalogType === "plugins" ? "capabilities_catalog" : "title";
 }
 
 export function CapabilityCenter() {
@@ -180,7 +180,7 @@ function CenterContent({ me }: { me: MeUser }) {
     <section className={styles.content} aria-label={t("title")} data-testid="capability-center">
       <PageHeader
         title={t(pageTitleKey(catalogType))}
-        description={catalogType ? t("catalog_description") : t("description")}
+        description={catalogType === "plugins" ? t("catalog_description_plugins") : catalogType === "tools" ? t("catalog_description_tools") : t("description")}
       />
       {view === "team" && !admin ? (
         <p role="alert">{t("team_denied")}</p>
@@ -242,17 +242,20 @@ function CenterContent({ me }: { me: MeUser }) {
   );
 }
 
-function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilities" }) {
+function DiscoveryCatalog({ me, type }: { me: MeUser; type: CatalogType }) {
   const t = useTranslations("sidebar.centers");
   const [catalog, setCatalog] = useState<CapabilityDiscoveryCatalog | null>(null);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState("");
   // Team/personal state of built-in Plugins and Tools; null when unavailable,
-  // in which case the read-only catalog below stays as it was.
+  // in which case the read-only Tool catalog below stays as it was.
   const [plugins, setPlugins] = useState<BuiltinPluginsView | null>(null);
   const [stateTools, setStateTools] = useState<BuiltinToolState[] | null>(null);
   const [stateVersion, setStateVersion] = useState(0);
+  // The `retry` round whose state has arrived. Only the state lists the general built-in Plugins,
+  // so the Plugin catalog waits for it instead of showing a partial list first.
+  const [stateRound, setStateRound] = useState(-1);
   const role = teamRoleForUser(me);
   const admin = role === "owner" || role === "team_admin";
   useEffect(() => {
@@ -276,6 +279,7 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
       if (cancelled) return;
       setPlugins(pluginView);
       setStateTools(toolStates);
+      setStateRound(retry);
     });
     return () => {
       cancelled = true;
@@ -287,25 +291,8 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
     googleWorkspace: Boolean(me.capabilities?.google_workspace),
   });
   const rows =
-    type === "capabilities"
-      ? [
-          ...(catalog?.builtin_plugins ?? []).map((item) => ({
-            id: item.id,
-            name: t.has(`system_plugins.${item.name}.name`) ? t(`system_plugins.${item.name}.name`) : item.name,
-            description: t.has(`system_plugins.${item.name}.description`) ? t(`system_plugins.${item.name}.description`) : t("settings_plugin_usage"),
-            source: t("builtin_source"),
-            detail: t("bundle_count", { tools: item.tool_count, skills: item.skill_count }),
-            builtinPlugin: true,
-          })),
-          ...(catalog?.capabilities.map((item) => ({
-            id: item.id,
-            name: item.name,
-            description: item.description,
-            source: t("team_source"),
-            detail: t("bundle_count", { tools: item.tool_count, skills: item.skill_count }),
-            builtinPlugin: false,
-          })) ?? []),
-        ]
+    type === "plugins"
+      ? []
       : [
           ...builtin.map((item) => ({
             id: item.ref,
@@ -313,7 +300,6 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
             description: item.blurb,
             source: t("builtin_source"),
             detail: t("runtime_access"),
-            builtinPlugin: false,
           })),
           ...(catalog?.tools
             .filter((item) => item.source_kind !== "native")
@@ -324,7 +310,6 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
                 ...text,
                 source: item.source_display_name || t("team_source"),
                 detail: t(item.selectable ? "selectable" : "unavailable"),
-                builtinPlugin: false,
               };
             }) ?? []),
         ];
@@ -347,8 +332,14 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
       ))}
     </ul>
   );
-  const builtinPlugins = visible.filter((item) => item.builtinPlugin);
-  const teamPlugins = visible.filter((item) => !item.builtinPlugin);
+  const failed = (
+    <div role="alert">
+      <p>{t("load_failed")}</p>
+      <button className="ui-btn" onClick={() => setRetry((value) => value + 1)}>
+        {t("retry")}
+      </button>
+    </div>
+  );
   return (
     <section aria-label={t(type === "tools" ? "tools_catalog" : "capabilities_catalog")}>
       <div className={styles.header}>
@@ -363,25 +354,24 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
         />
       </div>
       {error ? (
-        <div role="alert">
-          <p>{t("load_failed")}</p>
-          <button className="ui-btn" onClick={() => setRetry((value) => value + 1)}>
-            {t("retry")}
-          </button>
-        </div>
-      ) : !catalog ? (
+        failed
+      ) : !catalog || (type === "plugins" && stateRound !== retry) ? (
         <p role="status">{t("loading")}</p>
       ) : (
         <>
-          {type === "capabilities" && plugins ? (
-            <PluginStateList
+          {type === "plugins" ? (
+            plugins ? (
+              <PluginStateList
               builtin={plugins.plugins}
               team={catalog.capabilities}
               teamMyDisabled={plugins.team_plugins_my_disabled}
               admin={admin}
               needle={needle}
               onChanged={reloadState}
-            />
+              />
+            ) : (
+              failed
+            )
           ) : type === "tools" && plugins && stateTools ? (
             <>
               <ToolStateList
@@ -401,23 +391,6 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: "tools" | "capabilit
             </>
           ) : visible.length === 0 ? (
             <p role="status">{t(needle ? "no_results" : "catalog_empty")}</p>
-          ) : type === "capabilities" ? (
-            <>
-              {builtinPlugins.length > 0 ? (
-                <section aria-label={t("builtin_plugins")}>
-                  <h2 className="ui-section-title">{t("builtin_plugins")}</h2>
-                  <p className="ui-page-desc">{t("system_plugin_usage")}</p>
-                  {renderRows(builtinPlugins)}
-                </section>
-              ) : null}
-              {/* Hidden when the team has no team Plugins, as in the Agent picker (design §7.3 item 8). */}
-              {teamPlugins.length > 0 ? (
-                <section aria-label={t("team_plugins")}>
-                  <h2 className="ui-section-title">{t("team_plugins")}</h2>
-                  {renderRows(teamPlugins)}
-                </section>
-              ) : null}
-            </>
           ) : (
             renderRows(visible)
           )}

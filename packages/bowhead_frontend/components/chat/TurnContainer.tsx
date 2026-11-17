@@ -41,7 +41,7 @@ import {
   projectAnswerValues,
 } from "@/lib/clarification-answers";
 import { buildOptionValueByLabel, relabelQuestions } from "@/lib/clarification-option-labels";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   fetchEffectDisclosure,
@@ -118,6 +118,7 @@ import type { DocumentRevisionReceipt as DocumentRevisionReceiptFacts, ModelRetr
 import { handoffQuestionToNewChat } from "@/lib/composer-handoff";
 import { resolveRecoveryAction } from "@/lib/turn-feedback";
 import { BotByline } from "./step-list/BotByline";
+import { SteerMessage, formatSteerTime } from "./step-list/SteerMessage";
 import { ChatBubbleNew } from "./step-list/ChatBubbleNew";
 import { SolidifyChip } from "@/components/workflow-solidify/turn-chip";
 import {
@@ -2219,6 +2220,13 @@ function TurnTraceRegion({
   );
 }
 
+/** Mid-run steering: an instruction the running answer took, shown where the Lead took it. */
+function TakenInstruction({ text, queuedAt }: { text: string; queuedAt?: string }) {
+  const t = useTranslations("canvas");
+  const locale = useLocale();
+  return <SteerMessage who={t("steer_you")} time={formatSteerTime(queuedAt, locale)} text={text} showAck={false} />;
+}
+
 function TurnBeatFlow({
   beats,
   stepViews,
@@ -2322,6 +2330,8 @@ function TurnBeatFlow({
       out.push(
         <Fragment key={`${kp}draft-${b.draftId}`}>{renderDraft(b.draftId)}</Fragment>,
       );
+    } else if (b.kind === "steer") {
+      out.push(<TakenInstruction key={`${kp}steer-${b.key}`} text={b.text} queuedAt={b.queuedAt} />);
     }
     // Picker beat: caller renders through the clarification block.
   });
@@ -2765,8 +2775,9 @@ const EMPTY_SEG_IDS: Set<string> = new Set();
 
 /**
  * With running band present, split beats around the first step beat into above/below-band segments.
- * Move only prose and answers; retain step beats above (already suppressed during takeover), preserving plans/confirmation
- * and all other beats. No split without band (pre-execution, completed, clarification, error); share replay's iteration path.
+ * Move only prose, answers and taken instructions (which sit between prose in time order); retain step beats above
+ * (already suppressed during takeover), preserving plans/confirmation and all other beats. No split without band
+ * (pre-execution, completed, clarification, error); share replay's iteration path.
  */
 function splitBeatsAroundBand(
   beats: TurnBeat[],
@@ -2775,7 +2786,7 @@ function splitBeatsAroundBand(
   const firstStep = bandSlotOwnsDisclosure ? beats.findIndex((b) => b.kind === "step") : -1;
   if (firstStep < 0) return { aboveBand: beats, belowBand: [] };
   const movable = (b: TurnBeat, i: number) =>
-    i > firstStep && (b.kind === "narrative" || b.kind === "answer");
+    i > firstStep && (b.kind === "narrative" || b.kind === "answer" || b.kind === "steer");
   return {
     aboveBand: beats.filter((b, i) => !movable(b, i)),
     belowBand: beats.filter((b, i) => movable(b, i)),

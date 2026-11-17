@@ -749,8 +749,6 @@ async def kb_presign_bundle_confirm(
 
     # 1. Lookup bundle marker row + ACL recheck
     marker = await files_store.get(file_id)
-    if marker is not None and marker.parse_status != "done" and not marker.ingestion_action_id:
-        raise _kb_error(409, "knowledge_bundle_action_required", hint="Upload the bundle again from the Knowledge page to explicitly add its files.")
     if marker is None or marker.soft_deleted_at:
         raise _kb_error(404, "kb_file_not_found")
     if marker.uploaded_by != user.id:
@@ -782,6 +780,12 @@ async def kb_presign_bundle_confirm(
         scope_id=marker.scope_id,
         permission="write",
     )
+
+    # A pending marker from before explicit Knowledge admission cannot fan out
+    # children. Answer only after the existence, ownership and Space checks above
+    # so the refusal cannot reveal another user's marker or bypass an archived Space.
+    if marker.parse_status != "done" and not marker.ingestion_action_id:
+        raise _kb_error(409, "knowledge_bundle_action_required", hint="Upload the bundle again from the Knowledge page to explicitly add its files.")
 
     artifact_store: ArtifactStore = _get_artifact_store(request)
     backend = _backend(request)

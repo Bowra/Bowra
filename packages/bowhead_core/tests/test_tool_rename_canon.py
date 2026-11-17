@@ -340,6 +340,11 @@ class TestChokepointDriftGuard:
         # 2026-10-28 8844b0061: knowledge source checks match kb_* results by call id on the C1-checked
         # history; none of those Tools is renamed.
         "knowledge_source_runtime.py": "matches kb_* results by call id on the C1-checked history; kb Tools are not renamed",
+        # 2026-11-14: history hygiene classes a completed call by its name (turn-local, never cleared,
+        # read again) when a Turn's history is published. The history comes from the C1-checked loop,
+        # so names are canonical, and none of the Tools it names has an old name. A result under a
+        # name it does not know is shortened as an ordinary operation; nothing is executed from here.
+        "context_hygiene.py": "classes results of the C1-checked history for publication; executes nothing, unknown names take the default",
     }
     #: 2026-10-13 7f2a04a53: the team daily usage report reads and upserts a `tool_calls` count
     #: column in SQL (`o.tool_calls`, `excluded.tool_calls`). These exact SQL qualifiers name a number,

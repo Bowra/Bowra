@@ -84,7 +84,8 @@ def test_lint_caps_and_drops() -> None:
 # ── author_step_criteria ─────────────────────────────────────
 
 
-async def test_criteria_happy_path_and_lint() -> None:
+async def test_criteria_happy_path_and_lint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BOWHEAD_PLAN_CRITERIA_MAX_TOKENS", raising=False)
     steps = _steps()
     payload = {
         "criteria": {
@@ -98,10 +99,10 @@ async def test_criteria_happy_path_and_lint() -> None:
     assert out[steps[0].id] == ("引用 ≥2 个官方信源",)
     assert out[steps[1].id] == ("含 2025 各季度营收数字",)
     assert usage == [(200, 80)]  # Bill criteria tokens (same as A3).
-    # Request has each step id/objective; budget decoupled from graph generation.
+    # Request has each step id/objective; without an operator override the model's automatic output budget applies.
     _, req = router.calls[0]
     assert steps[0].id in req.messages[0].content
-    assert req.max_output_tokens >= 600
+    assert req.max_output_tokens is None
 
 
 async def test_criteria_unknown_id_and_bad_shape_ignored() -> None:

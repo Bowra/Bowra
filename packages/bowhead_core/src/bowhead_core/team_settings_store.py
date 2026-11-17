@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
@@ -86,6 +86,7 @@ class TeamSettingsStore:
             (team_id, key, value, updated_at or _now(), updated_by),
         )
 
+    @repeat_when_authority_busy()
     async def set(self, team_id: str, key: str, value: str, updated_by: str) -> None:
         async with diagnostic_connect(self._path) as db:
             await db.execute(
@@ -97,6 +98,7 @@ class TeamSettingsStore:
             )
             await db.commit()
 
+    @repeat_when_authority_busy()
     async def compare_and_set(
         self,
         team_id: str,
@@ -136,6 +138,7 @@ class TeamSettingsStore:
                 await db.rollback()
                 raise
 
+    @repeat_when_authority_busy()
     async def delete(self, team_id: str, key: str) -> None:
         async with diagnostic_connect(self._path) as db:
             await db.execute(

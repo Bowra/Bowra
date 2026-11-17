@@ -107,7 +107,7 @@ async def test_a_cleaned_history_is_read_as_stored_after_the_switch_is_turned_of
 
 
 async def test_publication_is_unchanged_while_the_switch_is_off(collab, context_case, monkeypatch):
-    monkeypatch.delenv("FEATURE_CONTEXT_HISTORY_HYGIENE", raising=False)
+    monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", "0")
     monkeypatch.setenv("BOWHEAD_CTX_HYGIENE_MIN_SAVING_TOKENS", "100")
     request = three_turns(context_case)
     restored = await publish_and_reload(collab, context_case, monkeypatch, request, CLOSEOUT)

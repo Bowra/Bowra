@@ -101,6 +101,7 @@ const COLLABORATION_AND_DECK_ERROR_KEYS: Record<string, `collab_errors.${string}
   collaboration_unresolved: "collab_errors.waiting",
   collaboration_arguments_invalid: "collab_errors.format",
   collaboration_coordination_reply_only: "collab_errors.format",
+  collaboration_user_round_update_only: "collab_errors.format",
   collaboration_wait_requires_settled_batch: "collab_errors.format",
   collaboration_wait_already_active: "collab_errors.format",
   collaboration_wait_invalid: "collab_errors.format",

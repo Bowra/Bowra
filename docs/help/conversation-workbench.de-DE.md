@@ -6,7 +6,8 @@ Dieser Artikel beschreibt die Bereiche der Unterhaltungsseite für Fortschritt, 
 
 - Nachdem Sie eine Nachricht gesendet haben, zeigt das Fortschrittsfeld über der Antwort dieselben Informationen wie bisher: In der ersten Zeile stehen die aktuelle Phase, die Schrittzahl und die verstrichene Zeit. Die nächsten zwei Zeilen zeigen die gerade abgeschlossenen Schritte und die letzte Zeile, was derzeit ausgeführt wird. Das Feld hat jetzt einen dünneren, helleren Rand und verwendet die Schriftart der Oberfläche. Abgeschlossene Schritte sind mit einem grauen Häkchen markiert; Fehler und erneute Versuche bleiben farblich hervorgehoben. Wählen Sie die erste Zeile aus, um den vollständigen Ablauf anzuzeigen. Mit derselben Auswahl klappen Sie ihn wieder ein.
 - Um eine Antwort anzuhalten, wählen Sie unten rechts im Composer **Stoppen**. Die Schaltfläche ist grau und dadurch gut von **Senden** zu unterscheiden. Sie zeigt **Wird gestoppt…**, bis die Aufgabe tatsächlich beendet ist.
-- Während eine Antwort läuft, können Sie eine Anweisung eingeben, um sie anzupassen. Sobald Sie tippen, wird die Schaltfläche unten rechts zu **Anweisung hinzufügen**, die Ihren Text für die aktuelle Antwort einreiht, und **Stoppen** rückt links daneben. So bricht die gewohnte Schaltfläche die Antwort nie ab. Die Eingabetaste wirkt wie **Anweisung hinzufügen**.
+- Während eine Antwort läuft, können Sie eine Anweisung eingeben, um sie anzupassen. Sobald Sie tippen, wird die Schaltfläche unten rechts zu **Anweisung hinzufügen**, und **Stoppen** rückt links daneben. So bricht die gewohnte Schaltfläche die Antwort nie ab. Die Eingabetaste wirkt wie **Anweisung hinzufügen**.
+- Eine hinzugefügte Anweisung wird berücksichtigt, sobald die Antwort ihren nächsten Schritt erreicht, auch wenn ein Agent noch an einem Teil der Aufgabe arbeitet. Sie erscheint dann in dieser Antwort an der Stelle, an der sie übernommen wurde. Wird die Antwort bereits geschrieben, läuft die Anweisung direkt danach als Folgeauftrag. Eine Anweisung mit Anhang oder verknüpfter Ressource läuft immer nach der Antwort.
 - Nach Abschluss wird der Fortschritt zu einer Zeile wie „N Schritte abgeschlossen“ eingeklappt. Wählen Sie sie aus, um den Ablauf erneut anzuzeigen. Konnte die Aufgabe nicht abgeschlossen werden, stehen dort der Grund und mögliche Wiederherstellungsaktionen.
 
 ## Aktionen unter einer Antwort
@@ -30,6 +31,8 @@ Nummerierte Zitatmarker in Antworten behalten ihre Position, Nummer und Quelle. 
 
 Karten, auf denen Sie etwas auswählen, ergänzen oder einen Plan freigeben sollen, haben während der Bearbeitung einen farblich hervorgehobenen Rand. Nach Ihrer Antwort oder Freigabe klappt die Karte zu einem einzeiligen Ergebnis zusammen. Dieses bleibt auch nach dem Aktualisieren in der Unterhaltung erhalten.
 
+Wenn der Versand einer E-Mail oder der Aufruf eines externen Tools Ihre Bestätigung erfordert, erscheint die Karte unter dem wartenden Schritt. Prüfen Sie die geplante Aktion und treffen Sie Ihre Wahl, bevor die Zeit abläuft. Bei Ablauf wird die Aktion übersprungen. Die Karte zeigt das Ergebnis auch nach der Fortsetzung.
+
 ## Ergebnisbereich
 
 - Bewegen Sie am Computer den Mauszeiger über den Trenner zwischen Unterhaltung und Ergebnissen. Der Griff wird sichtbar; ziehen Sie ihn, um die Breiten anzupassen.
@@ -38,7 +41,19 @@ Karten, auf denen Sie etwas auswählen, ergänzen oder einen Plan freigeben soll
 
 Das Ziehen von Dateien in die Unterhaltung, die Tastaturbedienung zum Ändern und Vergrößern der Bereiche sowie der Punkt für neue Ergebnisse werden unter [Dateien, Tastenkürzel und Hinweise auf der Unterhaltungsseite](conversation-workbench-actions.de-DE.md) beschrieben.
 
-Wird eine früher gelieferte Datei überarbeitet, zeigen Ergebnisse und die Seite „Dateien“ sie nur einmal mit ihrer neuesten Version an, zum Beispiel „Version 2 von 2“. Wenn Sie die Datei auf der Seite „Dateien“ löschen, werden alle Versionen gelöscht; **Rückgängig** oder der Papierkorb stellt sie gemeinsam wieder her. Frühere Dateikarten im Gespräch öffnen und laden die neueste Version, zeigen „Auf Version N aktualisiert“ und bieten „Version N herunterladen“ für die ursprünglich gelieferte Version. Jede Datei behält ihre drei neuesten Versionen (ein Entwurf, den eine spätere Speicherung in derselben Anfrage ersetzt, wird zuerst entfernt); ältere Versionen werden automatisch bereinigt, und die Karte weist darauf hin. Versionen, die ein Bericht, die Wissensdatenbank, ein Dokument oder ein Export-Snapshot verwendet, werden nie bereinigt. Nachdem Sie die Datei unter „Ergebnisse“ geöffnet haben, lädt **Versionsverlauf** im Menü **Weitere Aktionen** jede aufbewahrte Version. Eine der Wissensdatenbank hinzugefügte Datei bleibt auf der hinzugefügten Version: Die Wissensdatenbank zeigt „Neuere Version N verfügbar“, und die Seite „Dateien“ meldet, dass die Wissensdatenbank eine ältere Version enthält, und bietet **Version N hinzufügen** an. Entfernen Sie danach den alten Eintrag aus der Wissensdatenbank.
+### Eine Dateiversion finden oder herunterladen
+
+Nach einer Überarbeitung erscheint die Datei unter **Ergebnisse** und **Dateien** jeweils einmal mit ihrer neuesten Version. Eine ältere Dateikarte öffnet ebenfalls die neueste Version. Über **Version N herunterladen** erhalten Sie die ursprünglich gelieferte Version, solange sie verfügbar ist.
+
+Wenn Ihnen die Unterhaltung gehört, öffnen Sie die Datei unter **Ergebnisse** und wählen Sie **Weitere Aktionen → Versionsverlauf**, um eine erhaltene Version herunterzuladen. Bowhead behält die drei neuesten Versionen sowie ältere Versionen, die etwa durch Berichte, Wissensdatenbankeinträge, Dokumente oder gespeicherte Exporte geschützt sind. Ältere Versionen werden erst entfernt, wenn in der Unterhaltung keine Antwort mehr läuft oder auf Ihre Rückmeldung wartet; die Liste kann daher kurzzeitig mehr Versionen zeigen. Laden Sie eine Kopie herunter, solange sie noch verfügbar ist, wenn Sie eine bestimmte Version behalten möchten.
+
+Beim Löschen einer Datei unter **Dateien** werden alle Versionen in den Papierkorb verschoben. Über **Rückgängig** oder den Papierkorb stellen Sie sie gemeinsam wieder her.
+
+Wie Sie eine Vorlage ausfüllen und die PPTX aus den Ergebnissen herunterladen, erfahren Sie unter [Eine PowerPoint-Vorlage ausfüllen oder aktualisieren](powerpoint-templates.de-DE.md).
+
+## Dokumententwürfe prüfen und veröffentlichen
+
+Diese Schritte gelten für bestehende Entwürfe und eigene Agents mit dem Plugin für PPTX-Vorlagenentwürfe. Öffnen Sie den passenden Entwurf im **+**-Menü der Canvas-Tableiste. Prüfen Sie die Vorschau, Änderungen und Quellen, bestätigen Sie die Prüfung und veröffentlichen Sie den Entwurf. Laden Sie anschließend die PPTX oder das angeforderte PDF aus den Ergebnissen herunter. Beantworten Sie Rückfragen auf der jeweiligen Fragekarte.
 
 ## Berichte
 

@@ -16,7 +16,7 @@ Open **Release notes** in the account menu, between **Help Center** and **Langua
 
 Open **Settings** from your account menu for Personal, Team and current Space settings. Open **Administration Console** for the operations and governance pages available to your role. Each area has its own sidebar directory.
 
-- The main sidebar keeps New Work, My Reports and Library first, followed by **Agents**, then **Capability Center**, including on capability resource pages. Agents opens the market; use Manage My Agents for its existing management views.
+- The main sidebar keeps New Work, My Reports and Library first, followed by **Agents**, then **Capability Center**, including on capability resource pages. Agents opens **My Agents → Hired by me**. Expand Agents to open Marketplace, My Agents, or Top Charts.
 - Capability Center opens its overview and expands **Skills and Workflows**, **Tools**, **Team Plugins**, **My Connections** and **Scheduled Tasks**. Availability follows your account's permissions and enabled features.
 - Agent Tabs and Skill filters stay inside their pages. Agent details and management keep Agents selected; other catalogs and configuration keep their corresponding resource selected. Use a resource's management action when available, then its return link to go back. Management opened from Team Management returns to that overview view; management opened from the Skills page's Mine filter returns to Mine. Opening management links in another browser tab also retains the supported return context.
 - Search the Settings or Administration directory by name, or search within a resource catalog. Counts show pending decisions or active scheduled tasks. In Settings and Administration, **Back to Work** returns to your previous work page.

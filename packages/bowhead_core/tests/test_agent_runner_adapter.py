@@ -42,8 +42,16 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _reset_profiles() -> None:
-    """每 test 前 yield, no cleanup (manifest 同名覆盖 builtin OK 测试隔离)."""
+    """Restore the process-wide PROFILES registry after each test.
+
+    These tests register manifest-derived profiles (which declare a primary
+    capability) and remove `compute`. Leaving that state behind changed the
+    `compute` behavior descriptor seen by later tests on the same worker.
+    """
+    saved = dict(PROFILES)
     yield
+    PROFILES.clear()
+    PROFILES.update(saved)
 
 
 # -- Manifest → Profile translation --
@@ -564,7 +572,7 @@ async def test_runner_fn_failure_raises() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reported", [True, False], ids=["wrap-up-report", "count-only"])
 async def test_runner_fn_keeps_a_reported_partial_step(reported: bool) -> None:
-    """116 t_78ba5d3b1429: three helpers stopped at a run limit with their done and remaining work,
+    """116 the regression case: three helpers stopped at a run limit with their done and remaining work,
     every step failed, and the plan blocked the whole Turn although 27 sections were written."""
     registry = AgentRegistry.bootstrap()
     register_all_system_manifests(registry)

@@ -23,7 +23,7 @@ from bowhead_core.builtin_datarc_tool import datarc_source_label
 from bowhead_core.builtin_powerbi_tool import OPERATIONS as POWERBI_OPERATIONS
 from bowhead_core.ssrf_guard import SsrfBlocked, validate_url
 from bowhead_core.user_store import TeamBuiltinTool, User, _now
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
@@ -754,51 +754,36 @@ async def delete_shopify(tool_id: str, request: Request, user: User = Depends(_R
     await _audit_builtin_tool(request, user, AuditAction.TEAM_TOOL_SOURCE_DELETED, tool)
 
 
-@router.post("/shopify/{tool_id}/plugin", dependencies=[Depends(require_not_readonly)])
-async def create_shopify_plugin(tool_id: str, request: Request, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> dict[str, Any]:
-    return await _create_shopify_plugin(tool_id, request, user, content=False)
+@router.get("/plugin-templates")
+async def list_plugin_templates(request: Request, response: Response, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> dict[str, Any]:
+    """Preset Team Plugins for the team's active built-in connections, for the Plugin editor's create form.
 
-
-@router.post("/shopify/{tool_id}/content-plugin", dependencies=[Depends(require_not_readonly)])
-async def create_shopify_content_plugin(tool_id: str, request: Request, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> dict[str, Any]:
-    return await _create_shopify_plugin(tool_id, request, user, content=True)
-
-
-async def _create_shopify_plugin(tool_id: str, request: Request, user: User, *, content: bool) -> dict[str, Any]:
-    from bowhead_core.builtin_shopify_tool import shopify_tool_ref, supported_operations
-    from bowhead_core.shopify_content import CONTENT_OPERATIONS
-    from fastapi import Response
+    Nothing is saved here: the editor fills its form and saves through the ordinary Plugin create route.
+    A template whose Skill this caller's catalog does not offer is left out.
+    """
+    from bowhead_core.builtin_tool_providers import active_by_provider
 
     from bowhead_gateway.routes.agents import agent_authoring_catalog
-    from bowhead_gateway.routes.team_plugins import PluginBody, create_plugin
 
-    tool = await _shopify_current(request, user, tool_id)
-    if tool.status != "enabled":
-        raise _coded_error(422, "shopify_connection_unavailable")
-    operations = supported_operations(tool)
-    if content and "shopify_preview_content_update" not in operations:
-        raise _coded_error(422, "shopify_content_unavailable")
+    response.headers["Cache-Control"] = "private, no-store"
     store = _store(request)
+    active = active_by_provider(await store.list_team_builtin_tools(user.team_id), None)
+    pending = [(provider, tool, template) for provider, tools in active for tool in tools for template in provider.plugin_templates(tool)]
+    if not pending:
+        return {"templates": []}
     catalog = await agent_authoring_catalog(request, Response(), user, store)
-    skill_id = "builtin:shopify-content-optimization" if content else "builtin:shopify-analysis"
-    skill = next((item for item in catalog["skills"] if item["grant"]["skill_ref"]["id"] == skill_id), None)
-    if skill is None:
-        raise _coded_error(422, "capability_skill_unavailable")
-    selected = (
-        [op for op in operations if op in CONTENT_OPERATIONS or op in {"shopify_shop_context", "shopify_list_products", "shopify_list_pages"}]
-        if content
-        else [op for op in operations if op not in CONTENT_OPERATIONS]
-    )
-    return await create_plugin(
-        PluginBody(
-            name=f"Shopify content - {tool.display_name}" if content else f"Shopify - {tool.display_name}",
-            description="Shopify content optimization with exact requester review before each update."
-            if content
-            else "Read-only Shopify operational analysis and store content.",
-            tool_refs=[shopify_tool_ref(tool.id, op) for op in selected],
-            skill_grants=[skill["grant"]],
-        ),
-        request,
-        user,
-        store,
-    )
+    grants = {str(skill["name"]): skill["grant"] for skill in catalog["skills"] if skill["source_kind"] == "builtin"}
+    return {
+        "templates": [
+            {
+                "id": f"{template.kind}:{tool.id}",
+                "kind": template.kind,
+                "connection_id": tool.id,
+                "connection_name": tool.display_name,
+                "tool_refs": [provider.tool_ref(tool.id, operation) for operation in template.operations],
+                "skill_grants": [grants[template.skill]],
+            }
+            for provider, tool, template in pending
+            if template.skill in grants and template.operations
+        ]
+    }

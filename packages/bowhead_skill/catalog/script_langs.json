@@ -32,5 +32,9 @@
     {"name": "lodash", "version": "4.18.1"},
     {"name": "papaparse", "version": "5.5.4"},
     {"name": "dayjs", "version": "1.11.21"}
+  ],
+  "_browser_libraries_doc": "guaranteed_browser_libraries = single self-contained browser builds baked into the sandbox image for offline HTML deliverables (the Results preview blocks network access). Each file defines `global` when it runs as a classic <script>; deliverables inline its text. Install source: python_sandbox/browser_libs/package.json + lockfile (resolved pinned to registry.npmjs.org); the Dockerfile browserlibs stage bundles it with esbuild, which never enters the final image. `sha256` pins the built bundle (esbuild output is deterministic for the locked versions); a UT and the image-contract gate assert this list.",
+  "guaranteed_browser_libraries": [
+    {"name": "three", "version": "0.187.0", "path": "/opt/bowhead/browser-libs/three/three.min.js", "global": "THREE", "sha256": "c78895acdff5f794696fc6840893006b8640f1c4adf97fcdc7bc8891aa6d9d06"}
   ]
 }

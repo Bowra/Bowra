@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from bowhead_core.agents._generated.role_bindings import _PARADIGM_V2_ROLE_MAP
 from bowhead_core.agents._generated.tool_display import TOOL_DISPLAY
-from bowhead_core.agents._generated.tool_kinds import TOOL_RISKS
+from bowhead_core.agents._generated.tool_kinds import TOOL_KINDS, TOOL_RISKS
 from bowhead_core.approval_gate import approval_executable
 from bowhead_core.custom_subagent_store import (
     DESTRUCTIVE_TOOL_PREFIXES,
@@ -393,7 +393,10 @@ def native_authoring_tools() -> tuple[AuthoringTool, ...]:
                 source_display_name="Built-in tools",
                 capability_classes=_capability_classes(tool_ref, risk),
                 risk=risk,
-                discoverable=tool_ref not in COMPILER_DERIVED_SKILL_TOOLS,
+                # System parts (tool_aliases.yaml `kind: part`) are never shown or selected on their own. They
+                # stay in the allowlist, so dependency compilation and fingerprints are unchanged; only pickers
+                # stop listing them (render_deck, tool_switch_context and find_results slipped in via roles).
+                discoverable=tool_ref not in COMPILER_DERIVED_SKILL_TOOLS and TOOL_KINDS.get(tool_ref) != "part",
                 selectable=risk != "unknown",
                 locked_reason="risk_metadata_unknown" if risk == "unknown" else None,
                 risk_source=risk_source,
@@ -505,8 +508,10 @@ class SubagentAuthoringCatalogService:
             team_tools_list.append(
                 AuthoringTool(
                     stable_ref=entry.advertised_name,
+                    # An OpenAPI operation dispatches on its `teammcp.<source>.<op>` reference; people know it
+                    # by its operation ID, the name the Tools page shows. MCP tools keep the server's own name.
                     display_name=_safe_label(
-                        entry.dispatch_name,
+                        entry.op.operation_id if entry.op is not None else entry.dispatch_name,
                         fallback=entry.advertised_name,
                         limit=120,
                     ),

@@ -169,7 +169,28 @@ async def test_lead_receiver_selection_is_exact_and_fails_closed(receiver_case):
     assert request.response_format == {"type": "json_object"}
     assert request.metadata == {"prompt_version": "reference-receiver-selection@1", "candidate_count": 2}
     assert first.resource.id not in request.messages[0].content
-    for invalid in ('{"candidate_index":true}', '{"candidate_index":2}', '{"candidate_index":0,"reason":"x"}', "not-json"):
+    # Presentation around the index is tolerated: a JSON code fence and an explanatory field.
+    for tolerated in ('```json\n{"candidate_index":1}\n```', '{"candidate_index":1,"reason":"x"}', ' {"candidate_index":1}\n'):
+        assert (
+            await select_reference_receiver(
+                candidates,
+                task_text="盈利分析",
+                router=Router(tolerated),
+                trace_id="reference-receiver:test",
+                **selection_scope,
+            )
+            == second.resource
+        )
+    for invalid in (
+        '{"candidate_index":true}',
+        '{"candidate_index":2}',
+        '{"candidate_index":-1}',
+        '{"candidate_index":"1"}',
+        '{"reason":"x"}',
+        "[1]",
+        "```json\nnot-json\n```",
+        "not-json",
+    ):
         with pytest.raises(ValueError, match="reference_receiver_selection_invalid"):
             await select_reference_receiver(
                 candidates,

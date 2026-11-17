@@ -52,6 +52,8 @@ L’ajout ne déplace ni ne copie le fichier ; il reste dans Fichiers.
 
 Téléverser dans Fichiers ou joindre un fichier au chat conserve uniquement le fichier. Sa classification comme référence durable ne l’ajoute pas à la base de connaissances. Choisissez **Ajouter à la base de connaissances**, téléversez depuis la page Connaissances ou demandez explicitement à l’Agent d’ajouter un fichier précis avec la visibilité souhaitée. L’Agent vérifie votre demande initiale et vos droits actuels ; une cible ambiguë nécessite une clarification. Le fichier devient consultable après traitement. Un ZIP joint au chat reste un seul fichier, sans décompression ni indexation ; importez ses documents depuis la page Connaissances. Le retrait de la base conserve l’original. Une ancienne demande ne l’ajoute pas à nouveau après retrait ; une nouvelle demande explicite le peut.
 
+Après une révision dans **Fichiers**, la base de connaissances conserve la version ajoutée et signale qu’une version plus récente existe. Dans **Fichiers**, choisissez **Ajouter la version N** et sélectionnez le périmètre voulu. Une fois la nouvelle version prête, retirez l’ancienne entrée si vous ne voulez plus la retrouver dans les recherches.
+
 ## État des fichiers
 
 | État        | Signification                                                                                                                                              |

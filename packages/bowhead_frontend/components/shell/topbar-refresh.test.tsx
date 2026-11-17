@@ -45,10 +45,12 @@ vi.mock("@/lib/use-space", () => ({
 }));
 
 import { NotificationCenter } from "@/components/notification-center";
+import { publishNotificationCount, registerAttentionRefresh } from "@/lib/attention-loop";
 import { SpacePicker } from "@/components/space-picker";
 
 beforeEach(() => {
   state.counts = { actionRequired: 0, updatesUnread: 0, totalBadge: 0 };
+  registerAttentionRefresh(null); // forget the count an earlier test published
   state.me = { ...state.me, credit_balance: 99_999_932, credit_quota: 100_000_000 };
 });
 
@@ -56,7 +58,8 @@ afterEach(cleanup);
 
 describe("notification bell", () => {
   it("shows a number only for things that need you", async () => {
-    state.counts = { actionRequired: 3, updatesUnread: 2, totalBadge: 5 };
+    // Since 858dec763 the bell reads counts from the attention loop.
+    publishNotificationCount({ ok: true, counts: { actionRequired: 3, updatesUnread: 2, totalBadge: 5 } });
     renderIntl(<NotificationCenter />);
     // the accessible name says the same split as the badge
     const bell = await screen.findByRole("button", { name: "通知，3 个待处理，2 条未读更新" });
@@ -65,7 +68,7 @@ describe("notification bell", () => {
   });
 
   it("ordinary updates alone show a dot, and the accessible name calls them updates", async () => {
-    state.counts = { actionRequired: 0, updatesUnread: 2, totalBadge: 2 };
+    publishNotificationCount({ ok: true, counts: { actionRequired: 0, updatesUnread: 2, totalBadge: 2 } });
     renderIntl(<NotificationCenter />);
     const bell = await screen.findByRole("button", { name: "通知，2 条未读更新" });
     expect(bell.querySelector(".notification-bell__badge")).toBeNull();

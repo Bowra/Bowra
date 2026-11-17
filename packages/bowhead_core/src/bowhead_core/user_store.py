@@ -27,7 +27,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx
+from bowhead_core._db import open_pooled_read_ctx, repeat_when_authority_busy
 from bowhead_core._email_utils import normalize_email
 from bowhead_core.access_control import _require_read_transaction
 from bowhead_core.mcp_prompt_cache import validate_mcp_prompt_cache
@@ -42,6 +42,12 @@ from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
+
+#: Request writes on fenced tables repeat as a whole when a running Turn holds the authority lease
+#: (on 116, 1.7.49, Space name and description saves returned 500 twice in a row while Turns ran).
+#: Every admitted method rechecks its preconditions in its own transaction and runs nothing after
+#: its commit; see ``_db.repeat_when_authority_busy``.
+_repeat_when_authority_busy = repeat_when_authority_busy()
 
 # cca P3 (review fix): a distinct "argument omitted" sentinel so update_team_subagent_meta can
 # tell an OMITTED nullable field (skip — keep current value) from an EXPLICIT None (clear → SQL
@@ -2289,6 +2295,7 @@ class UserStore:
             rows = await cur.fetchall()
         return [str(row[0]) for row in rows]
 
+    @_repeat_when_authority_busy
     async def update_team_llm_config(self, team_id: str, config: dict[str, Any]) -> None:
         """P4.5.2: encrypt + 存 team LLM provider config (BYO LLM)."""
         from bowhead_core.llm_config_crypto import encrypt_llm_config
@@ -2301,6 +2308,7 @@ class UserStore:
             )
             await db.commit()
 
+    @_repeat_when_authority_busy
     async def update_team_llm_config_if_version(
         self,
         team_id: str,
@@ -4982,6 +4990,7 @@ class UserStore:
 
     # ─── workspace_members (P4.5.6) ─────────────────────
 
+    @_repeat_when_authority_busy
     async def add_member(
         self,
         *,
@@ -5019,6 +5028,7 @@ class UserStore:
             )
             await db.commit()
 
+    @_repeat_when_authority_busy
     async def remove_member(self, workspace_id: str, user_id: str) -> bool:
         async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -5070,6 +5080,7 @@ class UserStore:
         async with diagnostic_connect(self.db_path) as db:
             return await self._can_leave_workspace_conn(db, team_id, workspace_id, user_id)
 
+    @_repeat_when_authority_busy
     async def leave_workspace(self, team_id: str, workspace_id: str, user_id: str) -> None:
         """Remove only the caller's membership, retaining an effective administrator."""
         async with diagnostic_connect(self.db_path) as db:
@@ -5357,6 +5368,7 @@ class UserStore:
                 rows = await cur.fetchall()
         return [{**dict(r), "role": _canonical_workspace_member_role(r["role"])} for r in rows]
 
+    @_repeat_when_authority_busy
     async def update_member_role(
         self,
         workspace_id: str,
@@ -6601,6 +6613,35 @@ class UserStore:
             display_name, name_key = normalize_space_name(name)
             if len(display_name) > 120:
                 raise SpaceGovernanceError("workspace_name_too_long")
+        # Only the transaction repeats: after it commits, a repeat would meet its own new revision.
+        await self._write_governed_workspace_metadata(
+            team_id=team_id,
+            actor_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            expected_revision=expected_revision,
+            display_name=display_name,
+            name_key=name_key,
+            description=description,
+        )
+        return await self._get_workspace_governance_record(
+            team_id=team_id,
+            caller_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            require_team_governance=False,
+        )
+
+    @_repeat_when_authority_busy
+    async def _write_governed_workspace_metadata(
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        workspace_id: str,
+        expected_revision: int | None,
+        display_name: str | None,
+        name_key: str | None,
+        description: str | None | object,
+    ) -> None:
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -6672,12 +6713,6 @@ class UserStore:
             except Exception:
                 await db.rollback()
                 raise
-        return await self._get_workspace_governance_record(
-            team_id=team_id,
-            caller_user_id=actor_user_id,
-            workspace_id=workspace_id,
-            require_team_governance=False,
-        )
 
     async def archive_governed_workspace(
         self,

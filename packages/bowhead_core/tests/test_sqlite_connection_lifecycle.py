@@ -33,9 +33,12 @@ async def test_capacity_report_identifies_suspended_borrowers_without_values(tmp
         with caplog.at_level(logging.WARNING, logger="bowhead_core.sqlite_capacity"), pytest.raises(sqlite_capacity.SQLiteCapacityError):
             await connect(tmp_path / "refused.db")
         records = [record.getMessage() for record in caplog.records if "sqlite.capacity_holder" in record.getMessage()]
-        assert len(records) == 1
-        assert "nested_database_borrow" in records[0] and "phase=borrowed" in records[0]
-        assert private_value not in records[0]
+        # The report lists every current holder, including connections other tests on this
+        # worker still hold (the baseline); identify the borrower among them.
+        borrowed = [record for record in records if "nested_database_borrow" in record]
+        assert len(records) == baseline + 1
+        assert len(borrowed) == 1 and "phase=borrowed" in borrowed[0]
+        assert all(private_value not in record for record in records)
     finally:
         release.set()
         await borrower

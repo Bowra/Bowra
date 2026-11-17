@@ -200,7 +200,10 @@ async def build_presentation_view(
             source = await _read_prefix(store, art, art.size + 1)
             if len(source) != art.size:
                 raise representation_error("corrupt")
-            return await renderer.view_presentation(source)
+            from bowhead_core.pptx_result_view import render_source
+
+            # LibreOffice refuses a chart cache that lists more points than it declares; PowerPoint opens it.
+            return await renderer.view_presentation(await render_source(source))
 
         pdf = await previews.render(key, convert)
         if await _presentation_source_version(store, art) != version:

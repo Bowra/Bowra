@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Report data tables: content-sized columns only when every row is rendered.
  *

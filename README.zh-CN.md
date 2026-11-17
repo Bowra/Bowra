@@ -1,5 +1,9 @@
 # Bowra
 
+Bowra 是一个采用 MIT 许可、可自托管的 AI Agent 平台，用于业务数据和文档分析。团队可以在共享工作空间里比较文档、追溯分析的来源和计算过程，并继续修订报告。Bowra 是 Bowhead 的 Community 版。
+
+[常见问题](docs/faq.zh-CN.md)
+
 <p align="center">
   <img src="docs/assets/bowra/hero.svg" alt="Bowra — Verified Intelligence。展示工作依据的业务 Agent。" width="100%">
 </p>
@@ -31,9 +35,9 @@ Bowra 将专业 Agent、业务知识、文档审查、计算与报告放进共�
 
 ChromaDB 仍有未修复的上游依赖安全公告，详见[当前评估和部署边界](SECURITY.zh-CN.md#chromadb-依赖安全公告)。
 
-## 源码快照 1.7.44
+## 当前源码版本
 
-本次更新支持修订文件的版本历史，并将工具确认放到对话中。报告编辑与工具失败后的恢复也有改进。详见 [Community 发布说明](docs/help/release-notes/releases/v1.7.44.zh-CN.md)和[升级注意事项](deploy/README.md#upgrade-an-existing-installation)。
+**Bowra 1.7.49** 支持运行中补充指令和查找此前交付的文件，并提供独立的 Team Plugins 页面。[发布说明](docs/help/release-notes/releases/v1.7.49.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
 
 SQLite 升级统一协调十二个数据库文件。升级前停止全部写入，并备份实例密钥、数据库和存储对象。自动迁移备份只包含登记的 SQLite 文件与布局元数据，完整恢复快照需单独保存。恢复账号删除前的快照可能恢复该账号。Community 保留已审核沙箱源码与基础文档技能，原生模板创作 helper 需要单独验证执行环境。
 

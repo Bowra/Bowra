@@ -13,6 +13,7 @@ from http.cookies import SimpleCookie
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from bowhead_core._db import SQLiteStoreBusy
 from bowhead_core.error_catalog import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, ErrorCatalog
 from bowhead_core.language_context import _normalize_accept_language  # type: ignore[attr-defined]
 from bowhead_core.published_diagnostics import (
@@ -402,6 +403,15 @@ async def _sqlite_capacity_handler(request: Request, exc: SQLiteCapacityError) -
     )
 
 
+async def _sqlite_store_busy_handler(request: Request, exc: SQLiteStoreBusy) -> JSONResponse:
+    """A write kept losing its storage lock to running work for its whole wait; nothing was written."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": {"code": SQLiteStoreBusy.code, "message": _terminal_error_message(request.scope, code=SQLiteStoreBusy.code)}},
+        headers={REQUEST_ID_HEADER: _authoritative_request_id(request.scope), "Cache-Control": "no-store", "Retry-After": "2"},
+    )
+
+
 async def _client_disconnect_handler(request: Request, exc: ClientDisconnect) -> Response:
     """The caller dropped its own request body mid-upload; nothing failed and no one is listening.
 
@@ -417,6 +427,7 @@ async def _client_disconnect_handler(request: Request, exc: ClientDisconnect) ->
 def register_error_handlers(app: FastAPI) -> None:
     """主入口：把所有 i18n 感知的异常处理器注册到 FastAPI app."""
     app.add_exception_handler(SQLiteCapacityError, _sqlite_capacity_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(SQLiteStoreBusy, _sqlite_store_busy_handler)  # type: ignore[arg-type]
     app.add_exception_handler(ClientDisconnect, _client_disconnect_handler)  # type: ignore[arg-type]
     app.add_exception_handler(HTTPException, _http_exception_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(

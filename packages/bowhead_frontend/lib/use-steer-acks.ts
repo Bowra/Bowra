@@ -12,18 +12,18 @@
 
 import { useMemo } from "react";
 
-import { useTurn, type EmojiAck } from "./turn-store";
+import { pendingSteerAcks, useTurn, type EmojiAck } from "./turn-store";
 
 /**
  * Returns the list of 🤝 emoji acks for the given turn, filtered to those
- * that carry steer text (the user's interjection echoed by backend). When
- * `turnId` is null/empty or no acks exist yet, returns an empty array.
+ * that carry steer text (the user's interjection echoed by backend) and are
+ * still queued. An instruction the running answer took (mid-run steering)
+ * leaves this list and shows inside the Turn. When `turnId` is null/empty or
+ * no acks exist yet, returns an empty array.
  */
 export function useSteerAcks(turnId: string | null | undefined): EmojiAck[] {
   const state = useTurn(turnId ?? "");
-  return useMemo(() => {
-    return (state?.emojiAcks ?? []).filter(
-      (a) => a.emoji === "🤝" && Boolean(a.text),
-    );
-  }, [state?.emojiAcks]);
+  const emojiAcks = state?.emojiAcks;
+  const beats = state?.beats;
+  return useMemo(() => pendingSteerAcks(emojiAcks && beats ? { emojiAcks, beats } : undefined), [emojiAcks, beats]);
 }

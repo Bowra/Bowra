@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 # Filename count returned to Lead: only to recognize whether the requested file exists, not to provide an inventory.
 _MAX_FILE_NAMES = 10
+# Delivered files named with their identifiers (docs/sprints/result-lookup-2026-11-15, FR20). A shortened
+# result keeps lists of up to 30 items, so this many survive history hygiene.
+_MAX_DELIVERED = 30
+# Earlier files of the session read for the delivery check (116 dogfood N13): enough to cover the files an
+# answer names; files beyond this are not recognized, which leaves the check as it was.
+_MAX_SESSION_FILES = 50
+_DELIVERED_KINDS = frozenset({"deliverable", "deck_preview"})
 _EXTENSION_ALIASES = {
     ".htm": ".html",
     ".xhtml": ".html",
@@ -79,10 +86,30 @@ class DeliverableLedger:
     这个**为真但不够具体**的事实，就以为自己要的那种格式在里面。
     """
 
+    delivered: tuple[tuple[str, str], ...] = ()
+    """Identifier and name of each file this Turn delivered (up to ``_MAX_DELIVERED``).
+
+    A name alone cannot be revised: ``revise_files`` takes identifiers. Later Turns read
+    this pair from the helper result after history hygiene has shortened it.
+    """
+
     reused_files: int = 0
     reused_file_names: tuple[str, ...] = ()
     reused_file_exts: frozenset[str] = frozenset()
     reused_files_verified: bool = True
+
+    session_files: tuple[tuple[str, int], ...] = ()
+    """Name and newest version number of each file earlier Turns of this session delivered.
+
+    Read only when the answer claims a file (116 dogfood N13): "第4版……文件本身已生成" described
+    a version an earlier Turn wrote, and the check took it for a file this Turn failed to produce.
+    Empty when unread, which keeps the check unchanged.
+    """
+
+    @property
+    def session_file_exts(self) -> frozenset[str]:
+        """Canonical extensions of ``session_files`` (``.htm`` counts as ``.html``)."""
+        return frozenset(_canonical_extension("." + name.rsplit(".", 1)[-1]) for name, _ in self.session_files if "." in name)
 
     def count_available_for_ext(self, ext: str) -> int:
         """Availability includes scoped reused files; generation still does not."""
@@ -228,8 +255,12 @@ async def build_deliverable_ledger(
     canvas_store: Any | None = None,
     memory_notes_store: Any | None = None,
     invocations: Any = None,
+    include_session_files: bool = False,
 ) -> DeliverableLedger:
-    """把本轮的产出实况读成一份账单；单项失败标记为未验证。"""
+    """把本轮的产出实况读成一份账单；单项失败标记为未验证。
+
+    ``include_session_files`` also reads the session's earlier delivered files (``session_files``).
+    """
     ok_tools = collect_ok_tools(invocations)
     if not turn_id:
         return DeliverableLedger(
@@ -242,8 +273,10 @@ async def build_deliverable_ledger(
     files = 0
     file_exts: frozenset[str] = frozenset()
     file_names: tuple[str, ...] = ()
+    delivered: tuple[tuple[str, str], ...] = ()
     reused_names: list[str] = []
     reused_verified = True
+    session_files: tuple[tuple[str, int], ...] = ()
     files_verified = artifact_store is not None
     if artifact_store is not None:
         try:
@@ -258,6 +291,11 @@ async def build_deliverable_ledger(
             files = len(delivs)
             names = [str(getattr(a, "filename", "") or "").strip() for a in delivs]
             file_names = tuple(n for n in names if n)[:_MAX_FILE_NAMES]
+            delivered = tuple(
+                (str(a.id), str(a.filename).strip())
+                for a in delivs
+                if getattr(a, "kind", None) in _DELIVERED_KINDS and getattr(a, "id", None) and str(getattr(a, "filename", "") or "").strip()
+            )[:_MAX_DELIVERED]
             file_exts = frozenset("." + n.rsplit(".", 1)[-1].lower() for n in names if "." in n)
         except Exception as e:  # noqa: BLE001 — best-effort
             files_verified = False
@@ -281,6 +319,17 @@ async def build_deliverable_ledger(
                 reused_names = []
                 reused_verified = False
                 logger.debug("deliverable_ledger.reused_files degraded turn=%s error_type=%s", turn_id, type(e).__name__)
+        list_session = getattr(artifact_store, "list_session_deliverables", None)
+        if include_session_files and session_id and user_id and callable(list_session):
+            try:
+                earlier = await list_session(session_id=session_id, user_id=user_id, exclude_turn_id=turn_id, limit=_MAX_SESSION_FILES)
+                session_files = tuple(
+                    (str(a.filename).strip(), int(getattr(a, "version_no", None) or 1))
+                    for a in earlier
+                    if str(getattr(a, "filename", "") or "").strip()
+                )
+            except Exception as e:  # noqa: BLE001 — best-effort: unread leaves the check unchanged
+                logger.debug("deliverable_ledger.session_files degraded turn=%s error_type=%s", turn_id, type(e).__name__)
 
     sections = 0
     sections_verified = canvas_store is not None
@@ -316,10 +365,12 @@ async def build_deliverable_ledger(
         files=files,
         file_exts=file_exts,
         file_names=file_names,
+        delivered=delivered,
         reused_files=len(reused_names),
         reused_file_names=tuple(reused_names[:_MAX_FILE_NAMES]),
         reused_file_exts=frozenset("." + name.rsplit(".", 1)[-1].lower() for name in reused_names if "." in name),
         reused_files_verified=reused_verified,
+        session_files=session_files,
         sections=sections,
         memories=memories,
         ok_tools=ok_tools,

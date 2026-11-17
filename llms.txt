@@ -6,6 +6,9 @@ Bowra is the self-hosted Community edition of Bowhead. This repository is a sour
 
 ## Start here
 
+- [Community FAQ](docs/faq.md): product definition, self-hosting requirements, examples, edition scope, and evidence review.
+- [Current source snapshot](README.md#current-source-snapshot): current Community notes and upgrade instructions.
+
 - [Project overview](README.md): capabilities, Community scope, and availability.
 - [Documentation index](docs/README.md): first run, knowledge, reports, Agents, MCP, automation, and contribution.
 - [External-agent adoption guide](docs/agent-guide.md): capability/input/output/prerequisite/status map and actual Agent Developer API discovery.

@@ -68,9 +68,11 @@ async def first_use(resources, identity, *, read_skill):
     turn = await sessions.record_turn(turn_id="t_lifecycle_first", session_id=session.id, user_text="Summarize supplied evidence: sales grew 5%.")
     agent = await resources.store.get_team_subagent(resources.user.team_id, identity)
     adapter = MockAdapter(provider_name="lifecycle")
+    # After a successful Skill read, a prose answer gets one unreturned-work note (ce9390072);
+    # the model gives the same answer again and the run ends.
     adapter.scripted_responses = (
         [LLMResponse(content="", tool_calls=[ToolCall(id="read", name="skill_read", arguments={"name": "coached-method"})])] if read_skill else []
-    ) + [LLMResponse(content="Sales grew 5%.")]
+    ) + [LLMResponse(content="Sales grew 5%.")] * (2 if read_skill else 1)
     providers = ProviderRegistry()
     providers.load([ProviderConfig(name="lifecycle", type="mock")])
     providers._adapters["lifecycle"] = adapter

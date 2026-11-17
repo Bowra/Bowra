@@ -99,7 +99,12 @@ async def test_two_lead_answers_fetch_once_and_reuse_after_primary_answer(lead_p
                 )
             return tool_response(
                 "subagent_spawn",
-                {"agent_id": p.agent.id, "task": "Analyze the selected period using the retained Prompt.", "delegation_role": "primary"},
+                {
+                    "agent_id": p.agent.id,
+                    "task": "Analyze the selected period using the retained Prompt.",
+                    "delegation_role": "primary",
+                    "required_source_urls": [],
+                },
                 stream=body.get("stream", False),
             )
         primary_calls.append(body)

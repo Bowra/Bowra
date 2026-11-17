@@ -34,10 +34,22 @@ def test_surface_file_exists(name: str) -> None:
     assert _SURFACES[name].is_file(), _SURFACES[name]
 
 
+# c164afa1d rewrote the compute prompt's chart guidance as the English native-presentation
+# contract. It still keeps scatter on add_chart; the per-point label wording lives in the other three.
+_COMPUTE = "compute 系统提示词"
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("name", sorted(_SURFACES))
+def test_compute_prompt_keeps_scatter_on_add_chart() -> None:
+    text = _SURFACES[_COMPUTE].read_text(encoding="utf-8")
+    assert "use `add_chart` with the exact authorized CSV artifact" in text
+    assert "Use native scatter for numeric coordinates; generated PNGs lose native source inspection." in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", sorted(name for name in _SURFACES if name != _COMPUTE))
 def test_scatter_exception_is_stated(name: str) -> None:
-    """四处**都**要说「散点仍走 add_chart」，不能只改一处。"""
+    """其余三处**都**要说「散点仍走 add_chart」，不能只改一处。"""
     text = _SURFACES[name].read_text(encoding="utf-8")
     assert "散点" in text, f"{name} 没提散点"
     assert "add_chart" in text, f"{name} 没指回 add_chart"
@@ -51,7 +63,9 @@ def test_statistical_diagnostic_loophole_closed_in_compute_prompt() -> None:
 
     compute 提示词那份清单里已经摘掉，别再加回去（其余几处保留该措辞是可以的
     ——它们讲的是箱线图/QQ plot 那类真的画不了的，且都紧跟着散点例外）。
+    c164afa1d removed the compute prompt's whole `add_image` allowlist, so the
+    loophole must not come back anywhere in that prompt.
     """
-    text = _SURFACES["compute 系统提示词"].read_text(encoding="utf-8")
-    line = next(ln for ln in text.splitlines() if "`add_image` 只留给" in ln)
-    assert "统计诊断图" not in line, line
+    text = _SURFACES[_COMPUTE].read_text(encoding="utf-8")
+    assert "统计诊断图" not in text
+    assert "statistical diagnostic" not in text.lower()

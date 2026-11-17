@@ -91,16 +91,48 @@ async def iter_grant_verdicts(
         if not resource_id:
             continue
         decision = await access_store.explain_decision(access_ctx, resource_kind, resource_id, permission)
-        allowed = bool(decision.get("allowed"))
-        yield GrantVerdict(
-            resource_kind=resource_kind,
-            resource_id=resource_id,
-            permission=permission,
-            allowed=allowed,
-            reason=(str(decision.get("reason")) if decision.get("reason") is not None else None),
-            owner_exempt=(not allowed and _owner_exempt(ctx, resource_kind, decision, created_by)),
-            decision=decision,
-        )
+        yield _verdict(ctx, (resource_kind, resource_id, permission), decision, created_by)
+
+
+def _verdict(ctx: Any, target: GrantTarget, decision: Mapping[str, Any], team_skill_created_by: str | None) -> GrantVerdict:
+    resource_kind, resource_id, permission = target
+    allowed = bool(decision.get("allowed"))
+    return GrantVerdict(
+        resource_kind=resource_kind,
+        resource_id=resource_id,
+        permission=permission,
+        allowed=allowed,
+        reason=(str(decision.get("reason")) if decision.get("reason") is not None else None),
+        owner_exempt=(not allowed and _owner_exempt(ctx, resource_kind, decision, team_skill_created_by)),
+        decision=decision,
+    )
+
+
+async def grant_verdicts_batch(
+    ctx: Any, access_store: Any, access_ctx: Any, target_lists: Iterable[Iterable[GrantTarget]]
+) -> list[list[GrantVerdict]]:
+    """Every verdict of ``iter_grant_verdicts`` (no re-keying, no author) for several target lists at once.
+
+    Targets resolve and skip exactly as there, but ``explain_decisions`` decides each resource kind and
+    permission in one batch: two queries per chunk of ids instead of two per target. A listing that
+    checked each Skill on its own made about 550 database round trips per Lead start (116, 1.7.49).
+    """
+    resolved_lists: list[list[GrantTarget]] = []
+    groups: dict[tuple[str, str], list[str]] = {}
+    for targets in target_lists:
+        resolved_targets = []
+        for resource_kind, resource_id, permission in targets:
+            resolved = resolve_contextual_grant_target(ctx, resource_kind, resource_id)
+            if resolved is None or not resolved[1]:
+                continue
+            resolved_targets.append((resolved[0], resolved[1], permission))
+            groups.setdefault((resolved[0], permission), []).append(resolved[1])
+        resolved_lists.append(resolved_targets)
+    decisions: dict[GrantTarget, Mapping[str, Any]] = {}
+    for (resource_kind, permission), resource_ids in groups.items():
+        for resource_id, decision in (await access_store.explain_decisions(access_ctx, resource_kind, resource_ids, permission)).items():
+            decisions[(resource_kind, resource_id, permission)] = decision
+    return [[_verdict(ctx, target, decisions[target], None) for target in resolved_targets] for resolved_targets in resolved_lists]
 
 
 async def grant_verdicts(

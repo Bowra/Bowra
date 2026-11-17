@@ -136,9 +136,10 @@ def _trend_canvas() -> dict:
 # ─── helpers ────────────────────────────────────────────────
 
 
-def _run_render(input_data: dict, *, template_path: str | None = None) -> tuple[Path, dict]:
+def _run_render(input_data: dict, *, template_path: str | None = None, workdir: Path | None = None) -> tuple[Path, dict]:
     """跑 render → 返 (output_pptx, result_json)."""
-    workdir = Path(tempfile.mkdtemp(prefix="pptx-test-"))
+    if workdir is None:
+        workdir = Path(tempfile.mkdtemp(prefix="pptx-test-"))
     try:
         if template_path:
             input_data["template_path"] = template_path
@@ -477,7 +478,7 @@ def test_render_insight_referenced_image_embeds_picture(tmp_path):
     canvas["sections"].append({"id": "img1", "kind": "image", "artifact_id": "art_x", "caption": "蒙特卡洛模拟结果", "_local_path": str(png)})
     ins = next(s for s in canvas["sections"] if s["kind"] == "insight_card")
     ins["evidence"] = [{"kind": "image", "chart_section_id": "img1"}]
-    out, _ = _run_render(canvas)
+    out, _ = _run_render(canvas, workdir=tmp_path)
     assert _picture_count(out) >= 1, "insight 引用的 image 应嵌入 picture shape"
     # Insight text still goes on the slide (uses the chart-slide template).
     texts = [t for slide in _slide_texts(out) for t in slide]
@@ -492,7 +493,7 @@ def test_render_standalone_image_embeds_picture(tmp_path):
     canvas = _ea_canvas()
     canvas["sections"] = [s for s in canvas["sections"] if s["kind"] not in ("chart", "insight_card")]
     canvas["sections"].append({"id": "img2", "kind": "image", "artifact_id": "art_y", "caption": "波形图", "_local_path": str(png)})
-    out, _ = _run_render(canvas)
+    out, _ = _run_render(canvas, workdir=tmp_path)
     assert _picture_count(out) >= 1, "独立 image 应嵌入 picture shape"
 
 
@@ -522,7 +523,7 @@ def test_render_image_clears_hidden_demo_chart_workbook(tmp_path: Path) -> None:
             "_local_path": str(png),
         }
     )
-    out, _ = _run_render(canvas)
+    out, _ = _run_render(canvas, workdir=tmp_path)
     assert _picture_count(out) == 1
     assert _chart_fingerprints(out) == []
     workbook_payloads = _embedded_workbook_xml(out)
@@ -543,7 +544,7 @@ def test_render_image_with_bytes_wins_over_bytesless_insight_image(tmp_path):
     ins["evidence"] = [{"kind": "image", "chart_section_id": "img_nobyte"}]
     # Standalone image with bytes.
     canvas["sections"].append({"id": "img_real", "kind": "image", "artifact_id": "art_y", "_local_path": str(png)})
-    out, _ = _run_render(canvas)
+    out, _ = _run_render(canvas, workdir=tmp_path)
     assert _picture_count(out) >= 1, "有字节 image 应被渲染, 不被无字节 insight image 抢占"
 
 

@@ -20,7 +20,8 @@ _FE = Path(__file__).resolve().parents[3] / "packages" / "bowhead_frontend"
 @pytest.mark.unit
 @pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
 def test_frontend_failure_reasons_cover_backend_llm_reason_codes(locale: str) -> None:
-    messages = json.loads((_FE / "messages" / f"{locale}.json").read_text(encoding="utf-8"))
+    # The shared catalog source feeds both editions; `messages/` is ignored assembler output.
+    messages = json.loads((_FE / "edition" / "shared-messages" / f"{locale}.json").read_text(encoding="utf-8"))
     keys = set(messages["error_messages"]["reasons"].keys())
     missing = LLM_REASON_CODES - keys
     assert not missing, f"{locale}.json error_messages.reasons is missing: {sorted(missing)}"

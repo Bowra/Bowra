@@ -108,7 +108,6 @@ def test_route_created_subagent_resolves_into_profile(tmp_path) -> None:
             "description": "answers sales questions",
             "system_prompt": "You are a focused sales analyst.",
             "tool_refs": ["bi_query", "bi_schema"],  # native, analyst-allowlisted
-            "max_iterations": 12,
             "model": "analyst",
             "output_schema": {"type": "object", "additionalProperties": False, "properties": {"exec_summary": {"type": "string"}}},
         },
@@ -129,7 +128,8 @@ def test_route_created_subagent_resolves_into_profile(tmp_path) -> None:
     assert p is not None
     assert p.name == "sales-expert"
     assert p.llm_agent_type == "analyst"  # S4 model clamp
-    assert p.max_iterations == 12  # stored value, not dataclass 50
+    # Per-Agent step limits are no longer authored (f879d4630): the stored default, not dataclass 50.
+    assert p.max_iterations == 10
     assert set(p.tool_whitelist) == {"bi_query", "bi_schema", "subagent_return"}  # native + auto terminal
     assert p.team_tool_bundle == ()  # native-only → empty bundle (not None)
     assert p.output_schema == {"type": "object", "additionalProperties": False, "properties": {"exec_summary": {"type": "string"}}}  # S4 carry

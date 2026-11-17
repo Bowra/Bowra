@@ -252,3 +252,59 @@ async def test_visibility_name_key_unchanged_without_id(tmp_path, monkeypatch):
     access = await _mk_access(tmp_path)
     ctx = _skill_ctx(access)
     assert await skill_visible_by_grants(ctx, "any-skill") is True  # Regression: allow by default without a grant
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enforce", ["1", "0"])
+async def test_skill_listing_decides_in_one_batch_with_the_single_check_answers(tmp_path, monkeypatch, enforce):
+    """The Lead Skill index checked each Skill on its own: about 550 database round trips per Lead
+    start on 116 (1.7.49). It now decides each resource kind in one batch; every Skill keeps the
+    single check's answer, including a refusal through its built-in capability."""
+    from bowhead_core.resource_access import BUILTIN_CAPABILITIES
+    from bowhead_core.skill_access import filter_skill_specs_by_grants, skills_visible_by_grants
+
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", enforce)
+    access = await _mk_access(tmp_path)
+    capability_id, capability = next((cid, cap) for cid, cap in sorted(BUILTIN_CAPABILITIES.items()) if cap.skill_names)
+    capability_skill = sorted(capability.skill_names)[0]
+    for kind, resource_id, principal, effect in (
+        ("skill", "denied-skill", "u_alice", "deny"),
+        ("builtin_capability", capability_id, "u_alice", "deny"),
+        ("skill", "bobs-skill", "u_bob", "allow"),
+    ):
+        await access.create_or_update_resource_grant(
+            team_id="team_acme",
+            resource_kind=kind,
+            resource_id=resource_id,
+            principal_type="user",
+            principal_id=principal,
+            permission="use",
+            effect=effect,
+            created_by="u_admin",
+        )
+    ctx = _skill_ctx(access)
+    names = ["open-skill", "denied-skill", capability_skill, "bobs-skill"]
+    single = {name: await skill_visible_by_grants(ctx, name) for name in names}
+    if enforce == "1":
+        assert single == {"open-skill": True, "denied-skill": False, capability_skill: False, "bobs-skill": False}
+    else:
+        assert all(single.values())
+
+    calls = {"single": 0, "batch": 0}
+    one, many = access.explain_decision, access.explain_decisions
+
+    async def counted_one(*args, **kwargs):
+        calls["single"] += 1
+        return await one(*args, **kwargs)
+
+    async def counted_many(*args, **kwargs):
+        calls["batch"] += 1
+        return await many(*args, **kwargs)
+
+    monkeypatch.setattr(access, "explain_decision", counted_one)
+    monkeypatch.setattr(access, "explain_decisions", counted_many)
+    assert await skills_visible_by_grants(ctx, names) == single
+    specs = [SimpleNamespace(name=name) for name in names]
+    assert [spec.name for spec in await filter_skill_specs_by_grants(ctx, specs)] == [name for name in names if single[name]]
+    # One batch for Skill names and one for built-in capabilities, per listing.
+    assert calls == {"single": 0, "batch": 4}

@@ -72,7 +72,12 @@ async def test_system_lead_retains_original_receiver_and_read_checkpoint(system_
             if not primary_calls:
                 return tool_response(
                     "subagent_spawn",
-                    {"agent_id": selected.id, "task": "Analyze profit with the selected method.", "delegation_role": "primary"},
+                    {
+                        "agent_id": selected.id,
+                        "task": "Analyze profit with the selected method.",
+                        "delegation_role": "primary",
+                        "required_source_urls": [],
+                    },
                     stream=content.get("stream", False),
                 )
             return answer_response(request)

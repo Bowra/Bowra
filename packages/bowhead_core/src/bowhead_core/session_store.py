@@ -623,6 +623,55 @@ def _segment_steer_buffer(raw_json: str | None) -> _SteerBufferSegment:
     )
 
 
+def _plain_steer_head(buffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Leading buffer items that carry only text: no attachment and no reference pointer."""
+    head: list[dict[str, Any]] = []
+    for item in buffer:
+        if not item.get("text") or item.get("attachment_ids") or item.get("attachment_refs") or "reference_submission_id" in item:
+            break
+        head.append(item)
+    return head
+
+
+async def _running_steer_buffer_in_connection(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    turn_id: str,
+    now: str,
+) -> list[dict[str, Any]] | None:
+    """Return the steer buffer while ``turn_id`` is the Session's running legacy Turn under a live dispatch.
+
+    ``None`` means the buffer belongs to finalization or recovery now. These are the
+    conditions under which ``materialize_steer_follow_up`` turns a non-empty buffer into
+    a child Turn, plus a running status so a stopped Turn takes nothing more.
+    """
+    try:
+        parent = await _read_legacy_continuation_parent_in_tx(db, turn_id=turn_id, session_id=session_id)
+    except (SessionProtocolManagedError, TerminalProtocolError):
+        return None
+    if parent is None:
+        return None
+    session, turn = parent
+    if normalize_legacy_turn_status(str(turn["status"])) != "running":
+        return None
+    async with db.execute(
+        "SELECT d.lease_expires_at>? FROM chat_turn_spawn_dispatch d JOIN turns t "
+        "ON t.id=d.turn_id WHERE d.turn_id=? AND d.session_id=? "
+        "AND d.state='spawned' AND d.owner_id IS NOT NULL "
+        "AND d.lease_kind IN ('turn','resume') "
+        "AND d.lease_execution_generation=t.execution_generation",
+        (now, turn_id, session_id),
+    ) as cursor:
+        dispatch = await cursor.fetchone()
+    if dispatch is None or not dispatch[0]:
+        return None
+    try:
+        return _decode_steer_buffer(session["steer_buffer_json"])
+    except _LegacyContinuationRowError:
+        return None
+
+
 async def _materialize_blocked_reference_recovery_child_in_tx(
     db: aiosqlite.Connection,
     *,
@@ -1950,6 +1999,11 @@ class SessionStore:
                 await db.execute("ALTER TABLE turns ADD COLUMN generation_base_tokens_output INTEGER NOT NULL DEFAULT 0")
             if "generation_base_cost_usd" not in cols:
                 await db.execute("ALTER TABLE turns ADD COLUMN generation_base_cost_usd REAL NOT NULL DEFAULT 0.0")
+            # Alembic 0206 owns the deployed column; ordinary history reads exclude maintenance Turns by it.
+            if "operation_kind" not in cols:
+                await db.execute(
+                    "ALTER TABLE turns ADD COLUMN operation_kind TEXT CHECK(operation_kind IS NULL OR operation_kind='context_maintenance')"
+                )
             # Sprint δ: registered_facts + registered_facts_history tables (η pattern)
             await db.execute(
                 "CREATE TABLE IF NOT EXISTS registered_facts ("
@@ -3118,6 +3172,9 @@ class SessionStore:
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
+            # Deadlines start once the writer lock is held; waiting for it can take up to a minute.
+            now = _now()
+            lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
             try:
                 async with db.execute(
                     "SELECT state FROM chat_auth_session_generations WHERE user_id=? AND auth_session_generation_hash=?",
@@ -3675,6 +3732,9 @@ class SessionStore:
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
+            # Deadlines start once the writer lock is held; waiting for it can take up to a minute.
+            now = _now()
+            lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
             try:
                 try:
                     parent = await _read_legacy_continuation_parent_in_tx(
@@ -3823,6 +3883,9 @@ class SessionStore:
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
+            # Deadlines start once the writer lock is held; waiting for it can take up to a minute.
+            now = _now()
+            lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
             try:
                 async with db.execute(
                     "SELECT d.state,d.owner_id,d.cancel_requested_at,"
@@ -4059,6 +4122,9 @@ class SessionStore:
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
+            # Deadlines start once the writer lock is held; waiting for it can take up to a minute.
+            now = _now()
+            recovery_lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=30)).isoformat()
             try:
                 parent = await _read_legacy_continuation_parent_in_tx(
                     db,
@@ -5204,6 +5270,74 @@ class SessionStore:
                     await db.execute("ROLLBACK")
                 raise
         return turn_ids
+
+    async def read_steer_head(self, *, session_id: str, turn_id: str) -> list[dict[str, Any]]:
+        """Return the plain-text instructions at the head of a running Turn's steer buffer.
+
+        Mid-run steering reads this before each Lead step. The result is empty unless the
+        legacy Turn is still the Session's running active Turn under a live dispatch, so a
+        Turn that is ending or being recovered leaves the buffer to its existing owners.
+        The read takes no writer lock; ``claim_steer_head`` repeats every check.
+        """
+        async with open_shared_ctx(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            state = await _running_steer_buffer_in_connection(db, session_id=session_id, turn_id=turn_id, now=_now())
+        return [] if state is None else _plain_steer_head(state)
+
+    async def claim_steer_head(self, *, session_id: str, turn_id: str, items: list[dict[str, Any]]) -> bool:
+        """Remove exactly ``items`` from the head of the buffer for the running Turn that read them.
+
+        Returns False without writing when the Turn no longer owns a live dispatch or the
+        buffer no longer starts with ``items``. Instructions appended meanwhile stay queued.
+        """
+        if not items:
+            return False
+        async with open_shared_ctx(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                state = await _running_steer_buffer_in_connection(db, session_id=session_id, turn_id=turn_id, now=_now())
+                if state is None or state[: len(items)] != items:
+                    await db.execute("ROLLBACK")
+                    return False
+                await db.execute(
+                    "UPDATE sessions SET steer_buffer_json=? WHERE id=? AND active_turn_id=?",
+                    (json.dumps(state[len(items) :], ensure_ascii=False), session_id, turn_id),
+                )
+                await db.commit()
+                return True
+            except BaseException:
+                if db.in_transaction:
+                    await db.execute("ROLLBACK")
+                raise
+
+    async def list_turn_applied_instructions(self, turn_ids: list[str]) -> dict[str, list[str]]:
+        """Return the instructions each Turn took while it was running, in the order taken.
+
+        Reads the ``steer.applied`` rows of ``turn_events``. A Turn without such rows is
+        absent from the result; a malformed row is skipped.
+        """
+        ids = [str(turn_id) for turn_id in dict.fromkeys(turn_ids) if turn_id]
+        taken: dict[str, list[str]] = {}
+        async with open_shared_ctx(self._db_path) as db:
+            for start in range(0, len(ids), 200):
+                chunk = ids[start : start + 200]
+                placeholders = ",".join("?" for _ in chunk)
+                async with db.execute(
+                    f"SELECT turn_id, payload_json FROM turn_events "  # noqa: S608 — placeholders only
+                    f"WHERE turn_id IN ({placeholders}) AND event_type='steer.applied' ORDER BY turn_id, seq",
+                    tuple(chunk),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                for turn_id, payload_json in rows:
+                    try:
+                        items = json.loads(str(payload_json)).get("items")
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+                    texts = [item["text"] for item in items or () if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"]]
+                    if texts:
+                        taken.setdefault(str(turn_id), []).extend(texts)
+        return taken
 
     async def materialize_steer_follow_up(
         self,
@@ -8004,6 +8138,9 @@ class SessionStore:
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
+            # Deadlines start once the writer lock is held; waiting for it can take up to a minute.
+            now = _now()
+            lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
             try:
                 try:
                     parent = await _read_legacy_continuation_parent_in_tx(

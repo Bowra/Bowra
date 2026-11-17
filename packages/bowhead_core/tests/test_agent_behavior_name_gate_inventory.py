@@ -18,18 +18,38 @@ _ALLOWED_DIRECT_COMPARISONS = Counter(
         ("agents/lead_orchestrator.py", "profile == 'marketing-analyst'"): 1,
         ("agents/lead_orchestrator.py", "profile == 'canvas-writer'"): 1,
         ("deck_render_inputs.py", "mode == 'consultant'"): 1,
-        ("deck_render_inputs.py", "mode != 'consultant'"): 1,
+        ("deck_render_inputs.py", "mode != 'consultant'"): 2,
         ("deck_render_inputs.py", "i.arguments.get('profile') == 'consultant'"): 1,
         ("subagent.py", "profile in ('compute', 'consultant')"): 1,
         ("subagent.py", "getattr(profile, 'name', '') == 'marketing-analyst'"): 1,
         ("subagent.py", "profile_name in ('lead', 'analyst', 'compute')"): 1,
         ("subagent.py", "profile == 'consultant'"): 1,
+        # Recorded debt from shipped fixes that landed while this guard was not run. Each still
+        # needs an M3-13E behavior contract; do not add more copies.
+        # 4f813582e and 6c135b78f: lookup template hierarchy and localized lookup rules.
+        ("agents/agent_runner_adapter.py", "manifest.name == 'compute'"): 2,
+        ("subagent.py", "profile.name == 'compute'"): 1,
+        # a3ac20de9 and 8554bb4f6: native new-deck delivery verification and receipts
+        # (the second deck_render_inputs.py `mode != 'consultant'` above is from a3ac20de9).
+        ("deck_render_tool.py", "get_current_peer_name() != 'consultant'"): 1,
+        ("subagent.py", "profile.name == 'consultant'"): 3,
+        ("subagent.py", "result.profile == 'consultant'"): 1,
+        # 01afbedc9: default internal lookup read requirement for an explicit Datarc lookup.
+        ("subagent.py", "profile == 'compute'"): 1,
         ("subagent_capability_resolver.py", "tool.risk in {'read', 'compute', 'artifact_write'}"): 1,
         # As above: compute is a tool risk level, not an Agent name (849cb8df0 reference-receiver metadata validation).
         (
             "reference_receiver_metadata.py",
             "self.risk not in {'read', 'compute', 'artifact_write', 'external_write', 'destructive', 'unknown'}",
         ): 1,
+        # As above: compute is a document authoring operation, not an Agent name.
+        (
+            "documents/authoring_protocol.py",
+            "operation not in {'inspect', 'material', 'compute', 'execute', 'render', 'view'}",
+        ): 1,
+        ("documents/authoring_protocol.py", "operation in {'compute', 'execute'}"): 1,
+        ("documents/authoring_protocol.py", "operation in {'inspect', 'material', 'compute', 'execute'}"): 1,
+        ("documents/authoring_worker.py", "record['operation'] in {'compute', 'execute'}"): 2,
     },
 )
 _ALLOWED_PROFILE_DISPATCHES = Counter(

@@ -42,10 +42,10 @@ afterEach(() => {
 
 describe("NotificationCenter load failure copy", () => {
   it.each([
-    ["zh-CN", "通知", "没能加载通知。请稍后再试。"],
-    ["en-US", "Notifications", "Couldn't load notifications. Try again later."],
-    ["de-DE", "Benachrichtigungen", "Benachrichtigungen konnten nicht geladen werden. Versuchen Sie es später erneut."],
-    ["fr-FR", "Notifications", "Impossible de charger les notifications. Réessayez plus tard."],
+    ["zh-CN", "通知", "没能加载通知。"],
+    ["en-US", "Notifications", "Couldn't load notifications."],
+    ["de-DE", "Benachrichtigungen", "Benachrichtigungen konnten nicht geladen werden."],
+    ["fr-FR", "Notifications", "Impossible de charger les notifications."],
   ] as const)("says what happened and why, without a status code (%s)", async (locale, _bell, message) => {
     document.documentElement.lang = locale;
     state.fetchNotifications.mockRejectedValue(failure(500));
@@ -53,8 +53,9 @@ describe("NotificationCenter load failure copy", () => {
 
     fireEvent.click(screen.getByRole("button", { expanded: false }));
 
+    // The reason's next step replaces the surface's own "try again later".
     const reason = httpFailureMessage("server_error", locale);
-    expect(await screen.findByText((text) => text.startsWith(message) && text.endsWith(reason))).toBeInTheDocument();
+    expect(await screen.findByText(locale === "zh-CN" ? `${message}${reason}` : `${message} ${reason}`)).toBeInTheDocument();
     const panel = document.querySelector("[data-notification-center]");
     expect(panel?.textContent ?? "").not.toMatch(STATUS_CODE);
   });

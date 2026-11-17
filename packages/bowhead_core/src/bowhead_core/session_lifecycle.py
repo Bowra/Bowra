@@ -20,6 +20,7 @@ from typing import Literal
 
 import aiosqlite
 
+from bowhead_core._db import repeat_when_authority_busy
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.session_store import SessionStore
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
@@ -434,6 +435,7 @@ class SessionLifecycleCoordinator:
                 raise SessionLifecycleError("terminal_protocol_future_version")
             raise SessionLifecycleError("terminal_protocol_malformed")
 
+    @repeat_when_authority_busy()
     async def _legacy_transition_if_still_legacy(
         self,
         *,

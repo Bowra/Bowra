@@ -63,6 +63,14 @@ USER_OWNED_SOURCES = frozenset({"upload", "kb_upload", "kb_bundle_upload"})
 _FLAG_ENV = "BOWHEAD_MODEL_VIEW_PROJECTION"
 
 
+class ModelText(str):
+    """A projection that is already model text: the serializer sends it verbatim.
+
+    Any other projection is JSON-encoded, which escapes newlines and quotes.
+    Only a projector that renders complete readable text returns this type.
+    """
+
+
 def enabled() -> bool:
     """默认 ON。`BOWHEAD_MODEL_VIEW_PROJECTION=0` 可即时关掉（不必回滚镜像）。
 
@@ -179,6 +187,11 @@ def project_tool_result(
     """
     if not tool_name or not enabled():
         return result
+    if tool_name == "skill_read":
+        from bowhead_core.skill_text import render_skill_read_result, skill_via_lead_enabled
+
+        if skill_via_lead_enabled() and (text := render_skill_read_result(result)) is not None:
+            return ModelText(text)
     if tool_name == "present_artifacts" and isinstance(result, dict):
         result = dict(result)
         for key in ("artifacts", "output_artifacts"):

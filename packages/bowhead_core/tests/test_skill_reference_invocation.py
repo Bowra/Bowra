@@ -16,7 +16,7 @@ import pytest
 import respx
 from bowhead_core.events import TurnEventBus
 from bowhead_core.skill_bridge import register_skill_tools
-from bowhead_core.subagent import SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.tool_registry import ToolRegistry
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope
 from bowhead_skill.tools import build_skill_tools
@@ -179,16 +179,20 @@ async def test_actual_primary_loop_invokes_retained_baseline_and_settles_model_r
                 },
             )
         assert "CALCULATED 42" in json.dumps(body)
+        if len(sent) == 3:
+            # A prose ending after successful Tool work gets one runtime note (ce9390072);
+            # the same prose answer then ends the run.
+            assert any(UNRETURNED_WORK_NOTE in (message.get("content") or "") for message in body["messages"])
         return success("openai", "after-baseline")
 
     try:
         with respx.mock() as mock:
             route = mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
-            assert result.ok and result.final_answer == "OK" and route.call_count == 2
+            assert result.ok and result.final_answer == "OK" and route.call_count == 3
         assert len(calls) == 1 and calls[0][2] == original and not calls[0][1].exists()
-        assert len(rows(case, "chat_reference_model_contexts")) == 2
-        assert [row["status"] for row in rows(case, "chat_reference_model_invocations")] == ["completed", "completed"]
+        assert len(rows(case, "chat_reference_model_contexts")) == 3
+        assert [row["status"] for row in rows(case, "chat_reference_model_invocations")] == ["completed", "completed", "completed"]
         assert [row["kind"] for row in rows(case, "chat_reference_evidence")] == ["delegate_started", "output_received"]
         assert case.ctx.skill_runtime_grants is None and case.ctx.assigned_skill_material is None
     finally:

@@ -124,11 +124,18 @@ python_exec(
 - FileNotFoundError 时 stderr 末尾附「已声明的 key 清单 + 取法」，照它改一次就对；一个都没声明时 `inputs/` 是空的，先声明再读。
 - **跨调用无状态**：每次全新容器 + 全新工作目录，上次写出的文件（如上次 `to_csv` 的结果）这次**不在盘上**；复用上次数据 = 拿上次 `output_artifacts[].artifact_id` 重新声明进 `inputs`。❌ 别写 `'inputs/art_xxx.csv'`、`'artifacts/art_xxx.csv'` 这类路径——`inputs/` 下的文件名是你声明的 key，不是 artifact id。
 - 用户明确要求生成可下载的最终文件（含 HTML、图片、视频、CSV 等）时，传
-  `purpose="deliverable"`，并在 `deliverable_outputs` 逐项列出代码实际写出的顶层文件名；普通计算、
+  `purpose="deliverable"`，并在 `deliverable_outputs` 逐项列出代码实际写出的文件：顶层文件写文件名（`game.html`）；
+  子目录里的单个文件写相对路径（`build/report.pdf`，按 `report.pdf` 保存）；多文件结果写文件夹并以 `/` 结尾（`site/`，
+  打包成一个保留目录结构的 `site.zip`）。没列出的子目录文件不会保存。普通计算、
   中间数据和 Report 图表数据保持 `purpose="analysis"`。交付意图不能靠扩展名或 MIME 猜。
   A downloadable file draws its charts in the code that writes it (for example inline SVG in an HTML file); it does not
   need `add_chart`. A refused or circuit-broken `add_chart` affects only Canvas charts: still write the requested file,
   and report the chart failure separately instead of saying the file could not be produced.
+- An HTML deliverable (a page, game or visualization) is one self-contained file. The Results preview runs offline and removes
+  external scripts, styles and fonts, so never load a library from a CDN, even if the task asks for one. For 3D, check whether
+  `/opt/bowhead/browser-libs/three/three.min.js` is available in the sandbox. When present, inline it in a classic
+  `<script>` before your own code and use the global `THREE`. When absent, use a supported offline technique or explain
+  which part requires the library.
 - **比增长 / 同比 / 「增长最快的 N 个」→ 用沙箱内置的 `compare_growth`**，别自己把两年各自 `groupby().sum()` 再相除、也别拿月度斜率或环比判断增长：
   ```python
   from period_growth import compare_growth

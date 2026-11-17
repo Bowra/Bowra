@@ -236,7 +236,7 @@ describe("profile partial saves", () => {
       fireEvent.change(await screen.findByLabelText("显示名称"), { target: { value: "Updated" } });
       fireEvent.click(screen.getByRole("button", { name: "保存" }));
       expect(await screen.findByText(
-        "姓名的保存结果尚未确认，请先核对当前资料。服务暂时不可用，可能正在重启或维护，请稍后重试。",
+        "姓名的保存结果尚未确认。服务暂时不可用，可能正在重启或维护，请稍后重试。",
       )).toBeTruthy();
     } finally {
       document.documentElement.lang = "";

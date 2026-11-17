@@ -301,6 +301,7 @@ class TestRevealEmitIsGated:
         assert len(gated) == 2, (
             f"期望 chart / image 两个 handler 都门控，实际 {len(gated)} 处——有人把 `and not _suppress_reveal` 删了，target=chat 的图会照常上画布"
         )
-        for handler in ("_add_chart", "_add_image"):
+        # The add_chart Tool entry adjusts the request; `_draw_chart` is the body that saves and reveals.
+        for handler in ("_draw_chart", "_add_image"):
             body = src.split(f"async def {handler}(", 1)[1].split("\nasync def ", 1)[0]
             assert "await _apply_surface_target(" in body, f"{handler} must apply its visibility target before revealing a section"

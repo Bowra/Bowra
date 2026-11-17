@@ -43,6 +43,7 @@ ephemeral context-manager pattern.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import sqlite3
@@ -81,7 +82,14 @@ def _await_locations(task: asyncio.Task | None) -> list[str]:
 
 
 def _watch_shared_transaction(conn: aiosqlite.Connection) -> Callable[[], None]:
-    """Attribute a long open transaction; this does not identify its lock mode."""
+    """Attribute a long open transaction; this does not identify its lock mode.
+
+    The check runs on the event loop while the connection's worker may be inside a statement, so it
+    never calls SQLite. From SQLite 3.53.3 ``in_transaction`` takes the connection mutex, which the
+    worker holds for the whole of a statement: reading it here stopped the event loop for as long as
+    a ``BEGIN IMMEDIATE`` waited for the writer, and the transaction it waited for needs the event
+    loop to commit. The worker records the state after every operation instead.
+    """
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     started = time.monotonic()
@@ -90,7 +98,7 @@ def _watch_shared_transaction(conn: aiosqlite.Connection) -> Callable[[], None]:
     def inspect_transaction() -> None:
         nonlocal timer
         try:
-            active = conn.in_transaction
+            active = conn._conn.bowhead_open_transaction  # noqa: SLF001 -- A Python attribute the worker maintains, not a SQLite call.
         except ValueError:
             return
         if not active:
@@ -161,45 +169,67 @@ async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
         yield conn
 
 
-async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[aiosqlite.Connection], Awaitable[T]]) -> T:
-    """Run an explicitly admitted, database-only idempotent write transaction.
+# ── Repeating a write that found its lock taken ──────────────────────────
+# Every repeat of a busy SQLite write goes through ``repeat_while_busy``. The entry points below
+# only choose which errors repeat, the wait budget and what a spent wait raises:
+#
+# - ``wait_for_writer``: any SQLITE_BUSY (writer lock or authority lease), up to one minute;
+#   for background writes such as usage settlement. Turn event writes use the same rule.
+# - ``repeat_when_authority_busy``: a store method that owns its transaction and lost the
+#   authority lease; 30 seconds, then ``SQLiteStoreBusy`` (503 ``store_busy``) for a request.
+# - ``run_sqlite_authority_write``: a database-only callback on a borrowed connection that lost
+#   the authority lease; the connection's own busy-timeout budget.
 
-    The callback must not commit, perform external effects, or return live cursors.
-    Only marked authority conflicts inside the callback can repeat, after full
-    rollback and connection release, within the original busy-timeout budget.
+
+async def repeat_while_busy[T](
+    attempt: Callable[[], Awaitable[T]],
+    *,
+    retry: Callable[[sqlite3.OperationalError], bool],
+    seconds_left: Callable[[], float | None],
+    first_delay: float,
+    max_delay: float,
+    spent: Callable[[], BaseException] | None = None,
+    log: Callable[[str, float], None] | None = None,
+) -> T:
+    """Repeat ``attempt`` while it fails with a busy error that ``retry`` admits.
+
+    ``attempt`` runs one complete write and has written nothing when it raises: one transaction
+    that rolled back, or one autocommit statement. It opens its own connection, so waiting holds
+    no lock, snapshot or lease. An admitted ``OperationalError`` repeats after a pause that doubles
+    from ``first_delay`` up to ``max_delay`` while ``seconds_left()`` stays positive; ``None`` means
+    no budget is known yet. Other errors and cancellation propagate at once. A spent budget
+    re-raises the last error, or raises ``spent()`` from it. ``log(phase, waited_seconds)`` hears
+    ``"started"`` on the first pause and then ``"ended"`` or ``"failed"``.
     """
-    deadline = None
-    delay = 0.01
+    started = time.monotonic()
+    delay = first_delay
+    waiting = False
     while True:
-        retryable = False
         try:
-            async with open_shared_ctx(str(path)) as db:
-                if deadline is None:
-                    async with db.execute("PRAGMA busy_timeout") as cursor:
-                        timeout_ms = (await cursor.fetchone())[0]
-                    deadline = time.monotonic() + timeout_ms / 1000
-                else:
-                    remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-                    await db.execute(f"PRAGMA busy_timeout={remaining_ms}")
-                await db.execute("BEGIN IMMEDIATE")
-                try:
-                    result = await operation(db)
-                except BaseException as error:
-                    await db.rollback()
-                    retryable = isinstance(error, sqlite3.OperationalError) and getattr(error, "bowhead_authority_busy", False) is True
-                    raise
-                await db.commit()
-                return result
-        except sqlite3.OperationalError:
-            if not retryable or deadline is None:
-                raise
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            await anyio.sleep(min(delay, remaining))
-            if time.monotonic() >= deadline:
-                raise
-            delay = min(delay * 2, 0.1)
+            result = await attempt()
+        except sqlite3.OperationalError as error:
+            if retry(error):
+                remaining = seconds_left()
+                if remaining is not None and remaining > 0:
+                    if not waiting:
+                        waiting = True
+                        if log is not None:
+                            log("started", time.monotonic() - started)
+                    await anyio.sleep(min(delay, remaining))
+                    delay = min(delay * 2, max_delay)
+                    remaining = seconds_left()
+                    if remaining is not None and remaining > 0:
+                        continue
+                if waiting and log is not None:
+                    log("failed", time.monotonic() - started)
+                if spent is not None:
+                    raise spent() from error
+            elif waiting and log is not None:
+                log("failed", time.monotonic() - started)
+            raise
+        if waiting and log is not None:
+            log("ended", time.monotonic() - started)
+        return result
 
 
 #: How long a write waits for a database's writer lock before it fails. With the earlier 5 s, one long
@@ -212,7 +242,7 @@ WRITER_BUSY_TIMEOUT_MS = int(WRITER_WAIT_SECONDS * 1000)
 
 
 def writer_busy(error: BaseException) -> bool:
-    """Whether a write found the writer lock held (any SQLITE_BUSY code)."""
+    """Whether a write found the writer lock held (any SQLITE_BUSY code, the authority lease included)."""
     code = getattr(error, "sqlite_errorcode", None)
     return isinstance(error, sqlite3.OperationalError) and isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_BUSY
 
@@ -225,26 +255,154 @@ async def wait_for_writer[T](label: str, attempt: Callable[[], Awaitable[T]]) ->
     connection each time, so no lock or snapshot is kept while waiting.
     """
     started = time.monotonic()
-    delay = 0.05
-    waiting = False
-    while True:
-        try:
-            result = await attempt()
-        except sqlite3.OperationalError as error:
-            waited = time.monotonic() - started
-            if not writer_busy(error) or waited >= WRITER_WAIT_SECONDS:
-                if waiting:
-                    _logger.warning("sqlite.writer_wait_failed label=%s waited_ms=%d", label, waited * 1000)
+
+    def log(phase: str, waited: float) -> None:
+        if phase == "started":
+            _logger.warning("sqlite.waits_for_writer label=%s", label)
+        elif phase == "ended":
+            _logger.info("sqlite.writer_wait_ended label=%s waited_ms=%d", label, waited * 1000)
+        else:
+            _logger.warning("sqlite.writer_wait_failed label=%s waited_ms=%d", label, waited * 1000)
+
+    return await repeat_while_busy(
+        attempt,
+        retry=writer_busy,
+        seconds_left=lambda: WRITER_WAIT_SECONDS - (time.monotonic() - started),
+        first_delay=0.05,
+        max_delay=0.5,
+        log=log,
+    )
+
+
+#: How long a request's write keeps repeating after it loses the cross-file authority lease. Most
+#: conflicts clear within the first repeats; the bound covers a long transaction of another Turn
+#: (completion writes held their lock 10-12 s on 116) without the person seeing a busy answer.
+#: The maintainer set 30 s on 2026-11-17 (it was 5 s for one day).
+AUTHORITY_BUSY_WAIT_SECONDS = 30.0
+
+
+def is_authority_busy(error: BaseException) -> bool:
+    """Whether ``error`` is the runtime's marked cross-file authority-lease conflict."""
+    return isinstance(error, sqlite3.OperationalError) and getattr(error, "bowhead_authority_busy", False) is True
+
+
+class SQLiteStoreBusy(RuntimeError):
+    """A write kept losing its lock for its whole wait; nothing was written.
+
+    The gateway answers it with 503 ``store_busy`` and ``Retry-After``: the same request can
+    succeed once running work releases the lock.
+    """
+
+    code = "store_busy"
+
+
+def repeat_when_authority_busy[**P, T](
+    spent: Callable[[], BaseException] | None = SQLiteStoreBusy,
+) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
+    """Repeat a complete write method that lost the cross-file authority lease.
+
+    This is the standard for a store method that opens its own connection and runs one write
+    transaction on fenced tables. A fenced write asks for an exclusive lease that fails at once
+    while a running Turn holds the shared side, so without a repeat the request fails under
+    ordinary load. Admit a method only when all of these hold:
+
+    - its transaction is database-only, and it has rolled back and closed its connection by the
+      time the error leaves it;
+    - every attempt rechecks its preconditions (existence, revision or ETag, uniqueness,
+      permission) inside its own transaction, so a repeat cannot act on a stale decision;
+    - no statement runs after its commit (a follow-up read belongs to the caller), so a repeat
+      never meets its own committed write.
+
+    Only the runtime's marked conflict repeats, for up to ``AUTHORITY_BUSY_WAIT_SECONDS``. When
+    the wait is spent, ``spent()`` is raised from the last conflict and nothing was written. A
+    writer-lock timeout (an unmarked SQLITE_BUSY after the connection's own busy timeout) is not
+    repeated but raises ``spent()`` too, since it also wrote nothing. The
+    default ``SQLiteStoreBusy`` needs no route code: the gateway answers it with 503
+    ``store_busy``; ``None`` re-raises the last conflict for callers that already map it.
+    A database-only callback that can take a borrowed connection uses
+    ``run_sqlite_authority_write`` instead.
+    """
+
+    def decorate(method: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
+        label = method.__qualname__
+
+        def log(phase: str, waited: float) -> None:
+            if phase == "started":
+                _logger.info("sqlite.authority_busy_wait_started label=%s", label)
+            elif phase == "ended":
+                _logger.info("sqlite.authority_busy_wait_ended label=%s waited_ms=%d", label, waited * 1000)
+            else:
+                _logger.warning("sqlite.authority_busy_wait_failed label=%s waited_ms=%d", label, waited * 1000)
+
+        @functools.wraps(method)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            deadline = time.monotonic() + AUTHORITY_BUSY_WAIT_SECONDS
+            try:
+                return await repeat_while_busy(
+                    lambda: method(*args, **kwargs),
+                    retry=is_authority_busy,
+                    seconds_left=lambda: deadline - time.monotonic(),
+                    first_delay=0.01,
+                    max_delay=0.1,
+                    spent=spent,
+                    log=log,
+                )
+            except sqlite3.OperationalError as error:
+                # The writer lock, not the lease: the attempt already waited its connection's whole
+                # busy timeout (5 s unpooled, 60 s pooled), so it is not repeated. It wrote nothing,
+                # so it gets the same answer as a spent lease wait instead of an unexplained 500.
+                if spent is None or not writer_busy(error):
+                    raise
+                _logger.warning("sqlite.authority_busy_wait_failed label=%s reason=writer_lock", label)
+                raise spent() from error
+
+        return wrapper
+
+    return decorate
+
+
+async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[aiosqlite.Connection], Awaitable[T]]) -> T:
+    """Run an explicitly admitted, database-only idempotent write transaction.
+
+    The callback must not commit, perform external effects, or return live cursors.
+    Only marked authority conflicts inside the callback can repeat, after full
+    rollback and connection release, within the original busy-timeout budget.
+    """
+    deadline: float | None = None
+    retryable = False
+
+    async def attempt() -> T:
+        nonlocal deadline, retryable
+        retryable = False
+        async with open_shared_ctx(str(path)) as db:
+            if deadline is None:
+                async with db.execute("PRAGMA busy_timeout") as cursor:
+                    timeout_ms = (await cursor.fetchone())[0]
+                deadline = time.monotonic() + timeout_ms / 1000
+            else:
+                remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                # The pragma returns a row; close its cursor so it does not count as an open read (f6d822c69).
+                async with db.execute(f"PRAGMA busy_timeout={remaining_ms}"):
+                    pass
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                result = await operation(db)
+            except BaseException as error:
+                await db.rollback()
+                retryable = is_authority_busy(error)
                 raise
-            if not waiting:
-                waiting = True
-                _logger.warning("sqlite.waits_for_writer label=%s", label)
-            await anyio.sleep(delay)
-            delay = min(delay * 2, 0.5)
-            continue
-        if waiting:
-            _logger.info("sqlite.writer_wait_ended label=%s waited_ms=%d", label, (time.monotonic() - started) * 1000)
-        return result
+            await db.commit()
+            return result
+
+    # Only a conflict raised by the callback itself repeats: commit, rollback and release
+    # failures leave ``retryable`` false and propagate.
+    return await repeat_while_busy(
+        attempt,
+        retry=lambda _error: retryable,
+        seconds_left=lambda: None if deadline is None else deadline - time.monotonic(),
+        first_delay=0.01,
+        max_delay=0.1,
+    )
 
 
 # ── Connection pools ──────────────────────────────────────────────────────
@@ -304,13 +462,27 @@ def _daemonize(conn: aiosqlite.Connection) -> None:
         worker.daemon = True
 
 
+async def _run_setup(conn: aiosqlite.Connection, sql: str) -> None:
+    """Run one connection setup statement and close its cursor before the connection is handed out.
+
+    A cursor that is only dropped is closed later, by a task the event loop has not run yet when the
+    borrower's first statement reaches the connection. Until then it counts as an open read, and a
+    statement that finds an open read may not wait for a busy authority lease: it fails at once with
+    "database is locked". On 116 (1.7.47, 2026-11-16) a file lookup on a newly opened pooled
+    connection failed that way while another Turn held the lease, and the ``add_chart`` call that
+    made it failed with it.
+    """
+    cursor = await conn.execute(sql)
+    await cursor.close()
+
+
 async def _open_pooled_reader(path: str) -> aiosqlite.Connection:
     conn = diagnostic_connect(path)
     _daemonize(conn)
     await conn
     try:
-        await conn.execute("PRAGMA busy_timeout=5000")
-        await conn.execute("PRAGMA query_only=ON")
+        await _run_setup(conn, "PRAGMA busy_timeout=5000")
+        await _run_setup(conn, "PRAGMA query_only=ON")
     except BaseException:
         await conn.close()
         raise
@@ -393,6 +565,10 @@ def _scrub_raw(raw: sqlite3.Connection) -> bool:
     if has_temp_objects:
         return False
     raw.executescript(_SHARED_BASELINE)
+    # The diagnostic connection follows busy_timeout only through single-statement pragmas, so a value a
+    # borrower lowered (run_sqlite_authority_write's remaining budget) would otherwise outlive this scrub.
+    if hasattr(raw, "bowhead_busy_timeout_ms"):
+        raw.bowhead_busy_timeout_ms = WRITER_BUSY_TIMEOUT_MS
     raw.row_factory = None
     raw.text_factory = str
     raw.isolation_level = ""
@@ -414,10 +590,10 @@ async def _open_pooled_shared(path: str) -> aiosqlite.Connection:
     _daemonize(conn)
     await conn
     try:
-        await conn.execute(f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS}")
-        await conn.execute("PRAGMA main.synchronous=NORMAL")
-        await conn.execute("PRAGMA foreign_keys=ON")
-        await conn.execute("PRAGMA main.secure_delete=ON")
+        await _run_setup(conn, f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS}")
+        await _run_setup(conn, "PRAGMA main.synchronous=NORMAL")
+        await _run_setup(conn, "PRAGMA foreign_keys=ON")
+        await _run_setup(conn, "PRAGMA main.secure_delete=ON")
     except BaseException:
         await conn.close()
         raise

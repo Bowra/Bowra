@@ -18,6 +18,8 @@ PLOT_KINDS = frozenset(
     {"kpi", "line", "bar", "hbar", "pie", "stacked_bar", "dual_axis", "combo", "scatter", "area_stacked", "waterfall", "sankey", "heatmap"}
 )
 GROUP_KINDS = frozenset({"line", "bar", "hbar", "stacked_bar", "area_stacked", "heatmap", "sankey", "scatter"})
+#: Kinds whose y fields with exactly two declared units the add_chart Tool draws on a dual axis.
+UNIT_SPLIT_KINDS = frozenset({"combo", "bar", "line", "hbar"})
 
 
 def _declared_unit(column: ChartColumn) -> str | None:
@@ -31,9 +33,48 @@ def _declared_unit(column: ChartColumn) -> str | None:
 
 
 class ExplicitPresentationError(ValueError):
-    def __init__(self, message: str, path: str = "/axes") -> None:
+    def __init__(self, message: str, path: str = "/axes", *, missing: list[str] | None = None) -> None:
         super().__init__(message)
         self.path = path
+        #: Requested fields absent from the data, so the caller can say which data it read.
+        self.missing = missing or []
+
+
+class _Problems:
+    """Every independent problem of one request, raised together.
+
+    A model fixes what an error names and resends. One rule per reply cost the 116 helper
+    the regression case (the regression case) three calls on one combo chart, and the third failure in
+    a row disabled `add_chart` for it. A single problem keeps its original message and path.
+    """
+
+    def __init__(self) -> None:
+        self.found: list[tuple[str, str]] = []
+
+    def add(self, message: str, path: str = "/axes") -> None:
+        self.found.append((message, path))
+
+    def take(self, error: ExplicitPresentationError) -> None:
+        self.add(str(error), error.path)
+
+    def error(self) -> ExplicitPresentationError:
+        if len(self.found) == 1:
+            return ExplicitPresentationError(*self.found[0])
+        listed = " ".join(f"{index}. {message}" for index, (message, _path) in enumerate(self.found, 1))
+        return ExplicitPresentationError(f"Fix all {len(self.found)} problems before resending: {listed}", self.found[0][1])
+
+    def raise_found(self) -> None:
+        if self.found:
+            raise self.error()
+
+
+def _y_right_refusal(kind: str) -> str:
+    if kind == "combo":
+        return (
+            "combo draws every y field on one value axis (the first as bars, the rest as lines) and does not accept y_right. "
+            "For a right-hand axis use force_kind dual_axis and name those fields in y_right."
+        )
+    return "Only dual_axis accepts y_right."
 
 
 def input_properties() -> dict[str, Any]:
@@ -82,69 +123,124 @@ def completed_axes(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_request(args: dict[str, Any], *, analytical: bool = False) -> None:
+    """Refuse a request that explicit presentation cannot draw, naming every independent problem.
+
+    Problems that later checks depend on (an unsupported kind, a missing axes object, unreadable
+    field lists) still end the check where they are found.
+    """
     args = completed_axes(args)
+    problems = _Problems()
     for key in ("series", "hint", "limit", "sort_by"):
         if key in args:
-            raise ExplicitPresentationError(
+            problems.add(
                 f"{key} is not supported by explicit presentation. Use Table columns or plot axes/group_by; prepare sorting, ranking and sampling upstream.",
                 f"/{key}",
             )
     kind = args.get("force_kind", "table")
     if not isinstance(kind, str) or kind not in {"table", *PLOT_KINDS}:
-        raise ExplicitPresentationError("Choose a supported force_kind or omit it for a Table.", "/force_kind")
+        problems.add("Choose a supported force_kind or omit it for a Table.", "/force_kind")
+        raise problems.error()
     if analytical:
         if any(key in args for key in ("columns", "axes", "group_by")):
-            raise ExplicitPresentationError("Analytical views already declare their exact fields; omit ordinary columns/axes/group_by.")
+            problems.add("Analytical views already declare their exact fields; omit ordinary columns/axes/group_by.")
+        problems.raise_found()
         return
     if kind == "table":
         if "axes" in args or "group_by" in args:
-            raise ExplicitPresentationError("Tables use columns, not axes or group_by.")
+            problems.add("Tables use columns, not axes or group_by.")
         selection = args.get("columns", "all")
         if selection != "all":
-            _keys(selection, "/columns")
+            try:
+                _keys(selection, "/columns")
+            except ExplicitPresentationError as exc:
+                problems.take(exc)
+        problems.raise_found()
         return
     if "columns" in args:
-        raise ExplicitPresentationError("Plots use axes and group_by, not Table columns.", "/columns")
+        problems.add("Plots use axes and group_by, not Table columns.", "/columns")
     axes = args.get("axes")
     if not isinstance(axes, dict) or set(axes) - {"x", "y", "x_scale", "y_right"}:
-        raise ExplicitPresentationError("Declare axes with exact x, y and x_scale keys; KPI uses y only.")
-    y = _keys(axes.get("y"), "/axes/y")
+        problems.add("Declare axes with exact x, y and x_scale keys; KPI uses y only.")
+        raise problems.error()
+    try:
+        y = _keys(axes.get("y"), "/axes/y")
+    except ExplicitPresentationError as exc:
+        problems.take(exc)
+        raise problems.error() from None
     if len(y) > 12:
-        raise ExplicitPresentationError("At most twelve y fields fit a native plot; prepare a smaller view or use a Table.", "/axes/y")
-    groups = _keys(args.get("group_by"), "/group_by", empty=True)
+        problems.add("At most twelve y fields fit a native plot; prepare a smaller view or use a Table.", "/axes/y")
+    try:
+        groups = _keys(args.get("group_by"), "/group_by", empty=True)
+    except ExplicitPresentationError as exc:
+        problems.take(exc)
+        raise problems.error() from None
     if len(groups) > 1:
-        raise ExplicitPresentationError("At most one explicit group is supported; prepare a composite grouping field upstream.", "/group_by")
+        problems.add("At most one explicit group is supported; prepare a composite grouping field upstream.", "/group_by")
     if kind == "kpi":
         if set(axes) != {"y"} or groups or len(y) != 1:
-            raise ExplicitPresentationError("KPI uses exactly one axes.y field and group_by: [] only.")
+            problems.add("KPI uses exactly one axes.y field and group_by: [] only.")
+        problems.raise_found()
         return
-    if not isinstance(axes.get("x"), str) or not axes["x"]:
-        raise ExplicitPresentationError("Declare the exact x field.", "/axes/x")
+    has_x = isinstance(axes.get("x"), str) and bool(axes["x"])
+    if not has_x:
+        problems.add("Declare the exact x field.", "/axes/x")
     required_scale = "linear" if kind == "scatter" else "category"
     if axes.get("x_scale") != required_scale:
-        raise ExplicitPresentationError(
+        problems.add(
             f"{kind} requires x_scale={required_scale!r}. Continuous time/numeric Line axes use the existing analytical profile.", "/axes/x_scale"
         )
     if groups and (kind not in GROUP_KINDS or len(y) != 1):
-        raise ExplicitPresentationError(
+        problems.add(
             "This native shape cannot represent these groups and y fields without aggregation; prepare the intended result or use a Table.",
             "/group_by",
         )
     if kind in {"heatmap", "sankey"} and (len(groups) != 1 or len(y) != 1):
-        raise ExplicitPresentationError(f"{kind} requires one group_by field and exactly one y field.", "/group_by")
+        problems.add(f"{kind} requires one group_by field and exactly one y field.", "/group_by")
     if kind in {"scatter", "pie", "waterfall"} and len(y) != 1:
-        raise ExplicitPresentationError(f"{kind} requires exactly one y field.", "/axes/y")
+        problems.add(f"{kind} requires exactly one y field.", "/axes/y")
     if kind in {"dual_axis", "combo"} and len(y) < 2:
-        raise ExplicitPresentationError(f"{kind} requires at least two explicitly named y fields.", "/axes/y")
+        problems.add(f"{kind} requires at least two explicitly named y fields.", "/axes/y")
     if kind == "dual_axis":
-        right = _keys(axes.get("y_right"), "/axes/y_right")
-        if not set(right) < set(y):
-            raise ExplicitPresentationError(
-                "y_right names the axes.y fields drawn on the right axis; keep at least one y field on the left axis.", "/axes/y_right"
-            )
+        try:
+            right = _keys(axes.get("y_right"), "/axes/y_right")
+        except ExplicitPresentationError as exc:
+            problems.take(exc)
+        else:
+            if not set(right) < set(y):
+                problems.add("y_right names the axes.y fields drawn on the right axis; keep at least one y field on the left axis.", "/axes/y_right")
     elif "y_right" in axes:
-        raise ExplicitPresentationError("Only dual_axis accepts y_right.", "/axes/y_right")
-    _keys([axes["x"], *groups, *y], "/axes")
+        problems.add(_y_right_refusal(kind), "/axes/y_right")
+    if has_x:
+        try:
+            _keys([axes["x"], *groups, *y], "/axes")
+        except ExplicitPresentationError as exc:
+            problems.take(exc)
+    problems.raise_found()
+
+
+def _split_two_units(kind: str, axes: dict[str, Any], selected: list[ChartColumn], fallbacks: list[dict[str, str]]) -> str:
+    """Draw y fields with exactly two declared units as dual_axis: the first y field's unit on the left.
+
+    116 refusals were mostly an amount and a rate written as one combo ("bars for revenue, a line for
+    year-on-year"); the dual-axis renderer draws the left axis as bars and the right as a line.
+    """
+    from bowhead_core.chart.compat import receipt
+
+    declared = [(column, _declared_unit(column)) for column in selected if column.key in axes["y"]]
+    units = list(dict.fromkeys(unit for _column, unit in declared if unit))
+    if len(units) != 2:
+        return kind
+    right = [column.key for column, unit in declared if unit == units[1]]
+    shown = [next(column.unit or unit for column, declared_unit in declared if declared_unit == unit) for unit in units]
+    axes["y_right"] = right
+    for column in selected:
+        if column.key in axes["y"]:
+            column.y_axis_id = int(column.key in right)
+    detail = f"{kind} fields carry two units ({shown[0]}, {shown[1]}); drew dual_axis with {right} on the right axis."
+    if kind == "hbar":
+        detail += " A dual axis is vertical."
+    receipt(fallbacks, "two_units_drawn_as_dual_axis", "/force_kind", detail)
+    return "dual_axis"
 
 
 def _keys(value: Any, path: str, *, empty: bool = False) -> list[str]:
@@ -165,8 +261,13 @@ def compile_view(
     analytical: dict[str, Any] | None = None,
     full_table: bool = False,
     observation_keys: list[str] | None = None,
+    fallbacks: list[dict[str, str]] | None = None,
 ) -> ChartSpec:
-    """Compile one view without field discovery, column pruning or data reduction."""
+    """Compile one view without field discovery, column pruning or data reduction.
+
+    `fallbacks` is passed by the add_chart Tool only: a plot whose y fields carry two declared
+    units is then drawn on a dual axis and the change is recorded there. Strict callers pass nothing.
+    """
     args = completed_axes(args)
     validate_request(args, analytical=analytical is not None)
     try:
@@ -199,7 +300,9 @@ def compile_view(
     missing = [key for key in keys if key not in by_key]
     if missing:
         raise ExplicitPresentationError(
-            f"Requested fields are absent: {missing}. Available fields: {list(by_key)}.", "/columns" if kind == "table" else "/axes"
+            f"Requested fields are absent: {missing}. Available fields: {list(by_key)}.",
+            "/columns" if kind == "table" else "/axes",
+            missing=missing,
         )
     selected = [copy.deepcopy(by_key[key]) for key in keys]
     values = [{key: row.get(key) for key in keys} for row in rows]
@@ -237,6 +340,8 @@ def compile_view(
         for key in axes["y"]:
             if not any(row[key] is not None for row in values):
                 raise ExplicitPresentationError(f"Field {key!r} has no usable observations; use a Table to show missing data.", "/axes/y")
+        if fallbacks is not None and kind in UNIT_SPLIT_KINDS and not axes.get("y_right"):
+            kind = _split_two_units(kind, axes, selected, fallbacks)
         for axis_id in (0, 1):
             units = {
                 _declared_unit(column) for column in selected if column.key in axes["y"] and column.y_axis_id == axis_id and _declared_unit(column)

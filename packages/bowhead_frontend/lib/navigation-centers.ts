@@ -58,7 +58,7 @@ export function navigationContextForRoute(
   }
   if ((first === "team" || first === "space") && second === "settings") {
     const tab = third;
-    return ["tools", "capabilities", "workflows", "scheduled"].includes(tab ?? "")
+    return ["tools", "plugins", "workflows", "scheduled"].includes(tab ?? "")
       ? "capabilities"
       : "settings";
   }
@@ -75,7 +75,7 @@ export function centerActiveForRoute(
   if (first === "capabilities") {
     if (["my", "team"].includes(query.get("view") ?? "")) return "overview";
     if (query.get("type") === "tools") return "tools_catalog";
-    if (query.get("type") === "capabilities") return "capabilities_catalog";
+    if (query.get("type") === "plugins") return "capabilities_catalog";
     return "overview";
   }
   if (first === "connections") return "connections";
@@ -85,7 +85,7 @@ export function centerActiveForRoute(
       ? third : null;
   if (tab === "workflows") return "skills";
   if (tab === "tools") return "tools_catalog";
-  if (tab === "capabilities") return "capabilities_catalog";
+  if (tab === "plugins") return "capabilities_catalog";
   if (tab === "scheduled") return "scheduled";
   return null;
 }
@@ -116,7 +116,7 @@ export function capabilityResourceNavigation(capabilities: MeUser["capabilities"
   return [
     center("skills", "/skills/"),
     center("tools_catalog", "/capabilities/?type=tools"),
-    center("capabilities_catalog", "/capabilities/?type=capabilities"),
+    center("capabilities_catalog", "/capabilities/?type=plugins"),
     ...(capabilities?.personal_mcp || capabilities?.google_workspace ? [center("connections", "/connections/")] : []),
     ...(authenticated ? [{ ...center("scheduled", settingsTabHref("scheduled")), counter: "scheduled_active" as const }] : []),
   ];
@@ -171,7 +171,7 @@ export function capabilityOverviewGroups(me: MeUser | null) {
         ...(capabilities?.subagent_management_v2 ? [overviewItem("agents", "/agents/marketplace/")] : []),
         overviewItem("skills", "/skills/"),
         overviewItem("tools_catalog", "/capabilities/?type=tools"),
-        overviewItem("capabilities_catalog", "/capabilities/?type=capabilities"),
+        overviewItem("capabilities_catalog", "/capabilities/?type=plugins"),
       ],
     },
     {

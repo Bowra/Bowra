@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+from bowhead_core.artifact_store import SVG_MIME
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
@@ -111,7 +112,8 @@ async def artifact_streaming_response(
         "Content-Disposition": ("inline" if inline else content_disposition("attachment", art.filename or art.id)),
         "X-Content-Type-Options": "nosniff",
     }
-    if (art.mime or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml"}:
+    normalized_mime = (art.mime or "").split(";", 1)[0].strip().lower()
+    if normalized_mime in {"text/html", "application/xhtml+xml"}:
         from bowhead_core.execution_limits import load_team_limits
         from bowhead_core.html_preview_policy import HTML_PREVIEW_LIMIT_HEADER
 
@@ -127,6 +129,7 @@ async def artifact_streaming_response(
                 team_id = await user_store.get_workspace_team_id(workspace_id)
         limits = await load_team_limits(getattr(request.app.state, "team_settings_store", None), team_id)
         headers[HTML_PREVIEW_LIMIT_HEADER] = str(limits.html_max_bytes)
+    if normalized_mime in {"text/html", "application/xhtml+xml", SVG_MIME}:
         headers["Cache-Control"] = "private, no-store"
         # Fetching bytes into the trusted preview does not inherit this policy.
         # If navigation ever renders this response, it must have no app origin

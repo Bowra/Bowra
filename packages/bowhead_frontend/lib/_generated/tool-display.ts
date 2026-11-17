@@ -483,6 +483,14 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     kind: "tool",
     risk: "artifact_write",
   },
+  find_results: {
+    label: { "zh-CN": "查找会话结果", "en-US": "Find conversation results", "de-DE": "Gesprächsergebnisse finden", "fr-FR": "Rechercher les résultats de la conversation" },
+    blurb: { "zh-CN": "按名称和类别查找本会话的文件，返回编号，不返回内容。", "en-US": "Finds this conversation's files by name and kind. Returns identifiers, not content.", "de-DE": "Findet Dateien dieses Gesprächs nach Name und Art. Liefert Kennungen, keine Inhalte.", "fr-FR": "Recherche les fichiers de cette conversation par nom et type. Renvoie des identifiants, pas le contenu." },
+    sigil: "🔎",
+    category: "orchestrate",
+    kind: "part",
+    systemCapability: true,
+  },
   get_current_user: {
     label: { "zh-CN": "当前用户资料", "en-US": "Current user profile", "de-DE": "Aktuelles Benutzerprofil", "fr-FR": "Profil utilisateur actuel" },
     blurb: { "zh-CN": "读取你本人的昵称、账户邮箱和邮箱验证状态。", "en-US": "Read your own display name, account email and email verification status.", "de-DE": "Ihren Anzeigenamen, Ihre Konto-E-Mail und deren Bestätigungsstatus lesen.", "fr-FR": "Lire votre nom, votre e-mail de compte et son statut de vérification." },

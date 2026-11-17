@@ -89,3 +89,7 @@ Dans les détails de l’exécution, **Créer une nouvelle présentation** crée
 | Capacité absente du produit                          | Responsable du produit                                                                                                          |
 
 Un Outcome décrit un résultat promis et peut présenter preuves ou disponibilité. Un plugin d’équipe regroupe Tools et Skills sélectionnables par les auteurs. Aucun ne remplace les autorisations des fonctionnalités, outils ou données.
+
+## Gérer les workflows partagés
+
+Si les workflows d’équipe sont disponibles, ouvrez la gestion depuis le catalogue. Consultez les approbations de partage en attente et la liste publiée. Utilisez les actions proposées pour partager, activer, désactiver ou supprimer. Vérifiez les effets indiqués sur le travail en cours ou planifié avant une désactivation ou une suppression. Vos propres workflows restent accessibles dans la vue personnelle des Skills et workflows.

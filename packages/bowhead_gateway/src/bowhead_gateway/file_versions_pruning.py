@@ -4,7 +4,8 @@ Each file keeps its newest three live versions; same-run drafts go first. The st
 candidates and rechecks every protection inside its write transaction; KB references live
 in another database (``kb_files``), so they are checked here. Pruning fails closed: without
 the KB store, or when the KB lookup fails, nothing is pruned. It soft-deletes only, and the
-nightly purge removes pruned rows after 30 days.
+nightly purge removes pruned rows after 30 days. A file waits while a Turn of its session is
+running or paused.
 """
 
 from __future__ import annotations
@@ -40,14 +41,43 @@ async def prune_file_versions(app: Any, lineage_roots: Sequence[str] | None = No
     return pruned
 
 
+#: A version is usually written inside a Turn of its session, so its file waits until no Turn of
+#: that session is running or paused; after this long the nightly run prunes it instead.
+_DEFER_POLL_SECONDS = 30.0
+_DEFER_MAX_WAIT_SECONDS = 3600.0
+
+
 def schedule_file_version_prune(app: Any, lineage_root: str) -> None:
-    """After a version is written or a file restored: prune that file in the background, best-effort."""
+    """After a version is written or a file restored: prune that file in the background, best-effort.
+
+    A Turn lists the session's files when it starts and checks them again when it publishes
+    its history; pruning a listed version under a running or paused Turn fails that Turn
+    (116 dogfood N12), so the prune waits for the session to settle. The store rechecks the
+    same condition inside its write transaction.
+    """
+    pending = getattr(app.state, "_file_version_prune_pending", None)
+    if pending is None:
+        pending = set()
+        app.state._file_version_prune_pending = pending
+    if lineage_root in pending:
+        return
+    pending.add(lineage_root)
 
     async def run() -> None:
         try:
+            store = getattr(app.state, "artifact_store", None)
+            waited = 0.0
+            while store is not None and await store.version_prune_deferred(lineage_root):
+                if waited >= _DEFER_MAX_WAIT_SECONDS:
+                    log.info("file_versions.prune_deferred root=%s reason=session_turn_active", lineage_root)
+                    return
+                await asyncio.sleep(_DEFER_POLL_SECONDS)
+                waited += _DEFER_POLL_SECONDS
             await prune_file_versions(app, [lineage_root])
         except Exception:
             log.warning("file_versions.prune_failed root=%s", lineage_root, exc_info=True)
+        finally:
+            pending.discard(lineage_root)
 
     task = asyncio.create_task(run())
     tasks = getattr(app.state, "_file_version_prune_tasks", None)

@@ -67,3 +67,7 @@ HTTP 200 signifie que le service a répondu, mais pas forcément que le modèle 
 Les paramètres affichés concernent principalement le modèle, la longueur de sortie et la réflexion, lorsqu’ils sont présents ; ils n’incluent ni les identifiants ni la requête complète. Le résumé de consommation contient les comptes numériques de tokens reconnus. Les autres champs restent dans l’extrait de réponse. Le JSON est mis en forme pour la lecture ; les espaces et sauts de ligne à l’intérieur des chaînes sont conservés. Les identifiants connus sont masqués, y compris leurs répétitions dans d’autres champs ou événements du flux. Vérifiez néanmoins le contenu avant de le partager. Après masquage, seuls les 64 premiers Kio de la réponse sont affichés et copiés.
 
 Relancez la vérification pour une ancienne tentative ou des détails non enregistrés, après avoir vérifié le nombre de requêtes et leur coût éventuel. Consulter ou copier les détails existants n’appelle pas le modèle et n’enregistre pas de modification de configuration.
+
+## Vérifier une reconstruction de l’index de connaissances
+
+Si la reconstruction de l’index d’équipe échoue, le propriétaire ou un administrateur ouvre l’index depuis l’avis de la base de connaissances. Vérifiez le modèle de vectorisation en attente et l’état affiché avant de relancer. Si le modèle doit changer, ouvrez l’affectation des modèles de la base. L’état de traitement des fichiers reste affiché séparément dans la base de connaissances.

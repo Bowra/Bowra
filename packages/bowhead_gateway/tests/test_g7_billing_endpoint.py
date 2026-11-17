@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import aiosqlite
 import pytest
@@ -13,23 +12,10 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-async def store(tmp_path):
-    # Filename must be bowhead.db: `upgrade(target="core")` resolves only the **directory** from the URL;
-    # target filename is fixed at TARGET_FILES["core"] (migrate.py:12), so another name sends migration elsewhere.
-    s = UserStore(tmp_path / "bowhead.db")
-    # `GET /admin/llm-config` projects team LLM readiness when model_discovery_v2 is enabled;
-    # those tables (team_llm_v2_enrollments / team_llm_provider_identities…) are created by alembic
-    # `0005_team_llm_verification`, **no longer by Store.initialize() DDL**
-    # (see docs/design/数据库迁移.md). A fixture using only initialize() leaves the route without those tables
-    # and fails closed with 503. Same approach as test_team_llm_config_api.py's store fixture.
-    import sqlite3
-
-    from bowhead_core.migrations.baseline_schema import initial_schema
-    from gateway_legacy_database import upgrade
-
-    with sqlite3.connect(s.db_path) as connection:
-        connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{Path(s.db_path).with_name('bowhead.db')}", target="core")
+async def store(tmp_path, initialize_migrated_core_database):
+    db_path = tmp_path / "bowhead.db"
+    initialize_migrated_core_database(db_path)
+    s = UserStore(db_path)
     await s.initialize()
     return s
 
@@ -199,7 +185,10 @@ async def test_get_llm_config_redacts_keys(client, store):
     response_str = json.dumps(body)
     # P0-S-1: NEVER any plaintext
     assert "sk-deepseek" not in response_str
-    assert "secret" not in response_str
+    # The seeded key's distinctive tail. The bare word "secret" legitimately appears in the
+    # page's registered field contract ("Only non-secret configuration is editable") once
+    # any earlier create_app() on this worker has registered the configuration forms.
+    assert "1234secret" not in response_str
     assert "api_key" not in response_str
     # Has fingerprint
     assert body["providers"][0]["fingerprint"].startswith("sha256:")

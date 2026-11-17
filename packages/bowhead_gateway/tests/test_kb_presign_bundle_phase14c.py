@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import sqlite3
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -32,12 +31,10 @@ import aiosqlite
 import pytest
 from bowhead_core.artifact_store import TEAM_SCOPE_WORKSPACE_ID, LocalBackend, ObjectHead, PresignPostResult
 from bowhead_core.kb.files_store import KbFilesStore
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.user_store import User
 from bowhead_gateway.routes import kb_presign
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gateway_legacy_database import upgrade
 
 from bowhead_core import ArtifactStore
 
@@ -143,15 +140,12 @@ def _make_user(uid: str = "u_alice", team: str = "team_test") -> User:
 
 
 @pytest.fixture
-async def app(initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch) -> FastAPI:
+async def app(initialize_migrated_core_database, initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch) -> FastAPI:
     monkeypatch.delenv("BOWHEAD_AUTO_ADMIN_DOMAINS", raising=False)
     a = FastAPI()
     a.include_router(kb_presign.router)
     artifact_db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(artifact_db_path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(artifact_db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(artifact_db_path)
     artifact_store = ArtifactStore(
         db_path=str(artifact_db_path),
         backend=LocalBackend(root_dir=tmp_path / "blobs"),

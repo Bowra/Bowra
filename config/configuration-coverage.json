@@ -90,8 +90,8 @@
       "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
     },
     "/team/settings/capabilities/": {
-      "status": "workflow",
-      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+      "status": "redirect",
+      "reason": "Navigation entry or legacy alias; configuration belongs to the canonical destination."
     },
     "/team/settings/datasource/": {
       "status": "manual",
@@ -180,6 +180,10 @@
     "/team/settings/people/": {
       "status": "manual",
       "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/plugins/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
     },
     "/team/settings/public-entries/": {
       "status": "manual",

@@ -7,6 +7,7 @@ import json
 import math
 import operator
 import re
+from collections.abc import Collection
 from decimal import Decimal, DecimalException, localcontext
 from typing import Any
 
@@ -139,20 +140,51 @@ def structured(value: Any, field: str) -> Any:
     return value
 
 
-def composition(args: dict[str, Any], *, fallbacks: list[dict[str, str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _view_field_problems(views: list[Any], shared_fields: Collection[str]) -> str | None:
+    """Name every view that carries fields a view does not accept, in one message.
+
+    The bare "declared view fields" refusal left a helper guessing which view and field were wrong
+    until its third failure disabled add_chart (116 the regression case: column_types inside two views).
+    """
+    problems: list[str] = []
+    misplaced: set[str] = set()
+    for index, view in enumerate(views, start=1):
+        if not isinstance(view, dict):
+            problems.append(f"View {index} must be an object.")
+            continue
+        extra = sorted(set(view) - VIEW_FIELDS)
+        if extra:
+            name = view["id"] if isinstance(view.get("id"), str) and view["id"].strip() else str(index)
+            problems.append(f"View {name} has {', '.join(extra)}, which a view does not accept.")
+            misplaced.update(field for field in extra if field in shared_fields)
+    if not problems:
+        return None
+    text = " ".join(problems) + f" A view accepts only {', '.join(sorted(VIEW_FIELDS))}."
+    if misplaced:
+        text += f" Give {', '.join(sorted(misplaced))} once at the top level beside views instead; top-level fields apply to every view."
+    return text
+
+
+def composition(
+    args: dict[str, Any],
+    *,
+    fallbacks: list[dict[str, str]] | None = None,
+    shared_fields: Collection[str] = (),
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate all views; authoring may recover presentation without losing a view.
 
     Passing a fallback receipt permits bounded layout recovery. Stored edits and
-    strict callers retain their original guards.
+    strict callers retain their original guards. `shared_fields` names the top-level
+    fields copied into every view, so a refusal can point a misplaced one back there.
     """
     views = structured(args.get("views"), "views")
     if not isinstance(views, list) or not 1 <= len(views) <= MAX_VIEWS:
         raise ValueError("views must contain 1 to 6 native chart views")
+    if problems := _view_field_problems(views, shared_fields):
+        raise ValueError(problems)
     ids: list[str] = []
     normalized: list[dict[str, Any]] = []
     for view in views:
-        if not isinstance(view, dict) or set(view) - VIEW_FIELDS:
-            raise ValueError("each view must use only the declared view fields")
         vid = view.get("id")
         if not isinstance(vid, str) or not _ID.fullmatch(vid) or vid in ids:
             raise ValueError("view ids must be unique lowercase identifiers")

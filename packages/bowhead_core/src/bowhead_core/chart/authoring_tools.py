@@ -121,6 +121,24 @@ def edit_schema() -> ToolSchema:
     )
 
 
+_LISTED_CHARTS = 20
+
+
+def _current_charts_hint(sections: list[Any]) -> str:
+    """The section IDs and titles a chart request can use, newest last.
+
+    A bare "choose a current chart" left a 116 helper (the regression case) resending a made-up ID.
+    """
+    from bowhead_core.figure_anchor_layout import figure_title
+
+    charts = [item for item in sections if getattr(item, "kind", None) == "chart" and not getattr(item, "superseded", False)]
+    if not charts:
+        return " This session has no current chart yet; create one with add_chart."
+    listed = "; ".join(f"{item.id} ({figure_title(getattr(item, 'payload', None), 'chart')[:80]})" for item in charts[-_LISTED_CHARTS:])
+    more = f" ({len(charts) - _LISTED_CHARTS} older not listed)" if len(charts) > _LISTED_CHARTS else ""
+    return f" Current charts: {listed}{more}."
+
+
 async def _target(args: dict[str, Any], ctx: Any) -> tuple[Any, Any, dict[str, Any]] | dict[str, Any]:
     store, session_id = getattr(ctx, "canvas_store", None), getattr(ctx, "session_id", None)
     section_id = args.get("section_id")
@@ -132,7 +150,7 @@ async def _target(args: dict[str, Any], ctx: Any) -> tuple[Any, Any, dict[str, A
     sections = await store.list_sections(canvas.id, include_hidden=True)
     section = next((item for item in sections if item.id == section_id and item.kind == "chart"), None)
     if section is None or section.superseded:
-        return {"error": "chart_unavailable", "hint": "Choose a current chart in this session."}
+        return {"error": "chart_unavailable", "hint": "Choose a current chart in this session." + _current_charts_hint(sections)}
     access = getattr(ctx, "report_read_access", None)
     project = getattr(access, "project_chart", None)
     if callable(project) and any(

@@ -48,6 +48,7 @@ async def stores(tmp_path):
     await sessions.ensure_session(session_id="s_v", workspace_id="ws_v", user_id="u_owner")
     for turn in ("t1", "t2", "t3"):
         await sessions.record_turn(turn_id=turn, session_id="s_v", user_text="Fix the report charts")
+        await sessions.mark_completed(turn_id=turn, intent=None, final_answer="done", tokens_input=0, tokens_output=0, cost_usd=0.0)
         await sessions.finalize_turn(session_id="s_v", current_turn_id=turn, next_turn_id=None)
     return store, sessions
 
@@ -256,6 +257,7 @@ async def test_pruning_fails_closed_and_keeps_knowledge_base_versions(stores):
 
     store, sessions = stores
     await sessions.record_turn(turn_id="t4", session_id="s_v", user_text="again")
+    await sessions.mark_completed(turn_id="t4", intent=None, final_answer="done", tokens_input=0, tokens_output=0, cost_usd=0.0)
     await sessions.finalize_turn(session_id="s_v", current_turn_id="t4", next_turn_id=None)
     v1 = await _put(store, "t1")
     v2 = await _put(store, "t2", v1.id)

@@ -69,7 +69,10 @@ def _path(app: FastAPI, suffix: str = "") -> str:
 async def test_admin_saves_versions_and_members_read_current(app: FastAPI) -> None:
     empty = await _call(app, "GET", _path(app), "member")
     assert empty.status_code == 200
-    assert empty.json() | {"max_chars": None} == {
+    body = empty.json()
+    # 25f3d2937: the page carries its registered field contract for settings guidance.
+    assert body.pop("field_contract")["domain"] == "space_instructions"
+    assert body | {"max_chars": None} == {
         "workspace_id": app.state.ids["ws"],
         "version": 0,
         "content": "",

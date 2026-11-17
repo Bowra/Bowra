@@ -189,44 +189,56 @@ async def _execute(name: str, result: dict) -> list:
     registry = ToolRegistry()
     registry.register(ToolSpec(schema=ToolSchema(name=name, description="", input_schema={}), handler=handler))
     runner = SubagentRunner(router=_router(), tool_registry=registry)  # type: ignore[arg-type]
-    ctx = _ctx()
-    ctx.role = "lead"
+    ctx = _bi_ctx()
     with request_change_scope():
-        await runner._execute_tool(ToolCall(id="call_kb", name=name, arguments={}), ctx, TurnEventBus(), "t", "lead_root", running_profile="lead")
+        await runner._execute_tool(ToolCall(id="call_rows", name=name, arguments={}), ctx, TurnEventBus(), "t", "lead_root", running_profile="lead")
         return list(_pending())
 
 
+def _fetched_rows(count: int) -> dict:
+    # bi_fetch_rows results are always artifact-only for the model (kb_search is no longer capped).
+    return {"artifact_id": "art_rows", "rows": [{"text": f"secret {i}"} for i in range(count)]}
+
+
+def _bi_ctx() -> ToolExecutionContext:
+    ctx = _ctx()
+    ctx.role = "lead"
+    ctx.datarc = object()  # type: ignore[assignment]  # The BI gate needs a bound connection; the stub handler never uses it.
+    ctx.active_datarc_project = "2"
+    return ctx
+
+
 async def test_a_capped_tool_result_records_sizes_and_hashes_not_content():
-    changes = await _execute("kb_search", {"hits": [{"text": f"secret {i}"} for i in range(8)]})
+    changes = await _execute("bi_fetch_rows", _fetched_rows(8))
 
     assert _kinds(changes) == ["tool_result_capped"]
     detail = changes[0].detail
-    assert detail["tool_call_id"] == "call_kb" and detail["tool_name"] == "kb_search"
+    assert detail["tool_call_id"] == "call_rows" and detail["tool_name"] == "bi_fetch_rows"
     assert detail["full_bytes"] > detail["capped_bytes"] and detail["full_sha256"] != detail["capped_sha256"]
     assert "secret" not in repr(detail)
 
 
 async def test_a_cap_that_changes_nothing_records_nothing():
-    assert await _execute("kb_search", {"hits": [{"text": "one"}]}) == []
+    # Without an artifact the cap only copies the result.
+    assert await _execute("bi_fetch_rows", {"rows": [{"text": "one"}]}) == []
 
 
 async def test_parallel_tool_calls_share_the_run_list():
     import asyncio
 
     async def handler(_args, _ctx):
-        return {"hits": [{"text": str(i)} for i in range(8)]}
+        return _fetched_rows(8)
 
     registry = ToolRegistry()
-    registry.register(ToolSpec(schema=ToolSchema(name="kb_search", description="", input_schema={}), handler=handler))
+    registry.register(ToolSpec(schema=ToolSchema(name="bi_fetch_rows", description="", input_schema={}), handler=handler))
     runner = SubagentRunner(router=_router(), tool_registry=registry)  # type: ignore[arg-type]
-    ctx = _ctx()
-    ctx.role = "lead"
+    ctx = _bi_ctx()
     with request_change_scope():
         await asyncio.gather(
             *(
                 asyncio.create_task(
                     runner._execute_tool(
-                        ToolCall(id=f"call_{i}", name="kb_search", arguments={}), ctx, TurnEventBus(), "t", "lead_root", running_profile="lead"
+                        ToolCall(id=f"call_{i}", name="bi_fetch_rows", arguments={}), ctx, TurnEventBus(), "t", "lead_root", running_profile="lead"
                     )
                 )
                 for i in range(3)

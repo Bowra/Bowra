@@ -1135,7 +1135,10 @@ def _make_handler() -> Any:
         # ─── cca P3 (S4 §5) — optional team-subagent output_schema gate ───
         _osc_gate = _apply_output_schema_gate(ctx, payload, _handler_subagent_id)
         if _osc_gate is not None:
-            return _osc_gate
+            from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
+
+            # A terminal schema correction like validate_payload's, never a delivery failure to review.
+            return note_ordinary_return_rejection(ctx, _osc_gate)
 
         # ─── Sprint ν1.5 — translate simple-int IDs (1/2/3) → real IDs ───
         # Peer uses simple IDs from allowlist XML; backend translates, then ν1 validates

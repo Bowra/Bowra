@@ -317,7 +317,7 @@ def register_skill_tools(
 
     from bowhead_core.html_static_check import HTML_STATIC_CHECK_GUIDANCE
     from bowhead_core.ordinary_lead_material import OrdinarySkillObserver
-    from bowhead_core.pptx_result_view import PPTX_RESULT_VIEW_GUIDANCE
+    from bowhead_core.pptx_result_view import INPUT_VIEW_GUIDANCE, PPTX_RESULT_VIEW_GUIDANCE
 
     observer = OrdinarySkillObserver(catalog)
 
@@ -364,10 +364,12 @@ def register_skill_tools(
                 await follow_new_versions_on_canvas(result, ctx)
             except Exception:
                 logger.warning("canvas.html_section_follow_failed tool=%s", tool_name, exc_info=True)
-            from bowhead_core.pptx_result_view import attach_result_views
+            from bowhead_core.pptx_result_view import attach_input_views, attach_result_views
 
             # Advisory facts about every presentation or HTML file this call wrote, work files included.
             result = await attach_result_views(result, ctx)
+            # The structure of a presentation the call read, once per Agent run.
+            result = await attach_input_views(result, ctx)
             try:
                 return await normalize_producer_declaration(tool_name, args, result, ctx)
             except Exception:
@@ -410,7 +412,9 @@ def register_skill_tools(
                     name=d.name,
                     description=d.description
                     + (
-                        " " + HTML_STATIC_CHECK_GUIDANCE + " " + PPTX_RESULT_VIEW_GUIDANCE if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL) else ""
+                        " " + HTML_STATIC_CHECK_GUIDANCE + " " + PPTX_RESULT_VIEW_GUIDANCE + " " + INPUT_VIEW_GUIDANCE
+                        if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL)
+                        else ""
                     ),
                     input_schema=d.input_schema,
                 ),

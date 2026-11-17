@@ -46,6 +46,8 @@ export interface GeneratedToolDisplay {
   kind: ToolKind;
   /** Always present for `kind: "tool"`. */
   risk?: ToolRisk;
+  /** A part the runtime gives every Agent: listed as always on, never selected or disabled. */
+  systemCapability?: boolean;
 }
 
 /** Display attributes selected for current UI language. */
@@ -127,6 +129,23 @@ export function builtinTools(options: { googleWorkspace?: boolean } = {}): Built
     // positions, separating same capability family into seemingly random order; Chinese/English also produce different orders.
     // Sorting by ref naturally keeps `bi_*` / `pbi_*` families adjacent and both languages ordered identically.
     .sort((a, b) => a.category.localeCompare(b.category) || a.ref.localeCompare(b.ref));
+}
+
+/**
+ * Capabilities every Agent has without configuration, in the current locale.
+ *
+ * They are system parts, so they are in no Plugin, no Agent selects them and no Team can turn
+ * them off. Team owners still see them: the Tools page and the Capability Center list them as
+ * always on. Kept apart from `builtinTools()` so that counts and pickers of selectable Tools do not change.
+ */
+export function systemCapabilities(locale: Locale = getCurrentLocale()): BuiltinTool[] {
+  return Object.keys(TOOL_DISPLAY)
+    .filter((ref) => TOOL_DISPLAY[ref].systemCapability === true)
+    .sort((a, b) => a.localeCompare(b))
+    .map((ref) => {
+      const d = toolDisplay(ref, locale);
+      return { ref, name: d.label, blurb: d.blurb, sigil: d.sigil, category: d.category };
+    });
 }
 
 /** Select built-in catalog translations; external tool labels keep their original text. */

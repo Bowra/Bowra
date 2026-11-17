@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from bowhead_core._db import open_shared_ctx
@@ -19,6 +20,8 @@ from bowhead_core.sqlite_domain_runtime import connect
 from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.subagent import _system_profile_snapshot
 from test_sqlite_domain_stores import domain_directory as domain_directory
+
+from bowhead_core import _db, agent_execution_binding, sqlite_domain_runtime
 
 
 @pytest.mark.asyncio
@@ -56,6 +59,50 @@ async def test_system_revision_precedes_execution_and_space_snapshot_uses_execut
         db.execute("SELECT id FROM main.turn_agent_execution WHERE id=?", (binding.execution_id,)) as cursor,
     ):
         assert await cursor.fetchone() == (binding.execution_id,)
+
+
+@pytest.mark.asyncio
+async def test_system_revision_write_repeats_after_a_busy_core_authority_lease(domain_directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 116, 1.7.49: the first compute spawn after a release must write its new system revision, and that
+    # write lost the core authority lease to a running Turn three times in a row, failing the spawn.
+    core = domain_directory / "bowhead.db"
+    sessions = SessionStore(core)
+    await sessions.ensure_session(session_id="s_busy", workspace_id="ws_1", user_id="u_1")
+    turn = await sessions.record_turn(turn_id="t_domain_busy", session_id="s_busy", user_text="compute")
+    original = agent_execution_binding.replace_subject_projection_conn
+    attempts = 0
+
+    async def lose_the_lease_once(db, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise sqlite_domain_runtime._busy()
+        await original(db, **kwargs)
+
+    async def no_wait(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(agent_execution_binding, "replace_subject_projection_conn", lose_the_lease_once)
+    monkeypatch.setattr(_db, "anyio", SimpleNamespace(sleep=no_wait))
+    # A definition of its own, so the revision is new even after the module's other compute admission.
+    definition = {"llm_agent_type": "analyst", "name": "compute", "schema_version": 1, "system_prompt": "Released prompt"}
+    binding = await AgentExecutionBindingStore(core).admit_system_execution(
+        team_id="team_1",
+        user_id="u_1",
+        turn_id=turn.id,
+        profile_name="compute",
+        dispatch_key="domain:compute-busy",
+        definition=definition,
+        manifest_fingerprint="sha256:" + hashlib.sha256(b"manifest").hexdigest(),
+        override_version=None,
+        system_required=True,
+    )
+    assert attempts == 2
+    async with (
+        connect(core) as db,
+        db.execute("SELECT COUNT(*) FROM main.system_agent_effective_revision WHERE id=?", (binding.revision_ref,)) as cursor,
+    ):
+        assert await cursor.fetchone() == (1,)
 
 
 @pytest.mark.asyncio

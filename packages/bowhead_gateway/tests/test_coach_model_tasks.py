@@ -22,7 +22,7 @@ from bowhead_core.coach_operation_reference import with_operation_reference
 from bowhead_core.events import TurnEventBus
 from bowhead_core.session_store import SessionStore
 from bowhead_core.skill_bridge import build_default_skill_stack, register_skill_tools
-from bowhead_core.skill_upload import bundle_sha256
+from bowhead_core.skill_upload import builtin_bundle_sha256
 from bowhead_core.subagent import PROFILES, SubagentRunner, register_subagent_tool
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
@@ -650,7 +650,7 @@ def test_coach_task(evaluation, case, resources, saved_draft, skill_adapter, mon
         "manifest_version": manifest.version,
         "manifest_sha256": digest(manifest.model_dump(mode="json")),
         "prompt_sha256": digest(PROFILES[AGENT_NAME].system_prompt),
-        "skill_revision": "sha256:" + bundle_sha256(ROOT / "packages/bowhead_skill/catalog/agent-authoring"),
+        "skill_revision": "sha256:" + builtin_bundle_sha256(ROOT / "packages/bowhead_skill/catalog/agent-authoring"),
         "tool_schema_sha256": digest([asdict(schema) for schema in registry.to_schemas() if schema.name in PROFILES[AGENT_NAME].tool_whitelist]),
         "configured_route": asdict(router.resolve("analyst", AGENT_NAME)),
         "lead_route": asdict(router.resolve("lead", "lead")) if args.through_lead else None,

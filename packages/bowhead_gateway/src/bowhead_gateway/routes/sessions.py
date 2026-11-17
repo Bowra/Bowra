@@ -17,6 +17,7 @@ import unicodedata
 from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING, Any, Literal
 
+from bowhead_core._db import SQLiteStoreBusy
 from bowhead_core.artifact_references import is_user_intent_pin
 from bowhead_core.session_lifecycle import SessionLifecycleError
 from bowhead_core.session_store import SessionProtocolManagedError
@@ -691,7 +692,8 @@ async def delete_session(
         raise session_lifecycle_http_error(exc) from exc
     except SessionProtocolManagedError as exc:
         raise _coded_error(status.HTTP_503_SERVICE_UNAVAILABLE, "terminal_protocol_writer_not_ready") from exc
-    except HTTPException:
+    except (HTTPException, SQLiteStoreBusy):
+        # A busy storage lock deleted nothing; the gateway answers it as 503 store_busy.
         raise
     except Exception as exc:
         logger.exception(

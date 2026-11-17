@@ -200,3 +200,107 @@ async def test_cancellation_never_restarts_the_operation(database: Path, monkeyp
         await asyncio.gather(pending, return_exceptions=True)
     assert attempts == 1
     assert await accepted_count(database) == 0
+
+
+class _Spent(RuntimeError):
+    pass
+
+
+async def test_repeat_decorator_repeats_only_marked_conflicts() -> None:
+    attempts: list[int] = []
+
+    @_db.repeat_when_authority_busy(lambda: _Spent("busy"))
+    async def write(value: str) -> str:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) < 3:
+            raise sqlite_domain_runtime._busy()
+        return value
+
+    assert await write("saved") == "saved"
+    assert attempts == [1, 2, 3]
+
+
+async def test_repeat_decorator_passes_other_sqlite_errors_through_at_once() -> None:
+    attempts: list[int] = []
+
+    @_db.repeat_when_authority_busy(lambda: _Spent("busy"))
+    async def write() -> None:
+        attempts.append(1)
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        await write()
+    assert attempts == [1]
+
+
+async def test_repeat_decorator_raises_the_callers_error_once_the_wait_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    attempts: list[int] = []
+
+    @_db.repeat_when_authority_busy(lambda: _Spent("busy"))
+    async def write() -> None:
+        attempts.append(1)
+        raise sqlite_domain_runtime._busy()
+
+    with pytest.raises(_Spent) as spent:
+        await write()
+    assert len(attempts) > 1
+    assert _db.is_authority_busy(spent.value.__cause__)
+
+
+async def test_repeat_decorator_defaults_to_the_store_busy_error_and_logs_its_wait(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+
+    @_db.repeat_when_authority_busy()
+    async def write() -> None:
+        raise sqlite_domain_runtime._busy()
+
+    with caplog.at_level("INFO", logger="bowhead_core._db"), pytest.raises(_db.SQLiteStoreBusy) as busy:
+        await write()
+    assert busy.value.code == "store_busy"
+    assert "sqlite.authority_busy_wait_started label=" in caplog.text
+    assert "sqlite.authority_busy_wait_failed label=" in caplog.text
+
+
+async def test_repeat_loop_does_not_wait_when_no_budget_is_known() -> None:
+    attempts: list[int] = []
+
+    async def attempt() -> None:
+        attempts.append(1)
+        raise sqlite_domain_runtime._busy()
+
+    with pytest.raises(sqlite3.OperationalError):
+        await _db.repeat_while_busy(attempt, retry=_db.is_authority_busy, seconds_left=lambda: None, first_delay=0.01, max_delay=0.1)
+    assert attempts == [1]
+
+
+async def test_repeat_decorator_answers_a_writer_lock_timeout_as_busy_without_repeating() -> None:
+    attempts: list[int] = []
+
+    @_db.repeat_when_authority_busy()
+    async def write() -> None:
+        attempts.append(1)
+        timeout = sqlite3.OperationalError("database is locked")
+        timeout.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        raise timeout
+
+    with pytest.raises(_db.SQLiteStoreBusy) as busy:
+        await write()
+    # The connection's busy timeout already covered the wait for the writer lock.
+    assert attempts == [1]
+    assert _db.writer_busy(busy.value.__cause__) and not _db.is_authority_busy(busy.value.__cause__)
+
+
+async def test_repeat_decorator_without_spent_re_raises_a_writer_lock_timeout() -> None:
+    timeout = sqlite3.OperationalError("database is locked")
+    timeout.sqlite_errorcode = sqlite3.SQLITE_BUSY
+
+    @_db.repeat_when_authority_busy(spent=None)
+    async def write() -> None:
+        raise timeout
+
+    with pytest.raises(sqlite3.OperationalError) as caught:
+        await write()
+    assert caught.value is timeout

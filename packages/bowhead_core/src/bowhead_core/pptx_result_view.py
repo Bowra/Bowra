@@ -3,7 +3,9 @@
 The model knows the code it ran, not what the file now is. This view states what
 can be read from the saved file: charts without values, number formats, series of
 very different size, text still equal to the template and added shapes that cover
-others. It echoes no slide content, gives no instruction and no verdict.
+others. A render in the sandbox adds where the text was drawn: outside the page,
+beyond its frame, over other text, or smaller than in the template. It echoes no
+slide content, gives no instruction and no verdict.
 """
 
 from __future__ import annotations
@@ -28,8 +30,9 @@ _MAX_UNCHANGED_NAMES = 5
 _SCALE_FACTOR = 100
 _BACKGROUND_SHARE = 0.5
 _OVERLAP_SHARE = 0.05
+_LAYOUT_NOT_RENDERED = "Text layout is not rendered, so text running outside its shape is not reported."
 NOT_CHECKED = (
-    "Text layout is not rendered, so text running outside its shape is not reported.",
+    _LAYOUT_NOT_RENDERED,
     "Shapes inside groups, lines, rotated shapes, table heights and plots that share one axis are not compared.",
     "Data correctness is not checked.",
 )
@@ -37,7 +40,10 @@ PPTX_RESULT_VIEW_GUIDANCE = (
     "A .pptx written by a sandbox call comes back with result_view: one summary line and facts read from the saved file "
     "(charts without values, General or percent number formats that do not fit the values, series of very different size, "
     "text and chart titles equal to the attached template, "
-    "added shapes that cover others). It lists what was not checked and gives no verdict. The file's content is read by "
+    "added shapes that cover others) and, when the sandbox could render the file, layout facts measured in that render "
+    "(text drawn outside the page, beyond its frame, over other text, or smaller than in the template), "
+    "or the fact that the renderer produced no pages from the file. "
+    "It lists what was not checked and gives no verdict. The file's content is read by "
     "passing its artifact_id in a later call's inputs."
 )
 
@@ -93,10 +99,25 @@ def _chart_facts(slide_number: int, name: str, chart: Any) -> list[str]:
 
     facts: list[str] = []
     where = f"slide {slide_number}, chart '{name}'"
+    # A cache that lists points past its declared count: seen from scripts that append points by hand
+    # (116, 2026-11-16, art_a32c144fa91d). LibreOffice does not load a presentation that contains one.
+    beyond = []
+    for cache in chart._chartSpace.iter(qn("c:numCache"), qn("c:strCache")):
+        declared = cache.find(qn("c:ptCount"))
+        indexes = [int(point.get("idx")) for point in cache.findall(qn("c:pt")) if (point.get("idx") or "").isdigit()]
+        if declared is not None and (declared.get("val") or "").isdigit() and indexes and max(indexes) >= int(declared.get("val")):
+            beyond.append((max(indexes) + 1, int(declared.get("val"))))
+    if beyond:
+        facts.append(
+            _cut(
+                f"{where}: {len(beyond)} data caches list up to {max(item[0] for item in beyond)} points but declare "
+                f"{min(item[1] for item in beyond)} (c:ptCount)."
+            )
+        )
     plots = list(chart.plots)
     series_values = [[value for value in series.values if value is not None] for plot in plots for series in plot.series]
     if not any(series_values):
-        return [_cut(f"{where}: no values in any series.")]
+        return [*facts, _cut(f"{where}: no values in any series.")]
     many_decimals = any(isinstance(value, float) and abs(value - round(value, 4)) > 1e-9 for values in series_values for value in values)
     cache_format = None
     node = chart._chartSpace.find(".//" + qn("c:val") + "//" + qn("c:formatCode"))
@@ -104,7 +125,7 @@ def _chart_facts(slide_number: int, name: str, chart: Any) -> list[str]:
         node = chart._chartSpace.find(".//" + qn("c:yVal") + "//" + qn("c:formatCode"))
     if node is not None and node.text:
         cache_format = node.text
-    labels = next((_effective_format(plot.data_labels, cache_format) for plot in plots if plot.has_data_labels), None)
+    labels = next((_effective_format(plot.data_labels, cache_format) for plot in plots if _has_data_labels(plot)), None)
     try:
         axis = _effective_format(chart.value_axis.tick_labels, cache_format)
     except ValueError:  # a pie chart has no value axis
@@ -144,6 +165,13 @@ def _chart_facts(slide_number: int, name: str, chart: Any) -> list[str]:
                     )
                 )
     return facts
+
+
+def _has_data_labels(plot: Any) -> bool:
+    try:
+        return bool(plot.has_data_labels)
+    except AttributeError:  # python-pptx has no plot-level labels for scatter and bubble charts
+        return False
 
 
 def _stored_axis_percent(chart: Any) -> tuple[str, float] | None:
@@ -225,8 +253,19 @@ def _template_index(data: bytes) -> dict[tuple[int, int], tuple[dict[str, str], 
     return index
 
 
-def inspect_pptx(data: bytes, template: bytes | None = None) -> dict[str, Any]:
-    """Read facts from a saved deck. Runs in the bounded parse child."""
+def inspect_pptx(data: bytes, template: bytes | None = None, pdf: bytes | None = None, template_pdf: bytes | None = None) -> dict[str, Any]:
+    """Read facts from a saved deck, and from its render when one is given. Runs in the bounded parse child."""
+    view = _file_facts(data, template)
+    if pdf is not None:
+        try:
+            view["layout"] = layout_facts(data, pdf, template, template_pdf)
+            view["not_checked"] = [LAYOUT_NOT_CHECKED if line == _LAYOUT_NOT_RENDERED else line for line in view["not_checked"]]
+        except Exception as exc:  # A render that cannot be measured leaves the file facts as they are.
+            view["layout"] = {"status": "not_available", "reason": "render_not_readable", "error_type": type(exc).__name__}
+    return view
+
+
+def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     from pptx import Presentation
 
     presentation = Presentation(io.BytesIO(data))
@@ -305,6 +344,243 @@ def inspect_pptx(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     }
 
 
+_EMU_PER_POINT = 12700
+_MAX_LAYOUT_FACTS = 8
+_MAX_LAYOUT_FACTS_PER_KIND = 3
+_PAGE_SLACK = 2.0
+_FRAME_SLACK = 4.0
+_SIZE_SLACK = 1.0
+_MIN_COLLIDING_GLYPHS = 3
+LAYOUT_RENDERER = "LibreOffice in the sandbox; fonts missing there are replaced, so another program may place text differently."
+FILE_NOT_RENDERED = "LibreOffice in the sandbox ran and produced no pages from this file; it could not load or convert it."
+LAYOUT_NOT_CHECKED = "Layout comes from one renderer; chart interiors, pictures and colours are not examined."
+
+
+def _layout_shapes(presentation: Any):
+    """Yield (slide number, key, name, is_table, frame in points or None, text units) for shapes that carry text."""
+    for number, slide in enumerate(presentation.slides, 1):
+
+        def visit(shapes: Any, sx: float, sy: float, tx: float, ty: float, number: int = number, slide: Any = slide):
+            for shape in shapes:
+                if getattr(shape, "shape_type", None) is not None and "GROUP" in str(shape.shape_type):
+                    xfrm = shape._element.grpSpPr.xfrm
+                    if xfrm is None or not xfrm.chExt.cx or not xfrm.chExt.cy or shape.rotation:
+                        continue
+                    gx, gy = shape.width / xfrm.chExt.cx, shape.height / xfrm.chExt.cy
+                    yield from visit(
+                        shape.shapes, sx * gx, sy * gy, tx + sx * (shape.left - gx * xfrm.chOff.x), ty + sy * (shape.top - gy * xfrm.chOff.y)
+                    )
+                    continue
+                table = bool(getattr(shape, "has_table", False))
+                if table:
+                    units = ["".join(cell.text.split()) for row in shape.table.rows for cell in row.cells]
+                elif getattr(shape, "has_text_frame", False):
+                    units = ["".join(paragraph.text.split()) for paragraph in shape.text_frame.paragraphs]
+                else:
+                    continue
+                units = [unit for unit in units if unit]
+                if not units:
+                    continue
+                frame = None
+                upright = not shape.rotation and all(node.get("vert") in {None, "horz"} for node in shape._element.iter())
+                if upright and None not in (shape.left, shape.top, shape.width, shape.height):
+                    left, top = tx + sx * shape.left, ty + sy * shape.top
+                    frame = (
+                        left / _EMU_PER_POINT,
+                        top / _EMU_PER_POINT,
+                        (left + sx * shape.width) / _EMU_PER_POINT,
+                        (top + sy * shape.height) / _EMU_PER_POINT,
+                    )
+                yield number, (slide.slide_id, shape.shape_id), shape.name, table, frame, units
+
+        yield from visit(slide.shapes, 1.0, 1.0, 0.0, 0.0)
+
+
+def _page_glyphs(page: Any) -> list[tuple[str, float, float, float, float, float]]:
+    """Drawn characters of one PDF page as (character, left, top, right, bottom, size), top-left origin."""
+    import pypdfium2.raw as pdfium_c
+
+    height = page.get_height()
+    text_page = page.get_textpage()
+    glyphs = []
+    try:
+        for index in range(text_page.count_chars()):
+            character = text_page.get_text_range(index, 1)
+            if len(character) != 1 or not character.strip():
+                continue
+            left, bottom, right, top = text_page.get_charbox(index)
+            if right - left <= 0 or top - bottom <= 0:
+                continue
+            glyphs.append((character, left, height - top, right, height - bottom, float(pdfium_c.FPDFText_GetFontSize(text_page.raw, index))))
+    finally:
+        text_page.close()
+    return glyphs
+
+
+def _drawn_layout(data: bytes, pdf: bytes) -> tuple[dict[tuple[int, int], dict[str, Any]], list[tuple[float, float]], int]:
+    """Where each text shape's characters were drawn: extent, smallest size and the shapes its glyphs touch."""
+    import pypdfium2 as pdfium
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(data))
+    by_slide: dict[int, list[tuple[Any, ...]]] = {}
+    for item in _layout_shapes(presentation):
+        by_slide.setdefault(item[0], []).append(item)
+    document = pdfium.PdfDocument(pdf)
+    drawn: dict[tuple[int, int], dict[str, Any]] = {}
+    pages: list[tuple[float, float]] = []
+    skipped = 0
+    try:
+        if len(document) != len(presentation.slides):
+            raise ValueError("page count differs from slide count")
+        for number in range(1, len(document) + 1):
+            page = document[number - 1]
+            pages.append((page.get_width(), page.get_height()))
+            glyphs = _page_glyphs(page)
+            text = "".join(glyph[0] for glyph in glyphs)
+            used = [False] * len(glyphs)
+            owned: list[tuple[tuple[int, int], list[tuple[str, float, float, float, float, float]]]] = []
+            for _, key, name, table, frame, units in by_slide.get(number, []):
+                if frame is None:
+                    skipped += 1
+                picked: list[tuple[str, float, float, float, float, float]] = []
+                for unit in units:
+                    # The same words can occur twice on a page; take the unused occurrence nearest the frame.
+                    best: tuple[float, int] | None = None
+                    start = 0
+                    while (index := text.find(unit, start)) >= 0:
+                        start = index + 1
+                        if any(used[index : index + len(unit)]):
+                            continue
+                        first = glyphs[index]
+                        distance = (
+                            0.0
+                            if frame is None
+                            else max(frame[0] - first[3], first[1] - frame[2], 0.0) + max(frame[1] - first[4], first[2] - frame[3], 0.0)
+                        )
+                        if best is None or distance < best[0]:
+                            best = (distance, index)
+                    if best is not None:
+                        used[best[1] : best[1] + len(unit)] = [True] * len(unit)
+                        picked.extend(glyphs[best[1] : best[1] + len(unit)])
+                if not picked or key in drawn:
+                    continue
+                drawn[key] = {
+                    "slide": number,
+                    "name": name,
+                    "table": table,
+                    "frame": frame,
+                    "box": (min(g[1] for g in picked), min(g[2] for g in picked), max(g[3] for g in picked), max(g[4] for g in picked)),
+                    "size": round(min(g[5] for g in picked) * 2) / 2,
+                    "touches": set(),
+                }
+                owned.append((key, picked))
+            for position, (key, mine) in enumerate(owned):
+                for other_key, theirs in owned[position + 1 :]:
+                    a, b = drawn[key]["box"], drawn[other_key]["box"]
+                    if min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1]):
+                        continue
+                    hits = sum(
+                        1 for g in mine if any(min(g[3], h[3]) - max(g[1], h[1]) > 0.5 and min(g[4], h[4]) - max(g[2], h[2]) > 0.5 for h in theirs)
+                    )
+                    if hits >= _MIN_COLLIDING_GLYPHS:
+                        drawn[key]["touches"].add(other_key)
+                        drawn[other_key]["touches"].add(key)
+    finally:
+        document.close()
+    return drawn, pages, skipped
+
+
+def _excess(entry: dict[str, Any]) -> tuple[float, float]:
+    frame, box = entry["frame"], entry["box"]
+    return (0.0, 0.0) if frame is None else (max(0.0, box[3] - frame[3]), max(0.0, box[2] - frame[2]))
+
+
+def _outside(entry: dict[str, Any], page: tuple[float, float]) -> tuple[float, str]:
+    box = entry["box"]
+    return max((box[3] - page[1], "below"), (box[2] - page[0], "right of"), (-box[1], "above"), (-box[0], "left of"))
+
+
+def layout_facts(data: bytes, pdf: bytes, template: bytes | None = None, template_pdf: bytes | None = None) -> dict[str, Any]:
+    """Facts about where a render drew the text. Runs in the bounded parse child."""
+    drawn, pages, skipped = _drawn_layout(data, pdf)
+    reference = None
+    if template is not None and template_pdf is not None:
+        reference, reference_pages, _ = _drawn_layout(template, template_pdf)
+    found: dict[str, list[tuple[float, str]]] = {
+        kind: [] for kind in ("outside_page", "table_larger_than_frame", "text_over_text", "text_outside_box", "smaller_text")
+    }
+    for key, entry in drawn.items():
+        number, page = entry["slide"], pages[entry["slide"] - 1]
+        before = reference.get(key) if reference is not None else None
+        label = f"{'table' if entry['table'] else 'text of'} '{entry['name']}'"
+        text_label = f"text of table '{entry['name']}'" if entry["table"] else f"text of '{entry['name']}'"
+        compared = "" if reference is None else ("; the template has no such shape" if before is None else None)
+        off, side = _outside(entry, page)
+        off_before = _outside(before, reference_pages[before["slide"] - 1])[0] if before is not None else 0.0
+        if off > _PAGE_SLACK and off - max(off_before, 0.0) > _PAGE_SLACK:
+            tail = compared if compared is not None else f"; in the template {max(off_before, 0.0):.0f} pt"
+            found["outside_page"].append(
+                (off, f"slide {number}: {text_label} is drawn {off:.0f} pt {side} the page (page is {page[0]:.0f}x{page[1]:.0f} pt){tail}.")
+            )
+        if entry["frame"] is not None:
+            tall, wide = _excess(entry)
+            tall_before, wide_before = _excess(before) if before is not None else (0.0, 0.0)
+            frame = entry["frame"]
+            size = f"{frame[2] - frame[0]:.0f}x{frame[3] - frame[1]:.0f} pt"
+            parts = []
+            if tall > _FRAME_SLACK and tall - tall_before > _FRAME_SLACK:
+                parts.append((f"{tall:.0f} pt taller" if entry["table"] else f"{tall:.0f} pt below its box", f"{tall_before:.0f} pt"))
+            if wide > _FRAME_SLACK and wide - wide_before > _FRAME_SLACK:
+                parts.append((f"{wide:.0f} pt wider" if entry["table"] else f"{wide:.0f} pt right of its box", f"{wide_before:.0f} pt"))
+            if parts:
+                tail = compared if compared is not None else "; in the template " + " and ".join(part[1] for part in parts)
+                grown = " and ".join(part[0] for part in parts)
+                if entry["table"]:
+                    found["table_larger_than_frame"].append(
+                        (max(tall, wide), f"slide {number}: {label} is drawn {grown} than its frame ({size}){tail}.")
+                    )
+                else:
+                    found["text_outside_box"].append((max(tall, wide), f"slide {number}: {label} runs {grown} ({size}){tail}."))
+        new = sorted(entry["touches"] - (before["touches"] if before is not None else set()), key=lambda other: drawn[other]["name"])
+        # State each colliding pair once, at the shape with more partners (ties: the first seen).
+        new = [other for other in new if (len(drawn[other]["touches"]), other) <= (len(entry["touches"]), key)]
+        if new:
+            names = ", ".join(f"'{drawn[other]['name']}'" for other in new[:3]) + (f", and {len(new) - 3} more" if len(new) > 3 else "")
+            tail = (
+                "" if reference is None else ("; the template has no such shape" if before is None else "; in the template it overlaps none of them")
+            )
+            found["text_over_text"].append(
+                (
+                    float(len(new)),
+                    f"slide {number}: drawn {text_label} overlaps the text of {len(new)} other shape{'s' if len(new) > 1 else ''} ({names}){tail}.",
+                )
+            )
+        if before is not None and before["size"] - entry["size"] > _SIZE_SLACK:
+            found["smaller_text"].append(
+                (
+                    before["size"] - entry["size"],
+                    f"slide {number}: {text_label} is drawn at {entry['size']:g} pt; in the template at {before['size']:g} pt.",
+                )
+            )
+    facts: list[dict[str, str]] = []
+    omitted: dict[str, int] = {}
+    for kind, items in found.items():
+        items.sort(key=lambda item: -item[0])
+        room = min(_MAX_LAYOUT_FACTS_PER_KIND, _MAX_LAYOUT_FACTS - len(facts))
+        facts += [{"kind": kind, "detail": _cut(detail, _MAX_GROUPED_DETAIL)} for _, detail in items[:room]]
+        if len(items) > room:
+            omitted[kind] = len(items) - room
+    return {
+        "status": "rendered",
+        "renderer": LAYOUT_RENDERER,
+        "compared_with_template": reference is not None,
+        "facts": facts,
+        "facts_omitted": omitted,
+        **({"shapes_not_measured": skipped, "shapes_not_measured_reason": "rotated or vertical text"} if skipped else {}),
+    }
+
+
 def _not_available(reason: str) -> dict[str, Any]:
     return {"status": "not_available", "reason": reason}
 
@@ -333,6 +609,117 @@ async def _template_bytes(ctx: Any, written: Artifact) -> bytes | None:
     return data if len(data) == decks[0].size else None
 
 
+_CHART_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_MAX_CHART_PART_BYTES = 8 * 1024 * 1024
+
+
+def chart_point_count_copy(data: bytes) -> bytes | None:
+    """A copy whose chart caches declare as many points as they list, or None when nothing differs.
+
+    PowerPoint opens a chart whose cache lists five points and declares three; LibreOffice refuses the
+    whole file. Only the copy sent to the renderer is changed, and only the declared count.
+    Runs in the bounded parse child.
+    """
+    import re
+    import zipfile
+
+    from lxml import etree
+
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+    changed: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as package:
+        for item in package.infolist():
+            if re.fullmatch(r"ppt/charts/chart\d+\.xml", item.filename) is None or item.file_size > _MAX_CHART_PART_BYTES:
+                continue
+            root = etree.fromstring(package.read(item.filename), parser)
+            corrected = 0
+            for kind in ("numCache", "strCache", "numLit", "strLit"):
+                for cache in root.iter(f"{{{_CHART_NAMESPACE}}}{kind}"):
+                    declared = cache.find(f"{{{_CHART_NAMESPACE}}}ptCount")
+                    indexes = [int(point.get("idx")) for point in cache.findall(f"{{{_CHART_NAMESPACE}}}pt") if (point.get("idx") or "").isdigit()]
+                    if declared is None or not (declared.get("val") or "").isdigit() or not indexes or max(indexes) < int(declared.get("val")):
+                        continue
+                    declared.set("val", str(max(indexes) + 1))
+                    corrected += 1
+            if corrected:
+                changed[item.filename] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        if not changed:
+            return None
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as copy:
+            for item in package.infolist():
+                copy.writestr(item, changed.get(item.filename) or package.read(item.filename))
+    return output.getvalue()
+
+
+async def render_source(data: bytes) -> bytes:
+    """The bytes to hand to the renderer: the file, or a copy with consistent chart point counts."""
+    import base64
+
+    from bowhead_core.untrusted_parse import run_worker_json
+
+    try:
+        result, outcome = await run_worker_json("pptx_render_copy", {}, data=data)
+        if outcome == "ok" and isinstance(result, dict) and isinstance(result.get("copy_base64"), str):
+            return base64.b64decode(result["copy_base64"])
+    except Exception as exc:
+        _LOG.info("pptx_result_view.render_copy_unavailable error_type=%s", type(exc).__name__)
+    return data
+
+
+_RENDER_WAIT_SECONDS = 30
+_TEMPLATE_RENDERS: dict[str, bytes] = {}
+_MAX_TEMPLATE_RENDERS = 4
+_MAX_KEPT_RENDER_BYTES = 8 * 1024 * 1024
+
+
+async def _render_pdf(data: bytes) -> tuple[bytes | None, str]:
+    """Render in the sandbox executor's fixed viewer worker; the application never opens the file in an office program."""
+    import os
+    from pathlib import Path
+
+    import anyio
+
+    root, url, token = (
+        os.environ.get(name, "") for name in ("BOWHEAD_SKILL_WORKDIR_ROOT", "BOWHEAD_SANDBOX_EXECUTOR_URL", "BOWHEAD_SANDBOX_EXECUTOR_TOKEN")
+    )
+    if not root or not url or not token:
+        return None, "renderer_unavailable"
+    try:
+        from bowhead_core.documents.authoring_executor import AuthoringExecutor
+
+        renderer = AuthoringExecutor(root=Path(root), url=url, token=token)
+        with anyio.fail_after(_RENDER_WAIT_SECONDS):
+            return await renderer.view_presentation(await render_source(data)), "ok"
+    except TimeoutError:
+        return None, "time_limit"
+    except Exception as exc:
+        code = getattr(exc, "code", "")
+        _LOG.info("pptx_result_view.render_unavailable error_type=%s code=%s", type(exc).__name__, code)
+        if code in {"document_pdf_invalid", "document_render_failed", "document_pdf_page_mismatch"}:
+            return None, "file_not_rendered"
+        return None, "size_limit" if code in {
+            "document_slide_limit",
+            "document_preview_limit",
+            "file_office_package_limit",
+        } else "renderer_unavailable"
+
+
+async def _template_render(template: bytes) -> bytes | None:
+    """One render of a template serves every file written from it; kept in memory by content hash."""
+    import hashlib
+
+    key = hashlib.sha256(template).hexdigest()
+    if key in _TEMPLATE_RENDERS:
+        return _TEMPLATE_RENDERS[key]
+    pdf, _ = await _render_pdf(template)
+    if pdf is not None and len(pdf) <= _MAX_KEPT_RENDER_BYTES:
+        while len(_TEMPLATE_RENDERS) >= _MAX_TEMPLATE_RENDERS:
+            _TEMPLATE_RENDERS.pop(next(iter(_TEMPLATE_RENDERS)))
+        _TEMPLATE_RENDERS[key] = pdf
+    return pdf
+
+
 async def pptx_result_view(ctx: Any, artifact: Artifact) -> dict[str, Any]:
     """Advisory: a view that cannot be built never undoes or questions the saved file."""
     from bowhead_core.untrusted_parse import run_worker_json
@@ -344,15 +731,111 @@ async def pptx_result_view(ctx: Any, artifact: Artifact) -> dict[str, Any]:
         if len(data) != artifact.size:
             return _not_available("content_changed")
         template = await _template_bytes(ctx, artifact)
+        pdf, render_outcome = await _render_pdf(data)
+        template_pdf = await _template_render(template) if pdf is not None and template is not None else None
+        extra = {"template": template, "pdf": pdf, "template_pdf": template_pdf}
         result, outcome = await run_worker_json(
-            "pptx_result_view", {}, data=data, extra_files={"template": template} if template is not None else None
+            "pptx_result_view", {}, data=data, extra_files={name: content for name, content in extra.items() if content is not None}
         )
         if outcome != "ok" or not isinstance(result, dict):
             return _not_available({"timeout": "time_limit", "oom": "memory_limit"}.get(outcome, "file_not_readable"))
+        if pdf is None and render_outcome == "file_not_rendered":
+            result["layout"] = {"status": "not_rendered", "detail": FILE_NOT_RENDERED}
+        elif pdf is None:
+            result["layout"] = _not_available(render_outcome)
         return result
     except Exception as exc:
         _LOG.warning("pptx_result_view.unavailable artifact_id=%s error_type=%s", artifact.id, type(exc).__name__)
         return _not_available("inspection_unavailable")
+
+
+_MAX_STRUCTURE_CHARS = 6000
+_MAX_SEEN_INPUTS = 2048
+# (Turn, calling Agent, artifact) whose structure a tool result already carried. Bounded, oldest dropped first.
+_INPUTS_DESCRIBED: dict[tuple[str, str, str], None] = {}
+INPUT_VIEW_GUIDANCE = (
+    "A .pptx a sandbox call reads that was not written in this Turn (an attached template, a file from an earlier Turn) "
+    "comes back once per run in input_views: the text that pptx_fill.describe prints for it (shape ids, table sizes and "
+    "merged ranges, chart plots, series and number formats)."
+)
+
+
+def _pptx_fill_module() -> Any:
+    """The sandbox helper module, loaded from the python_sandbox Skill so both sides print the same text."""
+    import importlib.util
+
+    from bowhead_skill.catalog import builtin_catalog_dir
+
+    path = builtin_catalog_dir() / "python_sandbox" / "scripts" / "pptx_fill.py"
+    spec = importlib.util.spec_from_file_location("bowhead_pptx_fill", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(str(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def deck_structure(data: bytes) -> dict[str, Any]:
+    """What pptx_fill.describe prints for a deck, cut at a line boundary. Runs in the bounded parse child."""
+    from pptx import Presentation
+
+    text = _pptx_fill_module().describe(Presentation(io.BytesIO(data)))
+    if len(text) <= _MAX_STRUCTURE_CHARS:
+        return {"structure": text}
+    lines = text.split("\n")
+    kept: list[str] = []
+    size = 0
+    for line in lines:
+        if size + len(line) + 1 > _MAX_STRUCTURE_CHARS:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    rest = lines[len(kept) :]
+    slides = sum(1 for line in rest if line.startswith("slide "))
+    kept.append(f"... {len(rest)} more lines ({slides} slides start in them); describe(prs, slides=[...]) prints them.")
+    return {"structure": "\n".join(kept)}
+
+
+async def attach_input_views(result: Any, ctx: Any) -> Any:
+    """Add the structure of each .pptx the call read that was not written in this Turn, once per Agent run."""
+    from bowhead_core.untrusted_parse import run_worker_json
+
+    if not isinstance(result, dict):
+        return result
+    nested = result.get("result_json") if isinstance(result.get("result_json"), dict) else {}
+    inputs = result.get("input_artifacts") or nested.get("input_artifacts")
+    store = getattr(ctx, "artifact_store", None)
+    turn = getattr(ctx, "turn_id", None)
+    if not isinstance(inputs, list) or store is None or not getattr(ctx, "user_id", None) or not turn:
+        return result
+    agent = getattr(getattr(ctx, "tool_step", None), "parent_agent_id", None) or "lead"
+    views: dict[str, Any] = {}
+    for item in inputs:
+        if not isinstance(item, dict) or not isinstance(item.get("artifact_id"), str) or not isinstance(item.get("key"), str):
+            continue
+        mark = (turn, agent, item["artifact_id"])
+        if mark in _INPUTS_DESCRIBED:
+            continue
+        try:
+            artifact = await store.get(item["artifact_id"], check_created_by=ctx.user_id, reject_null_owner=True)
+            if artifact is None or not is_pptx(artifact.mime, artifact.filename) or artifact.created_by_turn == turn:
+                continue
+            if not 0 < artifact.size <= MAX_VIEW_BYTES:
+                continue
+            data = await store.backend.read_bounded(artifact.path, limit=MAX_VIEW_BYTES)
+            if len(data) != artifact.size:
+                continue
+            built, outcome = await run_worker_json("pptx_structure", {}, data=data)
+            if outcome != "ok" or not isinstance(built, dict) or not isinstance(built.get("structure"), str):
+                continue
+        except Exception as exc:
+            _LOG.warning("pptx_input_view.unavailable artifact_id=%s error_type=%s", item["artifact_id"], type(exc).__name__)
+            continue
+        _INPUTS_DESCRIBED[mark] = None
+        while len(_INPUTS_DESCRIBED) > _MAX_SEEN_INPUTS:
+            _INPUTS_DESCRIBED.pop(next(iter(_INPUTS_DESCRIBED)))
+        views[item["key"]] = {"artifact_id": item["artifact_id"], "name": artifact.filename, "structure": built["structure"]}
+    return {**result, "input_views": views} if views else result
 
 
 async def attach_result_views(result: Any, ctx: Any) -> Any:

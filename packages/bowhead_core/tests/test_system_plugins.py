@@ -64,7 +64,7 @@ def test_settings_plugins_keep_their_compiled_resources_and_skill_grant():
 
 def test_every_registered_version_resolves_and_the_configuration_agent_refs_exist():
     refs = [plugin.ref for plugin in builtin_plugins() if plugin.family == "settings"]
-    assert len(refs) == len(set(refs)) == 21
+    assert len(refs) == len(set(refs)) == 22
     for ref in refs:
         tools, _ = resolve_system_plugins([ref], [], [])
         assert tools == CONFIGURATION_RESOURCES

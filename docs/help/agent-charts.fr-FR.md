@@ -1,6 +1,6 @@
 # Explorer les classements des Agents
 
-Ouvrez **Agents**, puis choisissez l’onglet **Classements** sous l’en-tête. **Marché**, **Mes agents** et **Classements** partagent le même en-tête : vous pouvez passer de l’un à l’autre à tout moment.
+Ouvrez **Agents → Classements** dans la barre latérale. **Marché**, **Mes agents** et **Classements** sont des pages distinctes. Le lien **Agents** ouvre la liste des Agents que vous avez recrutés.
 
 - **Top** montre les Agents utilisés par le plus de membres de votre équipe pendant les 28 derniers jours.
 - **En progression** montre la hausse des membres actifs sur les 7 derniers jours par rapport aux 7 jours précédents.

@@ -93,3 +93,9 @@ If sharing is disabled for your deployment, you can still inspect or revoke shar
 A report may reference a file shared with its author by someone else. Report recipients need their own access to that original; otherwise that file is unavailable while the rest of the report remains readable. Ask the file owner to grant appropriate access. Authorized HTML keeps its normal interaction and original download. Revocation prevents subsequent authorized reads; it cannot recall downloaded files or erase content already open in a browser.
 
 While preparing a document draft, the assistant may calculate or check the complete data you supplied before making the edits. A calculation result is not a ready draft. Review the generated document, its figures and its sources before confirming publication.
+
+## Find and manage reports
+
+Open **My Reports** from the sidebar. Search, filter by Space, or change the sort. Turn on the empty-report filter if you are looking for a report without generated content. Use **Shared with me** to find reports others gave you access to.
+
+Open a report by its title. The row actions can offer sharing, downloading, copying a permissioned link, updating status, and deleting. On a phone, look in the row’s **More** menu. When deleting a report, check whether the confirmation also selects the associated conversation.

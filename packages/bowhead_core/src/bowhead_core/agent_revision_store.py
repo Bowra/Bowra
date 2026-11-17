@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.agent_automation_context import (
     AutomationPreparation,
@@ -1188,6 +1188,7 @@ class AgentRevisionStore:
                 raise
         return _working_copy_from_row(row), created
 
+    @repeat_when_authority_busy()
     async def save_working_copy(
         self,
         *,

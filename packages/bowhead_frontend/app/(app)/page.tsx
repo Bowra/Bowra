@@ -235,6 +235,13 @@ import {
   type ComposerSubmissionWireSnapshot,
   type SubmissionRecoveryScope,
 } from "@/lib/composer-submission-recovery";
+import {
+  referencePreviewAfterSendSettled,
+  referencePreviewForPendingSend,
+  referencePreviewForRecoveredSubmission,
+  referencePreviewVisible,
+  type ReferenceSubmissionPreview,
+} from "@/lib/reference-submission-preview";
 import { ComposerRecoveryUnavailableError } from "@/lib/composer-local-persistence-db";
 import {
   canonicalComposerStartSessionId,
@@ -959,10 +966,8 @@ function CanvasHomeInner() {
   // The journal is written before POST so an interrupted send can be recovered.
   // It is not a recovery problem while that same POST is still in flight.
   const [submissionOutcomeUnknown, setSubmissionOutcomeUnknown] = useState(false);
-  const [referenceSubmissionPreview, setReferenceSubmissionPreview] = useState<{
-    scopeKey: string;
-    draft: RecoveredReferenceSubmission;
-  } | null>(null);
+  const [referenceSubmissionPreview, setReferenceSubmissionPreview] =
+    useState<ReferenceSubmissionPreview | null>(null);
   const recoveredSubmissionRef = useRef<RecoveredSubmission | null>(null);
   recoveredSubmissionRef.current = recoveredSubmission;
   const [submissionRecoveryChecked, setSubmissionRecoveryChecked] = useState(false);
@@ -1816,7 +1821,7 @@ function CanvasHomeInner() {
             try {
               const draft = await readPendingReferenceSubmission(submissionRecoveryScope);
               if (current && draft && composerDraftScopeKeyRef.current === previewScopeKey) {
-                setReferenceSubmissionPreview({ scopeKey: previewScopeKey, draft });
+                setReferenceSubmissionPreview(referencePreviewForRecoveredSubmission(previewScopeKey, draft));
                 if (referenceInputEnabled) {
                   setRecoveredSubmission(draft);
                   setSubmissionOutcomeUnknown(true);
@@ -1869,6 +1874,9 @@ function CanvasHomeInner() {
     if (recoveredSubmissionRef.current !== null) {
       setSubmissionOutcomeUnknown(true);
     }
+    // An accepted send has already cleared its local copy; one that is still
+    // here belongs to a failed, interrupted or unconfirmed send and is shown.
+    setReferenceSubmissionPreview(referencePreviewAfterSendSettled);
     settleSendInit(attemptKey, accepted);
   };
   const handleSubmissionPending = (
@@ -1882,9 +1890,8 @@ function CanvasHomeInner() {
     recoveredSubmissionRef.current = pending;
     setRecoveredSubmission(pending);
     setSubmissionOutcomeUnknown(false);
-    if ("input_document" in pending) setReferenceSubmissionPreview({
-      scopeKey, draft: pending as RecoveredReferenceSubmission,
-    });
+    if ("input_document" in pending) setReferenceSubmissionPreview((current) =>
+      referencePreviewForPendingSend(current, scopeKey, pending as RecoveredReferenceSubmission));
   };
   const handleSubmissionCleared = (
     _attemptKey: string,
@@ -3895,8 +3902,8 @@ function CanvasHomeInner() {
           terminalAction,
           "adopted",
         );
-        if (settlement === "deferred") return true;
-        if (settlement === "superseded") return false;
+        // Keep the draft visible while its accepted action is awaiting local settlement.
+        if (settlement !== "settled") return false;
       }
       if (!ownsTerminalPresentation()) return false;
       if (
@@ -5507,7 +5514,7 @@ function CanvasHomeInner() {
           referenceQueueRefresh,
         ].join(":")}
       />
-      {referenceSubmissionPreview?.scopeKey === composerDraftScopeKey ? (
+      {referencePreviewVisible(referenceSubmissionPreview, composerDraftScopeKey) ? (
         <ComposerReferencePreview
           document={referenceSubmissionPreview.draft.input_document}
           attachments={referenceSubmissionPreview.draft.attachments}

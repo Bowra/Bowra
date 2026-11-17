@@ -614,10 +614,11 @@ def test_chat_session_and_user_source_helpers_have_exact_callers() -> None:
         )
         == 1
     )
+    # aea6191e3 wrapped the startup body in `_application_lifespan` under the SQLite runtime lease.
     assert _call_owners(
         gateway_main_tree,
         "cleanup_stale_running_turns",
-    ) == {"lifespan", "_chat_submission_maintenance_loop"}
+    ) == {"_application_lifespan", "_chat_submission_maintenance_loop"}
 
 
 def _method_calls(tree: ast.AST, owner: str, callee: str) -> bool:

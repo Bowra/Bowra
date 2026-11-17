@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from bowhead_core.bi_workspace_continuation import BiWorkspaceReadContinuation, capture_bi_workspace_checkpoint
+from bowhead_core.output_recovery import STATE_NAME, OutputRecovery
 from bowhead_core.types import ToolInvocation
 from bowhead_router.types import Message, ToolCall
 
@@ -39,12 +40,17 @@ def capture_args():
         Message(role="assistant", content="Select workspace", tool_calls=[ToolCall(id="select", name="bi_query", arguments={"query": "revenue"})]),
         Message(role="tool", name="bi_query", tool_call_id="select", content=json.dumps(question)),
     ]
+    invocations = [
+        ToolInvocation(tool_name="skill_read", arguments={"name": "method"}, result=read),
+        ToolInvocation(tool_name="bi_query", arguments={"query": "revenue"}, result=question),
+    ]
+    # The runner records receipt-backed progress in its private output-recovery note after each Tool batch.
+    recovery = OutputRecovery()
+    recovery.observe(invocations)
+    recovery.sync(messages)
     return {
         "messages": messages,
-        "invocations": [
-            ToolInvocation(tool_name="skill_read", arguments={"name": "method"}, result=read),
-            ToolInvocation(tool_name="bi_query", arguments={"query": "revenue"}, result=question),
-        ],
+        "invocations": invocations,
         "iteration": 1,
         "binding": binding,
         "ctx": context,
@@ -67,6 +73,25 @@ def test_v2_retains_read_messages_and_round_number(capture_args):
     assert messages[-1].content == "Use B" and restored.next_iteration == 2
     capture_args["messages"][2].content = "CHANGED"
     assert restored.read_messages()[1].content == '{"body": "ORIGINAL METHOD"}'
+
+
+@pytest.mark.parametrize("change", ["correction_pending", "context_reduced", "unmatched_receipt", "not_last", "duplicate"])
+def test_output_recovery_note_is_excluded_only_when_retained_receipts_rebuild_it(capture_args, change):
+    messages = capture_args["messages"]
+    assert messages[-1].name == STATE_NAME
+    recovery = OutputRecovery.restore(messages)
+    if change == "correction_pending":
+        recovery.attempts = 1
+    elif change == "context_reduced":
+        recovery.context_reduced = True
+    elif change == "unmatched_receipt":
+        recovery.operations.add("0" * 64)
+    recovery.sync(messages)
+    if change == "not_last":
+        messages.insert(-2, messages.pop())
+    elif change == "duplicate":
+        messages.append(messages[-1])
+    assert capture_bi_workspace_checkpoint(**capture_args) is None
 
 
 @pytest.mark.parametrize(

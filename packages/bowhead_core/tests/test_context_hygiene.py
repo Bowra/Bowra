@@ -77,7 +77,11 @@ def helper_result(index: int) -> dict:
         "duration_ms": 91_337,
         "tool_execution": {"recorded": 12, "succeeded": 11, "failed": 1},
         "directive": "Tell the user which file changed. " * 30,
-        "produced": {"files": 1, "file_names": [f"report_v{index}.html"]},
+        "produced": {
+            "files": 3,
+            "file_names": [f"report_v{index}.html"],
+            "delivered_files": [{"artifact_id": f"art_new_{index}", "name": f"report_v{index}.html"}],
+        },
         "revised_files": {"targets": [{"artifact_id": f"art_old_{index}", "version": index}], "new_files": [{"artifact_id": f"art_new_{index}"}]},
         "payload_summary": {"title": "2025 review", "exec_summary": "Net revenue grew. " * 60},
         "material_refs": {"version": 1, "content_in_result": "omitted", "items": material_items(index)},
@@ -242,9 +246,12 @@ def test_a_stub_keeps_identity_and_outcome_and_drops_repeated_material() -> None
     assert kept["produced"]["file_names"] == ["report_v3.html"]
     assert kept["payload_summary"]["exec_summary"].endswith("chars removed]")
     assert not {"material_refs", "material_recovery_guidance", "directive"} & set(kept)
-    # The files this result wrote stay addressable; reused inputs and sections do not repeat.
-    assert data["produced_artifacts"] == [{"artifact_id": "art_new_3", "relation": "created"}, {"artifact_id": "art_data_3", "relation": "updated"}]
-    assert "art_in_3_0" not in stub and "sec_3_0" not in stub and "produced_artifacts_omitted" not in data
+    # The delivered file stays addressable by identifier and name together, with the count of everything
+    # produced. Data files, reused inputs and sections do not repeat: the lookup and read_report list them.
+    assert kept["produced"]["delivered_files"] == [{"artifact_id": "art_new_3", "name": "report_v3.html"}]
+    assert kept["produced"]["files"] == 3
+    assert "art_data_3" not in stub and "art_in_3_0" not in stub and "sec_3_0" not in stub
+    assert "produced_artifacts" not in data
     # Run statistics are neither identity nor outcome.
     assert not {"tokens_input", "tokens_output", "duration_ms", "tool_execution"} & set(kept)
     # Source validation reads provenance at the top level of a result.
@@ -256,15 +263,15 @@ def test_a_stub_keeps_identity_and_outcome_and_drops_repeated_material() -> None
     assert cleared_result("subagent_spawn", original) == stub
 
 
-def test_a_stub_bounds_the_produced_files_it_names() -> None:
-    origin = {"kind": "tool", "turn_id": "t_1", "producer_id": "sub_1", "call_id": "call_1"}
-    items = [{"kind": "artifact", "locator": {"artifact_id": f"art_{n:02d}"}, "relation": "created", "origin": origin} for n in range(15)]
-    body = {"ok": True, "final_answer": "x" * 4000, "material_refs": {"version": 1, "items": [*items, {"kind": "artifact"}, "bad"]}}
-    data = json.loads(cleared_result("subagent_spawn", json.dumps(body)))
-    assert [entry["artifact_id"] for entry in data["produced_artifacts"]] == [f"art_{n:02d}" for n in range(12)]
-    assert data["produced_artifacts_omitted"] == 3
-    # A result without its own reference list names nothing.
-    assert "produced_artifacts" not in json.loads(cleared_result("subagent_spawn", json.dumps({"ok": True, "final_answer": "x" * 4000})))
+def test_a_stub_keeps_as_many_delivered_files_as_a_helper_result_names() -> None:
+    delivered = [{"artifact_id": f"art_{n:02d}", "name": f"store-{n:02d}.html"} for n in range(30)]
+    body = {"ok": True, "final_answer": "x" * 4000, "produced": {"files": 42, "delivered_files": delivered}}
+    kept = json.loads(cleared_result("subagent_spawn", json.dumps(body)))["kept"]
+    # The ledger names up to 30 delivered files, and a stub keeps lists of that length whole.
+    assert kept["produced"] == {"files": 42, "delivered_files": delivered}
+    # A result written before delivered files were named keeps its names and count; nothing is invented for it.
+    older = {"ok": True, "final_answer": "x" * 4000, "produced": {"files": 2, "file_names": ["a.html", "b.csv"]}}
+    assert json.loads(cleared_result("subagent_spawn", json.dumps(older)))["kept"]["produced"] == older["produced"]
 
 
 def test_a_read_stub_keeps_coverage_and_asks_for_a_fresh_read() -> None:
@@ -326,8 +333,20 @@ def test_clearing_keeps_recent_turns_small_results_and_protected_tools() -> None
     assert clear_old_tool_bodies(conversation(2, corrected=False), keep_turns=2, min_tokens=1).results == 0
 
 
-def test_published_history_is_unchanged_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hygiene_is_on_unless_the_deployment_turns_it_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.context_hygiene import history_hygiene_enabled
+
     monkeypatch.delenv("FEATURE_CONTEXT_HISTORY_HYGIENE", raising=False)
+    assert history_hygiene_enabled()
+    for value in ("0", "false", "off", " OFF "):
+        monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", value)
+        assert not history_hygiene_enabled()
+    monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", "1")
+    assert history_hygiene_enabled()
+
+
+def test_published_history_is_unchanged_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FEATURE_CONTEXT_HISTORY_HYGIENE", "0")
     messages = conversation(6)
     published = published_history(messages)
     assert published.messages is messages and not published.enabled

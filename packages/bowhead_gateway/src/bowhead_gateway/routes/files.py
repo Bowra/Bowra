@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from functools import partial
@@ -24,6 +25,7 @@ import aiosqlite
 import anyio
 from bowhead_core.artifact_classifier import is_legacy_category, normalize_category
 from bowhead_core.artifact_store import (
+    SVG_MIME,
     TEAM_SCOPE_WORKSPACE_ID,
     _open_db,
     artifact_created_after_cutover,
@@ -175,6 +177,15 @@ _BROWSER_AMBIGUOUS_MIME: frozenset[str] = frozenset(
         "text/plain",
     }
 )
+
+# Text sources admitted only as a running Turn's own sandbox output (see `upload`): the
+# extension selects the stored MIME, and the declared MIME must be one of its known aliases.
+_PRODUCER_TEXT_OUTPUTS: dict[str, tuple[str, frozenset[str]]] = {
+    ".tex": ("text/x-tex", frozenset({"application/x-tex", "text/x-tex", "application/octet-stream", "text/plain"})),
+    ".svg": (SVG_MIME, frozenset({SVG_MIME, "application/octet-stream", "text/plain", "text/xml", "application/xml"})),
+}
+# An SVG document: optional XML declaration, comments and a DOCTYPE without an internal subset, then the svg root.
+_SVG_DOCUMENT_RE = re.compile(r"\A\ufeff?(?:\s+|<\?xml[^>]*\?>|<!--.*?-->|<!DOCTYPE[^>\[]*>)*<svg[\s/>]", re.IGNORECASE | re.DOTALL)
 
 
 def resolve_effective_upload_mime(mime: str, filename: str) -> str | None:
@@ -359,33 +370,28 @@ async def upload(
     if version_of and (effective_source == "upload" or kind != "deliverable" or not await producer_output_bound()):
         raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
 
-    # TeX is admitted only as an authenticated run output, never by a caller's
-    # source label or by relaxing ordinary browser upload MIME rules.
-    tex_output = False
-    if (file.filename or "").lower().endswith(".tex"):
-        if await producer_output_bound() and (file.content_type or "application/octet-stream").split(";", 1)[0].strip().lower() in {
-            "application/x-tex",
-            "text/x-tex",
-            "application/octet-stream",
-            "text/plain",
-        }:
-            mime = "text/x-tex"
-            tex_output = True
-        else:
+    # TeX and SVG sources are admitted only as an authenticated run output, never by a
+    # caller's source label or by relaxing ordinary browser upload MIME rules.
+    producer_text = _PRODUCER_TEXT_OUTPUTS.get(Path(file.filename or "").suffix.lower())
+    if producer_text is not None:
+        stored_mime, declared_aliases = producer_text
+        declared = (file.content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
+        if declared not in declared_aliases or not await producer_output_bound():
             raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
+        mime = stored_mime
     inspect_office = mime in OFFICE_MIMES.values()
-    if mime not in ALLOWED_MIME and not inspect_office and not tex_output:
+    if mime not in ALLOWED_MIME and not inspect_office and producer_text is None:
         raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
     limit = MAX_OFFICE_BYTES if inspect_office else MAX_SIZE
     content = await file.read(limit + 1)
     if len(content) > limit:
         raise _file_error(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
-    if tex_output:
+    if producer_text is not None:
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
             raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported") from None
-        if not text.strip() or "\x00" in text:
+        if not text.strip() or "\x00" in text or (mime == SVG_MIME and not _SVG_DOCUMENT_RE.match(text)):
             raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
     inspection_authorizer = await _require_document_inspection_upload(
         request,
@@ -2264,11 +2270,11 @@ async def download(artifact_id: str, request: Request):  # type: ignore[no-untyp
     if art.status == "missing":
         raise _file_error(status.HTTP_410_GONE, "file_content_missing")
 
-    if (art.mime or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml"}:
+    if (art.mime or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml", SVG_MIME}:
         from bowhead_gateway.artifact_streaming import artifact_streaming_response
 
-        # Keep the Team preview limit on the authorized response, including
-        # object-store artifacts; a redirect would lose this response metadata.
+        # Keep the Team preview limit and the active-document isolation headers on the
+        # authorized response, including object-store artifacts; a redirect would lose them.
         return await artifact_streaming_response(request, store, art, inline=False)
 
     # multimodal-v1: inline display (<img> in chat/canvas), owner already checked above.

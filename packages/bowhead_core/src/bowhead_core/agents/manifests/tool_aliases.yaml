@@ -68,6 +68,8 @@
 # ─── Resource kind and risk (docs/drafts/agents/capability-center-plugins-tech-design.md §4.1) ───
 #   kind: required. `tool` = user-visible built-in Tool (Tools page, Plugins, Agent selection);
 #     `part` = internal system part, never shown, selected or disabled on its own.
+#   system_capability: optional, parts only. `true` lists the part to Team owners as a capability every
+#     Agent has and that cannot be turned off. It is still never selected or disabled.
 #   risk: required for `kind: tool`; one of read / compute / artifact_write / external_write / destructive.
 #     A part may carry the risk the authoring catalog already gave it, so that catalog stays unchanged.
 
@@ -924,6 +926,22 @@ tools:
     sigil: "✅"
     category: orchestrate
     kind: part
+    allowed_roles: [analyst, lead]
+
+  - canonical: find_results
+    display_zh: 查找会话结果
+    display_en: Find conversation results
+    blurb_zh: "按名称和类别查找本会话的文件，返回编号，不返回内容。"
+    blurb_en: "Finds this conversation's files by name and kind. Returns identifiers, not content."
+    display_de: "Gesprächsergebnisse finden"
+    blurb_de: "Findet Dateien dieses Gesprächs nach Name und Art. Liefert Kennungen, keine Inhalte."
+    display_fr: "Rechercher les résultats de la conversation"
+    blurb_fr: "Recherche les fichiers de cette conversation par nom et type. Renvoie des identifiants, pas le contenu."
+    sigil: "🔎"
+    category: orchestrate
+    kind: part
+    # Granted to Lead and every helper by the runtime (result_lookup.py); shown to Team owners as always on.
+    system_capability: true
     allowed_roles: [analyst, lead]
 
   - canonical: get_current_user

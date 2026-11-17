@@ -438,18 +438,27 @@ test.describe("B09 live SSE steer dogfood", () => {
     await expect.poll(() => steerPosts).toBe(1);
 
     await page.getByTitle("Test Workspace").first().click();
-    await page.getByRole("menuitem", { name: /Alice Workspace/ }).click();
+    await page.getByRole("menuitemradio", { name: /Alice Workspace/ }).click();
     await page.getByTitle("Alice Workspace").first().click();
-    await page.getByRole("menuitem", { name: /Test Workspace/ }).click();
+    await page.getByRole("menuitemradio", { name: /Test Workspace/ }).click();
 
-    await expect(page.getByRole("region", { name: "发送状态待确认" })).toBeVisible();
+    const draftHandoff = page.getByText("上一个输入框的草稿保存尚未完成", { exact: false });
+    await expect(draftHandoff).toBeVisible({ timeout: 10_000 });
+    await expect(textarea).toBeDisabled();
     await expect(page.getByRole("button", { name: "恢复草稿或再次发送" }))
       .toHaveCount(0);
     expect(steerPosts).toBe(1);
+    const response = page.waitForResponse((result) =>
+      result.url().endsWith("/api/v1/chat/send")
+        && result.request().postDataJSON()?.message === "pending steer survives roundtrip",
+    );
     releaseSteer();
-    await expect.poll(() => steerPosts).toBe(1);
+    await response;
+    await page.getByRole("button", { name: "重试恢复草稿" }).click();
+    await expect(draftHandoff).toHaveCount(0);
+    expect(steerPosts).toBe(1);
     await expect(page.getByRole("region", { name: "发送状态待确认" })).toHaveCount(0);
-    await expect(textarea).not.toHaveAttribute("readonly", "");
+    await expect(textarea).toBeEnabled();
     await expect(textarea).toHaveValue("");
   });
 

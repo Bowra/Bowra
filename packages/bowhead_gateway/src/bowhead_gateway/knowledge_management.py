@@ -325,7 +325,7 @@ class KnowledgeManagementAccess:
                 raise KnowledgeWriteError("knowledge_source_unavailable")
             action = await self._admit(ctx, action="remove", artifact=artifact, scope=file.scope)
             ctx._knowledge_write_action = action
-            await kb._delete_file_core(file.file_id, scope_ctx, request, user, action=action)
+            await kb._delete_file_core(file.file_id, scope_ctx, request, user, action=action, include_deleted=True)
         from bowhead_core.kb.ingestion import canonical_hash
 
         action_key = canonical_hash(

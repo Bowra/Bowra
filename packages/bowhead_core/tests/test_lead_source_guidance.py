@@ -70,7 +70,9 @@ async def test_model_receives_independent_data_and_computation_routes(monkeypatc
 
     assert result.ok, result.error
     request = router.requests[0]
-    assert [tool.name for tool in request.tools] == ["subagent_spawn"]
+    # Lead's only business Tool stays subagent_spawn; 8d040eaaf adds the run-local review_delivery
+    # carrier, which has no business execution authority, while delivery review is on (default).
+    assert [tool.name for tool in request.tools] == ["subagent_spawn", "review_delivery"]
     decision = _block(request.system, "query_classification_decision_tree")
     data_line = next(line for line in decision.splitlines() if line.startswith("- contains metric/time/dim"))
     code_line = next(line for line in decision.splitlines() if line.startswith("- **Run code / pure calculation"))

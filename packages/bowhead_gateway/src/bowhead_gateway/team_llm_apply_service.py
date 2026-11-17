@@ -10,7 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import aiosqlite
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.llm_config_crypto import (
     decrypt_llm_config,
@@ -265,6 +265,7 @@ async def _facts(
     return result
 
 
+@repeat_when_authority_busy()
 async def apply_team_llm_v2(
     *,
     db_path: str,

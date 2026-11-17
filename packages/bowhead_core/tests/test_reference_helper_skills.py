@@ -8,7 +8,7 @@ import httpx2
 import pytest
 import respx
 from bowhead_core.skill_reference_context import ReferenceHelperSkillScope
-from bowhead_core.subagent import PROFILES, SubagentRunner
+from bowhead_core.subagent import PROFILES, UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope
 from test_reference_http_start import answer_response, enable_lead_writer, payload, rows, settled
 from test_reference_http_start import http_start as http_start
@@ -139,8 +139,11 @@ async def test_helper_can_read_own_skill_without_inheriting_selected_method(http
         turn_id = accepted.json()["turn_id"]
         await settled(turn_id)
     assert (await case.fixture.case.store.get_turn(turn_id)).status == "completed", [(item.tool_name, item.result) for item in invocations]
-    # A rejected baseline read retains the existing one-off delivery review.
-    assert {key: len(value) for key, value in calls.items()} == {"lead": 3 + int(not declared), "helper": 3 + int(not declared), "primary": 1}
+    # A rejected baseline read retains the existing one-off delivery review. A helper whose
+    # own read succeeded and then answered in prose gets one unreturned-work note instead
+    # (ce9390072); either way the helper makes one extra model call.
+    assert {key: len(value) for key, value in calls.items()} == {"lead": 3 + int(not declared), "helper": 4, "primary": 1}
+    assert any(UNRETURNED_WORK_NOTE in (message.get("content") or "") for message in calls["helper"][3]["messages"]) is declared
     executions = [row for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id]
     assert len(executions) == 2 and all(row["status"] == "completed" for row in executions)
     selected_execution = next(row["id"] for row in executions if row["agent_id"] == "osa_exact")

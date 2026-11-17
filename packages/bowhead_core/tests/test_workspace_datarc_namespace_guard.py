@@ -17,6 +17,26 @@ def _src(rel: str) -> str:
     return (_PKGS / rel).read_text(encoding="utf-8")
 
 
+# Committed sources of the user-facing message catalogs. `bowhead_frontend/messages/` is the
+# ignored output of `scripts/assemble-edition.mjs`, so a clean checkout has no copy there; every
+# edition assembles its catalog from these files, and copy fixes belong in them.
+_MESSAGE_SOURCES = (
+    _PKGS / "bowhead_frontend/edition/shared-messages",
+    _PKGS / "bowhead_frontend/edition/community/messages",
+    _PKGS.parent / "enterprise/frontend/messages",
+)
+
+
+def _message_catalogs(locale: str) -> dict[str, str]:
+    catalogs = {
+        path.relative_to(_PKGS.parent).as_posix(): path.read_text(encoding="utf-8")
+        for path in (source / f"{locale}.json" for source in _MESSAGE_SOURCES)
+        if path.is_file()
+    }
+    assert f"packages/bowhead_frontend/edition/shared-messages/{locale}.json" in catalogs, "shared message catalog is missing"
+    return catalogs
+
+
 def test_memory_governance_id_prefixes_are_registered() -> None:
     terminology = (_PKGS.parent / "docs/design/概念术语.md").read_text(encoding="utf-8")
     privacy = _src(
@@ -127,20 +147,20 @@ def test_i18n_zh_a_face_has_no_bare_workspace() -> None:
     _QUALIFIED_WORKSPACE_TERMS."""
     import json
 
-    msgs = json.loads(_src("bowhead_frontend/messages/zh-CN.json"))
     bad: list[str] = []
 
-    def walk(obj: object, path: str = "") -> None:
+    def walk(obj: object, path: str) -> None:
         if isinstance(obj, dict):
             for k, v in obj.items():
-                walk(v, f"{path}.{k}" if path else k)
+                walk(v, f"{path}.{k}")
         elif isinstance(obj, str) and "工作区" in obj:
             # Every occurrence must belong to one of the qualified spellings.
             if obj.count("工作区") != sum(obj.count(term) for term in _QUALIFIED_WORKSPACE_TERMS):
                 bad.append(path)
 
-    walk(msgs)
-    assert not bad, f"zh-CN.json 裸「工作区」({len(bad)}): {bad[:8]} — A 面写「空间」，B 面写「北极九章工作区」（docs/terminology.md）"
+    for name, text in _message_catalogs("zh-CN").items():
+        walk(json.loads(text), name)
+    assert not bad, f"zh-CN 裸「工作区」({len(bad)}): {bad[:8]} — A 面写「空间」，B 面写「北极九章工作区」（docs/terminology.md）"
 
 
 def test_fe_localstorage_ws_key_single_chokepoint() -> None:
@@ -212,13 +232,12 @@ def test_i18n_zh_has_no_org_wording() -> None:
     are listed in _THIRD_PARTY_ORG_TERMS."""
     import json
 
-    msgs = json.loads(_src("bowhead_frontend/messages/zh-CN.json"))
     bad: list[str] = []
 
-    def walk(obj: object, path: str = "") -> None:
+    def walk(obj: object, path: str) -> None:
         if isinstance(obj, dict):
             for k, v in obj.items():
-                walk(v, f"{path}.{k}" if path else k)
+                walk(v, f"{path}.{k}")
         elif isinstance(obj, str) and "组织" in obj:
             rest = obj
             for term in _THIRD_PARTY_ORG_TERMS:
@@ -226,10 +245,12 @@ def test_i18n_zh_has_no_org_wording() -> None:
             if "组织" in rest:
                 bad.append(path)
 
-    walk(msgs)
-    assert not bad, f"zh-CN.json 出现「组织」({len(bad)}): {bad[:8]} — 用户面统一「团队」（docs/design/概念术语.md）"
+    for name, text in _message_catalogs("zh-CN").items():
+        walk(json.loads(text), name)
+    assert not bad, f"zh-CN 出现「组织」({len(bad)}): {bad[:8]} — 用户面统一「团队」（docs/design/概念术语.md）"
 
 
 def test_i18n_en_has_no_an_team_typo() -> None:
     """概念术语审计批3: org→team 机器替换的 'an team' 语法残次不得回流。"""
-    assert "an team" not in _src("bowhead_frontend/messages/en-US.json")
+    bad = [name for name, text in _message_catalogs("en-US").items() if "an team" in text]
+    assert not bad, f"'an team' in {bad}"

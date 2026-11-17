@@ -47,7 +47,7 @@ describe("unified sidebar navigation schema", () => {
     ["/knowledge/doc-types/", "", { primaryId: "library", leafId: "knowledge" }],
     ["/capabilities/", "", { primaryId: "capabilities", leafId: "capabilities" }],
     ["/capabilities/", "type=tools", { primaryId: "capabilities", leafId: "tools_catalog" }],
-    ["/capabilities/", "type=capabilities", { primaryId: "capabilities", leafId: "capabilities_catalog" }],
+    ["/capabilities/", "type=plugins", { primaryId: "capabilities", leafId: "capabilities_catalog" }],
     ["/settings/tools/", "oauth=success", { primaryId: "capabilities", leafId: "tools_catalog" }],
     ["/team/settings/workflows/", "", { primaryId: "capabilities", leafId: "skills" }],
     ["/team/settings/scheduled/", "", { primaryId: "capabilities", leafId: "scheduled" }],
@@ -151,7 +151,7 @@ describe("unified sidebar navigation schema", () => {
     if (center?.kind !== "group") throw new Error("Capability resources require a group.");
     expect(center.children.map((child) => child.id)).toEqual(["skills", "tools_catalog", "capabilities_catalog", "connections", "scheduled"]);
     expect(center.children.find((child) => child.id === "tools_catalog")?.route).toBe("/capabilities/?type=tools");
-    expect(center.children.find((child) => child.id === "capabilities_catalog")?.route).toBe("/capabilities/?type=capabilities");
+    expect(center.children.find((child) => child.id === "capabilities_catalog")?.route).toBe("/capabilities/?type=plugins");
   });
 
   it.each(["owner", "team_admin", "audit_admin", "member"] as const)("offers the Agent market to an eligible %s", (teamRole) => {

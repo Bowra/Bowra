@@ -371,12 +371,12 @@ async def test_sandbox_requires_actual_input_and_settled_executor_output(assigne
     if change == "none":
         from bowhead_core import artifact_store as artifact_store_module
 
-        opened = []
-        connect = artifact_store_module.diagnostic_connect
-        monkeypatch.setattr(artifact_store_module, "diagnostic_connect", lambda *args, **kwargs: opened.append(1) or connect(*args, **kwargs))
+        borrowed = []
+        borrow = artifact_store_module.open_shared_ctx
+        monkeypatch.setattr(artifact_store_module, "open_shared_ctx", lambda *args, **kwargs: borrowed.append(1) or borrow(*args, **kwargs))
         await revalidate_tool_materials(ctx, [record])
         # The input and the output are looked up on one store connection, not one each.
-        assert len(opened) == 1
+        assert len(borrowed) == 1
     else:
         with pytest.raises(ValueError):
             await revalidate_tool_materials(ctx, [record])

@@ -1,0 +1,21 @@
+# Konto und persönliche Einstellungen verwalten
+
+Öffnen Sie **Einstellungen** im Kontomenü. Die persönlichen Seiten gelten für Ihr Konto.
+
+## Konto
+
+Ändern und speichern Sie Ihren Anzeigenamen. In der E-Mail-Zeile sehen Sie den Bestätigungsstatus und können die Bestätigung erneut senden. Stellen Sie Oberflächen- und Antwortsprache getrennt ein. Unter **Agents** wählen Sie, ob Coach nach einer Bearbeitung automatisch prüft oder zuerst nachfragt. Unter **Abrechnung** sehen Sie Kontostufe und Guthaben. [Spracheinstellungen](language.de-DE.md) · [Erinnerungs-E-Mails](notification-emails.de-DE.md)
+
+## Sicherheit
+
+Wählen Sie **Sicherheit → Passwort ändern** und geben Sie das aktuelle und das neue Passwort ein. Die Änderung meldet andere Geräte ab. Wenn Sie das Passwort vergessen haben, verwenden Sie den Link zum Zurücksetzen. Bei reiner Anmeldung über einen externen Anbieter verwalten Sie das Passwort dort.
+
+Unter **Aktive Sitzungen** können Sie angemeldete Geräte prüfen und eine unbekannte Sitzung über ihr Zeilenmenü widerrufen. Beim Abmelden auf allen Geräten wird auch das aktuelle Gerät abgemeldet.
+
+## Darstellung
+
+Wählen Sie die Systemeinstellung, den hellen oder den dunklen Modus. Passen Sie Farben, Hintergrund, Schrift, Schriftgröße, Dichte, Rundung und Animation an. Die Seite zeigt die wirksame Darstellung und ihre Herkunft. Entfernen Sie eine persönliche Einstellung, um den Standard zu übernehmen. Mit **Persönliche Darstellung löschen** werden persönliche Design- und Leseeinstellungen gelöscht. Diagrammstil und Barrierefreiheit von Diagrammen haben eigene Einstellungen. [Diagrammstile wählen oder veröffentlichen](chart-styles.de-DE.md)
+
+## Export
+
+Öffnen Sie den Bericht und wählen Sie **Exportieren**, auf schmalen Bildschirmen unter **Mehr**. Wählen Sie ein angebotenes Format. Die persönliche Exportseite erklärt die Optionen. Um eine vorhandene PowerPoint-Datei auszufüllen, verwenden Sie sie als Vorlage im Chat. [Eine PowerPoint-Vorlage ausfüllen oder aktualisieren](powerpoint-templates.de-DE.md)

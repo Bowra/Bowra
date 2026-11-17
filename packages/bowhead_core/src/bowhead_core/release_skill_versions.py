@@ -15,7 +15,12 @@ from typing import Any
 import aiosqlite
 import anyio
 
-from bowhead_core.agent_dependency_compiler import approved_revision_token, parse_exact_skill_grants, skill_bundle_revision
+from bowhead_core.agent_dependency_compiler import (
+    approved_revision_token,
+    builtin_skill_bundle_revision,
+    parse_exact_skill_grants,
+    skill_bundle_revision,
+)
 
 
 async def skill_updates_conn(
@@ -99,6 +104,7 @@ async def _current_revision_conn(
         spec = _builtin_catalog().get(skill_id.removeprefix("builtin:"))
         if spec is None:
             return None
-        revision = await anyio.to_thread.run_sync(skill_bundle_revision, str(spec.source_dir))
+        # Builtin grants pin source bytes without Python caches (3816214d1); compare the same view.
+        revision = await anyio.to_thread.run_sync(builtin_skill_bundle_revision, str(spec.source_dir))
         return (revision, None) if revision is not None else None
     return None

@@ -919,6 +919,62 @@ def test_failed_foreign_thread_close_preserves_live_authority_lease(domain_files
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("borrow", ["shared_pool", "read_pool", "file_store"])
+async def test_first_statement_on_a_new_pooled_connection_waits_for_a_busy_authority_lease(
+    domain_files: Path, monkeypatch: pytest.MonkeyPatch, borrow: str
+) -> None:
+    """116, 2026-11-16: a file lookup on a newly opened pooled connection failed at once with "database is locked".
+
+    The pool dropped the cursors of its setup statements. A dropped cursor is closed by a later task, so the
+    borrower's first statement still found an open read on the connection and was not allowed to wait.
+    """
+    import time
+
+    from bowhead_core import _db, artifact_store, sqlite_domains
+
+    monkeypatch.setattr(sqlite_domains, "domain_layout_active", lambda _path: True)
+    core = managed(domain_files, "core")
+    core.execute("INSERT INTO users(id,status,balance) VALUES('u1','active',0)").close()
+    core.commit()
+    core.close()
+    content = managed(domain_files, "content")
+    content.execute("INSERT INTO artifacts(id) VALUES('art_1')").close()
+    content.commit()
+    content.close()
+    path = str(domain_files.with_name(DOMAIN_TARGET_FILES["content"]))
+    opener = {"shared_pool": _db.open_shared_ctx, "read_pool": _db.open_pooled_read_ctx, "file_store": artifact_store._open_db}[borrow]
+    held, errors = threading.Event(), []
+
+    def hold_core_authority() -> None:
+        writer = managed(domain_files, "core")
+        try:
+            writer.execute("UPDATE users SET status='changed' WHERE id='u1'").close()
+            held.set()
+            time.sleep(0.3)
+            writer.commit()
+        except BaseException as error:
+            errors.append(error)
+            held.set()
+        finally:
+            writer.close()
+
+    worker = threading.Thread(target=hold_core_authority)
+    worker.start()
+    try:
+        assert await asyncio.to_thread(held.wait, 5)
+        started = time.monotonic()
+        # Nothing is awaited between the borrow and the statement, as a store method runs it.
+        read = "SELECT id FROM artifacts WHERE NOT EXISTS(SELECT 1 FROM users u WHERE u.id=artifacts.id AND u.status='gone')"
+        async with opener(path) as db, db.execute(read) as cursor:
+            assert [tuple(row) for row in await cursor.fetchall()] == [("art_1",)]
+        assert time.monotonic() - started >= 0.2, "The read must have waited for the lease, not skipped it"
+    finally:
+        await asyncio.to_thread(worker.join, 5)
+        await _db.close_pooled_readers()
+    assert not errors
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("collection", ["loop", "worker", "cycle"])
 async def test_async_collected_cursor_closes_on_its_owner_worker(domain_files: Path, monkeypatch: pytest.MonkeyPatch, collection: str) -> None:
     from bowhead_core.sqlite_domain_runtime import connect

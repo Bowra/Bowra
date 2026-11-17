@@ -62,7 +62,15 @@ if TYPE_CHECKING:
 EntryMode = Literal["ordinary", "steer", "plan", "resume"]
 ResourceKind = Literal["agent", "skill", "capability", "mcp_source", "mcp_tool", "mcp_prompt"]
 AuthorizationMode = Literal["baseline", "readonly_extension"]
-Reason = Literal["unsupported_entry", "unsupported_binding", "resource_unavailable", "catalog_adapter_unavailable", "catalog_metadata_unavailable"]
+Reason = Literal[
+    "unsupported_entry",
+    "unsupported_binding",
+    "resource_unavailable",
+    "catalog_adapter_unavailable",
+    "catalog_metadata_unavailable",
+    # Only Skills emit it: the viewer switched the Skill off and nothing else blocks it.
+    "personally_disabled",
+]
 PAGE_SIZE = 20
 
 
@@ -82,6 +90,9 @@ class ReferenceCatalogRequest(_Wire):
     exact_resource: SkillResourceRef | CapabilityResourceRef | McpToolResourceRef | McpPromptResourceRef | None = None
     entry_mode: EntryMode = "ordinary"
     submission_protocol: Literal["chat-references.v1"] = "chat-references.v1"
+    # Browsers loaded before version 2 reject unknown reason codes, so they keep
+    # receiving resource_unavailable for personally disabled Skills.
+    reason_code_version: Literal[1, 2] = 1
 
     @model_validator(mode="after")
     def exact_lookup(self):
@@ -648,7 +659,7 @@ async def _builtin_skills(
                         metadata_name=item.name,
                         metadata_entry_json=item.read_only_entry_json,
                         metadata_strict_access=strict_access,
-                        reason_code="unsupported_entry" if preferences.get(item.name, True) else "resource_unavailable",
+                        reason_code="unsupported_entry" if preferences.get(item.name, True) else "personally_disabled",
                     )
                 )
         # Grant reads use the canonical store's connections. Reject a policy
@@ -721,18 +732,20 @@ async def _uploaded_skills(
             if not visible:
                 continue
             if kind == "user":
-                active = bool(row["enabled"]) and row["import_status"] != "pending"
+                ready = row["import_status"] != "pending"
+                personally_enabled = bool(row["enabled"])
             else:
                 preference = preferences.get("team:" + row["id"])
                 if preference is None:
                     legacy = preferences.get(row["name"])
                     preference = legacy if legacy is not None and legacy["source_type"] == "team_shared" else None
-                active = (
+                ready = (
                     row["status"] == "enabled"
                     and row["approval"] == "approved"
                     and (row["visibility"] != "team_wide" or bool(row["approved_sha256"]))
-                    and (preference is None or bool(preference["enabled"]))
                 )
+                personally_enabled = preference is None or bool(preference["enabled"])
+            active = ready and personally_enabled
             metadata = index.find(kind, row) if index is not None and active else None
             incomplete |= active and metadata is None
             items.append(
@@ -746,7 +759,11 @@ async def _uploaded_skills(
                     metadata_name=metadata.name if metadata else None,
                     metadata_entry_json=metadata.read_only_entry_json if metadata else None,
                     metadata_strict_access=strict_access,
-                    reason_code="resource_unavailable" if not active else "unsupported_entry" if metadata else "catalog_metadata_unavailable",
+                    reason_code=("unsupported_entry" if metadata else "catalog_metadata_unavailable")
+                    if active
+                    else "personally_disabled"
+                    if ready
+                    else "resource_unavailable",
                 )
             )
         if await access_store.get_policy_epoch(team_id) != epoch:
@@ -1153,6 +1170,18 @@ def _catalog_response(
         support = _validated_entry_support(query.entry_mode)
     except (ValueError, TypeError, AttributeError) as exc:
         raise ReferenceCatalogError("reference_catalog_unavailable") from exc
+    if query.reason_code_version == 1:
+        groups = [
+            group.model_copy(
+                update={
+                    "items": [
+                        item.model_copy(update={"reason_code": "resource_unavailable"}) if item.reason_code == "personally_disabled" else item
+                        for item in group.items
+                    ]
+                }
+            )
+            for group in groups
+        ]
     mcp_group = next(
         (group for group in [*(compatibility_groups or []), *groups] if group.id == "mcp"),
         None,
@@ -1256,7 +1285,11 @@ def _catalog_response(
             "user": user_id,
             "locale": locale,
             "epoch": epoch,
-            "query": query.model_dump(mode="json", exclude={"cursor", "exact_resource"} if query.exact_resource is None else {"cursor"}),
+            # The reason-code version changes only projected reasons, which the groups below already carry.
+            "query": query.model_dump(
+                mode="json",
+                exclude={"cursor", "exact_resource", "reason_code_version"} if query.exact_resource is None else {"cursor", "reason_code_version"},
+            ),
             "groups": [
                 group.model_copy(update={"items": sorted(group.items, key=lambda item: (item.kind, item.source_kind, item.id))}).model_dump(
                     mode="json"

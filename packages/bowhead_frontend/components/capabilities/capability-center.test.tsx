@@ -9,6 +9,7 @@ import {
   fetchCapabilityDiscoveryCatalog,
   type CapabilityDiscoveryCatalog,
 } from "@/lib/capability-catalog-api";
+import { fetchBuiltinPlugins, fetchBuiltinTools } from "@/lib/builtin-resources-api";
 import { CapabilityCenter } from "./capability-center";
 
 const state = vi.hoisted(() => ({ query: "", session: null as AuthSessionValue | null }));
@@ -24,6 +25,11 @@ vi.mock("@/components/shell/AppShell", () => ({
 }));
 vi.mock("@/components/shell/Topbar", () => ({ Topbar: () => null }));
 vi.mock("@/lib/capability-catalog-api", () => ({ fetchCapabilityDiscoveryCatalog: vi.fn() }));
+vi.mock("@/lib/builtin-resources-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/builtin-resources-api")>()),
+  fetchBuiltinPlugins: vi.fn(),
+  fetchBuiltinTools: vi.fn(),
+}));
 
 const member = {
   id: "u_1",
@@ -50,6 +56,9 @@ describe("CapabilityCenter member flows", () => {
     state.query = "";
     authenticate(member);
     vi.mocked(fetchCapabilityDiscoveryCatalog).mockReset();
+    // The Plugin catalog lists its rows from the Plugin state; the Tool catalog keeps its read-only list without it.
+    vi.mocked(fetchBuiltinPlugins).mockResolvedValue({ plugins: [], team_plugins_my_disabled: [] });
+    vi.mocked(fetchBuiltinTools).mockResolvedValue(null);
   });
   afterEach(() => {
     cleanup();
@@ -71,6 +80,7 @@ describe("CapabilityCenter member flows", () => {
 
   it("keeps the Plugin and Tool catalog cards for members while Plugin state is unavailable", () => {
     state.query = "";
+    vi.mocked(fetchBuiltinPlugins).mockResolvedValue(null);
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
     expect(screen.getByRole("link", { name: /Open Plugins/ })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Open Tools/ })).toBeTruthy();
@@ -85,7 +95,7 @@ describe("CapabilityCenter member flows", () => {
   });
 
   it("supports catalog failure and retry without showing transport diagnostics", async () => {
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     vi.mocked(fetchCapabilityDiscoveryCatalog)
       .mockRejectedValueOnce(new Error("secret transport detail"))
       .mockResolvedValueOnce({
@@ -109,7 +119,7 @@ describe("CapabilityCenter member flows", () => {
   });
 
   it("discards late catalog results after changing teams", async () => {
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     let finish!: (value: CapabilityDiscoveryCatalog) => void;
     vi.mocked(fetchCapabilityDiscoveryCatalog)
       .mockImplementationOnce(
@@ -144,33 +154,11 @@ describe("CapabilityCenter member flows", () => {
     expect(screen.queryByText("Old team data")).toBeNull();
   });
 
-  it.each(["en-US", "zh-CN"] as const)("shows enabled system Plugins separately from an empty team list in %s", async (locale) => {
-    state.query = "type=capabilities";
-    vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({
-      tools: [], capabilities: [], builtin_plugins: [{ id: "builtin:settings-personal-appearance@2", name: "settings-personal-appearance", tool_count: 7, skill_count: 1 }],
-    });
-    renderIntl(<CapabilityCenter />, { locale });
-    const label = locale === "zh-CN" ? "个人外观" : "Personal Appearance";
-    await waitFor(() => expect(screen.getByRole("heading", { name: label })).toBeTruthy());
-    expect(screen.getByRole("region", { name: locale === "zh-CN" ? "内置插件" : "Built-in Plugins" })).toBeTruthy();
-    // With no team Plugins the team group is hidden, as in the Agent picker.
-    expect(screen.queryByRole("region", { name: locale === "zh-CN" ? "团队插件" : "Team Plugins" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Manage Team Plugins" })).toBeNull();
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: label } });
-    expect(screen.getByRole("heading", { name: label })).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing-plugin" } });
-    expect(screen.queryByRole("heading", { name: label })).toBeNull();
-  });
-
-  it("keeps disabled system Plugins and unconfigured third-party operations out of discovery", async () => {
-    state.query = "type=capabilities";
-    vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({ tools: [], capabilities: [], builtin_plugins: [] });
-    const rendered = renderIntl(<CapabilityCenter />, { locale: "en-US" });
-    await waitFor(() => expect(screen.getByText("No resources are available yet.")).toBeTruthy());
-    expect(screen.queryByRole("region", { name: "Built-in Plugins" })).toBeNull();
+  it("keeps unconfigured third-party operations out of discovery", async () => {
     state.query = "type=tools";
-    rendered.rerender(<NextIntlClientProvider locale="en-US" messages={messages}><CapabilityCenter /></NextIntlClientProvider>);
-    await waitFor(() => expect(fetchCapabilityDiscoveryCatalog).toHaveBeenCalledTimes(2));
+    vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({ tools: [], capabilities: [], builtin_plugins: [] });
+    renderIntl(<CapabilityCenter />, { locale: "en-US" });
+    await waitFor(() => expect(fetchCapabilityDiscoveryCatalog).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("heading", { name: "Read Google Docs, Sheets and Slides" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Query Power BI" })).toBeNull();
   });
@@ -195,7 +183,7 @@ describe("CapabilityCenter member flows", () => {
   it.each([
     ["", "Capability Center"],
     ["type=tools", "Tools"],
-    ["type=capabilities", "Plugins"],
+    ["type=plugins", "Plugins"],
     ["view=my&type=tools", "Capability Center"],
   ])("shows the top-bar title as the page H1 for %j", async (query, title) => {
     state.query = query;

@@ -182,6 +182,12 @@ async def test_system_baseline_never_infers_missing_or_wider_grants(receiver_cas
         await fixture.sources.instances.upsert(
             user_id=fixture.scope.user_id, name="method", source_type="builtin", source_path=str(fixture.root / "method"), enabled=False
         )
+    if kind == "legacy":
+        # A legacy profile has no exact grants to infer from. Explicitly selected methods are
+        # admitted only as task-scoped read-only input (5622a4375), never as baseline grants.
+        admission = await prepare(fixture, document)
+        assert admission.task_method_reference and admission.required_skill_modes == ("readonly_extension",)
+        return
     with pytest.raises(ReferenceStartPreparationError):
         await prepare(fixture, document)
 

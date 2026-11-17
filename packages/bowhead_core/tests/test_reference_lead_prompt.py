@@ -169,7 +169,12 @@ async def test_lead_prompt_retains_material_and_original_execution(lead_prompt, 
             if not primary_calls:
                 return tool_response(
                     "subagent_spawn",
-                    {"agent_id": p.agent.id, "task": "Analyze profit using the selected Prompt.", "delegation_role": "primary"},
+                    {
+                        "agent_id": p.agent.id,
+                        "task": "Analyze profit using the selected Prompt.",
+                        "delegation_role": "primary",
+                        "required_source_urls": [],
+                    },
                     stream=body.get("stream", False),
                 )
             return answer_response(request)
@@ -351,7 +356,9 @@ async def test_queued_prompt_executes_accepted_contract_after_switch_change(lead
             lead_calls += 1
             if not lead_has_dispatched(body):
                 return tool_response(
-                    "subagent_spawn", {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary"}, stream=body.get("stream", False)
+                    "subagent_spawn",
+                    {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary", "required_source_urls": []},
+                    stream=body.get("stream", False),
                 )
         elif "skill_read" in names:
             primary_calls += 1
@@ -438,7 +445,9 @@ async def test_prompt_pause_rechecks_authority_and_supports_dismissal(lead_promp
         lead = any(tool["function"]["name"] == "subagent_spawn" for tool in body.get("tools", []))
         if lead and pause == "primary":
             return tool_response(
-                "subagent_spawn", {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary"}, stream=body.get("stream", False)
+                "subagent_spawn",
+                {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary", "required_source_urls": []},
+                stream=body.get("stream", False),
             )
         question = {"questions": [{"question": "Which scope?", "type": "free_text", "options": []}]}
         return tool_response(

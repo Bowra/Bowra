@@ -53,6 +53,12 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "kb_list_tables": "lookup",
     "kb_get_record": "fetch",
     "kb_query_records": "query",
+    # Source directory metadata and operation/membership status: catalog and status reads, like kb_list_tables.
+    "kb_list_sources": "lookup",
+    "kb_operation_status": "lookup",
+    # Explicit knowledge membership changes persist state and return no numbers to summarize.
+    "kb_add_file": "write",
+    "kb_remove_file": "write",
     # Reference Office reads (5ccb0efd9): returns bounded upload text, like kb_get_record; no LLM finding.
     "attachment_read": "fetch",
     # Python / sandbox
@@ -71,6 +77,8 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "google_slides_write": "write",
     # Native PPTX rendering produces a deliverable file, like google_slides_write; no numbers to summarize.
     "render_deck": "write",
+    # Delivers retained files to the conversation through native receipts, like render_deck; no numbers to summarize.
+    "present_artifacts": "write",
     "google_sheet_write": "write",
     # Canvas (write tools)
     "add_chart": "chart",
@@ -83,6 +91,7 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     # Report writing: reading canvas is read-only metadata (no LLM finding); adding sections is write (section ID result, no summarizable numbers).
     # Previously unregistered ⇒ default compute fallback ⇒ finding-eligible.
     "read_report": "lookup",
+    "find_results": "lookup",
     "write_report": "write",
     # Web
     "web_search": "lookup",

@@ -800,7 +800,7 @@ def make_legacy_agent_runner_fn(
         ):
             # A helper stopped at a run limit and reported what it finished and what remains. The step
             # keeps that work, and the report names the rest as a gap; failing it blocked the whole plan
-            # (116 t_78ba5d3b1429: three such steps, 27 written sections, Turn failed as plan_blocked).
+            # (116 the regression case: three such steps, 27 written sections, Turn failed as plan_blocked).
             partial = {"stop_reason": result.stop_reason or "", "remaining": (result.partial_remaining or "").strip()[:2000]}
         elif not result.ok:
             # SubagentRunner failure → raise for LocalTaskRunner wrapping as TaskFailureError.

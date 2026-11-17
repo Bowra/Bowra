@@ -2,26 +2,34 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { codedErrorMessage, withHttpFailureReason } from "@/lib/user-facing-error";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { ConfirmDialog, useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { SaveBar } from "@/components/ui/save-bar";
 import { CanvasToolbarActions, canvasCloseGuardOptions } from "@/components/canvas/object";
+import { CapabilityLink } from "@/components/capabilities/capability-link";
+import { ResourceGroup, ResourceToolPicker, pluginsFromCatalog, toolGroups, type PickerTool, type ToolGroupKey } from "@/components/ui/resource-picker";
 import { getAgentAuthoringCatalog, type AgentAuthoringCatalog, type AgentAuthoringTool, type AgentExactSkillGrant } from "@/lib/agents-api";
+import { groupToolConnections } from "@/lib/agent-tool-connections";
+import { authoringToolMatches, toolSelectionLockedReasonKey } from "@/lib/agent-tool-selection";
+import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
+import { settingsTabHref } from "@/lib/settings-destinations";
 import {
   createTeamPlugin,
   deleteTeamPlugin,
+  listTeamPluginTemplates,
   listTeamPlugins,
   setTeamPluginEnabled,
   updateTeamPlugin,
   type TeamPlugin,
+  type TeamPluginTemplate,
 } from "@/lib/team-plugins-api";
 import { localizedToolText, toolDisplay } from "@/lib/tool-display";
-import { authoringSkillDescription, authoringSkillTitle } from "@/lib/skills-meta";
+import { authoringSkillDescription, authoringSkillMatches, authoringSkillTitle } from "@/lib/skills-meta";
 import type { CoachEditorPort, CoachEditorSnapshot } from "@/lib/coach-canvas-target";
 import { registerSubagentDraftNavigationGuard } from "@/lib/canvas-navigation-guard";
-import styles from "@/app/(app)/team/settings/capabilities/page.module.css";
+import styles from "@/app/(app)/team/settings/plugins/page.module.css";
 
 type HostedPluginEditor = {
   plugin: TeamPlugin;
@@ -38,13 +46,40 @@ function readableToolRef(ref: string): string {
   return toolDisplay(ref).label;
 }
 
-function ToolOption({ tool, selected, onToggle }: { tool: AgentAuthoringTool; selected: boolean; onToggle: () => void }) {
-  return <label className={styles.resource}>
-    <input type="checkbox" checked={selected} disabled={!tool.selectable && !selected} onChange={onToggle} />
-    <span><strong>{localizedToolText(tool).name}</strong><small>{localizedToolText(tool).description}</small>
-      {tool.source_display_name ? <small className={styles.resourceSource}>{tool.source_display_name}</small> : null}
-    </span>
-  </label>;
+/** Keys of everything a Plugin selects, so the groups holding them start open. */
+function selectionKeys(plugin: TeamPlugin | undefined): ReadonlySet<string> {
+  return new Set([...(plugin?.tool_refs ?? []), ...(plugin?.skill_grants ?? []).map((grant) => grant.skill_ref.id)]);
+}
+
+const NO_PLUGINS: ReadonlySet<string> = new Set();
+
+/** Template kinds with reviewed copy; a kind the frontend does not know is not offered. */
+const TEMPLATE_KINDS: ReadonlySet<string> = new Set(["shopify_analysis", "shopify_content"]);
+
+interface FormContents {
+  name: string;
+  description: string;
+  tools: string[];
+  skills: AgentExactSkillGrant[];
+}
+
+const BLANK_FORM: FormContents = { name: "", description: "", tools: [], skills: [] };
+
+/** Read-only contents without the authoring catalog: Team Tools, built-in Tools and Skills by readable name. */
+function ReadOnlyResources({ tools, skills }: { tools: string[]; skills: AgentExactSkillGrant[] }) {
+  const t = useTranslations("settings.team_capabilities");
+  const picker = useTranslations("resource_picker");
+  const teamTools = tools.filter((ref) => ref.startsWith("teammcp."));
+  const builtinTools = tools.filter((ref) => !ref.startsWith("teammcp."));
+  const groups: Array<[string, string[]]> = [
+    [t("readonly_team_tools"), teamTools.map(readableToolRef)],
+    [t("readonly_builtin_tools"), builtinTools.map(readableToolRef)],
+    [picker("skills"), skills.map((grant) => grant.skill_ref.name)],
+  ];
+  return <>{groups.filter(([, names]) => names.length).map(([title, names]) => <div key={title} className={styles.readOnlyGroup}>
+    <h4>{title}</h4>
+    <ul>{names.map((name, index) => <li key={`${name}:${index}`}>{name}</li>)}</ul>
+  </div>)}</>;
 }
 
 // Coded plugin failures carry localized catalog copy from the gateway.
@@ -59,13 +94,16 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
   const { confirm, dialog: navigationDialog } = useConfirmDialog();
   const nav = useTranslations("sidebar.centers");
   const t = useTranslations("settings.team_capabilities");
+  const picker = useTranslations("resource_picker");
   const common = useTranslations("common");
   const tObject = useTranslations("canvas_object");
   const [saveFailed, setSaveFailed] = useState(false);
   const catalogRequest = useRef(0);
+  const listRequest = useRef(0);
   const [items, setItems] = useState<TeamPlugin[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [catalog, setCatalog] = useState<AgentAuthoringCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
   const [selected, setSelected] = useState<TeamPlugin | null>(original.current ?? null);
   const [editing, setEditing] = useState(hostedMode);
   const [name, setName] = useState(original.current?.name ?? "");
@@ -75,6 +113,18 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TeamPlugin | null>(null);
+  const [query, setQuery] = useState("");
+  // Groups open when the form opens if they hold a selection; afterwards people open and close them.
+  const [openBaseline, setOpenBaseline] = useState<ReadonlySet<string>>(() => selectionKeys(original.current));
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const [templates, setTemplates] = useState<TeamPluginTemplate[] | null>(null);
+  const [templateError, setTemplateError] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  // The form as the last template (or Blank) left it; choosing another asks first only if people changed it since.
+  const templateBaseline = useRef(JSON.stringify(BLANK_FORM));
+  const locale = useLocale();
+  const toolT = useTranslations("settings.subagents");
+  const canSetCategory = useOptionalAuthSession()?.me?.capabilities?.team_tool_confirmations === true;
 
   const signature = JSON.stringify({ editing, id: selected?.id, name, description, tools, skills });
   const editVersion = useRef({ signature, value: 0 });
@@ -125,24 +175,42 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
       if (hosted?.controllerRef.current === port) hosted.controllerRef.current = null; };
   }, [hosted?.controllerRef, allowLeave]);
 
-  const reload = useCallback(async () => {
+  // The list and the authoring catalog load separately: the catalog can take several seconds
+  // (9.8 s once on 116) and only the form needs it, so the list never waits for it.
+  const loadCatalog = useCallback(async () => {
+    if (hosted?.readOnly) return;
     const request = ++catalogRequest.current;
+    setCatalogError("");
     try {
-      const [plugins, resources] = await Promise.all([hostedMode ? Promise.resolve([original.current!]) : listTeamPlugins(),
-        hosted?.readOnly ? Promise.resolve(null) : getAgentAuthoringCatalog()]);
-      if (!mounted.current || request !== catalogRequest.current) return;
+      const resources = await getAgentAuthoringCatalog();
+      if (mounted.current && request === catalogRequest.current) setCatalog(resources);
+    } catch (cause) {
+      // Shown only while there is no catalog: a failed refresh keeps the one already loaded.
+      if (mounted.current && request === catalogRequest.current) setCatalogError(withHttpFailureReason(t("resources_load_failed"), cause, { read: true }));
+    }
+  }, [hosted?.readOnly, t]);
+  const loadList = useCallback(async () => {
+    const request = ++listRequest.current;
+    try {
+      const plugins = hostedMode ? [original.current!] : await listTeamPlugins();
+      if (!mounted.current || request !== listRequest.current) return;
       setItems(plugins);
-      setCatalog(resources);
       setLoaded(true);
       setError("");
     } catch (cause) {
-      if (mounted.current && request === catalogRequest.current) {
+      if (mounted.current && request === listRequest.current) {
         setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
       }
     }
-  }, [hostedMode, hosted?.readOnly, t]);
+  }, [hostedMode, t]);
+  /** Refresh after a change: the list before continuing, the catalog in the background. */
+  const reload = useCallback(async () => {
+    void loadCatalog();
+    await loadList();
+  }, [loadCatalog, loadList]);
 
-  useEffect(() => { void reload(); return () => { catalogRequest.current += 1; }; }, [reload]);
+  useEffect(() => { void loadCatalog(); return () => { catalogRequest.current += 1; }; }, [loadCatalog]);
+  useEffect(() => { void loadList(); return () => { listRequest.current += 1; }; }, [loadList]);
 
   const chooseNow = (item: TeamPlugin | null) => {
     approved.current = null;
@@ -152,6 +220,11 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     setDescription(item?.description ?? "");
     setTools(item?.tool_refs ?? []);
     setSkills(item?.skill_grants ?? []);
+    setQuery("");
+    setOpenBaseline(selectionKeys(item ?? undefined));
+    setGroupOpen({});
+    setTemplateId("");
+    templateBaseline.current = JSON.stringify(BLANK_FORM);
     setError("");
   };
 
@@ -160,6 +233,38 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     setEditing(false);
     setSelected(null);
     setError("");
+  };
+
+  const creatingOnPage = !hostedMode && editing && selected === null;
+  // One request at a time; Retry only clears the error and this effect loads again.
+  const templateLoading = useRef(false);
+  useEffect(() => {
+    if (!creatingOnPage || templates !== null || templateError || templateLoading.current) return;
+    templateLoading.current = true;
+    void listTeamPluginTemplates()
+      .then((list) => { if (mounted.current) setTemplates(list.filter((item) => TEMPLATE_KINDS.has(item.kind))); })
+      .catch((cause: unknown) => { if (mounted.current) setTemplateError(withHttpFailureReason(t("template_load_failed"), cause, { read: true })); })
+      .finally(() => { templateLoading.current = false; });
+  }, [creatingOnPage, templates, templateError, t]);
+  const applyTemplate = async (id: string) => {
+    const template = templates?.find((item) => item.id === id);
+    const next: FormContents = template ? {
+      name: t(`templates.${template.kind}.name`, { connection: template.connection_name }),
+      description: t(`templates.${template.kind}.description`),
+      tools: template.tool_refs,
+      skills: template.skill_grants,
+    } : BLANK_FORM;
+    const edited = JSON.stringify({ name, description, tools, skills }) !== templateBaseline.current;
+    if (edited && !await confirm({ title: t("template_replace_title"), description: t("template_replace_description"), confirmLabel: t("template_replace_confirm") })) return;
+    if (!mounted.current) return;
+    setName(next.name);
+    setDescription(next.description);
+    setTools(next.tools);
+    setSkills(next.skills);
+    setOpenBaseline(new Set([...next.tools, ...next.skills.map((grant) => grant.skill_ref.id)]));
+    setGroupOpen({});
+    templateBaseline.current = JSON.stringify(next);
+    setTemplateId(id);
   };
 
   const save = async () => {
@@ -194,6 +299,7 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     live.current.busy = true;
     setBusy(true);
     setError("");
+    setSaveFailed(false);
     try {
       const saved = await setTeamPluginEnabled(item.id, item.row_version, item.status !== "active");
       if (!mounted.current) return;
@@ -212,6 +318,7 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     live.current.busy = true;
     setBusy(true);
     setError("");
+    setSaveFailed(false);
     let deleted = false;
     try {
       await deleteTeamPlugin(deleteTarget.id, deleteTarget.row_version);
@@ -242,10 +349,70 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     const current = catalog?.skills.find((skill) => skill.grant.skill_ref.id === grant.skill_ref.id);
     return current && current.grant.revision !== grant.revision;
   });
-  const unavailableSkills = skills.filter((grant) => !catalog?.skills.some((skill) => skill.grant.skill_ref.id === grant.skill_ref.id));
-  const addedTools = catalog?.tools.filter((tool) => tool.source_kind === "team_mcp") ?? [];
-  const systemTools = catalog?.tools.filter((tool) => tool.source_kind === "native") ?? [];
+  const unavailableSkills = catalog ? skills.filter((grant) => !catalog.skills.some((skill) => skill.grant.skill_ref.id === grant.skill_ref.id)) : [];
   const unavailableTools = catalog ? tools.filter((ref) => !catalog.tools.some((tool) => tool.stable_ref === ref)) : [];
+  const searching = query.trim().length > 0;
+  const selectedTools = new Set(tools);
+  const selectedSkills = new Set(skills.map((grant) => grant.skill_ref.id));
+  const pickerPlugins = pluginsFromCatalog(catalog?.plugins, locale);
+  const isOpen = (key: string, refs: readonly string[]) => groupOpen[key] ?? refs.some((ref) => openBaseline.has(ref));
+  const setOpen = (key: string) => (open: boolean) => setGroupOpen((current) => (current[key] === open ? current : { ...current, [key]: open }));
+  const countLabel = (refs: readonly string[], selectedRefs: ReadonlySet<string>) =>
+    searching ? String(refs.length) : t("group_count", { selected: refs.filter((ref) => selectedRefs.has(ref)).length, total: refs.length });
+  const toPickerTool = (tool: AgentAuthoringTool): PickerTool => {
+    const copy = localizedToolText(tool, locale);
+    const settable = canSetCategory && tool.source_kind === "team_mcp" && tool.locked_reason === "risk_metadata_unknown";
+    return {
+      ref: tool.stable_ref,
+      name: copy.name,
+      description: copy.description,
+      selectable: tool.selectable,
+      lockedLabel: tool.selectable ? null : toolT(toolSelectionLockedReasonKey(tool.locked_reason ?? "")),
+      lockedAction: !tool.selectable && settable ? <CapabilityLink href={settingsTabHref("tools")}>{t("locked_set_category")}</CapabilityLink> : null,
+    };
+  };
+  // Selectable first, then locked, each by name: what people can act on comes first.
+  const byAvailability = (left: PickerTool, right: PickerTool) =>
+    Number(!left.selectable) - Number(!right.selectable) || left.name.localeCompare(right.name, locale);
+  const matches = (tool: AgentAuthoringTool) => authoringToolMatches(tool, query, locale);
+  const connections = groupToolConnections(catalog?.tools ?? []).map((connection) => ({
+    key: `connection:${connection.id}`,
+    title: connection.name,
+    refs: connection.tools.map((tool) => tool.stable_ref),
+    items: connection.tools.filter(matches).map(toPickerTool).sort(byAvailability),
+  }));
+  const builtinTools = (catalog?.tools ?? []).filter((tool) => tool.source_kind === "native");
+  const visibleBuiltinTools = builtinTools.filter(matches).map(toPickerTool).sort(byAvailability);
+  const builtinGroupRefs = (key: ToolGroupKey) => {
+    const groupOf = toolGroups(pickerPlugins);
+    return builtinTools.filter((tool) => groupOf(tool.stable_ref) === key).map((tool) => tool.stable_ref);
+  };
+  const teamSkills = catalog?.skills.filter((skill) => skill.source_kind !== "user") ?? [];
+  const skillItems: PickerTool[] = teamSkills
+    .filter((skill) => authoringSkillMatches(skill, query, locale))
+    .map((skill) => ({
+      ref: skill.grant.skill_ref.id,
+      name: authoringSkillTitle(skill, locale),
+      description: authoringSkillDescription(skill, locale),
+      selectable: true,
+      riskLabel: skill.source_kind === "team" ? t("skill_source_team") : t("skill_source_builtin"),
+    }));
+  const skillRefs = teamSkills.map((skill) => skill.grant.skill_ref.id);
+  const toggleSkillRef = (id: string) => {
+    const grant = teamSkills.find((skill) => skill.grant.skill_ref.id === id)?.grant ?? skills.find((item) => item.skill_ref.id === id);
+    if (grant) toggleSkill(grant);
+  };
+  const unavailableItems: PickerTool[] = [
+    ...unavailableTools.map((ref) => ({ ref, name: readableToolRef(ref), description: "", selectable: false, lockedLabel: t("unavailable_reason") })),
+    ...unavailableSkills.map((grant) => ({ ref: grant.skill_ref.id, name: grant.skill_ref.name, description: "", selectable: false, lockedLabel: t("unavailable_reason") })),
+  ];
+  const toggleUnavailable = (ref: string) => {
+    if (tools.includes(ref)) toggle(tools, setTools, ref);
+    else toggleSkillRef(ref);
+  };
+  const nothingMatches = searching && !connections.some((group) => group.items.length) && !visibleBuiltinTools.length && !skillItems.length;
+  // Canvas hosting keeps its error at the top, next to its own save bar.
+  const formError = saveFailed && editing && !hosted ? error : "";
 
   return <>
     {navigationDialog}
@@ -253,12 +420,12 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
       {/* Hosted in Canvas the object header (C4) and toolbar (C2) replace the page header. */}
       {!hosted ? <header className={styles.header}>
         <div><h1>{t("title")}</h1><p>{t("intro")}</p></div>
-        <Button variant="primary" disabled={busy} onClick={() => void choose(null)}>{t("create")}</Button>
+        {!editing ? <Button variant="primary" disabled={busy} onClick={() => void choose(null)}>{t("create")}</Button> : null}
       </header> : selected && !hosted.readOnly ? <CanvasToolbarActions>
         <Button disabled={busy} onClick={() => void changeStatus(selected)}>{selected.status === "active" ? t("disable") : t("enable")}</Button>
       </CanvasToolbarActions> : null}
-      {error ? <p className={styles.error} role="alert">{error}</p> : null}
-      {error && !catalog && !hosted?.readOnly ? <Button onClick={() => void reload()}>{common("retry")}</Button> : null}
+      {error && !formError ? <p className={styles.error} role="alert">{error}</p> : null}
+      {error && !loaded ? <Button onClick={() => void loadList()}>{common("retry")}</Button> : null}
       <div className={`${styles.grid} ${hosted || !editing || items.length === 0 ? styles.singleColumn : ""}`}>
         {!hosted && (items.length > 0 || !editing) ? <div className={styles.list} aria-label={t("list_title")}>
           {items.length > 0 ? <h2 className={styles.listTitle}>{t("list_title")}</h2> : loaded ? <div className={styles.empty}>
@@ -283,37 +450,70 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
           {!hosted ? <h2>{selected ? t("edit") : t("create")}</h2> : null}
           <fieldset className={styles.formFields} disabled={busy || hosted?.readOnly}>
           {hosted?.readOnly ? <p>{t("read_only")}</p> : null}
+          {creatingOnPage && templates?.length ? <label className={styles.field}>{t("template_label")}
+            <select value={templateId} onChange={(event) => void applyTemplate(event.target.value)}>
+              <option value="">{t("template_blank")}</option>
+              {templates.map((item) => <option key={item.id} value={item.id}>{t(`templates.${item.kind}.option`, { connection: item.connection_name })}</option>)}
+            </select>
+          </label> : null}
+          {creatingOnPage && templateError ? <p className={styles.noMatch} role="status">{templateError} <Button size="sm" onClick={() => setTemplateError("")}>{common("retry")}</Button></p> : null}
           <label className={styles.field}>{t("name")}<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className={styles.field}>{t("description")}<textarea maxLength={1000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
           {hosted?.readOnly ? <fieldset className={styles.fieldset}><legend>{t("selected_resources")}</legend>
-            <ul>{tools.map((ref) => <li key={ref}>{readableToolRef(ref)}</li>)}{skills.map((grant) => <li key={grant.skill_ref.id}>{grant.skill_ref.name}</li>)}</ul>
-          </fieldset> : <>
-          <fieldset className={styles.fieldset}><legend>{t("added_tools")}</legend>
-            <div className={styles.resources}>{addedTools.length ? addedTools.map((tool) => <ToolOption key={tool.stable_ref} tool={tool} selected={tools.includes(tool.stable_ref)} onToggle={() => toggle(tools, setTools, tool.stable_ref)} />) : <p className={styles.emptyResources}>{t("no_added_tools")}</p>}</div>
-          </fieldset>
-          <fieldset className={styles.fieldset}><legend>{t("system_tools")}</legend>
-            <div className={styles.resources}>{systemTools.map((tool) => <ToolOption key={tool.stable_ref} tool={tool} selected={tools.includes(tool.stable_ref)} onToggle={() => toggle(tools, setTools, tool.stable_ref)} />)}</div>
-          </fieldset>
-          {unavailableTools.length ? <fieldset className={styles.fieldset}><legend>{t("unavailable_resource")}</legend>
-            <div className={styles.resources}>{unavailableTools.map((ref) => <label className={styles.resource} key={ref}>
-              <input type="checkbox" checked onChange={() => toggle(tools, setTools, ref)} />
-              <span><strong>{t("unavailable_resource")}</strong></span>
-            </label>)}</div>
-          </fieldset>
-          : null}
-          <fieldset className={styles.fieldset}><legend>{t("skills")}</legend>
-            <div className={styles.resources}>{catalog?.skills.filter((skill) => skill.source_kind !== "user").map((skill) => <label className={styles.resource} key={skill.grant.skill_ref.id}>
-              <input type="checkbox" checked={skills.some((grant) => grant.skill_ref.id === skill.grant.skill_ref.id)} onChange={() => toggleSkill(skill.grant)} />
-              <span><strong>{authoringSkillTitle(skill)}</strong><small>{authoringSkillDescription(skill)}</small></span>
-            </label>)}</div>
-          </fieldset>
-          {changedSkills.length ? <p>{t("changed_skills", { names: changedSkills.map((grant) => grant.skill_ref.name).join(", ") })}</p> : null}
-          {unavailableSkills.length ? <fieldset className={styles.fieldset}><legend>{t("unavailable_resource")}</legend>
-            {unavailableSkills.map((grant) => <label className={styles.resource} key={grant.skill_ref.id}>
-              <input type="checkbox" checked onChange={() => toggleSkill(grant)} /><span>{grant.skill_ref.name}</span>
-            </label>)}
-          </fieldset> : null}
-          </>}
+            <ReadOnlyResources tools={tools} skills={skills} />
+          </fieldset> : <section className={styles.resourceSection} aria-labelledby="plugin-resources-title">
+            <div className={styles.resourceHeading}>
+              <h3 id="plugin-resources-title">{t("resources_title")}</h3>
+              <span>{t("selected_summary", { tools: tools.length, skills: skills.length })}</span>
+            </div>
+            {!catalog ? (catalogError
+              ? <p className={styles.noMatch} role="alert">{catalogError} <Button size="sm" onClick={() => void loadCatalog()}>{common("retry")}</Button></p>
+              : <p className={styles.noMatch} role="status">{t("resources_loading")}</p>) : null}
+            {catalog ? <input className={styles.search} type="search" value={query} aria-label={t("search_label")} placeholder={t("search_placeholder")} onChange={(event) => setQuery(event.target.value)} /> : null}
+            {unavailableItems.length ? <ResourceGroup title={t("unavailable_title")} items={unavailableItems} selected={new Set([...selectedTools, ...selectedSkills])} onToggle={toggleUnavailable} inputName="plugin-unavailable" /> : null}
+            {nothingMatches ? <p className={styles.noMatch} role="status">{t("no_match", { query: query.trim() })} {picker("no_match_body")}</p> : null}
+            {catalog && !connections.length && !searching ? <p className={styles.emptyResources}>{t("no_added_tools")}</p> : null}
+            {connections.filter((group) => !searching || group.items.length).map((group) => <ResourceGroup
+              key={group.key}
+              title={group.title}
+              kind={t("group_connection")}
+              count={countLabel(group.refs, selectedTools)}
+              items={group.items}
+              selected={selectedTools}
+              onToggle={(ref) => toggle(tools, setTools, ref)}
+              inputName="plugin-tool"
+              collapsible={!searching}
+              open={isOpen(group.key, group.refs)}
+              onOpenChange={setOpen(group.key)}
+            />)}
+            {visibleBuiltinTools.length ? <ResourceToolPicker
+              tools={visibleBuiltinTools}
+              plugins={pickerPlugins}
+              selected={selectedTools}
+              selectedPluginIds={NO_PLUGINS}
+              onToggle={(ref) => toggle(tools, setTools, ref)}
+              kind={t("group_builtin")}
+              countLabel={(items) => {
+                const key = toolGroups(pickerPlugins)(items[0]?.ref ?? "");
+                return countLabel(searching ? items.map((item) => item.ref) : builtinGroupRefs(key), selectedTools);
+              }}
+              collapsible={!searching}
+              isOpen={(key) => isOpen(`builtin:${key}`, builtinGroupRefs(key))}
+              onOpenChange={(key, open) => setOpen(`builtin:${key}`)(open)}
+            /> : null}
+            {skillItems.length ? <ResourceGroup
+              title={picker("skills")}
+              count={countLabel(searching ? skillItems.map((item) => item.ref) : skillRefs, selectedSkills)}
+              items={skillItems}
+              selected={selectedSkills}
+              onToggle={toggleSkillRef}
+              inputName="plugin-skill"
+              collapsible={!searching}
+              open={isOpen("skills", skillRefs)}
+              onOpenChange={setOpen("skills")}
+            /> : null}
+            {changedSkills.length ? <p>{t("changed_skills", { names: changedSkills.map((grant) => grant.skill_ref.name).join(", ") })}</p> : null}
+          </section>}
           </fieldset>
           {hosted ? (
             // Hosted in Canvas: the shared save bar (C9) replaces Cancel / Save; Discard goes through the close guard.
@@ -327,10 +527,14 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
               onDiscard={() => void allowLeave(() => chooseNow(live.current.selected))}
             />
           ) : (
+            <>
+            {/* A failed save is reported beside Save: the form can be taller than the window. */}
+            {formError ? <p className={styles.error} role="alert">{formError}</p> : null}
             <div className={styles.actions}>
               <Button disabled={busy} onClick={() => afterLeave(() => closeEditor())}>{t("cancel")}</Button>
               <Button variant="primary" type="submit" disabled={!catalog || busy || selected?.status === "disabled" || !name.trim() || tools.length + skills.length === 0}>{t("save")}</Button>
             </div>
+            </>
           )}
         </form> : null}
       </div>

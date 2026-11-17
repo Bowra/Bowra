@@ -176,7 +176,8 @@ def test_criterion_3_full_roster_renders_the_historical_names(registry: AgentReg
     }
     prompt = _prompt(registry)
     assert "MUST spawn compute" in prompt
-    assert 'subagent_spawn(profile="compute", task="query <metric> for <month>")' in prompt
+    # 29ec9c824 added the explicit empty source list to the internal-lookup dispatch example.
+    assert 'subagent_spawn(profile="compute", task="query <metric> for <month>", required_source_urls=[])' in prompt
 
 
 def test_criterion_3_phantom_modeler_is_gone(registry: AgentRegistry) -> None:

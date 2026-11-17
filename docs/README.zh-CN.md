@@ -2,6 +2,8 @@
 
 [English](README.md) | 简体中文
 
+[Bowra Community 常见问题](faq.zh-CN.md)
+
 **Verified Intelligence** 让业务成果可以被检查：观点能追溯到来源，数字能追溯到计算，结果能对应到所采用的业务定义。Bowra 将这些能力放进一个协作空间，用于分析、文档、报告和可复用的智能体。
 
 [构建与设置](../deploy/README.zh-CN.md) · [面向外部 Agent](agent-guide.zh-CN.md) · [示例](../examples/community/README.zh-CN.md) · [项目概览](../README.zh-CN.md)

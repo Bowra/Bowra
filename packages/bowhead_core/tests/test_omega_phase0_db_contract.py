@@ -12,6 +12,7 @@ regression (Spike Q9 finding — SQLITE_BUSY on contention).
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -58,12 +59,57 @@ def test_db_helper_module_exists() -> None:
     )
 
 
-def test_db_helper_has_no_internal_bowhead_imports() -> None:
-    """Invariant from tech-design §2.8: `_db.py` is foundation, must not import
-    anything else from `bowhead_core`. Prevents circular import."""
-    db_module = _CORE_ROOT / "_db.py"
-    src = db_module.read_text(encoding="utf-8")
-    # Skip module docstring (everything before the first `from __future__` or
-    # `import` line). Pattern: any `from bowhead_core.` import.
-    bowhead_imports = [line.strip() for line in src.split("\n") if re.match(r"^\s*(from\s+bowhead_core\.)", line)]
-    assert bowhead_imports == [], f"_db.py must have zero internal bowhead_core imports (circular import risk). Found: {bowhead_imports}"
+# aea6191e3 (SQLite domain split) and ebdb52379 (connection capacity) placed the SQLite runtime
+# beneath `_db.py`: connection capacity, lock diagnostics, domain routing and the domain map.
+# These modules form the foundation layer `_db.py` builds on; none of them may import `_db.py`
+# or any Store at module import time.
+_SQLITE_FOUNDATION = frozenset({"sqlite_capacity", "sqlite_diagnostics", "sqlite_domain_runtime", "sqlite_domains"})
+
+
+def _module_level_internal_imports(module: str) -> set[str]:
+    """`bowhead_core` modules imported while ``module`` itself is imported (not lazily, not for typing)."""
+    tree = ast.parse((_CORE_ROOT / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8"))
+    found: set[str] = set()
+
+    def visit(nodes: list[ast.stmt]) -> None:
+        for node in nodes:
+            if isinstance(node, ast.ImportFrom) and node.module == "bowhead_core":
+                found.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("bowhead_core."):
+                found.add(node.module.removeprefix("bowhead_core."))
+            elif isinstance(node, ast.Import):
+                found.update(alias.name.removeprefix("bowhead_core.") for alias in node.names if alias.name.startswith("bowhead_core."))
+            elif isinstance(node, ast.If) and not (isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING"):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit(node.body)
+                for handler in node.handlers:
+                    visit(handler.body)
+                visit(node.orelse)
+                visit(node.finalbody)
+
+    visit(tree.body)
+    return found
+
+
+def test_db_helper_imports_only_the_sqlite_foundation() -> None:
+    """Invariant from tech-design §2.8: `_db.py` is foundation and must not import the rest of
+    `bowhead_core`, which prevents circular imports. Its only internal dependencies are the SQLite
+    foundation modules, and their import closure never comes back to `_db.py` or reaches a Store."""
+    direct = _module_level_internal_imports("_db")
+    assert direct, "the scanner found no internal import in _db.py; it no longer parses the module"
+    assert direct <= _SQLITE_FOUNDATION, f"_db.py imports outside the SQLite foundation (circular import risk): {sorted(direct - _SQLITE_FOUNDATION)}"
+
+    closure: set[str] = set()
+    pending = list(direct)
+    while pending:
+        module = pending.pop()
+        if module in closure:
+            continue
+        closure.add(module)
+        pending.extend(_module_level_internal_imports(module))
+    assert "_db" not in closure, "a SQLite foundation module imports _db.py at import time (circular import)"
+    assert closure <= _SQLITE_FOUNDATION, (
+        f"the SQLite foundation imports other bowhead_core modules at import time: {sorted(closure - _SQLITE_FOUNDATION)}"
+    )

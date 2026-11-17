@@ -148,16 +148,78 @@ async def test_gate_installed_on_explicit_auto_string() -> None:
     assert await _gate_after_turn("auto", "t_gate_auto_str") is not None
 
 
-@pytest.mark.asyncio
-async def test_gate_not_installed_on_off() -> None:
-    """off：用户明说不要计划，连拦都不该拦。"""
-    assert await _gate_after_turn("off", "t_gate_off") is None
+_TWO_PEERS = [
+    SimpleNamespace(name="subagent_spawn", arguments={"profile": "financial-analyst"}),
+    SimpleNamespace(name="subagent_spawn", arguments={"profile": "business-analyst"}),
+]
+_PLAN_CALL = [SimpleNamespace(name="plan_propose", arguments={"reason": "three steps"})]
+
+
+async def _gate_and_runtime(mode: str | None, turn_id: str):
+    runtime = _mk_runtime(_CapturingRunner())
+    await _lead_loop(_mk_sctx(turn_id, mode), "fill the template", runtime)
+    return runtime.parent_ctx._round_tool_calls_gate, runtime
 
 
 @pytest.mark.asyncio
-async def test_gate_not_installed_on_explicit_planning() -> None:
-    """显式 planning 有 loop 前直通，装了是白拦一次。"""
-    assert await _gate_after_turn("planning", "t_gate_planning") is None
+@pytest.mark.parametrize("mode", ["off", "planning"])
+async def test_outside_auto_a_batch_of_peers_is_not_asked_about_a_plan(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """off: the user said no plans. planning: the card path already ran before the loop."""
+    from bowhead_core.agents import lead_orchestrator
+
+    async def never(*_args: Any, **_kwargs: Any):
+        raise AssertionError("the card path must not be asked")
+
+    gate, _ = await _gate_and_runtime(mode, f"t_gate_{mode}")
+    monkeypatch.setattr(lead_orchestrator, "_maybe_propose_plan", never)
+    assert await gate(_TWO_PEERS, "lead") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "off", "planning"])
+async def test_a_plan_call_that_yields_no_card_lets_the_run_continue_and_says_so(mode: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Lead's own plan_propose call is decided before it runs.
+
+    The call used to end the run and ask the card path afterwards. When that path created no card the Lead
+    had written nothing and the user got the empty-answer fallback (observed in a regression).
+    Mutation: decide after the call (return the sentinel unconditionally) → this test fails.
+    """
+    from bowhead_core.agents import lead_orchestrator
+    from bowhead_core.agents.plan_propose_tool import PLAN_NOT_CREATED, _plan_propose, is_plan_propose_sentinel
+
+    asked: list[str] = []
+
+    async def no_card(sctx: Any, *_args: Any, **_kwargs: Any):
+        asked.append(sctx.turn_id)
+        return
+
+    gate, runtime = await _gate_and_runtime(mode, f"t_declined_{mode}")
+    monkeypatch.setattr(lead_orchestrator, "_maybe_propose_plan", no_card)
+    # A tool handler receives a shallow copy of the Turn context.
+    import copy
+
+    tool_ctx = copy.copy(runtime.parent_ctx)
+    assert is_plan_propose_sentinel(await _plan_propose({"reason": "x"}, tool_ctx)), "undecided calls keep the old contract"
+    assert await gate(_PLAN_CALL, "lead") is None
+    assert await _plan_propose({"reason": "x"}, tool_ctx) == {"plan_created": False, "detail": PLAN_NOT_CREATED}
+    # A second call in the same run repeats the fact without authoring a plan again.
+    assert await gate(_PLAN_CALL, "lead") is None and len(asked) == 1
+    assert await gate(_PLAN_CALL, "compute") is None and len(asked) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_plan_call_that_yields_a_card_ends_the_run_with_that_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.agents import lead_orchestrator
+
+    decided = SimpleNamespace(turn_id="t_card")
+
+    async def card(*_args: Any, **_kwargs: Any):
+        return decided
+
+    gate, runtime = await _gate_and_runtime("off", "t_card")
+    monkeypatch.setattr(lead_orchestrator, "_maybe_propose_plan", card)
+    assert await gate(_PLAN_CALL, "lead") == {"_plan_gate_committed": True}
+    assert runtime.parent_ctx._plan_gate_result is decided and runtime.parent_ctx._plan_propose_state == {"declined": False}
 
 
 @pytest.mark.asyncio

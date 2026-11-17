@@ -13,7 +13,8 @@ Cet article décrit les zones de la page de conversation qui affichent la progre
 
 - Après l’envoi, le cadre au-dessus de la réponse affiche l’étape actuelle, son numéro et le temps écoulé ; les deux lignes suivantes présentent les étapes terminées et la dernière décrit le travail actuel. La bordure est plus légère, la police est celle de l’interface, les étapes terminées ont une coche grise et les échecs ou nouveaux essais restent signalés par une couleur d’avertissement. Sélectionnez la première ligne pour développer ou réduire le déroulement complet.
 - **Arrêter**, en bas à droite du champ de saisie, est gris et se distingue d’Envoyer. Il affiche **Arrêt en cours…** jusqu’à la fin effective de la tâche.
-- Pendant une réponse, vous pouvez saisir une instruction pour l’ajuster. Dès que vous tapez, le bouton en bas à droite devient **Ajouter l’instruction**, qui met votre texte en attente pour la réponse en cours, et **Arrêter** passe à sa gauche : le bouton habituel n’interrompt donc jamais la réponse. La touche Entrée équivaut à **Ajouter l’instruction**.
+- Pendant une réponse, vous pouvez saisir une instruction pour l’ajuster. Dès que vous tapez, le bouton en bas à droite devient **Ajouter l’instruction**, et **Arrêter** passe à sa gauche : le bouton habituel n’interrompt donc jamais la réponse. La touche Entrée équivaut à **Ajouter l’instruction**.
+- Une instruction ajoutée est prise en compte dès que la réponse atteint sa prochaine étape, y compris lorsqu’un agent travaille encore sur une partie de la tâche. Elle apparaît alors dans cette réponse, à l’endroit où elle a été prise en compte. Si la réponse est déjà en cours de rédaction, l’instruction s’exécute juste après, comme une suite. Une instruction accompagnée d’une pièce jointe ou d’une ressource référencée s’exécute toujours après la réponse.
 - À la fin, la progression se réduit à « N étapes terminées », qui permet de rouvrir le déroulement. En cas d’échec, le même emplacement affiche la raison et les actions de reprise disponibles.
 
 ## Actions sous une réponse
@@ -37,6 +38,8 @@ Les repères numérotés conservent emplacement, numéro et source. Une source i
 
 Les cartes demandant un choix, une précision ou l’approbation d’un plan ont une bordure d’avertissement pendant l’attente. Après réponse ou approbation, elles se réduisent à un résultat sur une ligne, conservé dans la conversation même après actualisation.
 
+Lorsqu’un e-mail ou un outil externe nécessite votre confirmation, la carte apparaît sous l’étape en attente. Vérifiez ce qui sera envoyé ou modifié et faites votre choix avant la fin du compte à rebours. À l’expiration du délai, l’action est ignorée. La carte conserve le résultat après la reprise.
+
 ## Zone des résultats
 
 - Sur ordinateur, survolez le séparateur pour voir sa poignée et le déplacer.
@@ -45,7 +48,19 @@ Les cartes demandant un choix, une précision ou l’approbation d’un plan ont
 
 Le dépôt de fichiers, les réglages au clavier et le point signalant un nouveau résultat sont décrits dans [Glisser-déposer, raccourcis et indications](conversation-workbench-actions.fr-FR.md).
 
-Lorsqu’un fichier livré plus tôt est révisé, les résultats et la page Fichiers ne l’affichent qu’une fois, avec sa dernière version, par exemple « Version 2 sur 2 ». Supprimer le fichier depuis la page Fichiers supprime toutes ses versions ; **Annuler** ou la corbeille les restaure ensemble. Les cartes de fichier plus anciennes de la conversation ouvrent et téléchargent la dernière version, indiquent « Mis à jour vers la version N » et proposent « Télécharger la version N » pour la version livrée. Chaque fichier conserve ses trois versions les plus récentes (un brouillon remplacé par un enregistrement ultérieur dans la même demande est supprimé en premier) ; les versions plus anciennes sont nettoyées automatiquement et la carte le signale. Les versions utilisées par un rapport, la base de connaissances, un document ou un instantané d’export ne sont jamais nettoyées. Après avoir ouvert le fichier dans « Résultats », **Historique des versions** dans le menu **Autres actions** télécharge toute version conservée. Un fichier ajouté à la base de connaissances reste à la version ajoutée : la base de connaissances affiche « Version N plus récente disponible » et la page Fichiers indique que la base contient une version antérieure et propose **Ajouter la version N**. Supprimez ensuite l’ancienne entrée de la base de connaissances.
+### Trouver ou télécharger une version d’un fichier
+
+Après une révision, le fichier apparaît une seule fois dans les **Résultats** et dans **Fichiers**, dans sa version la plus récente. Une ancienne carte de fichier ouvre aussi la dernière version. Choisissez **Télécharger la version N** sur cette carte pour obtenir la version livrée à l’époque, si elle est encore disponible.
+
+Si vous êtes propriétaire de la conversation, ouvrez le fichier dans les **Résultats** et choisissez **Autres actions → Historique des versions** pour télécharger une version conservée. Bowhead garde les trois dernières versions et celles protégées, par exemple, par des rapports, des entrées de la base de connaissances, des documents ou des exports enregistrés. Les anciennes versions ne sont supprimées que lorsqu’aucune réponse de la conversation n’est en cours ou en attente de votre retour ; la liste peut donc afficher temporairement davantage de versions. Téléchargez une copie tant qu’elle reste disponible si vous devez conserver une version précise.
+
+La suppression d’un fichier dans **Fichiers** place toutes ses versions dans la corbeille. **Annuler** ou la restauration depuis la corbeille les récupère ensemble.
+
+Pour remplir un modèle et télécharger le PPTX depuis les résultats, consultez [Remplir ou mettre à jour un modèle PowerPoint](powerpoint-templates.fr-FR.md).
+
+## Vérifier et publier un brouillon de document
+
+Ces étapes concernent les brouillons existants et les Agents personnalisés dotés du plugin de brouillons PPTX. Ouvrez le brouillon dans le menu **+** de la barre d’onglets du Canvas. Vérifiez l’aperçu, les modifications et les sources, confirmez votre vérification et publiez le brouillon. Téléchargez ensuite le PPTX ou le PDF demandé depuis les résultats. Répondez aux demandes de précision sur la carte correspondante.
 
 ## Rapports
 

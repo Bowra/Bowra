@@ -93,6 +93,19 @@ _COVERED: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {
     ("GET", "/api/v1/kb/files/{file_id}/extract_rows_status"): ("kb_file", {}),
     ("POST", "/api/v1/kb/presign/{file_id}/confirm"): ("kb_file", {_JSON: {}}),
     ("POST", "/api/v1/kb/presign/bundle/{file_id}/confirm"): ("kb_file", {_JSON: {}}),
+    ("POST", "/api/v1/kb/files/{file_id}/chat-attachment"): ("kb_file", {}),
+    ("GET", "/api/v1/kb/files/{file_id}/navigation"): ("kb_file", {}),
+    (
+        "PATCH",
+        "/api/v1/kb/files/{file_id}/navigation",
+    ): ("kb_file", {_JSON: {"expected_source_version": 1, "expected_generation_id": None, "expected_revision": 0}}),
+    (
+        "POST",
+        "/api/v1/kb/files/{file_id}/description-jobs",
+    ): (
+        "kb_file",
+        {_JSON: {"expected_source_version": 1, "expected_generation_id": "gen_probe", "expected_revision": 0, "action_id": "probe_action"}},
+    ),
 }
 _COVERED_IDS = [f"{method} {path}" for method, path in _COVERED]
 
@@ -103,11 +116,14 @@ def _is_per_id(path: str) -> bool:
 
 def test_every_per_id_route_is_covered_or_exempt() -> None:
     from bowhead_gateway.main import app as production_app
+    from fastapi.routing import iter_route_contexts
 
+    # FastAPI 0.162 keeps each included router as one lazy entry in `app.routes`;
+    # enumerate the effective routes so the inventory cannot pass vacuously.
     live = {
         (method, route.path)
-        for route in production_app.routes
-        if _is_per_id(getattr(route, "path", ""))
+        for route in iter_route_contexts(production_app.routes)
+        if _is_per_id(route.path or "")
         for method in getattr(route, "methods", None) or ()
     }
     unaccounted = live - set(_COVERED) - set(_EXEMPT)
@@ -234,6 +250,32 @@ async def test_unreadable_id_is_indistinguishable_from_missing(env, method, path
     assert b"secret-plan" not in existing.content
 
 
+async def test_pending_legacy_bundle_marker_is_concealed_before_its_action_refusal(env) -> None:
+    """A pre-admission bundle marker (no explicit Knowledge action) still answers like a missing id to others."""
+    marker = await env.client.app.state.kb_files_store.create(
+        artifact_id=f"art_{uuid.uuid4().hex[:6]}",
+        filename="secret-plan.zip",
+        mime_type="application/zip",
+        size_bytes=16,
+        scope="personal",
+        scope_id=OWNER,
+        workspace_id=WS,
+        team_id=TEAM,
+        uploaded_by=OWNER,
+        initial_parse_status="awaiting_upload",
+    )
+    path = "/api/v1/kb/presign/bundle/{file_id}/confirm"
+    for headers in _HEADERS.values():
+        existing = _send(env, "POST", path, ("kb_file", {_JSON: {}}), marker, PROBER, headers)
+        missing = _send(env, "POST", path, ("kb_file", {_JSON: {}}), MISSING, PROBER, headers)
+        assert existing.status_code >= 400, existing.text
+        assert (existing.status_code, dict(existing.headers), existing.content) == (missing.status_code, dict(missing.headers), missing.content)
+    # The uploader still receives the actionable refusal.
+    own = _send(env, "POST", path, ("kb_file", {_JSON: {}}), marker, OWNER, {"X-Space-Id": WS})
+    assert own.status_code == 409, own.text
+    assert own.json()["detail"]["error"]["code"] == "knowledge_bundle_action_required"
+
+
 async def test_owner_still_reaches_each_family(env) -> None:
     """Positive control: the same fixture serves the owner, so the 404s above are the gate."""
     owner = {"X-Bowhead-User-Id": OWNER, "X-Space-Id": WS}
@@ -306,6 +348,11 @@ async def _ownerless(env, *, filename: str = "ownerless-plan.csv", deleted: bool
     return art.id
 
 
+def _promotion(artifact_id: str, scope: str = "personal") -> dict[str, str]:
+    """An explicit Add-to-Knowledge request; a promotion without intent is refused before any lookup."""
+    return {"knowledge_intent": "add_to_knowledge", "action_id": uuid.uuid4().hex, "artifact_id": artifact_id, "scope": scope}
+
+
 def _assert_same_as_missing(env, method: str, url_tpl: str, resource_id: str, user: str, *, space: str | None = WS, **kwargs: Any) -> None:  # noqa: ANN001
     headers = {"X-Bowhead-User-Id": user, **({"X-Space-Id": space} if space else {})}
     existing = env.client.request(method, url_tpl.format(id=resource_id), headers=headers, **kwargs)
@@ -327,8 +374,8 @@ async def test_ownerless_mutations_answer_like_missing(env, user) -> None:
     _assert_same_as_missing(env, "DELETE", "/api/v1/files/{id}", referenced, user)
     _assert_same_as_missing(env, "POST", "/api/v1/files/{id}/restore", trashed, user)
     headers = {"X-Bowhead-User-Id": user, "X-Space-Id": WS}
-    promoted = env.client.post("/api/v1/kb/files/from-artifact", json={"artifact_id": live, "scope": "personal"}, headers=headers)
-    missing = env.client.post("/api/v1/kb/files/from-artifact", json={"artifact_id": MISSING, "scope": "personal"}, headers=headers)
+    promoted = env.client.post("/api/v1/kb/files/from-artifact", json=_promotion(live), headers=headers)
+    missing = env.client.post("/api/v1/kb/files/from-artifact", json=_promotion(MISSING), headers=headers)
     assert promoted.status_code == 404, promoted.text
     assert (promoted.status_code, dict(promoted.headers), promoted.content) == (missing.status_code, dict(missing.headers), missing.content)
 
@@ -371,11 +418,12 @@ async def test_owned_artifact_mutations_still_work_for_the_owner(env) -> None:
     store = env.client.app.state.artifact_store
     session = await env.sessions.ensure_session(session_id=None, workspace_id=WS, user_id=PROBER)
     me = {"X-Bowhead-User-Id": PROBER, "X-Space-Id": WS}
+    # Only uploads and Agent deliverables may be added to Knowledge (d325a29fa); tool data is refused by kind.
     art = await store.put_bytes(
-        content=b"mine", filename="mine.csv", mime="text/csv", source="bi_fetch_rows", created_by=PROBER, session_id=session.id
+        content=b"mine", filename="mine.csv", mime="text/csv", source="upload", kind="user_upload", created_by=PROBER, session_id=session.id
     )
     assert env.client.post(f"/api/v1/files/{art.id}/category", json={"category": "dataset"}, headers=me).status_code == 200
-    promoted = env.client.post("/api/v1/kb/files/from-artifact", json={"artifact_id": art.id, "scope": "personal"}, headers=me)
+    promoted = env.client.post("/api/v1/kb/files/from-artifact", json=_promotion(art.id), headers=me)
     assert promoted.status_code == 201, promoted.text
     other = await store.put_bytes(
         content=b"mine2", filename="mine2.csv", mime="text/csv", source="bi_fetch_rows", created_by=PROBER, session_id=session.id

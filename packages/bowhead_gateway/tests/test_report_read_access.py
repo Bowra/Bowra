@@ -764,3 +764,109 @@ async def test_one_validation_pass_reads_a_report_once_and_the_next_pass_reads_a
         await db.commit()
     with report_read_validation_pass(), pytest.raises(OrdinaryContinuationUnavailable):
         await validate_report_read(ctx, record)
+
+
+async def test_history_and_supplement_recheck_read_recorded_sources_once_per_pass(report_case, monkeypatch):
+    """116 1.7.49: before every Lead model call, a 24-Turn conversation re-read its ~20k events once per
+    Report section reference and authorized each file on its own; the Lead waited minutes. One pass now
+    reads the recorded sources once and authorizes each Turn's files in one batch, with the same answers."""
+    from pathlib import Path
+
+    import bowhead_gateway.report_artifact_access as artifact_access
+    import bowhead_gateway.routes.canvas as canvas_routes
+    from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+    from bowhead_core.chat_reference_scope import ReferenceRequestScope
+    from bowhead_core.result_material_history import authorize_material_supplement, load_material_history
+    from bowhead_core.result_materials import MaterialReference, capture_material_references
+    from bowhead_core.types import ToolInvocation
+
+    ctx, _section, canvas, request = report_case
+    logs = request.app.state.turn_log_store
+    artifacts = ArtifactStore(ctx.session_store.db_path, LocalBackend(Path(ctx.session_store.db_path).parent / "blobs"))
+    await artifacts.initialize()
+    ctx.artifact_store = artifacts
+    request.app.state.artifact_store = artifacts
+    turn_ids, created = [], []
+    for t in range(3):
+        turn_id = ctx.turn_id if t == 0 else f"t_prior{t}"
+        if t:
+            await ctx.session_store.record_turn(turn_id=turn_id, session_id=ctx.session_id, user_text=f"Request {t}")
+        sections = [
+            await ctx.canvas_store.append_section(
+                canvas_id=canvas.id, kind="narrative", payload={"markdown": f"T{t} S{i}", "source_refs": ["101"]}, by_turn_id=turn_id
+            )
+            for i in range(3)
+        ]
+        files = [
+            await artifacts.put_bytes(
+                content=b"1",
+                filename=f"d{t}_{i}.csv",
+                mime="text/csv",
+                source="python_sandbox",
+                created_by=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                session_id=ctx.session_id,
+            )
+            for i in range(3)
+        ]
+        created += [a.id for a in files]
+        write = ToolInvocation("write_report", {}, call_id="write", result={"ok": True, "section_ids": [s.id for s in sections]})
+        await capture_material_references(write, ctx, turn_id=turn_id, producer_id="writer")
+        py = ToolInvocation("python_exec", {}, call_id="python", result={"output_artifacts": [{"artifact_id": a.id} for a in files]})
+        await capture_material_references(py, ctx, turn_id=turn_id, producer_id="writer")
+        await logs.record(turn_id=turn_id, event_type="agent_spawned", payload={"subagent_id": "writer", "profile": "narrative"})
+        for inv, tool in ((write, "write_report"), (py, "python_sandbox")):
+            await logs.record(
+                turn_id=turn_id,
+                event_type="tool_result",
+                payload={
+                    "subagent_id": "writer",
+                    "call_id": inv.call_id,
+                    "tool_name": tool,
+                    "result_meta": {"material_refs": inv.material_refs.model_dump(exclude_none=True)},
+                },
+            )
+        async with open_shared_ctx(ctx.session_store.db_path) as db:
+            await db.execute("UPDATE turns SET status='completed' WHERE id=?", (turn_id,))
+            await db.commit()
+        await ctx.session_store.finalize_turn(session_id=ctx.session_id, current_turn_id=turn_id, next_turn_id=None)
+        turn_ids.append(turn_id)
+    await ctx.session_store.record_turn(turn_id="t_now", session_id=ctx.session_id, user_text="Continue")
+    ctx.turn_id = "t_now"
+    # A deleted file stays unauthorized inside the batch without hiding the others.
+    deleted = created[0]
+    assert await artifacts.soft_delete(deleted, user_id=ctx.user_id)
+
+    calls = {"scans": 0, "file_checks": 0}
+    scan, check = canvas_routes._build_source_refs_for_session, artifact_access.authorized_report_artifact_ids
+
+    async def counted_scan(*args, **kwargs):
+        calls["scans"] += 1
+        return await scan(*args, **kwargs)
+
+    async def counted_check(*args, **kwargs):
+        calls["file_checks"] += 1
+        return await check(*args, **kwargs)
+
+    monkeypatch.setattr(canvas_routes, "_build_source_refs_for_session", counted_scan)
+    monkeypatch.setattr(artifact_access, "authorized_report_artifact_ids", counted_check)
+
+    history = await load_material_history(ctx, turn_ids)
+    items = [item for view in history.values() for item in view["items"]]
+    assert sum(item["kind"] == "canvas_section" for item in items) == 9
+    assert {item["locator"]["artifact_id"] for item in items if item["kind"] == "artifact"} == set(created) - {deleted}
+    # One batch per Turn's files, and one projection for the source set the sections share.
+    assert calls == {"scans": 1, "file_checks": len(turn_ids) + 1}
+
+    calls.update(scans=0, file_checks=0)
+    references = [MaterialReference.model_validate(item) for item in items]
+    supplement = SimpleNamespace(
+        scope=ReferenceRequestScope(team_id=ctx.team_id, user_id=ctx.user_id, workspace_id=ctx.workspace_id, session_id=ctx.session_id),
+        references=SimpleNamespace(items=references),
+    )
+    assert await authorize_material_supplement(ctx, supplement) is True
+    assert calls == {"scans": 1, "file_checks": 2}
+    # The recheck still refuses a pointer that lost its authority since the history was loaded.
+    revoked = next(reference for reference in reversed(references) if reference.kind == "artifact")
+    assert await artifacts.soft_delete(revoked.locator["artifact_id"], user_id=ctx.user_id)
+    assert await authorize_material_supplement(ctx, supplement) is False

@@ -165,8 +165,8 @@ def _pick_top_rows_by_delta(
 ) -> list[dict[str, Any]]:
     """Sort by abs(delta_col) desc, return top n. Fallback natural order.
 
-    Numeric coercion is permissive — strings like "-1.28%" / "1.5万" are
-    cleaned to floats. Failures fall back to natural order silently.
+    Only typed numbers are sorted. Formatted strings such as "-1.28%" / "1.5万"
+    keep the natural order, as do sorting failures.
     """
     if not rows:
         return []

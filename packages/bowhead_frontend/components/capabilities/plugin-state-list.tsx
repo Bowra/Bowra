@@ -6,6 +6,10 @@
  * Built-in and team Plugins share one row style. Administrators get a "Team" switch; everyone gets a
  * "Me" switch that is locked while the team has the Plugin disabled. A team-level disable previews
  * the affected Agents and scheduled tasks first; a personal disable applies at once with Undo.
+ *
+ * Settings Plugins belong to the system settings assistant: nobody can choose them for an Agent, but their
+ * switches still decide which settings forms the assistant may open (`form_plugin_disabled`). They are
+ * listed last in a collapsed group of their own, with the same switches.
  */
 import { useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -65,24 +69,22 @@ export function PluginStateList({
   const { confirm, dialog } = useConfirmDialog();
   const [busy, setBusy] = useState<string | null>(null);
 
-  // General Plugins first, settings Plugins after, each in registry order (rows never jump on state changes).
-  const ordered = [...builtin].sort((a, b) => Number(a.family === "settings") - Number(b.family === "settings"));
-  const builtinRows: Row[] = ordered.map((plugin) => ({
+  // Each family in registry order, so rows never jump on state changes.
+  const builtinRow = (plugin: BuiltinPluginState): Row => ({
     key: `builtin:${plugin.name}`,
     id: plugin.name,
     kind: "builtin" as const,
     name: plugin.listing[locale]?.name ?? (t.has(`system_plugins.${plugin.name}.name`) ? t(`system_plugins.${plugin.name}.name`) : plugin.name),
     version: `v${plugin.version}`,
-    description:
-      plugin.listing[locale]?.description ??
-      (t.has(`system_plugins.${plugin.name}.description`) ? t(`system_plugins.${plugin.name}.description`) : "") +
-        (plugin.family === "settings" ? ` ${r("settings_only")}` : ""),
+    description: plugin.listing[locale]?.description ?? (t.has(`system_plugins.${plugin.name}.description`) ? t(`system_plugins.${plugin.name}.description`) : ""),
     count: t("bundle_count", { tools: plugin.tool_count, skills: plugin.skill_count }),
     teamDisabled: plugin.team_disabled,
     myDisabled: plugin.my_disabled,
     notReady: plugin.ready === false,
     teamSwitch: true,
-  }));
+  });
+  const builtinRows: Row[] = builtin.filter((plugin) => plugin.family !== "settings").map(builtinRow);
+  const settingsRows: Row[] = builtin.filter((plugin) => plugin.family === "settings").map(builtinRow);
   const teamRows: Row[] = team.map((plugin) => ({
     key: `team:${plugin.id}`,
     id: plugin.id,
@@ -198,6 +200,7 @@ export function PluginStateList({
 
   const visibleBuiltin = builtinRows.filter(matches);
   const visibleTeam = teamRows.filter(matches);
+  const visibleSettings = settingsRows.filter(matches);
   return (
     <>
       {visibleBuiltin.length > 0 ? (
@@ -215,6 +218,18 @@ export function PluginStateList({
           </h2>
           {visibleTeam.length > 0 ? <ul className={styles.list}>{visibleTeam.map(renderRow)}</ul> : <p role="status">{t("team_plugins_empty")}</p>}
         </section>
+      ) : null}
+      {visibleSettings.length > 0 ? (
+        // Collapsed: members cannot use these. A search that matches one opens the group.
+        <details className={styles.settingsGroup} open={needle ? true : undefined}>
+          <summary aria-label={t("settings_plugins")}>
+            <h2 className="ui-section-title">
+              {t("settings_plugins")} <span className={styles.headingCount}>{settingsRows.length}</span>
+            </h2>
+          </summary>
+          <p className={styles.hint}>{t("settings_plugins_hint")}</p>
+          <ul className={styles.list}>{visibleSettings.map(renderRow)}</ul>
+        </details>
       ) : null}
       {dialog}
     </>

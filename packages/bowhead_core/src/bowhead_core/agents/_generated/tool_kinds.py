@@ -83,6 +83,7 @@ TOOL_KINDS: dict[str, ToolKind] = {
     "configuration_result": "part",
     "configuration_submit": "part",
     "edit_chart": "tool",
+    "find_results": "part",
     "get_current_user": "tool",
     "google_doc_write": "tool",
     "google_sheet_write": "tool",

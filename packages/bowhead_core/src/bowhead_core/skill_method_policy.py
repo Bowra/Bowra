@@ -65,10 +65,13 @@ def task_method_policy(document: InputDocument) -> TaskMethodReadPolicy:
 
 
 def selected_method_policy(
-    document: InputDocument,
+    document: InputDocument | None,
     grants: tuple[ExactSkillGrant, ...],
     published: AgentRuntimeExtensions | None,
 ) -> AgentRuntimeExtensions | TaskMethodReadPolicy | None:
+    if document is None:
+        # A plain-text Turn carries no input document, so it selected no methods.
+        return published
     selected = tuple(node.resource for node in document.nodes if isinstance(node, ReferenceNode) and isinstance(node.resource, SkillResourceRef))
     outside = []
     for resource in selected:

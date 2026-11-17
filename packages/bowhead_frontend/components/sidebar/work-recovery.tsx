@@ -38,6 +38,7 @@ import { trackInteraction as track } from "@/lib/metrics";
 import {
   searchResultCount as countSearchResults,
   unifiedWorkResultAppHref,
+  type SessionSearchMore,
   type UnifiedWorkKind,
   type UnifiedWorkSearchGroup,
   type UnifiedWorkSearchItem,
@@ -149,7 +150,7 @@ export function WorkRecovery({
   // Pending focus moves (spec 4a/4b): set on click, resolved when the request settles.
   const [olderFocusRequest, setOlderFocusRequest] = useState<RecoveryFocusRequest | null>(null);
   const olderPendingRef = useRef<{ pagesBefore: number } | null>(null);
-  const searchMorePendingRef = useRef(false);
+  const searchMorePendingRef = useRef<SessionSearchMore | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [hiddenActiveIds, setHiddenActiveIds] = useState<Set<string>>(
     () => new Set(),
@@ -914,11 +915,12 @@ export function WorkRecovery({
   useEffect(() => {
     setOlderFocusRequest(null);
     olderPendingRef.current = null;
+    searchMorePendingRef.current = null;
   }, [globalSearchActive, mode, query]);
   const showMoreSessions = () => {
     // aria-disabled while loading: the button keeps focus, repeated presses are ignored.
     if (sessionGroupMore.loading) return;
-    searchMorePendingRef.current = true;
+    searchMorePendingRef.current = sessionGroupMore;
     void search.loadMoreSessions();
   };
   const firstSearchSessionIds =
@@ -926,8 +928,9 @@ export function WorkRecovery({
   // Spec 4b: a landed page moves focus to its first result; a failure moves it to Retry; when the button is gone
   // with nothing new to show, focus the last result instead of dropping it on the page.
   useEffect(() => {
-    if (!searchMorePendingRef.current || sessionGroupMore.loading) return;
-    searchMorePendingRef.current = false;
+    const previousPage = searchMorePendingRef.current;
+    if (!previousPage || previousPage === sessionGroupMore || sessionGroupMore.loading) return;
+    searchMorePendingRef.current = null;
     if (sessionGroupMore.error) {
       focusInList(".unified-search-more-error button");
       return;

@@ -47,3 +47,18 @@ async def test_skill_index_filter_fails_closed_when_enforced(monkeypatch) -> Non
     rendered = await render_access_filtered_skill_index(_ctx(), _BoomCatalog())
 
     assert rendered == ""
+
+
+class _BoomBatchAccessStore(_BoomAccessStore):
+    async def explain_decisions(self, *args, **kwargs):
+        raise RuntimeError("policy store unavailable")
+
+
+async def test_skill_listing_batch_fails_closed_when_enforced_and_open_in_shadow_mode(monkeypatch) -> None:
+    from bowhead_core.skill_access import skills_visible_by_grants
+
+    ctx = SimpleNamespace(access_control_store=_BoomBatchAccessStore(), access_context={"team_id": "team_a", "user_id": "u_1"})
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "1")
+    assert await skills_visible_by_grants(ctx, ["forecasting", "pricing"]) == {"forecasting": False, "pricing": False}
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "0")
+    assert await skills_visible_by_grants(ctx, ["forecasting", "pricing"]) == {"forecasting": True, "pricing": True}

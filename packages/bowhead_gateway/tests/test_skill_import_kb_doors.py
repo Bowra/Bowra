@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import io
-import sqlite3
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,13 +13,11 @@ import pytest
 from bowhead_core.artifact_store import LocalBackend
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.kb.permission import ScopeContext
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.skill_import.bundle_inventory_store import get_bundle_inventory
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.user_store import User
 from bowhead_gateway.routes.kb import _process_zip_bundle
 from fastapi import BackgroundTasks
-from gateway_legacy_database import upgrade
 
 from bowhead_core import ArtifactStore
 
@@ -50,18 +47,14 @@ class _Worker:
 
 
 @pytest.fixture(autouse=True)
-def _migrated_kb_files(tmp_path: Path, initialize_migrated_kb_files_database) -> None:
-    """_world 的 KbFilesStore 建在 tmp_path/kb_files.db；先铺 Alembic head 结构。"""
+def _migrated_databases(tmp_path: Path, initialize_migrated_core_database, initialize_migrated_kb_files_database) -> None:
+    initialize_migrated_core_database(tmp_path / "bowhead.db")
     initialize_migrated_kb_files_database(tmp_path / "kb_files.db")
 
 
 async def _world(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # Skill disk paths use CWD-relative .data/user_skills.
     db = tmp_path / "bowhead.db"
-    with sqlite3.connect(db) as c:
-        c.executescript(initial_schema("core"))
-        c.commit()
-    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     artifact_store = ArtifactStore(db_path=str(db), backend=LocalBackend(root_dir=tmp_path / "blobs"))
     await artifact_store.initialize()
     files_store = KbFilesStore(tmp_path / "kb_files.db")

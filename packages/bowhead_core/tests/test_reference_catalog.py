@@ -278,20 +278,26 @@ async def test_plan_catalog_requires_explicit_team_receiver_and_readonly_grants(
     from dataclasses import replace
 
     from bowhead_core.agent_dependency_compiler import ExactSkillGrant
+    from bowhead_core.agent_execution_binding import project_system_agent_revision
     from bowhead_core.chat_reference_catalog import SkillCatalogItem
     from bowhead_core.chat_references import AgentResourceRef
     from bowhead_core.reference_receiver_metadata import ReferenceReceiverMetadata
+    from bowhead_core.subagent import PROFILES, _system_profile_snapshot
     from test_reference_skill_compatibility import method, resource
 
     skill = resource("method")
     grant = ExactSkillGrant("builtin", skill.id, "method", ("read",), skill.version, "reference")
+    # A receiver needs an eligible behavior descriptor before it accepts a Skill (25f823a51).
+    behavior = project_system_agent_revision(
+        team_id="team_one", profile_name="compute", definition=_system_profile_snapshot(PROFILES["compute"])
+    ).behavior_descriptor
     agent = ReferenceCatalogItem(
         id="osa_analyst",
         label="Analyst",
         summary="Analysis",
         reason_code="unsupported_entry",
         resource=AgentResourceRef(kind="agent", source_kind="team", id="osa_analyst", version="arv_1", release_id="arl_1", assignment_id="asa_1"),
-        receiver_metadata=ReferenceReceiverMetadata((grant,)),
+        receiver_metadata=ReferenceReceiverMetadata((grant,), behavior=behavior),
     )
     metadata = method("method")
     methods = ReferenceCatalogGroup(
@@ -313,7 +319,12 @@ async def test_plan_catalog_requires_explicit_team_receiver_and_readonly_grants(
     args = {"team_id": "team_one", "user_id": "u_one", "locale": "en-US", "epoch": 0, "initial_writer_available": True}
     for candidate, expected in (
         (agent, "baseline"),
-        (agent.model_copy(update={"receiver_metadata": ReferenceReceiverMetadata((replace(grant, permissions=("invoke", "read")),))}), "unavailable"),
+        (
+            agent.model_copy(
+                update={"receiver_metadata": ReferenceReceiverMetadata((replace(grant, permissions=("invoke", "read")),), behavior=behavior)}
+            ),
+            "unavailable",
+        ),
         (
             agent.model_copy(
                 update={

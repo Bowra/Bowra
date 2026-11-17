@@ -84,7 +84,8 @@ async def test_split_unconfigured_method_catalog_send_and_exact_receiver(http_st
 
 
 async def test_split_automatic_method_receiver_keeps_original_eligibility(http_start):
-    await method_flows.test_automatic_selection_uses_the_same_production_descriptor_eligibility(http_start)
+    # Routing failures are covered in the original suite; the split layout needs the successful selection.
+    await method_flows.test_automatic_selection_uses_the_same_production_descriptor_eligibility(http_start, "complete")
 
 
 async def test_split_assigned_method_question_resumes_its_original_execution(http_start, monkeypatch):

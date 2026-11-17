@@ -49,7 +49,7 @@ Prefer `bi_query` for supported aggregation, time series and period comparisons.
 - `inputs` maps names of your choice to authorized `artifact_id` values. Use a BI result's actual `_ref_artifact_id` when that result must become an input. Do not supply guessed filenames or paths.
 - `timeout_sec` defaults to the effective Team setting (120 seconds by default) and is bounded by the Team maximum and deployment ceiling (600 seconds by default). Running tasks retain their initial limits. Split expensive calculations into smaller tasks; a longer timeout does not repair an unavailable executor.
 - `purpose` defaults to `analysis`. Use `deliverable` only when the user has requested a final downloadable file from this execution.
-- With `purpose="deliverable"`, list the exact final filenames in `deliverable_outputs`, for example `["results.csv"]`. Write those files at the top level of `/workdir`. Unlisted helper files remain analysis artifacts.
+- With `purpose="deliverable"`, list each final output in `deliverable_outputs`. Use a filename for a top-level file, a relative path for a nested file, or a path ending in `/` to package the folder as a ZIP. Unlisted helper files remain analysis artifacts.
 
 ## Files and injected inputs
 
@@ -127,7 +127,7 @@ print(data.head(3))
 
 Both `python_exec` and `skill_invoke(name="python_sandbox", ...)` return an envelope. Read calculated values from `result_json.stdout` and script errors from `result_json.stderr` or `error`. The outer `stdout` belongs to the runner wrapper. Output may be truncated; print final facts concisely.
 
-`outputs` is a recursive filename listing, not proof of upload or successful execution. The ordinary collector registers new, nonempty regular files at the top level of `/workdir`; write final files there instead of a nested directory. Use the actual `output_artifacts[].artifact_id`, also present in `result_json.outputs`, matched by filename. A listing-only file has no registered artifact to reuse.
+`outputs` is a recursive filename listing, not proof of upload or successful execution. Declared nested deliverables are collected from the work directory and checked before registration. Use the actual `output_artifacts[].artifact_id`, also present in `result_json.outputs`, matched by filename. A listing-only file has no registered artifact to reuse.
 
 Check `ok` separately: failed scripts may retain partial analysis artifacts without completing the task. Only explicitly requested, successfully produced filenames listed in `deliverable_outputs` become final deliverables. Use returned artifact identifiers; never invent a download link. To reuse a registered output in another invocation, declare it under `inputs`; the previous path does not persist.
 

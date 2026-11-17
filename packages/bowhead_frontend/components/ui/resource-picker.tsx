@@ -10,6 +10,7 @@
  */
 "use client";
 
+import type { ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { CapabilityLink } from "@/components/capabilities/capability-link";
@@ -166,7 +167,7 @@ function PluginReason({ plugin, checked }: { plugin: PickerPlugin; checked: bool
   const needsEmailService = plugin.lockedReason === "not_ready" && Boolean(plugin.unavailableTools?.includes("send_email"));
   const href = needsEmailService
     ? teamSettingsPath("email-service")
-    : plugin.lockedReason === "not_ready" ? "/capabilities/?type=tools" : "/capabilities/?type=capabilities";
+    : plugin.lockedReason === "not_ready" ? "/capabilities/?type=tools" : "/capabilities/?type=plugins";
   return (
     <small className={styles.reason}>
       {needsEmailService ? t("reason_email_service_missing") : t(`reason_${plugin.lockedReason}`)}
@@ -396,6 +397,8 @@ export interface PickerTool {
   selectable: boolean;
   /** Localized reason shown when the Tool cannot be selected. */
   lockedLabel?: string | null;
+  /** A way to resolve the lock, such as a link to the setting; shown after the reason. */
+  lockedAction?: ReactNode;
   /** Localized risk tag, e.g. "Writes externally". */
   riskLabel?: string | null;
 }
@@ -411,6 +414,101 @@ export function toolGroups(plugins: PickerPlugin[]): (ref: string) => ToolGroupK
   return (ref) => byPlugin.get(ref) ?? TOOL_GROUP_OF_CATEGORY[toolDisplay(ref).category] ?? "skills";
 }
 
+export interface ResourceGroupProps {
+  title: string;
+  /** Short label after the title naming what kind of group this is, e.g. "Team connection". */
+  kind?: string | null;
+  /** Shown after the title; defaults to the number of items. */
+  count?: string;
+  items: PickerTool[];
+  selected: ReadonlySet<string>;
+  onToggle: (ref: string) => void;
+  /** Item reference → name of the selected Plugin that already brings it. */
+  owners?: ReadonlyMap<string, string>;
+  disabled?: boolean;
+  showRef?: boolean;
+  inputName?: string;
+  /** Render as a native disclosure that people can collapse, instead of a plain section. */
+  collapsible?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+/**
+ * One group of selectable resource cards. A selected item that became unavailable stays removable and
+ * says so; a locked reason keeps full contrast while the rest of its card is dimmed.
+ */
+export function ResourceGroup({
+  title,
+  kind,
+  count,
+  items,
+  selected,
+  onToggle,
+  owners,
+  disabled = false,
+  showRef = false,
+  inputName = "agent-tool",
+  collapsible = false,
+  open = false,
+  onOpenChange,
+}: ResourceGroupProps) {
+  const t = useTranslations("resource_picker");
+  const heading = (
+    <>
+      {title}
+      {kind ? <span className={styles.groupKind}>{kind}</span> : null} <span className={styles.version}>{count ?? items.length}</span>
+    </>
+  );
+  const cards = (
+    <div className={styles.grid}>
+      {items.map((item) => {
+        const owner = owners?.get(item.ref);
+        const checked = selected.has(item.ref) || owner !== undefined;
+        const locked = owner !== undefined || (!item.selectable && !selected.has(item.ref));
+        return (
+          <label key={item.ref} className={styles.card} data-selected={checked} data-disabled={locked}>
+            <input type="checkbox" name={inputName} checked={checked} disabled={disabled || locked} onChange={() => onToggle(item.ref)} />
+            <span className={styles.body}>
+              <strong>{item.name}</strong>
+              {showRef ? <code className={styles.ref}>{item.ref}</code> : null}
+              {item.description ? (
+                <small className={styles.clamp} title={item.description}>
+                  {item.description}
+                </small>
+              ) : null}
+              {item.riskLabel ? <small>{item.riskLabel}</small> : null}
+              {owner !== undefined ? (
+                <small className={styles.reason}>{t("included_in", { name: owner })}</small>
+              ) : item.lockedLabel ? (
+                <small className={styles.reason}>
+                  {item.lockedLabel}
+                  {selected.has(item.ref) ? ` · ${t("remove_hint")}` : ""}
+                  {item.lockedAction ? <> {item.lockedAction}</> : null}
+                </small>
+              ) : null}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+  if (collapsible) {
+    return (
+      <details className={styles.group} open={open} onToggle={(event) => onOpenChange?.(event.currentTarget.open)}>
+        <summary className={`${styles.groupTitle} ${styles.groupSummary}`}>{heading}</summary>
+        {cards}
+      </details>
+    );
+  }
+  return (
+    <section className={styles.group} aria-label={title}>
+      <h4 className={styles.groupTitle}>{heading}</h4>
+      {cards}
+    </section>
+  );
+}
+
 export interface ResourceToolPickerProps {
   tools: PickerTool[];
   plugins: PickerPlugin[];
@@ -420,6 +518,14 @@ export interface ResourceToolPickerProps {
   disabled?: boolean;
   /** Also show the Tool identifier (the value written into `tool_refs`), useful for support. */
   showRef?: boolean;
+  /** Short label after each group title, e.g. "Built-in Tools". */
+  kind?: string | null;
+  /** Each group's count; defaults to the number of Tools in it. */
+  countLabel?: (items: PickerTool[]) => string;
+  /** Collapsible groups (see `ResourceGroup`); `isOpen` and `onOpenChange` keep their state. */
+  collapsible?: boolean;
+  isOpen?: (key: ToolGroupKey) => boolean;
+  onOpenChange?: (key: ToolGroupKey, open: boolean) => void;
 }
 
 /**
@@ -434,8 +540,12 @@ export function ResourceToolPicker({
   onToggle,
   disabled = false,
   showRef = false,
+  kind,
+  countLabel,
+  collapsible = false,
+  isOpen,
+  onOpenChange,
 }: ResourceToolPickerProps) {
-  const t = useTranslations("resource_picker");
   const r = useTranslations("sidebar.centers.resources");
   const owners = pluginToolOwners(plugins, selectedPluginIds);
   const groupOf = toolGroups(plugins);
@@ -445,37 +555,21 @@ export function ResourceToolPicker({
   return (
     <div className={styles.picker}>
       {groups.map((group) => (
-        <section key={group.key} className={styles.group} aria-label={r(`groups.${group.key}`)}>
-          <h4 className={styles.groupTitle}>
-            {r(`groups.${group.key}`)} <span className={styles.version}>{group.items.length}</span>
-          </h4>
-          <div className={styles.grid}>
-            {group.items.map((tool) => {
-              const owner = owners.get(tool.ref);
-              const checked = selected.has(tool.ref) || owner !== undefined;
-              const locked = owner !== undefined || (!tool.selectable && !selected.has(tool.ref));
-              return (
-                <label key={tool.ref} className={styles.card} data-selected={checked} data-disabled={locked}>
-                  <input type="checkbox" name="agent-tool" checked={checked} disabled={disabled || locked} onChange={() => onToggle(tool.ref)} />
-                  <span className={styles.body}>
-                    <strong>{tool.name}</strong>
-                    {showRef ? <code className={styles.ref}>{tool.ref}</code> : null}
-                    <small>{tool.description}</small>
-                    {tool.riskLabel ? <small>{tool.riskLabel}</small> : null}
-                    {owner !== undefined ? (
-                      <small className={styles.reason}>{t("included_in", { name: owner })}</small>
-                    ) : tool.lockedLabel ? (
-                      <small className={styles.reason}>
-                        {tool.lockedLabel}
-                        {selected.has(tool.ref) ? ` · ${t("remove_hint")}` : ""}
-                      </small>
-                    ) : null}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </section>
+        <ResourceGroup
+          key={group.key}
+          title={r(`groups.${group.key}`)}
+          kind={kind}
+          count={countLabel?.(group.items)}
+          items={group.items}
+          selected={selected}
+          onToggle={onToggle}
+          owners={owners}
+          disabled={disabled}
+          showRef={showRef}
+          collapsible={collapsible}
+          open={isOpen?.(group.key) ?? false}
+          onOpenChange={(open) => onOpenChange?.(group.key, open)}
+        />
       ))}
     </div>
   );

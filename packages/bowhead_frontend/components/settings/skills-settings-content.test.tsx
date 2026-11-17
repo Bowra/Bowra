@@ -478,8 +478,8 @@ describe("SkillsSettingsContent interaction boundaries", () => {
     stash();
     renderIntl(<SkillsSettingsContent />);
     await screen.findByText("图表规范");
+    await waitFor(() => expect(sessionStorage.getItem("bowhead:feedback-prefill")).toBeNull());
     expect(screen.queryByTestId("skill-drawer")).toBeNull();
-    expect(sessionStorage.getItem("bowhead:feedback-prefill")).toBeNull();
   });
 });
 

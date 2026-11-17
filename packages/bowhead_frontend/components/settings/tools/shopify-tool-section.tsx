@@ -11,8 +11,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
 import {
-  createShopifyPlugin,
-  createShopifyContentPlugin,
   createShopifyTool,
   deleteShopifyTool,
   setShopifyEnabled,
@@ -41,7 +39,6 @@ export function ShopifyToolSection({
   const [form, setForm] = useState<ShopifyToolInput>(empty);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   function close() {
     setEditing(null);
@@ -73,7 +70,6 @@ export function ShopifyToolSection({
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError("");
-    setNotice("");
     try {
       await action();
     } catch (cause) {
@@ -114,34 +110,6 @@ export function ShopifyToolSection({
           <Button
             size="sm"
             variant="secondary"
-            disabled={busy || tool.status !== "enabled"}
-            onClick={() =>
-              void run(async () => {
-                await createShopifyPlugin(tool.id);
-                setNotice(t("plugin_created"));
-              })
-            }
-          >
-            {t("create_plugin")}
-          </Button>
-          {tool.supported_tools.includes("shopify_preview_content_update") ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || tool.status !== "enabled"}
-              onClick={() =>
-                void run(async () => {
-                  await createShopifyContentPlugin(tool.id);
-                  setNotice(t("content_plugin_created"));
-                })
-              }
-            >
-              {t("create_content_plugin")}
-            </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="secondary"
             disabled={busy}
             onClick={() => {
               setEditing(tool);
@@ -170,7 +138,6 @@ export function ShopifyToolSection({
         </div>
       ))}
       {error && !editing ? <Notice tone="error">{error}</Notice> : null}
-      {notice ? <Notice tone="success">{notice}</Notice> : null}
       {editing ? (
         <Dialog title={editing === "new" ? t("add_title") : t("edit_title")} onClose={busy ? () => undefined : close}>
           <p>{t("intro")}</p>

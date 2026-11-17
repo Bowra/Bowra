@@ -215,6 +215,7 @@
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   min-width: 0;
@@ -233,6 +234,7 @@
 }
 
 .field input:focus-visible,
+.field select:focus-visible,
 .field textarea:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
@@ -251,74 +253,78 @@
   font-weight: 650;
 }
 
-.resources {
-  display: grid;
-  max-height: 250px;
-  overflow: auto;
-  border: 1px solid var(--c-line);
-  border-radius: 8px;
-}
-
 .emptyResources {
   margin: 0;
-  padding: 14px 12px;
   color: var(--c-ink-3);
   font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
-.resource {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.resource + .resource {
-  border-top: 1px solid var(--c-line);
-}
-
-.resource:hover {
-  background: var(--c-bg);
-}
-
-.resource:has(input:disabled) {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.resource input {
-  flex: none;
-  margin: 3px 0 0;
-  accent-color: var(--c-accent);
-}
-
-.resource span {
+/* Tools and Skills: the shared resource picker groups (components/ui/resource-picker) under one heading and
+   one search. No inner scroll box: groups collapse instead, so the page or Canvas is the only scroll region. */
+.resourceSection {
   display: grid;
-  gap: 3px;
+  gap: 12px;
   min-width: 0;
 }
 
-.resource strong,
-.resource small {
-  overflow-wrap: anywhere;
+.resourceHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
 }
 
-.resource strong {
+.resourceHeading h3 {
+  margin: 0;
   font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.resourceHeading span {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.search {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  color: var(--c-ink);
+  background: var(--c-bg);
+  font: inherit;
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.noMatch {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.readOnlyGroup h4 {
+  margin: 8px 0 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
-.resource small {
-  color: var(--c-ink-3);
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-
-.resource .resourceSource {
-  color: var(--c-accent);
+.readOnlyGroup ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .actions {

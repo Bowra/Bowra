@@ -158,7 +158,7 @@ export function SettingsShell({
   const resource = active === "subagents" ? null
     : active === "workflows" ? { href: "/skills/", label: "skills" }
       : active === "tools" ? { href: "/capabilities/?type=tools", label: "tools_catalog" }
-        : active === "capabilities" ? { href: "/capabilities/?type=capabilities", label: "capabilities_catalog" }
+        : active === "capabilities" ? { href: "/capabilities/?type=plugins", label: "capabilities_catalog" }
           : null;
   const resourceReturn = ["subagents", "workflows", "tools", "capabilities"].includes(active) ? (
     <Suspense fallback={active === "subagents" ? <TeamSettingsBreadcrumb /> : <ResourceReturnLink destination={resource} />}>

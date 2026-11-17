@@ -283,6 +283,7 @@
       "unsupported_binding": "This resource's version or dependencies are not available for the current selection.",
       "skill_unsupported_binding": "No available Agent can use this Skill with the current selection. Choose an Agent configured for it, including through a Plugin, or an allowed read-only method for this task. Otherwise, ask the Agent’s owner to configure it; personal Skills require “Only me”.",
       "skill_readonly_unavailable": "This Skill has no read-only content for quick references yet.",
+      "skill_personally_disabled": "You turned this Skill off. Turn it back on in Capability Center → Skills and Workflows.",
       "agent_unsupported_binding": "This agent can't be picked directly right now. Ask Lead in the conversation to bring it in.",
       "resource_unavailable": "This resource is currently unavailable.",
       "catalog_adapter_unavailable": "This resource category is not available yet.",
@@ -872,7 +873,6 @@
       "load_failed": "Unable to load capabilities. Try again.",
       "retry": "Retry",
       "catalog_search": "Search the catalog",
-      "catalog_description": "Browse resource information here. Select resources in your Agent configuration; access and execution are checked separately.",
       "builtin_source": "Built-in",
       "team_source": "Team",
       "runtime_access": "Access is checked when used.",
@@ -910,7 +910,6 @@
       "builtin_plugins": "Built-in Plugins",
       "team_plugins": "Team Plugins",
       "team_plugins_empty": "No team Plugins are enabled yet.",
-      "system_plugin_usage": "Bowhead provides these Plugins. You can choose them for your custom Agents.",
       "system_plugins": {
         "settings-personal-appearance": {
           "name": "Personal Appearance",
@@ -931,6 +930,10 @@
         "settings-space-instructions": {
           "name": "AI work instructions",
           "description": "Maintain the instructions every conversation in the current Space follows, within your Space permissions."
+        },
+        "settings-team-administration": {
+          "name": "Team Administration Settings",
+          "description": "Maintain the team's run limits, model configuration and model retry settings with team administrator permissions."
         }
       },
       "external_tools": "External Tools",
@@ -958,7 +961,6 @@
         "tool_usage": "Agents and scheduled tasks using it",
         "overview_my_disabled": "{count, plural, =0 {You have not turned off any Plugin} one {You turned off # Plugin} other {You turned off # Plugins}}",
         "my_disabled": "Off for me",
-        "settings_only": "Used only by the system settings assistant.",
         "disable": "Turn off",
         "enable": "Turn on",
         "undo": "Undo",
@@ -977,6 +979,8 @@
         "tool_switch": "Turn “{name}” on or off",
         "enabled": "On",
         "not_enabled": "Not turned on",
+        "system_capabilities": "System capabilities",
+        "always_on": "Always on",
         "enable_risk_title": "Turn on “{name}”?",
         "enable_risk_irreversible": "Agents will write or send content outside Bowhead with this tool, and it may not be possible to take it back.",
         "enable_risk_audit": "Every call is recorded in the audit log.",
@@ -1008,7 +1012,10 @@
       "manage_workflows_button": "Manage team Skills and workflows",
       "manage_tools_button": "Manage tool sources",
       "manage_capabilities_button": "Manage team Plugins",
-      "settings_plugin_usage": "Used only by the system settings assistant."
+      "catalog_description_plugins": "A Plugin bundles Tools and Skills so you can choose them together when you configure an Agent.",
+      "catalog_description_tools": "These are the Tools Agents can call. Choose them when you configure an Agent.",
+      "settings_plugins": "Used by the settings assistant",
+      "settings_plugins_hint": "Only the system settings assistant uses these Plugins; they cannot be chosen for custom Agents. Turn one off and the settings assistant no longer changes that kind of setting for you."
     },
     "answer_language_link": "Answer Language Settings"
   },
@@ -3221,7 +3228,7 @@
     "draft_merging": "Merging…",
     "placeholder": "Ask about your data…",
     "readonly_placeholder": "Sending disabled",
-    "steer_placeholder": "↻ Add an instruction—queued until the current response finishes",
+    "steer_placeholder": "↻ Add an instruction—applies at the next step, or after this answer",
     "steer_send_label": "Add instruction",
     "steer_send_title": "Add this instruction to the current response (⏎)",
     "stopped_draft_restored": "Stopped · original prompt restored for editing and resending",
@@ -3364,10 +3371,9 @@
       "cancel": "Cancel",
       "name": "Name",
       "description": "Description",
-      "added_tools": "Added Tools",
-      "system_tools": "System Tools",
       "no_added_tools": "No added Tools are available. Configure and enable one under Team Settings → Tool Sources first.",
-      "skills": "Skills",
+      "resources_loading": "Loading the Tools and Skills you can choose…",
+      "resources_load_failed": "The Tools and Skills you can choose could not be loaded. What you entered is kept.",
       "save": "Save Plugin",
       "active": "Available",
       "disabled": "Disabled",
@@ -3379,12 +3385,44 @@
       "delete_failed": "Could not delete this Plugin. Another admin may have changed it. Review the list and try again.",
       "resource_count": "{count} resources",
       "manage": "Manage Team Plugins",
-      "unavailable_resource": "Unavailable resource",
       "load_failed": "Could not load team plugins. Refresh and try again.",
       "save_failed": "Could not save this plugin. Check its resources and your access, then try again.",
       "read_only": "This Plugin is currently read only.",
       "selected_resources": "Selected resources",
-      "changed_skills": "New versions are available for {names}. Remove and select them again to use the current versions."
+      "changed_skills": "New versions are available for {names}. Remove and select them again to use the current versions.",
+      "resources_title": "Tools and Skills",
+      "selected_summary": "{tools, plural, one {# Tool} other {# Tools}} · {skills, plural, one {# Skill} other {# Skills}} selected",
+      "search_label": "Search Tools and Skills",
+      "search_placeholder": "Search by name, purpose or source…",
+      "no_match": "No Tools or Skills match “{query}”.",
+      "group_count": "{selected} of {total} selected",
+      "group_connection": "Team connection",
+      "group_builtin": "Built-in Tools",
+      "skill_source_team": "Team Skill",
+      "skill_source_builtin": "Built-in Skill",
+      "locked_set_category": "Confirm its category in Tools settings",
+      "unavailable_title": "Selections no longer available",
+      "unavailable_reason": "No longer available",
+      "readonly_team_tools": "Team Tools",
+      "readonly_builtin_tools": "Built-in Tools",
+      "template_label": "Start from a template",
+      "template_blank": "Blank",
+      "template_replace_title": "Replace what you entered?",
+      "template_replace_description": "The template replaces the name, introduction and selected Tools and Skills.",
+      "template_replace_confirm": "Replace",
+      "template_load_failed": "Templates could not be loaded.",
+      "templates": {
+        "shopify_analysis": {
+          "option": "Shopify analysis · {connection}",
+          "name": "Shopify analysis - {connection}",
+          "description": "Read-only analysis of this shop's orders, products, inventory and store content."
+        },
+        "shopify_content": {
+          "option": "Shopify content optimization · {connection}",
+          "name": "Shopify content optimization - {connection}",
+          "description": "Improves this shop's product and page content; the requester reviews each update before it is applied."
+        }
+      }
     },
     "reference_retention": {
       "title": "Reference Material Retention",
@@ -4314,6 +4352,8 @@
       "cap_cat_orchestrate": "Orchestration",
       "cap_cat_media": "Images",
       "cap_cat_unknown": "Other",
+      "cap_cat_system": "System capabilities",
+      "system_capabilities_desc": "Every Agent has these. They are always on: there is nothing to configure or turn off.",
       "kind_openapi": "OpenAPI",
       "kind_mcp": "MCP",
       "auth_none": "No auth",
@@ -9168,7 +9208,7 @@
     "hdr_clear_report_changed": "The report changed, so nothing was cleared. Try again on the current report.",
     "hdr_delete_report": "Delete Report",
     "steer_you": "You",
-    "steer_ack": "Queued · will apply after the current response",
+    "steer_ack": "Queued · applies at the next step, or after this answer",
     "readonly_account": "This account is read-only",
     "readonly_streaming": "Report is generating — editing is unavailable for now",
     "readonly_no_context": "This report has no saveable context",
@@ -14172,7 +14212,6 @@
       "document_revision_inputs_unsupported": "A document revision cannot include new attachments or other references. Remove them or start a new request.",
       "document_revision_unavailable": "Document revision is not available right now. Your message is kept.",
       "context_maintenance_unsupported": "This conversation or model does not support context compaction. Select a supported model and send a message first.",
-      "context_maintenance_inputs_unsupported": "Context compaction cannot include a question, attachment, or pending action. Use the conversation menu.",
       "context_conversation_head_changed": "The conversation changed. Use Compact context again to work with its latest context.",
       "context_maintenance_session_busy": "Work is still running in this conversation. Wait for it to finish before compacting context.",
       "context_maintenance_pending_operation": "This conversation has an unanswered question, approval, or saved continuation. Resolve it before compacting context."
@@ -14948,8 +14987,6 @@
   },
   "shopify_tool": {
     "operation_count": "{count} available operations",
-    "create_plugin": "Create analysis Plugin",
-    "plugin_created": "Plugin created. Select it in the Agent editor to use this shop.",
     "edit": "Edit",
     "disable": "Disable",
     "enable": "Enable",
@@ -14971,9 +15008,7 @@
     "name_conflict": "A connection or Plugin with this name already exists.",
     "access_denied": "Shopify denied access. Check the installed app and granted permissions.",
     "failed": "Could not complete the operation. Check the app configuration and try again.",
-    "picker_desc": "Read shop data and content for selected Agents.",
-    "create_content_plugin": "Create content Plugin",
-    "content_plugin_created": "Content Plugin created. Select it in the Agent editor; each update requires your review."
+    "picker_desc": "Read shop data and content for selected Agents."
   },
   "shopifyContentConfirmation": {
     "notice": "Review the exact changes before applying them to your store. Coordinate with other editors before updating the same content.",

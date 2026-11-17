@@ -135,7 +135,8 @@ async def test_prompt_native_runner_reads_original_baseline_package(prompt_basel
         with respx.mock() as mock:
             mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
-        assert result.ok and len(calls) == 2 and case.calls == ["profitability"]
+        # The read, the prose answer, and the answer to the one unreturned-work note.
+        assert result.ok and len(calls) == 3 and case.calls == ["profitability"]
         assert case.ctx.reference_skill_access is None
     finally:
         await adapter.close()
@@ -170,7 +171,8 @@ async def test_prompt_native_invocation_preserves_exact_original_operation_grant
         with respx.mock() as mock:
             mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
-        assert result.ok and len(sent) == 2 and len(executions) == int(permitted)
+        # A successful invocation's prose answer gets one unreturned-work note.
+        assert result.ok and len(sent) == (3 if permitted else 2) and len(executions) == int(permitted)
         if permitted:
             assert b"fixture script must never run" in executions[0][2]
             assert not executions[0][1].exists()

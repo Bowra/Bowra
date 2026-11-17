@@ -12,7 +12,7 @@ import json
 import pytest
 from bowhead_core.events import TurnEventBus
 from bowhead_core.skill_bridge import register_skill_tools
-from bowhead_core.subagent import SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.tool_registry import ToolRegistry
 from bowhead_router.router import AgentBinding, Router
 from bowhead_router.types import LLMChunk, LLMResponse, ToolCall
@@ -192,7 +192,10 @@ async def test_existing_runner_reaches_the_real_exact_handler(tool_case):
         exact_binding=primary.binding,
         pre_minted_subagent_id=case.handle.subagent_id,
     )
-    assert result.ok and len(seen) == 2
+    # A prose ending after successful Tool work gets one runtime note (ce9390072);
+    # the same prose answer then ends the run.
+    assert result.ok and len(seen) == 3
+    assert any(UNRETURNED_WORK_NOTE in (message.content or "") for message in seen[2].messages)
     tool_messages = [message for message in seen[1].messages if message.role == "tool"]
     assert len(tool_messages) == 1
     body = json.loads(tool_messages[0].content)

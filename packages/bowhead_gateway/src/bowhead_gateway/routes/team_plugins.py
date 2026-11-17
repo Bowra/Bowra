@@ -39,6 +39,9 @@ def _coded_error(status: int, code: str) -> HTTPException:
 
 
 def _error(exc: Exception) -> HTTPException:
+    if isinstance(exc, TeamPluginError) and exc.code == "capability_store_busy":
+        # Nothing was written; the same request can succeed once running work releases the lease.
+        return HTTPException(503, detail={"code": exc.code}, headers={"Retry-After": "2"})
     if isinstance(exc, TeamPluginError):
         status = 404 if exc.code == "capability_not_found" else 409 if exc.code in {"capability_version_conflict", "capability_disabled"} else 422
         return _coded_error(status, exc.code)

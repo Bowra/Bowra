@@ -2,7 +2,7 @@
  * Sprint τ Phase 0 — tool-display.
  */
 import { describe, expect, it } from "vitest";
-import { builtinTools, GOOGLE_DELIVERY_TOOL_REFS, localizedToolText, toolDisplay, TOOL_DISPLAY_TABLE } from "@/lib/tool-display";
+import { builtinTools, GOOGLE_DELIVERY_TOOL_REFS, localizedToolText, systemCapabilities, toolDisplay, TOOL_DISPLAY_TABLE } from "@/lib/tool-display";
 
 describe("toolDisplay", () => {
   it("maps bi_query to zh-CN label + sigil + bi category", () => {
@@ -73,6 +73,20 @@ describe("toolDisplay", () => {
     expect(caps.length).toBe(40);
     for (const ref of GOOGLE_DELIVERY_TOOL_REFS) expect(withGoogle).toContain(ref);
     expect(withGoogle.length).toBe(43);
+  });
+
+  it("lists system capabilities apart from the selectable Tools, named in every locale", () => {
+    // A system capability is a part the runtime gives every Agent: Team owners see it as always on,
+    // and it must not appear where Tools are counted, selected or switched.
+    expect(systemCapabilities("en-US").map((tool) => tool.ref)).toEqual(["find_results"]);
+    expect(TOOL_DISPLAY_TABLE.find_results.kind).toBe("part");
+    expect(builtinTools({ googleWorkspace: true }).map((tool) => tool.ref)).not.toContain("find_results");
+    for (const locale of ["zh-CN", "en-US", "de-DE", "fr-FR"] as const) {
+      const [tool] = systemCapabilities(locale);
+      expect(tool.name, locale).toBeTruthy();
+      expect(tool.blurb, locale).toBeTruthy();
+    }
+    expect(systemCapabilities("zh-CN")[0].name).toBe("查找会话结果");
   });
 
   it("组内按代号排，同族能力相邻（不按译名排）", () => {

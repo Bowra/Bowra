@@ -56,7 +56,8 @@ import {
 } from "@/lib/agents-api";
 import { ApiError } from "@/lib/api-client";
 import { listTeamPlugins, type TeamPlugin } from "@/lib/team-plugins-api";
-import { toolSelectionLockedReasonKey, withoutSkillOperationToolRefs, withoutSkillOperationTools, agentResourceCounts } from "@/lib/agent-tool-selection";
+import { authoringToolMatches, toolSelectionLockedReasonKey, withoutSkillOperationToolRefs, withoutSkillOperationTools, agentResourceCounts } from "@/lib/agent-tool-selection";
+import { groupToolConnections, toolConnectionId, type ToolConnectionGroup } from "@/lib/agent-tool-connections";
 import { appPath } from "@/lib/base-path";
 import { readReleaseSeen, releaseResultUnseen, writeReleaseSeen } from "@/lib/agent-release-seen";
 import { fetchTeamDirectory, fetchTeamGroups, type DirectoryGroup, type DirectoryUser } from "@/lib/content-share-api";
@@ -169,13 +170,6 @@ interface EditorDraft {
   groupIds: string[];
 }
 
-interface ToolConnectionGroup {
-  id: string;
-  name: string;
-  tools: AgentAuthoringTool[];
-  selectable: boolean;
-}
-
 function PersonalToolAudienceNotice({ agentId }: { agentId: string }) {
   const t = useTranslations("agents_marketplace");
   const [hasPersonalTools, setHasPersonalTools] = useState(false);
@@ -200,36 +194,6 @@ function PersonalToolAudienceNotice({ agentId }: { agentId: string }) {
 
   if (!hasPersonalTools) return null;
   return <div className="am-release-audience-personal-tools" role="status"><strong>{t("release_audience_personal_tools_title")}</strong><p>{t("release_audience_personal_tools_body")}</p></div>;
-}
-
-function toolConnectionId(tool: AgentAuthoringTool): string | null {
-  if (tool.source_kind !== "team_mcp") return null;
-  if (tool.connection_id) return tool.connection_id;
-  const parts = tool.stable_ref.split(".");
-  return parts.length >= 3 && parts[0] === "teammcp" ? parts[1] : null;
-}
-
-function groupToolConnections(tools: AgentAuthoringTool[]): ToolConnectionGroup[] {
-  const grouped = new Map<string, ToolConnectionGroup>();
-  for (const tool of tools) {
-    const id = toolConnectionId(tool);
-    if (!id) continue;
-    const current = grouped.get(id);
-    if (current) {
-      current.tools.push(tool);
-      current.selectable ||= tool.selectable;
-      continue;
-    }
-    grouped.set(id, {
-      id,
-      name: tool.source_display_name || id,
-      tools: [tool],
-      selectable: tool.selectable,
-    });
-  }
-  return [...grouped.values()]
-    .map((group) => ({ ...group, tools: group.tools.sort((left, right) => left.stable_ref.localeCompare(right.stable_ref)) }))
-    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function ToolConnectionCard({
@@ -774,9 +738,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   const availableTools = catalog?.tools.filter((tool) => {
     if (tool.source_kind !== "native") return false;
     if (draft?.toolRefs.includes(tool.stable_ref)) return false;
-    if (!normalizedResourceQuery) return true;
-    const copy = localizedToolText(tool);
-    return `${copy.name} ${copy.description} ${tool.stable_ref}`.toLocaleLowerCase(locale).includes(normalizedResourceQuery);
+    return authoringToolMatches(tool, resourceQuery, locale);
   }) ?? [];
   const availableToolConnections = toolConnections.filter((connection) => {
     if (draft?.toolConnectionIds.includes(connection.id)) return false;
@@ -1669,7 +1631,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
                   <label className="am-config-resource-search"><span>{t("version_config_search_all")}</span><input type="search" name="agent-resource-search" autoComplete="off" value={resourceQuery} onChange={(event) => { setResourceQuery(event.target.value); setResourceVisibleCount(8); }} placeholder={t("version_config_search_all_placeholder")} /></label>
                   {libraryEmpty ? <div className="am-config-empty" role="status"><strong>{pickerT("no_match_title", { query: resourceQuery.trim() })}</strong><p>{pickerT("no_match_body")}</p></div> : <>
                   {libraryPlugins.length ? <>
-                    <div className="am-config-library-heading"><span>{t("version_config_available_plugins", { count: libraryPlugins.length })}</span><CapabilityLink href="/capabilities/?type=capabilities">{navT("capabilities_catalog")}</CapabilityLink></div>
+                    <div className="am-config-library-heading"><span>{t("version_config_available_plugins", { count: libraryPlugins.length })}</span><CapabilityLink href="/capabilities/?type=plugins">{navT("capabilities_catalog")}</CapabilityLink></div>
                     <ResourcePluginPicker plugins={libraryPlugins} selected={selectedPluginIds} canManage={pluginCanManage} disabled={archived} onToggle={togglePlugin} />
                   </> : null}
                   {availableToolConnections.length ? <><div className="am-config-library-heading"><span>{t("version_config_available_connections", { count: availableToolConnections.length })}</span><CapabilityLink href="/capabilities/?type=tools">{navT("tools_catalog")}</CapabilityLink></div>

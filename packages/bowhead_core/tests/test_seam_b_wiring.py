@@ -246,3 +246,32 @@ async def test_guard_failure_is_logged_loudly_not_silently(monkeypatch: pytest.M
         )
     assert out, "守卫挂掉不能把收尾带崩"
     assert any("deliverable_ledger_guard_failed" in r.getMessage() for r in caplog.records), "守卫抛异常却没留 warning —— prod 上等于静默失效"
+
+
+class _EarlierVersionStore(_FakeArtifactStore):
+    """This Turn wrote nothing; an earlier Turn of the session delivered version 4 of the report."""
+
+    def __init__(self) -> None:
+        super().__init__(0)
+
+    async def list_session_deliverables(self, **_scope: Any) -> list[Any]:
+        return [SimpleNamespace(filename="2025年经营分析报告.html", version_no=4)]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_about_an_earlier_version_keeps_its_text_and_gets_no_footer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 dogfood N13: asked how many versions the report had, the answer lost a true sentence and got the footer."""
+    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
+    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
+    runtime = _mk_runtime(files=0, sections=0)
+    runtime.parent_ctx.artifact_store = _EarlierVersionStore()
+    text = "HTML 报告一共 4 个版本，最新的是第 4 版。\n补充一点：第4版那次交付的回执显示执行中断，但文件本身已生成并登记为第4版。"
+    _, out = await _compose_turn_output(
+        runtime=runtime,
+        sctx=_mk_sctx(),
+        result=_mk_result(text),
+        aggregated_payload={},
+        user_text="HTML报告现在一共有几个版本？最新的是第几版？",
+        peer_payloads=[],
+    )
+    assert "交付核验" not in out and "文件本身已生成并登记为第4版" in out

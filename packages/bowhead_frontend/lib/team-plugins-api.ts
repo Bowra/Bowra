@@ -24,6 +24,16 @@ export interface TeamPluginInput {
   skill_grants: AgentExactSkillGrant[];
 }
 
+/** A preset Plugin for one built-in connection; it only fills the create form (plugin-management S4). */
+export interface TeamPluginTemplate {
+  id: string;
+  kind: string;
+  connection_id: string;
+  connection_name: string;
+  tool_refs: string[];
+  skill_grants: AgentExactSkillGrant[];
+}
+
 async function result<T>(response: Response): Promise<T> {
   if (!response.ok) throw await readApiError(response);
   return response.json() as Promise<T>;
@@ -52,4 +62,8 @@ export async function setTeamPluginEnabled(id: string, rowVersion: number, enabl
 export async function deleteTeamPlugin(id: string, rowVersion: number): Promise<void> {
   const response = await apiFetch(`/api/v1/team-capabilities/${encodeURIComponent(id)}?row_version=${rowVersion}`, { method: "DELETE" });
   if (!response.ok) throw await readApiError(response);
+}
+
+export async function listTeamPluginTemplates(): Promise<TeamPluginTemplate[]> {
+  return (await result<{ templates: TeamPluginTemplate[] }>(await apiFetch("/api/v1/team-builtin-tools/plugin-templates"))).templates;
 }

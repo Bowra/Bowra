@@ -28,6 +28,8 @@ Use the Bowra PPTX Skill to create a new text/table presentation from authorized
 4. Add only relevant files and say how each should be used.
 5. Send the request and review the process and result. Continue in the same work to refine conditions or correct scope; create a new work item only for a new question.
 
+To reuse a slide deck and update specific content, see [Fill or update a PowerPoint template](powerpoint-templates.en-US.md).
+
 ## Answer questions during analysis
 
 In a regular conversation, an Agent may show a question card to confirm a period, metric definition, or other condition. Answer each question, add your own answer where needed, and submit to continue. The card means the analysis is waiting for your input; it does not mean the analysis is complete. If no card appears, use the question shown in the conversation to provide more detail.
@@ -49,13 +51,13 @@ While a message is sending normally, you only see a waiting state. If the networ
 - If you don't want to wait, choose **Abandon and keep editing**. If the original task had in fact started, the page takes you to that conversation; only if it hadn't started does your draft become editable again.
 - If the check fails for now, try again later. Your content is not cleared.
 
-A draft with `@` or `/` references may also show a read-only copy. Choose **View references and parameters** to review it, or use **Copy text** or **Copy full draft** to keep the content. While the send status is still unresolved, use the actions next to the composer first.
+A draft with `@` or `/` references may also show a read-only copy. It does not appear while a send is in progress; it appears when a send was interrupted or its result cannot be confirmed. Choose **View references and parameters** to review it, or use **Copy text** or **Copy full draft** to keep the content. While the send status is still unresolved, use the actions next to the composer first.
 
 ## Select an Agent, method, or tool
 
 When the composer shows a shortcut menu, type `@` to select an Agent and `/` to select an available method, tool, or capability. Disabled entries are unavailable; use the explanation in the menu. Selected resources become chips in the composer. Select a chip, or focus it with Tab and press Enter, to fill required parameters. **Apply parameters** updates the draft; you still need to send the task.
 
-Use the source label to distinguish resources with the same name. An unavailable resource keeps its explanation visible. You can continue choosing from available results if another category fails to load, or choose **Retry** to load that category again.
+Use the source label to distinguish resources with the same name. An unavailable resource keeps its explanation visible. A Skill you turned off tells you to turn it back on in **Capability Center → Skills and Workflows**. You can continue choosing from available results if another category fails to load, or choose **Retry** to load that category again.
 
 You can select an available team or system Agent without adding a method. A Skill already included in that Agent can be referenced as ordinary instructions without a separate parameter form. If no compatible Agent is available, choose one that includes the Skill or ask its owner to add it. Selecting instructions does not grant permission to run scripts. When a supported task shows a question card, answer on that card to continue with the original Agent and selected methods. You do not need to select them again. Sending a new message, including one edited through **Rephrase**, starts a separate task rather than answering the pending card. If access or task materials have changed, continuation may be unavailable; follow the message shown on the card.
 
@@ -106,6 +108,8 @@ The Capability Center overview is one page with a section per resource: Plugins,
 Authorized administrators can open **Administration Console** from the account menu and switch between operational traces/approvals, resource governance and the available administration pages in its sidebar. Publication reviews and your personal connection confirmations stay in their original pages. Use **Back to Work** to return to your task.
 
 ## Decide whether a result is usable
+
+If the answer says a requested filter did not take effect, or that a metric or dimension is missing, check the scope of the returned data before using its totals. Ask Bowhead to rerun the query with the exact period, region or category you need, and check that the new result reflects it.
 
 An Agent finishing its part does not mean the whole task has finished. Check the task's final status and answer. Unavailable usage or cost information is unknown, not zero.
 

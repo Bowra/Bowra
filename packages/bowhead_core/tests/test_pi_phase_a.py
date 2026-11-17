@@ -674,10 +674,10 @@ async def test_mark_completed_clears_stale_error_kind(tmp_path) -> None:
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
-    await store.initialize()
     from core_legacy_database import upgrade
 
     upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    await store.initialize()
     sess = await store.ensure_session(
         session_id=None,
         workspace_id="ws",
@@ -723,10 +723,10 @@ async def test_completed_turn_rolls_up_session_usage(tmp_path) -> None:
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
-    await store.initialize()
     from core_legacy_database import upgrade
 
     upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    await store.initialize()
     sess = await store.ensure_session(
         session_id=None,
         workspace_id="ws",
@@ -787,8 +787,8 @@ async def test_resume_cancel_usage_is_cumulative_and_idempotent(tmp_path: Path) 
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
-    await store.initialize()
     upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    await store.initialize()
     sess = await store.ensure_session(
         session_id="s_resume_cancel",
         workspace_id="ws",
@@ -1216,8 +1216,8 @@ async def test_durable_stop_worker_finalizes_partial_usage(tmp_path: Path) -> No
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
-    await store.initialize()
     upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    await store.initialize()
     sess = await store.ensure_session(
         session_id="s_stop_usage",
         workspace_id="ws",

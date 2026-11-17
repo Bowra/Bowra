@@ -8,6 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+import { HttpStatusError } from "@/lib/api-client";
+import { publishNotificationCount, registerAttentionRefresh } from "@/lib/attention-loop";
+
 import { ShellGlobalControls } from "./global-controls";
 import { Topbar } from "./Topbar";
 
@@ -114,6 +117,9 @@ beforeEach(() => {
   mocks.fetchNotificationCount
     .mockReset()
     .mockResolvedValue({ actionRequired: 1, updatesUnread: 2, totalBadge: 3 });
+  // Since 858dec763 the bell reads counts from the attention loop; the loop is not mounted here.
+  registerAttentionRefresh(null);
+  publishNotificationCount({ ok: true, counts: { actionRequired: 1, updatesUnread: 2, totalBadge: 3 } });
   mocks.fetchNotifications.mockReset().mockResolvedValue({ items: [], nextCursor: null });
 });
 
@@ -138,7 +144,8 @@ describe("ShellGlobalControls placement", () => {
     expect(within(region("desktop-topbar")).queryByRole("button")).toBeNull();
     expect(screen.getAllByRole("button", { name: /picker_aria/ })).toHaveLength(1);
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
-    expect(mocks.fetchNotificationCount).toHaveBeenCalledTimes(1);
+    // The bell only subscribes to the attention loop; it does not poll counts itself.
+    expect(mocks.fetchNotificationCount).not.toHaveBeenCalled();
   });
 
   // The credits badge is the popover trigger button (components/user-badge.test.tsx).
@@ -194,13 +201,13 @@ describe("ShellGlobalControls placement", () => {
     "hides notifications when the endpoint is off and credits when signed out at %ipx",
     async (width) => {
       stubViewport(width);
-      mocks.fetchNotificationCount.mockReset().mockRejectedValue(new Error("notifications: 404"));
+      registerAttentionRefresh(null);
+      publishNotificationCount({ ok: false, error: new HttpStatusError("notifications", new Response("{}", { status: 404 })) });
       const { AuthError } = await import("@/lib/auth-api");
       mocks.fetchMe.mockReset().mockRejectedValue(new AuthError(401, "unauthorized"));
       render(<Surfaces />);
 
       expect(await screen.findByRole("button", { name: "picker_aria:华东区" })).toBeTruthy();
-      await waitFor(() => expect(mocks.fetchNotificationCount).toHaveBeenCalled());
       await waitFor(() => expect(screen.queryByRole("button", { name: /bell_/ })).toBeNull());
       expect(screen.queryByRole("button", { name: "credits_button_aria" })).toBeNull();
     },

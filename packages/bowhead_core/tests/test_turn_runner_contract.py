@@ -81,6 +81,9 @@ class FakeToolRegistry:
         self.spawn_available = spawn_available
         self.specs: dict[str, Any] = {}
 
+    def list_names(self) -> list[str]:
+        return ["subagent_spawn"] if self.spawn_available else []
+
     def to_schemas(self) -> list[Any]:
         return []
 

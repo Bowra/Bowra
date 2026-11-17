@@ -367,6 +367,22 @@ class _MockAS:
 
 
 @pytest.mark.asyncio
+async def test_a_cut_notice_gives_a_lower_bound_when_the_file_listing_came_back_full() -> None:
+    """116, 2026-11-16: the notice said total="100" for a conversation that held 144 files."""
+    al = RefAllowlist()
+    full = _MockAS([_Art(id=f"art_{n:03d}", filename=f"metric-{n:03d}.csv", source="python_sandbox") for n in range(100)])
+    await al.refresh_from_stores(canvas_store=_MockCS({}), artifact_store=full, session_id="s_1", user_id="u_1", canvas_id=None, tool_invocations=[])
+    assert '<more kind="data" shown="10" total="100+" find_with="find_results with part of the file name" />' in al.to_prompt_xml(max_items=10)
+
+    exact = RefAllowlist()
+    some = _MockAS([_Art(id=f"art_{n:03d}", filename=f"metric-{n:03d}.csv", source="python_sandbox") for n in range(12)])
+    await exact.refresh_from_stores(
+        canvas_store=_MockCS({}), artifact_store=some, session_id="s_1", user_id="u_1", canvas_id=None, tool_invocations=[]
+    )
+    assert '<more kind="data" shown="10" total="12" ' in exact.to_prompt_xml(max_items=10)
+
+
+@pytest.mark.asyncio
 async def test_refresh_from_stores_full() -> None:
     al = RefAllowlist()
     cs = _MockCS({"chart": {"sec_b", "sec_a"}, "code_block": {"sec_code"}})
@@ -545,6 +561,28 @@ def test_chart_cap_keeps_the_newest_charts_not_the_oldest() -> None:
     assert len(shown) == 10
     assert set(fresh) <= shown, f"本轮新图 {fresh} 必须在清单里，实际 {sorted(shown)}"
     assert 1 not in shown, "最旧的那批该被截掉"
+
+
+def test_a_cut_list_states_what_it_left_out_and_where_the_rest_is() -> None:
+    """A capped list says how many entries exist and which Tool finds the others.
+
+    A silent cut read as "nothing older exists". The rules block is unchanged: it
+    still teaches list numbers only.
+    """
+    al = RefAllowlist()
+    for i in range(12):
+        al.add("chart", f"sec_chart{i:02d}")
+        al.add("data", f"art_data{i:02d}", filename=f"rows-{i}.csv")
+    al.add("design", "sec_design")
+
+    xml = al.to_prompt_xml(max_items=10)
+
+    assert '<more kind="chart" shown="10" total="12" find_with="read_report" />' in xml
+    assert '<more kind="data" shown="10" total="12" find_with="find_results with part of the file name" />' in xml
+    assert xml.count("<more ") == 2, "a kind that shows everything adds no notice"
+    rules = xml.split("<allowlist_rules>", 1)[1]
+    assert "find_results" not in rules and "不在列表里的 ID 一律视为幻觉" in rules
+    assert "<more " not in al.to_prompt_xml(max_items=20)
 
 
 def test_image_cap_keeps_the_newest_too() -> None:

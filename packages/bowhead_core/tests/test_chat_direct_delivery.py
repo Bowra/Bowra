@@ -143,12 +143,20 @@ async def test_spawn_marks_sentinel() -> None:
     assert inv.result["final_answer"] == SHORT_ANSWER
 
 
-@pytest.mark.parametrize("role", [None, "helper", "unknown"])
+@pytest.mark.parametrize("role", [None, "helper"])
 async def test_partial_or_unspecified_delegation_returns_evidence_to_lead(role: str | None) -> None:
     inv = await _spawn_once(role=role)
     assert not is_chat_direct_delivery_sentinel(inv.result)[0]
     assert inv.result["final_answer"] == SHORT_ANSWER
     assert "remaining work" in inv.result["directive"]
+
+
+async def test_unknown_delegation_role_is_refused_before_a_helper_runs() -> None:
+    inv = await _spawn_once(role="unknown")
+    assert not is_chat_direct_delivery_sentinel(inv.result)[0]
+    assert inv.result["ok"] is False and inv.result["path"] == "delegation_role"
+    assert inv.result["error"].startswith("No helper ran.")
+    assert "final_answer" not in inv.result
 
 
 class _ProseRunner:
@@ -584,6 +592,8 @@ async def test_peer_profile_does_not_short_circuit() -> None:
         router, calls = _counting_router(
             LLMResponse(content="", tool_calls=[ToolCall(id="c1", name="subagent_spawn", arguments={"profile": "compute", "task": "查"})]),
             LLMResponse(content="peer 继续干活", tool_calls=[]),
+            # A helper that worked and answered in prose gets one unreturned-work note.
+            LLMResponse(content="peer 继续干活", tool_calls=[]),
         )
         runner = SubagentRunner(router=router, tool_registry=build_default_registry())
 
@@ -605,7 +615,8 @@ async def test_peer_profile_does_not_short_circuit() -> None:
             parent_bus=TurnEventBus(),
             parent_ctx=_ctx_for_loop(),
         )
-        assert calls[0] == 2, "peer 不该被 chat-direct 哨兵短路"
+        # Spawn, the prose answer, and the answer to the one unreturned-work note.
+        assert calls[0] == 3, "peer 不该被 chat-direct 哨兵短路"
         assert result.chat_direct_delivered is False
     finally:
         if prev is not None:

@@ -123,11 +123,16 @@ def test_route_mounts_unconditionally(monkeypatch: pytest.MonkeyPatch) -> None:
     （原第三次构建那行守的就是它——注册表是进程级的，重复 boot 会撞）。
     """
     from bowhead_gateway.main import create_app
+    from fastapi.routing import iter_route_contexts
+
+    def mounted(app) -> bool:
+        # FastAPI 0.162 keeps each included router as one lazy entry in `app.routes`.
+        return any(route.path == "/api/v1/config-drafts" for route in iter_route_contexts(app.routes))
 
     monkeypatch.setenv("FEATURE_CONFIG_COPILOT", "0")  # Old disabling value must no longer affect behavior.
-    assert any(getattr(route, "path", "") == "/api/v1/config-drafts" for route in create_app().routes)
+    assert mounted(create_app())
     monkeypatch.delenv("FEATURE_CONFIG_COPILOT", raising=False)
-    assert any(getattr(route, "path", "") == "/api/v1/config-drafts" for route in create_app().routes)
+    assert mounted(create_app())
     create_app()  # Third build: idempotent registry replace, no exception.
 
 

@@ -35,6 +35,7 @@ from bowhead_skill.sandbox_call_shape import (
     FLAT_SANDBOX_TOOL,
     sandbox_call_skeleton,
 )
+from bowhead_skill.sandbox_deliverables import DeliverableEntryError, deliverable_saved_name, parse_deliverable_entries
 from bowhead_skill.script_langs import (
     argv0_allowlist,
     entry_extensions,
@@ -233,7 +234,7 @@ async def _validated_revises(raw: Any, deliverable_outputs: list[str], ctx: Any)
                 reason_code=reason,
                 **({"latest_id": latest} if latest else {}),
             )
-        if Path(filename).suffix.lower() != Path(str(getattr(target, "filename", "") or "")).suffix.lower():
+        if Path(deliverable_saved_name(filename)).suffix.lower() != Path(str(getattr(target, "filename", "") or "")).suffix.lower():
             return refuse(
                 f"input.revises[{filename!r}] = {artifact_id}: {_VERSION_REFUSAL_HINTS['version_target_format_changed']}",
                 reason_code="version_target_format_changed",
@@ -268,7 +269,7 @@ async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises
             continue
         names = {str(getattr(target, "filename", "") or ""), str(getattr(latest, "filename", "") or "")}
         for name in deliverable_outputs:
-            if name in names and name not in revises and name not in found:
+            if deliverable_saved_name(name) in names and name not in revises and name not in found:
                 found[name] = latest.id
                 used.add(latest.id)
                 break
@@ -277,7 +278,8 @@ async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises
 
 def _same_name_version_facts(versions: dict[str, str], saved: list[dict[str, Any]]) -> dict[str, Any]:
     """State which saved outputs became the next version of a revision target (only outputs that were saved)."""
-    saved_by_name = {item.get("name"): item.get("artifact_id") for item in saved if item.get("name")}
+    # A nested output is keyed by its declared entry (`path`); a top-level one by its file name.
+    saved_by_name = {item.get("path") or item.get("name"): item.get("artifact_id") for item in saved if item.get("path") or item.get("name")}
     recorded = [
         {"filename": name, "artifact_id": saved_by_name[name], "previous_version": target}
         for name, target in versions.items()
@@ -467,16 +469,6 @@ async def _inject_current_canvas_sections(name: str, input_data: dict[str, Any],
     return None
 
 
-def _rel_to_workdir(p: Any, workdir: Any) -> str:
-    """feedback-0713 #4b: 宿主输出路径 → workdir 相对名（防泄漏一次性绝对路径）。"""
-    try:
-        if workdir:
-            return str(Path(str(p)).relative_to(Path(str(workdir))))
-    except ValueError:
-        pass
-    return Path(str(p)).name
-
-
 def _output_artifacts_from_result_json(result_json: Any) -> list[dict[str, Any]]:
     """D5: project the uploaded artifacts (real art_ ids) out of result_json['outputs'].
 
@@ -498,6 +490,11 @@ def _output_artifacts_from_result_json(result_json: Any) -> list[dict[str, Any]]
         }
         if output.get("data_role") in {"stdout", "structured"}:
             item["data_role"] = output["data_role"]
+        # A declared nested file or folder: the entry it came from, and the file count of a folder archive.
+        if isinstance(output.get("path"), str) and output["path"]:
+            item["path"] = output["path"]
+        if isinstance(output.get("files"), int):
+            item["files"] = output["files"]
         projected.append(item)
     return projected
 
@@ -830,22 +827,12 @@ def build_skill_tools(
                 if not isinstance(_raw_deliverable_outputs, list):
                     return {
                         "error_kind": "invalid_args",
-                        "error": "python_sandbox input.deliverable_outputs must be a filename list.",
+                        "error": "python_sandbox input.deliverable_outputs must be a list of file or folder paths.",
                     }
-                for _candidate in _raw_deliverable_outputs:
-                    if not isinstance(_candidate, str):
-                        return {
-                            "error_kind": "invalid_args",
-                            "error": ("python_sandbox input.deliverable_outputs entries must be top-level output filenames without paths."),
-                        }
-                    _filename = _candidate.strip()
-                    if not _filename or len(_filename) > 255 or "/" in _filename or "\\" in _filename or Path(_filename).name != _filename:
-                        return {
-                            "error_kind": "invalid_args",
-                            "error": ("python_sandbox input.deliverable_outputs entries must be top-level output filenames without paths."),
-                        }
-                    if _filename not in _deliverable_outputs:
-                        _deliverable_outputs.append(_filename)
+                try:
+                    _deliverable_outputs = parse_deliverable_entries(_raw_deliverable_outputs)
+                except DeliverableEntryError as exc:
+                    return {"error_kind": "invalid_args", "error": str(exc)}
                 if not _deliverable_outputs:
                     return {
                         "error_kind": "invalid_args",
@@ -876,7 +863,7 @@ def build_skill_tools(
                         or "/" in _filename
                         or "\\" in _filename
                         or Path(_filename).name != _filename
-                        or _filename in _deliverable_outputs
+                        or _filename in {deliverable_saved_name(entry) for entry in _deliverable_outputs}
                     ):
                         return _work_error
                     if _filename not in _work_outputs:
@@ -1314,9 +1301,13 @@ def build_skill_tools(
             "stdout": _bounded_stream(result.stdout),
             "stderr": _bounded_stream(result.stderr),
             "result_json": _rj,
-            # review nit: relative to workdir, not basename; preserve subdirectory information so nested files with the same name
-            # do not collapse. Fall back to basename when workdir is absent.
-            "outputs": ([_rel_to_workdir(p, result.workdir) for p in result.outputs] if _is_sandbox else [str(p) for p in result.outputs]),
+            # Sandbox: only what was saved. Staged helpers and unsaved nested files are not outputs
+            # (docs/sprints/sandbox-nested-deliverables-2026-11-16/tech-design.md §4.5).
+            "outputs": (
+                [str(item["name"]) for item in _output_artifacts_from_result_json(result.result_json) if item.get("name")]
+                if _is_sandbox
+                else [str(p) for p in result.outputs]
+            ),
             "output_artifacts": _output_artifacts_from_result_json(result.result_json),
             **({"inputs_with_newer_version": _inputs_newer} if _inputs_newer else {}),
             **_same_name_version_facts(_same_name_versions, _output_artifacts_from_result_json(result.result_json)),
@@ -1564,7 +1555,12 @@ def build_skill_tools(
                     "deliverable_outputs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "purpose=deliverable 时必填：代码实际写出的顶层文件名。",
+                        "description": (
+                            "Required with purpose=deliverable: the files the code wrote for the user. Each entry is a top-level "
+                            "file ('game.html'), a nested file ('build/report.pdf', saved as report.pdf) or a folder ending in '/' "
+                            "('site/', saved as one site.zip that keeps the folder's layout). Files below the top level that are "
+                            "not listed are not saved."
+                        ),
                     },
                     "work_outputs": {
                         "type": "array",

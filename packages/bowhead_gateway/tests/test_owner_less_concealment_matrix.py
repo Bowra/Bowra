@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from test_file_existence_concealment_blackbox import _HEADERS, MISSING, OUTSIDER, OWNER, PROBER, _ownerless, env  # noqa: F401, F811
+from test_file_existence_concealment_blackbox import _HEADERS, MISSING, OUTSIDER, OWNER, PROBER, _ownerless, _promotion, env  # noqa: F401, F811
 
 
 def _cmp(env, method, tpl, rid, user, headers, **kw):  # noqa: ANN001, ANN202
@@ -36,8 +36,10 @@ async def test_ownerless_mutations_all_headers(env, header, user) -> None:
             bad.append((m, tpl, a.status_code, a.content[:200], b.status_code, b.content[:200]))
     h = {"X-Bowhead-User-Id": user, **headers}
     for scope in ("personal", "space"):
-        a = env.client.post("/api/v1/kb/files/from-artifact", json={"artifact_id": live, "scope": scope}, headers=h)
-        b = env.client.post("/api/v1/kb/files/from-artifact", json={"artifact_id": MISSING, "scope": scope}, headers=h)
+        a = env.client.post("/api/v1/kb/files/from-artifact", json=_promotion(live, scope), headers=h)
+        b = env.client.post("/api/v1/kb/files/from-artifact", json=_promotion(MISSING, scope), headers=h)
+        # Two identical body-validation refusals would match without reaching the owner gate.
+        assert a.status_code != 422, a.text
         if (a.status_code, dict(a.headers), a.content) != (b.status_code, dict(b.headers), b.content):
             bad.append(("promote", scope, a.status_code, a.content[:200], b.status_code, b.content[:200]))
     assert not bad, bad

@@ -57,10 +57,11 @@ export function PluginOverview({ state, onlyMine }: { state: ResourceState; only
   const r = useTranslations("sidebar.centers.resources");
   const locale = useLocale() as Locale;
   const { plugins } = state;
+  // "Built-in" counts the Plugins people can choose; settings Plugins are a group of their own in the catalog.
+  // Their switches are real, so a turned-off settings Plugin still counts as off and shows under "Only mine".
+  const general = plugins.plugins.filter((plugin) => plugin.family === "general");
   const disabled = plugins.plugins.filter((plugin) => plugin.team_disabled || plugin.my_disabled).length;
-  const candidates = onlyMine
-    ? plugins.plugins.filter((plugin) => plugin.my_disabled)
-    : plugins.plugins.filter((plugin) => plugin.family === "general");
+  const candidates = onlyMine ? plugins.plugins.filter((plugin) => plugin.my_disabled) : general;
   const shown = [...candidates]
     .sort((a, b) => Number(b.team_disabled || b.my_disabled || b.ready === false) - Number(a.team_disabled || a.my_disabled || a.ready === false))
     .slice(0, OVERVIEW_PLUGIN_LIMIT);
@@ -70,8 +71,8 @@ export function PluginOverview({ state, onlyMine }: { state: ResourceState; only
         {onlyMine
           ? r("overview_my_disabled", { count: shown.length })
           : state.catalog
-            ? r("overview_plugins_count_team", { builtin: plugins.plugins.length, team: state.catalog.capabilities.length, disabled })
-            : r("overview_plugins_count", { builtin: plugins.plugins.length, disabled })}
+            ? r("overview_plugins_count_team", { builtin: general.length, team: state.catalog.capabilities.length, disabled })
+            : r("overview_plugins_count", { builtin: general.length, disabled })}
       </span>
       {shown.length ? (
         <div className={styles.grid}>
@@ -84,7 +85,7 @@ export function PluginOverview({ state, onlyMine }: { state: ResourceState; only
                   ? r("not_ready")
                   : null;
             return (
-              <CapabilityLink key={plugin.name} href="/capabilities/?type=capabilities" className={styles.card}>
+              <CapabilityLink key={plugin.name} href="/capabilities/?type=plugins" className={styles.card}>
                 <h2>
                   {plugin.listing[locale]?.name ??
                     (t.has(`system_plugins.${plugin.name}.name`) ? t(`system_plugins.${plugin.name}.name`) : plugin.name)}

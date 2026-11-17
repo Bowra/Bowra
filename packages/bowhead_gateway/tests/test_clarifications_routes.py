@@ -2466,14 +2466,39 @@ async def test_scheduled_origin_dismiss_waits_for_dispatch_settlement(
     app_with_orch,
     http,
     monkeypatch,
+    tmp_path,
+    initialize_migrated_core_database,
 ) -> None:
+    from bowhead_core.session_store import SessionStore
+    from bowhead_core.turn_log_store import TurnLogStore
 
     monkeypatch.setattr(
         turn_service,
         "LEGACY_CLARIFICATION_SETTLEMENT_WAIT_SECONDS",
         0.0,
     )
-    session_store = _DispatchGatedSessionStore(app_with_orch.state.clarification_store.db_path, ready=False)
+    # Dismissing a legacy Lead question also cancels its paused Turn and drains
+    # its dispatch in the same transaction (5fac4f0cf), so the card lives beside
+    # a real paused scheduled Turn whose producer has settled.
+    db_path = tmp_path / "scheduled-dismiss.db"
+    initialize_migrated_core_database(db_path)
+    sessions = SessionStore(db_path)
+    await sessions.ensure_session(session_id="s_sched_dogfood", workspace_id="42", user_id="u_dev_alice")
+    await sessions.record_turn(turn_id="t_sched_dismiss", session_id="s_sched_dogfood", user_text="算一下本月的复购率，并按门店排名")
+    assert (
+        await sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_sched_dismiss", owner_id="scheduled-producer", lease_seconds=600) == "claimed"
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE turns SET status='clarification_pending' WHERE id='t_sched_dismiss'")
+    await TurnLogStore(db_path).record(
+        turn_id="t_sched_dismiss", event_type="done", payload={"status": "clarification_pending", "execution_generation": 1}
+    )
+    assert await sessions.mark_chat_spawn_dispatch_terminal(turn_id="t_sched_dismiss", owner_id="scheduled-producer")
+    clarify = ClarificationStore(db_path)
+    await clarify.initialize()
+    app_with_orch.state.clarification_store = clarify
+    app_with_orch.state.terminal_protocol_store = _LegacyProtocolStore(clarify)
+    session_store = _DispatchGatedSessionStore(str(db_path), ready=False)
     app_with_orch.state.orchestrator.session_store = session_store
     app_with_orch.state.scheduled_store = _SchedStoreStub(turn_id="t_sched_dismiss")
     req = await _seed_scheduled_clarification(
@@ -2488,12 +2513,15 @@ async def test_scheduled_origin_dismiss_waits_for_dispatch_settlement(
     pending = await app_with_orch.state.clarification_store.get(req.request_id)
     assert pending is not None and pending.status == "pending"
 
+    assert (await sessions.get_turn("t_sched_dismiss")).status == "clarification_pending"
+
     session_store._ready = True
     settled = await http.post(
         f"/api/v1/clarifications/{req.request_id}/dismiss",
     )
     assert settled.status_code == 200, settled.text
     assert settled.json()["dismissed"] is True
+    assert (await sessions.get_turn("t_sched_dismiss")).status == "cancelled"
 
 
 @pytest.mark.integration

@@ -72,16 +72,11 @@ NEVER_CLEARED_TOOLS = frozenset(
 
 # Pure reads of saved material: reading again is the recovery path, and the
 # old body describes a version that may since have changed.
-REREAD_TOOLS = frozenset({"read_report"})
+REREAD_TOOLS = frozenset({"read_report", "find_results"})
 
 # Result fields that are rebuilt for every request or only instruct the Turn
 # that received them. The retained material supplement re-projects references.
 REPROJECTED_RESULT_KEYS = frozenset({"material_refs", "material_recovery_guidance", "directive", "instruction", "evidence_guidance"})
-
-# The supplement's budget (8 KB, 32 items) reaches only the most recent Turns: on
-# 116 it covered four of nine. The files a result created or updated therefore
-# stay in its stub by identifier; sections are listed by ``read_report``.
-MAX_KEPT_PRODUCED_ARTIFACTS = 12
 
 # Run statistics of the finished call. They are neither identity nor outcome,
 # and usage is recorded elsewhere.
@@ -120,7 +115,8 @@ _REREAD_NOTE = (
 
 
 def history_hygiene_enabled() -> bool:
-    return os.environ.get("FEATURE_CONTEXT_HISTORY_HYGIENE", "0") == "1"
+    """On unless the deployment sets ``FEATURE_CONTEXT_HISTORY_HYGIENE=0`` (default on since 2026-11-16, the maintainer's decision)."""
+    return os.environ.get("FEATURE_CONTEXT_HISTORY_HYGIENE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def min_saving_tokens() -> int:
@@ -253,20 +249,6 @@ def _reduce(value: Any, depth: int) -> Any:
     return f"[{type(value).__name__} removed]"
 
 
-def _produced_artifacts(references: Any) -> list[dict[str, str]]:
-    """Identifiers of the files a result's own reference list says it created or updated."""
-    items = references.get("items") if isinstance(references, dict) else None
-    produced: dict[str, str] = {}
-    for item in items if isinstance(items, list) else ():
-        if not isinstance(item, dict) or item.get("kind") != "artifact" or item.get("relation") not in {"created", "updated"}:
-            continue
-        locator = item.get("locator")
-        identity = locator.get("artifact_id") if isinstance(locator, dict) else None
-        if isinstance(identity, str) and identity:
-            produced.setdefault(identity, item["relation"])
-    return [{"artifact_id": identity, "relation": relation} for identity, relation in produced.items()]
-
-
 def cleared_result(tool: str, content: str) -> str | None:
     """H6: an identifier-keeping stub for one completed Tool result.
 
@@ -294,12 +276,10 @@ def cleared_result(tool: str, content: str) -> str | None:
             if reread and isinstance(value, (list, dict)) and key != "coverage":
                 continue
             kept[key] = _reduce(value, 1)
+        # ``kept`` carries what a later Turn needs to address this result's files: the produced
+        # count, the delivered files as identifier and name (``produced.delivered_files``) and a
+        # revision's targets. Any other file of the conversation is found with ``find_results``.
         stub["kept"] = kept
-        produced = _produced_artifacts(data.get("material_refs"))
-        if produced:
-            stub["produced_artifacts"] = produced[:MAX_KEPT_PRODUCED_ARTIFACTS]
-            if len(produced) > MAX_KEPT_PRODUCED_ARTIFACTS:
-                stub["produced_artifacts_omitted"] = len(produced) - MAX_KEPT_PRODUCED_ARTIFACTS
         # Source validation reads these at the top level of a result, and an
         # older head may record a source nowhere else. They stay verbatim.
         for key in PROVENANCE_RESULT_KEYS:

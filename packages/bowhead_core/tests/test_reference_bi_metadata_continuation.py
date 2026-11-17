@@ -11,7 +11,11 @@ import aiosqlite
 import httpx2
 import pytest
 import respx
+from bowhead_core.datarc_connection_store import DatarcConnectionStore
+from bowhead_core.user_memory import UserMemoryStore
+from bowhead_gateway.connector_context_service import ConnectorContextService
 from bowhead_gateway.datarc_context import DatarcTurnContext
+from bowhead_gateway.member_resolver import MemberUidResolver
 from test_reference_http_start import http_start as _http_start
 from test_reference_http_start import payload, rows, settled
 from test_reference_http_start import receiver_case as _receiver_case
@@ -58,6 +62,15 @@ async def test_discovery_workspace_selection_resumes_exact_original_call(http_st
     requests = []
 
     class DatarcClient:
+        async def fetch_account(self, email):
+            return {"uid": "account_one"}
+
+        async def list_account_projects(self, account_uid, **kwargs):
+            return [{"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"}]
+
+        async def fetch_workspace_member(self, *, datarc_workspace_id, username):
+            return {"uid": "member_" + datarc_workspace_id}
+
         async def list_measures(self, project):
             requests.append(("measures", project))
             return []
@@ -66,12 +79,30 @@ async def test_discovery_workspace_selection_resumes_exact_original_call(http_st
             requests.append(("dimensions", project))
             return []
 
+    # A Datarc client comes only from the Team connection registry; the picker answer is
+    # checked against that registry and the actor's verified Datarc identity.
+    scope, state = case.fixture.scope, case.app.state
+    with sqlite3.connect(case.path) as db:
+        db.execute("UPDATE users SET email='actor@example.test', email_verified=1 WHERE id=?", (scope.user_id,))
+    client = DatarcClient()
+    memory = UserMemoryStore(case.path)
+    state.user_memory_store, state.datarc_connection_store = memory, DatarcConnectionStore(case.path)
+    await state.datarc_connection_store.create_connection(
+        team_id=scope.team_id, name="Source", base_url="https://source.datarc.example", auth_key="test-key"
+    )
+    state.datarc_client_factory = SimpleNamespace(get_client=lambda *_: client)
+    state.member_resolver = MemberUidResolver()
+    state.tool_context_service = ConnectorContextService(user_store=state.user_store, user_memory_store=memory)
+    binding = await datarc_context.resolve_team_datarc_binding(case.app, scope.team_id)
+
     async def connector(*args, **kwargs):
         assert kwargs["team_id"] == case.fixture.scope.team_id
         return DatarcTurnContext(
-            datarc_client=DatarcClient(),
+            connection_binding=binding,
+            datarc_client=client,
             accessible_datarc_workspaces=({"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"}),
             active_datarc_project=kwargs.get("pinned_project"),
+            datarc_project_for_calls=kwargs.get("pinned_project") or "",
         )
 
     monkeypatch.setattr(chat, "resolve_datarc_turn_context", connector)
@@ -202,9 +233,10 @@ async def test_discovery_workspace_selection_resumes_exact_original_call(http_st
         assert resumed.status_code == 200, resumed.text
         await settled(turn_id)
         assert (await case.fixture.case.store.get_turn(turn_id)).status == "completed"
-        assert route.call_count == 3 + int(read_first)
+        # The resumed tool call, its prose answer, and the one unreturned-work note's answer.
+        assert route.call_count == 4 + int(read_first)
         assert (await case.client.post(f"/api/v1/clarifications/{question}/resume_turn")).json() == resumed.json()
-        assert route.call_count == 3 + int(read_first)
+        assert route.call_count == 4 + int(read_first)
         expected = {"measures", "dimensions"} if tool == "bi_schema" else {"measures" if tool == "bi_list_measures" else "dimensions"}
         assert sorted(requests) == sorted((name, "project_b") for name in expected)
         messages = bodies[-1]["messages"]

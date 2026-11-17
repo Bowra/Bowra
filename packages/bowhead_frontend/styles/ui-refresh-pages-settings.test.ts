@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance, page acceptance A: personal/team/space settings
  * source contracts (styles/ui-refresh-pages-settings.css).

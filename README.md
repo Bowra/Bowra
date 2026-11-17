@@ -1,5 +1,9 @@
 # Bowra
 
+Bowra is an MIT-licensed, self-hosted AI agent platform for business data and document analysis. Teams can compare documents, trace an analysis to its sources and calculations, and revise the resulting reports in a shared workspace. Bowra is the Community edition of Bowhead.
+
+[Frequently asked questions](docs/faq.md)
+
 <p align="center">
   <img src="docs/assets/bowra/hero.svg" alt="Bowra — Verified Intelligence. Business agents that show their work." width="100%">
 </p>
@@ -31,9 +35,9 @@ This is a **source preview**. You can build and initialize the reviewed Communit
 
 ChromaDB has unresolved upstream dependency advisories. See the [current assessment and deployment boundaries](SECURITY.md#chromadb-dependency-advisories).
 
-## Source snapshot 1.7.44
+## Current source snapshot
 
-This update adds version history for revised files and moves tool confirmations into the conversation. It also improves report editing and recovery after a failed tool call. See the [Community release notes](docs/help/release-notes/releases/v1.7.44.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+**Bowra 1.7.49** adds instructions during a running conversation, lookup for files delivered earlier, and a dedicated Team Plugins page. [Release notes](docs/help/release-notes/releases/v1.7.49.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
 
 SQLite upgrades coordinate twelve database files. Stop every writer and preserve instance keys, databases and objects before upgrading. Automatic migration backups cover registered SQLite files and layout metadata; keep complete recovery snapshots separately. Restoring a snapshot from before account deletion can restore that account. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

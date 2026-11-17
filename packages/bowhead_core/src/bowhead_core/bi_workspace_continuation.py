@@ -181,16 +181,26 @@ class BiWorkspaceContinuation(BaseModel):
             or len(answer.encode()) > 32768
         ):
             raise ValueError("reference_continuation_changed")
-        return [
+        from bowhead_core.output_recovery import OutputRecovery
+
+        transcript = [
             Message(role="user", content=task),
+            *self.read_messages(),
             Message(
                 role="assistant",
                 content=self.assistant_text,
                 tool_calls=[ToolCall(id=self.tool_call_id, name=getattr(self, "tool_name", "bi_query"), arguments=json.loads(self.arguments_json))],
             ),
             Message(role="tool", name=getattr(self, "tool_name", "bi_query"), tool_call_id=self.tool_call_id, content=self.result_json),
-            Message(role="user", content=answer),
         ]
+        # Rebuild the receipt-only output-recovery note that capture excluded, before the answer.
+        recovery = OutputRecovery()
+        recovery.observe(_tool_receipts(transcript[1:]))
+        recovery.sync(transcript)
+        return [*transcript, Message(role="user", content=answer)]
+
+    def read_messages(self) -> list[Message]:
+        return []
 
 
 def _capture_read_history(**args) -> str | None:
@@ -315,10 +325,6 @@ class BiWorkspaceReadContinuation(BiWorkspaceContinuation):
         except (ValueError, TypeError, RecursionError):
             return None
 
-    def resume_messages(self, **args) -> list[Message]:
-        messages = super().resume_messages(**args)
-        return [messages[0], *self.read_messages(), *messages[1:]]
-
 
 class BiWorkspaceAttachmentContinuation(BiWorkspaceReadContinuation):
     """Retain the exact user-data tail alongside the existing BI transcript."""
@@ -367,7 +373,48 @@ class BiWorkspaceToolContinuation(BiWorkspaceReadContinuation):
             return None
 
 
+def _tool_receipts(messages: list[Message]) -> list[ToolInvocation]:
+    """Rebuild retained Tool receipts from their native messages without dispatching them."""
+    from bowhead_core.types import ToolInvocation
+
+    return [
+        ToolInvocation(tool_name=assistant.tool_calls[0].name, arguments=assistant.tool_calls[0].arguments, result=json.loads(result.content))
+        for assistant, result in zip(messages[0::2], messages[1::2], strict=True)
+    ]
+
+
+def _without_output_recovery_note(messages: list[Message]) -> list[Message] | None:
+    """Exclude the private output-recovery note only when the retained receipts rebuild it.
+
+    The runner appends this server-authored note after receipt-backed Tool
+    progress. It is runtime state, not a native read or question round. Resume
+    rebuilds it from the same retained Tool receipts, so pending corrections,
+    reduced context and unmatched receipts are never silently discarded.
+    """
+    from bowhead_core.output_recovery import STATE_NAME, OutputRecovery
+
+    notes = [message for message in messages if message.role == "user" and message.name == STATE_NAME]
+    if not notes:
+        return messages
+    if len(notes) != 1 or notes[0] is not messages[-1] or notes[0].tool_calls or notes[0].images:
+        return None
+    retained = messages[:-1]
+    try:
+        recovery = OutputRecovery.restore(notes)
+        rebuilt = OutputRecovery()
+        rebuilt.observe(_tool_receipts(retained[1:]))
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+        return None
+    if recovery.attempts or recovery.context_reduced or rebuilt != recovery:
+        return None
+    return retained
+
+
 def capture_bi_workspace_checkpoint(*, attachment_context: str | None = None, **args) -> BiWorkspaceContinuation | None:
+    messages = _without_output_recovery_note(args["messages"])
+    if messages is None:
+        return None
+    args = {**args, "messages": messages}
     checkpoint = BiWorkspaceContinuation.capture(**args) or BiWorkspaceReadContinuation.capture_after_reads(**args)
     if checkpoint is None:
         return BiWorkspaceToolContinuation.capture_tool(attachment_context=attachment_context, **args)

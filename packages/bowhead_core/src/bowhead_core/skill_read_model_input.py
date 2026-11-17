@@ -8,11 +8,9 @@ before constructing this input and separately revalidate each live invocation.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from base64 import b64decode
 from binascii import Error as Base64Error
-from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
@@ -38,30 +36,6 @@ def _image_refs(request: LLMRequest) -> list[tuple[str, str]]:
         except (Base64Error, ValueError):
             raise LLMInputAdmissionError("reference_model_image_unavailable") from None
     return images
-
-
-def _wire_images(messages: list[dict]) -> list[tuple[str, str, dict, str]]:
-    """Locate native image blocks so a text-only adapter cannot drop them."""
-    found: list[tuple[str, str, dict, str]] = []
-    for message in messages:
-        if not isinstance(message, dict) or message.get("role") != "user" or not isinstance(message.get("content"), list):
-            continue
-        for part in message["content"]:
-            if not isinstance(part, dict):
-                continue
-            kind = part.get("type")
-            if kind in {"image_url", "input_image"}:
-                container = part.get("image_url") if isinstance(part.get("image_url"), dict) else part
-                key = "url" if container is not part else "image_url"
-                value = container.get(key)
-                if isinstance(value, str) and value.startswith("data:image/") and ";base64," in value:
-                    mime, content = value[5:].split(";base64,", 1)
-                    found.append((mime, content, container, key))
-            elif kind == "image" and isinstance(part.get("source"), dict):
-                source = part["source"]
-                if source.get("type") == "base64" and isinstance(source.get("data"), str):
-                    found.append((source.get("media_type"), source["data"], source, "data"))
-    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,44 +129,11 @@ class RequiredSkillModelInput:
         self.validate_outbound(request, body, family=family)
 
     def validate_outbound(self, request: LLMRequest, body: dict, *, family: str) -> None:
-        """Verify final wire integrity after shared context/output accounting.
+        """Recheck the attached method after the adapter's final rendering.
 
-        Recognizes the existing chat/Responses/Anthropic body contracts only;
-        unknown templated transports cannot claim this input support.
+        The wire body shape belongs to the adapter. OpenAI Chat/Responses,
+        Anthropic and custom HTTP templates all carry the request messages,
+        so no transport family or wire position is required here. Capacity
+        stays with the adapter's shared final-body accounting.
         """
-        try:
-            self._validate_input(request, provider="outbound", model=request.model, context_window=request.input_admission_window)
-            if family not in {"openai", "openai_responses", "anthropic"} or body.get("model") != request.model:
-                raise LLMInputAdmissionError("reference_model_adapter_unavailable")
-            # Work on a detached JSON body; neither conversion nor accounting may
-            # remove bytes from the object the HTTP client will actually send.
-            encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-            stripped = json.loads(encoded)
-            messages = stripped.get("input" if family == "openai_responses" else "messages")
-            if not isinstance(messages, list):
-                raise LLMInputAdmissionError("reference_model_input_changed")
-            expected_images = Counter(_image_refs(request))
-            actual_images = _wire_images(messages)
-            if Counter((mime, content) for mime, content, _, _ in actual_images) != expected_images:
-                raise LLMInputAdmissionError("reference_model_image_changed")
-            if any(encoded.count(content) != count for (_mime, content), count in expected_images.items()):
-                raise LLMInputAdmissionError("reference_model_image_changed")
-            slots = []
-            for message in messages:
-                if not isinstance(message, dict) or message.get("role") != "user":
-                    continue
-                content = message.get("content")
-                if isinstance(content, str):
-                    slots.append((message, "content"))
-                elif isinstance(content, list):
-                    slots.extend((part, "text") for part in content if isinstance(part, dict) and part.get("type") in {"text", "input_text"})
-            found = [(obj, key) for obj, key in slots if isinstance(obj.get(key), str) and self.content in obj[key]]
-            if len(found) != 1 or found[0] != slots[0] or found[0][0][found[0][1]].count(self.content) != 1:
-                raise LLMInputAdmissionError("reference_model_input_changed")
-            obj, key = found[0]
-            if not obj[key].startswith(self.content):
-                raise LLMInputAdmissionError("reference_model_input_changed")
-        except LLMInputAdmissionError:
-            raise
-        except Exception:
-            raise LLMInputAdmissionError("reference_model_budget_unavailable") from None
+        self._validate_input(request, provider="outbound", model=request.model, context_window=request.input_admission_window)

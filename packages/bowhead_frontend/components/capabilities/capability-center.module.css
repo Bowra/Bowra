@@ -151,6 +151,21 @@
   color: var(--c-ink-3);
   font-size: 0.8125rem;
 }
+/* Settings Plugins: a collapsed group under the other two, with the native disclosure triangle. */
+.settingsGroup > summary {
+  cursor: pointer;
+}
+.settingsGroup > summary h2 {
+  display: inline;
+}
+.settingsGroup > summary:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.settingsGroup > .hint {
+  margin: 4px 0 0;
+}
 /* Count beside a list or group heading on the Plugins and Tools pages. */
 .headingCount {
   margin-left: 6px;

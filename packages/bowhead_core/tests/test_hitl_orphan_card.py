@@ -75,7 +75,7 @@ def _sub_result(invocations: list[ToolInvocation], final_answer: str) -> Subagen
 def _runtime(bus: Any, ctx: Any, runner: Any) -> LeadRuntime:
     return LeadRuntime(
         router=SimpleNamespace(),
-        tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+        tool_registry=SimpleNamespace(to_schemas=list, list_names=list, has=lambda *_: False),
         parent_bus=bus,
         parent_ctx=ctx,
         subagent_runner=runner,

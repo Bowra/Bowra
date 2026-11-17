@@ -117,7 +117,12 @@ async def test_mcp_lead_uses_exact_tool_and_resumes_original_execution(mcp_case,
             if not primary_calls:
                 return tool_response(
                     "subagent_spawn",
-                    {"agent_id": f.agent.id, "task": "Read the selected margin with its fixed parameters.", "delegation_role": "primary"},
+                    {
+                        "agent_id": f.agent.id,
+                        "task": "Read the selected margin with its fixed parameters.",
+                        "delegation_role": "primary",
+                        "required_source_urls": [],
+                    },
                     stream=body.get("stream", False),
                 )
             return answer_response(request)
@@ -249,7 +254,9 @@ async def test_mcp_pause_rechecks_authority_and_supports_dismissal(mcp_case, pau
         lead = any(tool["function"]["name"] == "subagent_spawn" for tool in body.get("tools", []))
         if lead and pause != "lead":
             return tool_response(
-                "subagent_spawn", {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary"}, stream=body.get("stream", False)
+                "subagent_spawn",
+                {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary", "required_source_urls": []},
+                stream=body.get("stream", False),
             )
         if pause == "after_read" and not f.calls:
             return tool_response(to_wire_tool_name(f.read.id), {"year": 2025}, stream=body.get("stream", False))
@@ -302,7 +309,7 @@ async def test_mcp_completion_obligations(mcp_case, outcome):
             if len(lead_calls) == 1:
                 return tool_response(
                     "subagent_spawn",
-                    {"agent_id": f.agent.id, "task": "Read margin if needed.", "delegation_role": "primary"},
+                    {"agent_id": f.agent.id, "task": "Read margin if needed.", "delegation_role": "primary", "required_source_urls": []},
                     stream=body.get("stream", False),
                 )
         else:
@@ -336,14 +343,17 @@ async def test_queued_mcp_executes_accepted_contract_after_switch_change(mcp_cas
             lead_calls += 1
             if lead_calls % 2:
                 return tool_response(
-                    "subagent_spawn", {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary"}, stream=body.get("stream", False)
+                    "subagent_spawn",
+                    {"agent_id": f.agent.id, "task": "Read margin.", "delegation_role": "primary", "required_source_urls": []},
+                    stream=body.get("stream", False),
                 )
         elif to_wire_tool_name(f.read.id) in names:
             primary_calls += 1
             if primary_calls == 1:
                 primary_started.set()
                 await asyncio.wait_for(release_primary.wait(), 120)
-            if primary_calls % 2:
+            # Each primary reads once; later rounds (including the unreturned-work note) answer in prose.
+            if not any(message.get("role") == "tool" for message in body.get("messages", [])):
                 return tool_response(to_wire_tool_name(f.read.id), {"year": 2025}, stream=body.get("stream", False))
         return answer_response(request)
 
@@ -387,7 +397,8 @@ async def test_queued_mcp_executes_accepted_contract_after_switch_change(mcp_cas
         assert (await case.fixture.case.store.get_turn(child_id)).status == "completed"
         plan = next(row for row in rows(case, "chat_reference_plans") if row["turn_id"] == child_id)
         assert json.loads(plan["plan_json"]).get("orchestration_contract") == ("lead-delegation.v1" if lead_queue else None)
-        assert lead_calls == (4 if lead_queue else 2) and primary_calls == 4
+        # Parent and child primaries each read, answer in prose, and repeat it after one unreturned-work note.
+        assert lead_calls == (4 if lead_queue else 2) and primary_calls == 6
         assert f.calls == [("ots_finance", "getMargin", {"year": 2025})] * 2
         calls = [row for row in rows(case, "chat_reference_mcp_calls") if row["turn_id"] == child_id]
         assert len(calls) == 1 and calls[0]["status"] == "completed"

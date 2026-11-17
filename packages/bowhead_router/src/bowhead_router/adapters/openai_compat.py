@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import dataclasses
 import hashlib
@@ -503,15 +504,7 @@ class OpenAICompatibleAdapter:
                 )
 
         if responses_surface and resp.status_code in {400, 404, 405}:
-            # Surface-specific diagnostics belong to batch 2 (§5-5); avoid sending administrators in the wrong
-            # direction with "request rejected, upstream_code=…" (review P2-7: qwen-plus /responses tool-result
-            # submission 400s would incorrectly suggest a parameter issue).
-            logger.warning(
-                "openai_compat.responses.surface_error provider=%s model=%s status=%d — if this gateway/model lacks the /responses surface, set the model's api_surface back to chat_completions.",
-                self.provider_name,
-                req.model,
-                resp.status_code,
-            )
+            self._log_responses_http_error(model=req.model, status_code=resp.status_code, fields=upstream_error_fields(resp))
         if resp.status_code in (401, 403):
             await confirm_provider_auth_rejection(attempt, status_code=resp.status_code)
             attempt = None
@@ -656,13 +649,15 @@ class OpenAICompatibleAdapter:
                     if resp.status_code >= 400:
                         err_text = (await resp.aread()).decode("utf-8", errors="replace")[:500]
                         if responses_surface and resp.status_code in {400, 404, 405}:
-                            # Use the same targeted hint as invoke (review R2: after batch 1, tool-result submissions use stream;
-                            # qwen-plus submission 400s reach this path, so an invoke-only hint would never run).
-                            logger.warning(
-                                "openai_compat.responses.surface_error provider=%s model=%s status=%d — if this gateway/model lacks the /responses surface, set the model's api_surface back to chat_completions.",
-                                self.provider_name,
-                                req.model,
-                                resp.status_code,
+                            # Same diagnostics as invoke (review R2: tool-result submissions use stream, so an
+                            # invoke-only hint would never run for qwen-plus submission 400s).
+                            error_payload: Any = None
+                            with contextlib.suppress(ValueError):
+                                error_payload = json.loads(err_text)
+                            self._log_responses_http_error(
+                                model=req.model,
+                                status_code=resp.status_code,
+                                fields=upstream_error_fields_from_payload(error_payload, headers=resp.headers),
                             )
                         # Adaptive outbound parameters (the streaming path uses the same criteria as invoke).
                         rejected_outbound = (
@@ -1196,6 +1191,8 @@ class OpenAICompatibleAdapter:
         if req.response_format:
             if responses_surface:
                 body["text"] = {"format": req.response_format}
+                if req.response_format.get("type") == "json_object":
+                    _ensure_json_word_in_input(body["input"])
             else:
                 body["response_format"] = req.response_format
         # Per-model request_body_overrides (an existing V2ModelDeclaration field previously consumed only by custom_http):
@@ -1885,6 +1882,38 @@ class OpenAICompatibleAdapter:
     # ─────────────────────────────────────────────────────────
     # Error mapping
     # ─────────────────────────────────────────────────────────
+    def _log_responses_http_error(self, *, model: str, status_code: int, fields: dict[str, str | None]) -> None:
+        """Log a /responses rejection with the provider's own bounded explanation.
+
+        404/405 mean the gateway has no /responses route, so the surface hint is the fix.
+        A 400 is ambiguous (review P2-7: qwen-plus tool-result submissions return 400 for
+        a surface gap, while OpenAI returns 400 for a request it refuses, such as JSON
+        mode without "json" in the input), so it carries the upstream type, code, param
+        and credential-scrubbed message, and the hint applies only when that message
+        says the surface cannot serve the request.
+        """
+
+        if status_code in {404, 405}:
+            logger.warning(
+                "openai_compat.responses.surface_error provider=%s model=%s status=%d — if this gateway/model lacks the /responses surface, set the model's api_surface back to chat_completions.",
+                self.provider_name,
+                model,
+                status_code,
+            )
+            return
+        logger.warning(
+            "openai_compat.responses.request_rejected provider=%s model=%s status=%d type=%s code=%s param=%s message=%r — "
+            "read the upstream message first; set the model's api_surface back to chat_completions only if it says this "
+            "gateway/model cannot serve the request on /responses.",
+            self.provider_name,
+            model,
+            status_code,
+            fields.get("upstream_error_type"),
+            fields.get("upstream_error_code"),
+            fields.get("upstream_error_param"),
+            sanitize_upstream_text(fields.get("upstream_message"), max_length=300),
+        )
+
     def _raise_for_status(self, resp: httpx2.Response) -> None:
         if 200 <= resp.status_code < 300:
             return
@@ -1903,6 +1932,42 @@ class OpenAICompatibleAdapter:
 # Protocol conformance check
 # ─────────────────────────────────────────────────────────────
 _: type[LLMAdapter] = OpenAICompatibleAdapter  # type: ignore[assignment,type-abstract]
+
+
+_JSON_MODE_INPUT_NOTE = "Respond with a JSON object."
+
+
+def _ensure_json_word_in_input(items: list[dict[str, Any]]) -> None:
+    """Make a Responses JSON-mode request name JSON in its input messages.
+
+    OpenAI's /responses rejects ``text.format={"type": "json_object"}`` with HTTP 400
+    unless an input message mentions JSON; ``instructions`` does not count. Chat
+    Completions counts the system message, so callers that state the JSON contract
+    only in ``system`` pass there and fail here (a customer's OpenAI Responses model,
+    2026-11-16: every Skill-only receiver selection). The note joins the last user message, or
+    becomes the final user item, so the strict user/assistant alternation that
+    ``_convert_input_items`` maintains is kept.
+    """
+
+    def message_texts(item: dict[str, Any]) -> list[str]:
+        content = item.get("content") if "role" in item else None
+        if isinstance(content, str):
+            return [content]
+        if isinstance(content, list):
+            return [block["text"] for block in content if isinstance(block, dict) and isinstance(block.get("text"), str)]
+        return []
+
+    if any("json" in text.lower() for item in items for text in message_texts(item)):
+        return
+    last = items[-1] if items else None
+    if last is not None and last.get("role") == "user":
+        content = last.get("content")
+        if isinstance(content, list):
+            last["content"] = [*content, {"type": "input_text", "text": _JSON_MODE_INPUT_NOTE}]
+        else:
+            last["content"] = "\n\n".join(part for part in (content, _JSON_MODE_INPUT_NOTE) if part)
+        return
+    items.append({"role": "user", "content": _JSON_MODE_INPUT_NOTE})
 
 
 def _truncate_json(obj: Any, max_len: int = 300) -> str:

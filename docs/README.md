@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
+[Bowra Community FAQ](faq.md)
+
 **Verified Intelligence** means making business work inspectable: connect a claim to its source, a number to its calculation, and a result to the definitions used to produce it. Bowra brings these into a shared workspace for analysis, documents, reports, and reusable Agents.
 
 [Build and setup](../deploy/README.md) · [For external agents](agent-guide.md) · [Examples](../examples/community/README.md) · [Project overview](../README.md)

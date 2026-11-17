@@ -897,11 +897,30 @@ class AgentReleaseBaselineStore:
             "asr_",
             team_id,
             agent_id,
+            imported_revision_id,
+            safety_content_hash,
+            dependency_fingerprint,
+            BASELINE_COMPILER_VERSION,
+        )
+        legacy_report_id = _stable_id(
+            "asr_",
+            team_id,
+            agent_id,
             agent_id,
             safety_content_hash,
             dependency_fingerprint,
             BASELINE_COMPILER_VERSION,
         )
+        # Keep existing staged digests valid when their report already belongs to this revision.
+        async with db.execute(
+            """
+            SELECT 1 FROM agent_safety_report
+            WHERE id=? AND team_id=? AND agent_id=? AND subject_kind='revision' AND subject_ref=?
+            """,
+            (legacy_report_id, team_id, agent_id, imported_revision_id),
+        ) as cursor:
+            if await cursor.fetchone() is not None:
+                report_id = legacy_report_id
         return _CompiledLegacyAgent(
             team_id=team_id,
             agent_id=agent_id,

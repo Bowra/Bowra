@@ -506,8 +506,9 @@ async def test_non_empty_payload_still_gets_the_delivery_directive() -> None:
     )
     res = await _spawn(result)
     directive = res["directive"]
-    assert "已通过 subagent_return 交了结构化报告" in directive
-    assert "composer 会自动渲染 canvas" in directive
+    # 38b3bf4e3 translated the delivery directive to English with the same meaning.
+    assert "The helper returned a report payload for composition." in directive
+    assert "the normal report pointer is added after saving" in directive
     assert "没有产出任何可交付内容" not in directive
     # Carry counts and exec_summary truthfully.
     assert res["payload_summary"]["insights_count"] == 1
@@ -908,8 +909,10 @@ async def test_failed_after_write_report_tells_lead_the_body_is_on_canvas() -> N
     assert res["delivered"] == "canvas"
     assert res["canvas_written"] == {"tool_calls": 1, "section_ids": ["sec_a", "sec_b", "sec_c"]}
     directive = res["directive"]
-    assert "正文已落画布之后" in directive
-    assert "不要重派" in directive
+    # 38b3bf4e3 translated the directive: the saved sections stay, and they are not rewritten again.
+    assert "The helper stopped after acknowledged report writes" in directive
+    assert "Retain the saved sections listed in canvas_written" in directive
+    assert "Do not repeat confirmed writes to recover their content" in directive
     assert "未能产出可靠结论" not in directive
     # insufficient_data may appear only within prohibitions on saying it; do not instruct Lead to tell users that.
     assert "直接告诉用户 insufficient_data" not in directive

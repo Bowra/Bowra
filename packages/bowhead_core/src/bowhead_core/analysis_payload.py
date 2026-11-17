@@ -1612,8 +1612,8 @@ _REMOVED_RUN_RE = re.compile(r"[ \t]*\x00[\x00 \t]*")
 
 
 def _joins_without_space(char: str) -> bool:
-    """Whether text next to a removed ID needs no separating space (CJK, punctuation, edges)."""
-    if not char or char in "\r\n":
+    """Whether text next to a removed ID needs no separating space (CJK, punctuation, code delimiters, edges)."""
+    if not char or char in "\r\n`":
         return True
     if unicodedata.category(char).startswith("P"):
         return True
@@ -1629,12 +1629,50 @@ def _close_removed_gaps(text: str) -> str:
     return _REMOVED_RUN_RE.sub(join, text)
 
 
+# 116 the regression case: "第5版（the regression case，约25小时前生成）" reached the user as "第 5 版，约 25 小时前生成）".
+# A bracket that holds more than the ID stays, and the separator between the ID and that bracket or another
+# removed ID goes with the ID.
+_ID_SEPARATOR = r"[ \t]*[，,、；;：:][ \t]*"
+_REMOVED_LIST_RE = re.compile(rf"\x00(?:{_ID_SEPARATOR}\x00)+")
+_REMOVED_BRACKETED_RE = re.compile(r"[\(（\[【][ \t]*\x00[ \t]*[\)）\]】]")
+_REMOVED_AFTER_OPEN_RE = re.compile(rf"([\(（\[【])[ \t]*\x00{_ID_SEPARATOR}")
+_REMOVED_BEFORE_CLOSE_RE = re.compile(rf"{_ID_SEPARATOR}\x00[ \t]*([\)）\]】])")
+
+
+def _tidy_removed(text: str) -> str:
+    text = _REMOVED_BRACKETED_RE.sub(_REMOVED, _REMOVED_LIST_RE.sub(_REMOVED, text))
+    text = _REMOVED_BEFORE_CLOSE_RE.sub(r"\1", _REMOVED_AFTER_OPEN_RE.sub(r"\1", text))
+    return _close_removed_gaps(text) if _REMOVED in text else text
+
+
+def remove_id_matches(text: str, pattern: re.Pattern[str]) -> str:
+    """Remove every ``pattern`` match from prose and close the gap it leaves.
+
+    ``pattern`` may capture an opening bracket as ``open`` and a closing one as ``close``.
+    Both go with the ID; a lone one stays, because the bracket holds other words, and so
+    does the whitespace captured as ``lead`` before it.
+    """
+    if not text or _REMOVED in text:
+        return text
+
+    def mark(match: re.Match[str]) -> str:
+        groups = match.groupdict()
+        opening, closing = groups.get("open") or "", groups.get("close") or ""
+        if bool(opening) == bool(closing):
+            return _REMOVED
+        return (groups.get("lead") or "") + opening + _REMOVED + closing
+
+    marked = pattern.sub(mark, text)
+    return _tidy_removed(marked) if _REMOVED in marked else text
+
+
 def strip_internal_object_ids(text: str, *, artifacts: bool = False) -> str:
     """Remove internal canvas/section/revision IDs (and artifact IDs with ``artifacts``).
 
     A bracket containing only an ID (and its label) goes with it; otherwise only the
-    ID is removed, so surrounding brackets stay balanced. The gap closes without a space
-    next to CJK text or punctuation and keeps one space between words. Idempotent.
+    ID and a separator between it and the bracket are removed, so surrounding brackets
+    stay balanced. The gap closes without a space next to CJK text or punctuation and
+    keeps one space between words. Idempotent.
     """
     if not text or "_" not in text or _REMOVED in text:
         return text
@@ -1643,7 +1681,7 @@ def strip_internal_object_ids(text: str, *, artifacts: bool = False) -> str:
     for index in range(0, len(parts), 2):
         part = _INLINE_CODE_SPAN_RE.sub(lambda m: _REMOVED if whole.fullmatch(m.group("content")) else m.group(0), parts[index])
         part = bare.sub(_REMOVED, bracketed.sub(_REMOVED, part))
-        parts[index] = _close_removed_gaps(part) if _REMOVED in part else part
+        parts[index] = _tidy_removed(part) if _REMOVED in part else part
     return "".join(parts)
 
 

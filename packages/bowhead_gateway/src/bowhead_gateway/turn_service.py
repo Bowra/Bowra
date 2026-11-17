@@ -432,6 +432,19 @@ def is_session_busy_rejection(error: BaseException) -> bool:
     return isinstance(error, ValueError) and str(error) == "submission_session_active"
 
 
+async def wake_waiting_lead(turn_id: str) -> None:
+    """Mid-run steering: a Lead of this process that waits on a helper reads the queued instruction now.
+
+    A wake-up only saves the wait; the instruction is already queued and is read without it.
+    """
+    try:
+        from bowhead_core.steer_inbox import notify_local
+
+        await notify_local(turn_id)
+    except Exception as exc:  # noqa: BLE001 — never fail an accepted instruction over a wake-up
+        _log.warning("steer.wake_failed turn=%s error_type=%s", turn_id, type(exc).__name__)
+
+
 async def steer_or_proceed(
     orchestrator: Any,
     *,
@@ -521,6 +534,7 @@ async def steer_or_proceed(
             )
         except Exception as exc:
             _log.warning("steer.emoji_ack_emit_failed turn=%s err=%s", active_turn_id, exc)
+        await wake_waiting_lead(active_turn_id)
         return SteerOutcome("buffered", active_turn_id)
 
     if expected_turn_id:

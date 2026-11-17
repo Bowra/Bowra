@@ -498,6 +498,7 @@ def build_turn_history(
     material_refs: Mapping[str, dict[str, Any]] | None = None,
     make_tool_calls_message: Callable[[list[tuple[str, str, dict[str, Any]]]], Any] | None = None,
     make_tool_result_message: Callable[[str, str, str], Any] | None = None,
+    instructions: Mapping[str, Sequence[str]] | None = None,
 ) -> TurnHistory:
     """Render prior visible Turns as native history within a whole-Turn budget.
 
@@ -508,6 +509,10 @@ def build_turn_history(
     Citation markers are stripped from completed answers and spawn summaries.
     Oldest whole Turns are dropped to the hysteresis floor when over budget;
     a nonpositive budget is unlimited.
+
+    ``instructions`` maps a Turn to the instructions it took while it was running
+    (mid-run steering). They follow the Turn's request in its user message, separated
+    by a blank line, as merged follow-up instructions are.
     """
     mk = make_message or (lambda role, content: {"role": role, "content": content})
     mk_calls = make_tool_calls_message or (
@@ -532,6 +537,9 @@ def build_turn_history(
         user_text = (getattr(t, "user_text", None) or "").strip()
         if not user_text:
             continue
+        taken = [text.strip() for text in (instructions or {}).get(turn_id) or () if text.strip()]
+        if taken:
+            user_text = "\n\n".join([user_text, *taken])
         if status == "completed":
             answer = st(getattr(t, "final_answer", None) or "").strip()
             if not answer:

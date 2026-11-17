@@ -59,7 +59,9 @@ async def test_followup_correction_and_primary_preserve_current_request(http_sta
                 assert current_request in repair
                 assert previous_request not in repair
                 # Even a stale model paraphrase must not replace the admitted request.
-                return tool_response("subagent_spawn", {"agent_id": agent_id, "task": previous_request}, stream=sent.get("stream", False))
+                return tool_response(
+                    "subagent_spawn", {"agent_id": agent_id, "task": previous_request, "required_source_urls": []}, stream=sent.get("stream", False)
+                )
             return answer_response(request)
         if "skill_read" in names:
             primary_calls.append(sent)

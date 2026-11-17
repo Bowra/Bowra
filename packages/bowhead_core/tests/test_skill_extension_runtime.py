@@ -15,7 +15,7 @@ import respx
 from bowhead_core.events import TerminalDurabilityAbort, TurnEventBus
 from bowhead_core.skill_extension_material import prepare_skill_extension, restore_skill_extension
 from bowhead_core.skill_reference_execution import claim_reference_skill_primary_for_worker
-from bowhead_core.subagent import SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from test_skill_model_invocation import adapter_for, router_for, success
 from test_skill_reference_claim import claimed_case as _claimed_case
 from test_skill_reference_claim import receiver_case as _receiver_case
@@ -131,7 +131,10 @@ async def test_native_loop_reads_optional_method_and_only_invokes_original_packa
             mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
         assert result.ok and result.final_answer == "OK", result.error
-        assert len(sent) == 4
+        # A prose ending after successful Tool work gets one runtime note and one more model
+        # call (ce9390072); the same prose answer then ends the run.
+        assert len(sent) == 5
+        assert UNRETURNED_WORK_NOTE in sent[4]["messages"][-1]["content"]
         texts = [json.dumps(body) for body in sent]
         assert all("BODY_optional_method" in text and "BODY_support" in text for text in texts)
         tool_results = [[m for m in body["messages"] if m["role"] == "tool"] for body in sent]
@@ -142,7 +145,7 @@ async def test_native_loop_reads_optional_method_and_only_invokes_original_packa
         assert not calls[0][1].exists()
         assert case.ctx.reference_skill_access is None and case.ctx.skill_runtime_scope is None
         invocations, checks = rows(case, "chat_reference_model_invocations"), rows(case, "chat_reference_extension_checks")
-        assert len(checks) == len(invocations) == 4 and all(row["status"] == "completed" for row in invocations)
+        assert len(checks) == len(invocations) == 5 and all(row["status"] == "completed" for row in invocations)
         for check in checks:
             invocation = next(row for row in invocations if row["invocation_id"] == check["invocation_id"])
             assert (check["context_id"], check["execution_id"], check["created_generation"]) == (

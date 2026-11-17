@@ -9,7 +9,7 @@ import respx
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.events import TerminalDurabilityAbort, TurnEventBus
 from bowhead_core.skill_read_resolution import SkillReadResolutionError
-from bowhead_core.subagent import SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from test_skill_extension_runtime import publish_policy, tool_response
 from test_skill_model_invocation import adapter_for, router_for, success
 from test_skill_reference_claim import claimed_case as _claimed_case
@@ -63,7 +63,10 @@ async def test_republished_allowed_method_keeps_original_agent_and_records_new_a
             mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
         assert result.ok and result.final_answer == "OK", result.error
-        assert len(sent) == 2
+        # A prose ending after successful Tool work gets one runtime note and one more model
+        # call (ce9390072); the same prose answer then ends the run.
+        assert len(sent) == 3
+        assert any(UNRETURNED_WORK_NOTE in (message.get("content") or "") for message in sent[2]["messages"])
         assert [call[0] for call in calls] == (["unused"] if operation == "invoke" else [])
         assert rows(case, "chat_reference_resolutions") == original
         assert all("A new role for future executions." not in json.dumps(body) and "BODY_optional_method" in json.dumps(body) for body in sent)

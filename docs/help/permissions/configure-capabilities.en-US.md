@@ -52,6 +52,8 @@ Team owners and Team admins set limits for every agent in the Team, built-in and
 
 When a limit is reached, the conversation shows the specific reason and retains known results. A finite step stop also shows used/allowed decisions. Review those results before narrowing the remaining request. Use Continue only when the conversation offers a supported continuation; it is not available for every stop. Restoring Team defaults does not remove a displayed deployment ceiling. Higher limits let a task do more, but you wait longer and use more quota.
 
+An agent that keeps sending exactly the same request to a tool and getting the same answer is told so; from the 8th identical request in a row the request is not run, and if the agent keeps asking, it stops and shows the partial result as "stopped after several steps produced no new results". Requests that change something, such as an edit to a file or a chart, or a check of a running job's status, are not affected.
+
 ## Set sandbox and HTML limits
 
 On **Team settings › Agents › Run limits**, Team owners and admins can also configure:
@@ -107,3 +109,7 @@ In the Trace, **Create New Presentation** means a new basic editable PPTX is bei
 | A platform capability not offered by the product | Product maintainer                                                                                               |
 
 An Outcome describes the result an Agent promises and may show evidence or availability. A team Plugin groups Tools and Skills for Agent authors to select. Neither replaces feature, tool, or data authorization.
+
+## Manage shared workflows
+
+Where team workflows are enabled, open their management page from the workflow catalog. Inspect pending sharing approvals and the published list. Use the offered share, enable, disable, or delete action for the selected workflow. Before disabling or deleting one, review any listed impact on active work or schedules. For your own workflows, return to **Skills and Workflows → Mine**.

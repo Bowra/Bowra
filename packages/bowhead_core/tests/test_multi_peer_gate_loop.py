@@ -184,3 +184,37 @@ async def test_declined_gate_lets_the_round_run_no_empty_turn() -> None:
     assert executed == ["subagent_spawn", "subagent_spawn"], f"放行后本轮必须照常跑，实际: {executed}"
     sentinels = [i for i in result.tool_invocations if isinstance(i.result, dict) and i.result.get("_plan_propose_pending")]
     assert sentinels == [], "没出计划就不该留哨兵"
+
+
+@pytest.mark.asyncio
+async def test_a_round_gate_that_runs_long_is_not_a_stall(monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 1.7.48 the regression case: the Lead's plan_propose went through this gate, which ran the whole
+    Auto Plan. Nothing owned the wait, so after stall_timeout_s (300 s) the watchdog cancelled the Lead
+    and the Turn failed as agent_stalled. The gate's work is the Lead's work in progress."""
+    import asyncio
+
+    import bowhead_core.subagent as subagent_module
+
+    now = [0.0]
+    controls: list[Any] = []
+
+    class _Clocked(subagent_module._RuntimeExecution):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **{**kwargs, "clock": lambda: now[0]})
+            controls.append(self)
+
+    monkeypatch.setattr(subagent_module, "_RuntimeExecution", _Clocked)
+
+    async def long_gate(tool_calls: list[Any], profile_name: str) -> dict[str, Any] | None:
+        lead = controls[0]
+        now[0] += 10 * lead.budget.stall_timeout_s
+        lead.changed.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        return None
+
+    executed: list[str] = []
+    result = await _run(_runner_recording(executed), _ctx_with_gate(gate=long_gate))
+    assert controls, "the Lead run had no runtime control, so this test proves nothing"
+    assert result.stop_reason != "agent_stalled", result.error
+    assert executed == ["subagent_spawn", "subagent_spawn"]

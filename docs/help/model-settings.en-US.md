@@ -103,3 +103,7 @@ An HTTP 200 response means the service replied; it does not prove that the model
 The test parameters show the main model, output and thinking settings where present; they do not include authentication or the full request. The usage summary contains recognized numeric token counts. Other provider fields remain in the response excerpt. JSON is formatted for reading while whitespace inside response strings is preserved. Known credentials are hidden, including values repeated in other fields or stream events; check the contents before sharing. Response excerpts are limited to 64 KiB after credentials are hidden, and copying includes the same excerpt.
 
 Earlier attempts or attempts whose details could not be saved may have no details. Run verification again to collect them, reviewing its request count and possible cost first. Viewing or copying existing details sends no model request and does not save configuration changes.
+
+## Inspect a knowledge-base index rebuild
+
+If the knowledge base reports a failed team index rebuild, a Team owner or administrator can choose **Review and retry** to open **Knowledge base index**. Check the pending embedding model and reported status before choosing **Retry Index Rebuild**. If the model needs changing, open **Adjust Knowledge Base Models** and save the correct assignment. File parsing status is shown separately on the Knowledge page.

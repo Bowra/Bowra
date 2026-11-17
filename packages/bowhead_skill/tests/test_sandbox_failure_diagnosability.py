@@ -479,3 +479,52 @@ def test_diagnostics_never_swallow_the_original_traceback(tmp_path) -> None:
     err = _run_scaffold(tmp_path, code, {"inputs": {}})
     assert "KeyError" in err and "期望的列" in err, "原始异常被诊断代码盖掉了"
     assert "boom in diagnostics" not in err, "诊断自己的异常泄漏到了用户面前"
+
+
+# ─── L5: an index past a python-pptx table states the table's size ────
+# Grounded in the 116 template fills of 2026-11-16/17: most script failures were one IndexError from
+# `table.cell(r, c)` past the last row, whose message names neither the index nor the table size.
+
+_TABLE_DECK = (
+    "from pptx import Presentation\n"
+    "from pptx.util import Inches\n"
+    "prs = Presentation()\n"
+    "slide = prs.slides.add_slide(prs.slide_layouts[6])\n"
+    "frame = slide.shapes.add_table(3, 4, Inches(1), Inches(1), Inches(6), Inches(2))\n"
+    "frame.name = 'Object 15'\n"
+    "tb = frame.table\n"
+)
+
+
+@pytest.mark.parametrize(
+    "access,fact",
+    [
+        (
+            "tb.cell(3, 0).text = 'x'",
+            "[runner] table.cell(3, 0) was requested; table 'Object 15' (id 2) has 3 rows x 4 columns (indexes start at 0). "
+            "pptx_fill.resize_table changes the row count.",
+        ),
+        (
+            "tb.rows[5].height = 1",
+            "[runner] table.rows[5] was requested; table 'Object 15' (id 2) has 3 rows x 4 columns (indexes start at 0). "
+            "pptx_fill.resize_table changes the row count.",
+        ),
+        ("tb.columns[4].width = 1", "[runner] table.columns[4] was requested; table 'Object 15' (id 2) has 3 rows x 4 columns (indexes start at 0)."),
+        (
+            "tb.rows[1].cells[7].text = 'x'",
+            "[runner] table.rows[1].cells[7] was requested; table 'Object 15' (id 2) has 3 rows x 4 columns (indexes start at 0).",
+        ),
+    ],
+)
+def test_an_index_past_a_pptx_table_states_the_table_size(tmp_path, access, fact) -> None:
+    err = _run_scaffold(tmp_path, _TABLE_DECK + access + "\n", {"inputs": {}})
+    assert "IndexError" in err and "Traceback" in err, "the original traceback must stay"
+    assert err.rstrip().endswith(fact)
+    if "columns" in fact.split(" was ")[0] or ".cells[" in fact:
+        assert "resize_table" not in err
+
+
+def test_other_index_errors_are_left_alone(tmp_path) -> None:
+    err = _run_scaffold(tmp_path, _TABLE_DECK + "rows = [1, 2]\nrows[5]\n", {"inputs": {}})
+    assert "IndexError: list index out of range" in err
+    assert "[runner]" not in err

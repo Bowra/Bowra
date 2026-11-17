@@ -316,18 +316,20 @@ def render_recent_turns_block(digests: list[dict[str, Any]], *, source_continuit
             cid = d.get("canvas_id")
             if cid:
                 lines.append(_canvas_line(cid))
-        if section_revise:
-            # canvas-update-turn batch B0: if the canvas already has a report, express follow-up intent in spawn canvas_mode.
-            # Review fix: mention it once in the block; caller passes `section_revise` when "flag on AND canvas has a previously visible report"
-            # (canvas_id exists after just one chart; checking it alone calls chat+chart sessions "existing reports",
-            # making Lead choose revise for a first report without a prior report).
-            lines.append("")
-            lines.append(_SECTION_REVISE_HINT)
-            from bowhead_core.delivered_files import revision_targets_enabled
-
-            if revision_targets_enabled():
-                lines.append(_FILE_TARGET_HINT)
         return "\n".join(lines)
+
+    hints = ""
+    if section_revise:
+        # canvas-update-turn batch B0: if the canvas already has a report, express follow-up intent in spawn canvas_mode.
+        # Review fix: mention it once in the block; caller passes `section_revise` when "flag on AND canvas has a previously visible report"
+        # (canvas_id exists after just one chart; checking it alone calls chat+chart sessions "existing reports",
+        # making Lead choose revise for a first report without a prior report).
+        # The hints are fixed text appended after the size trim: they never displace a turn and are never cut mid-sentence.
+        hints = "\n\n" + _SECTION_REVISE_HINT
+        from bowhead_core.delivered_files import revision_targets_enabled
+
+        if revision_targets_enabled():
+            hints += "\n" + _FILE_TARGET_HINT
 
     # Defensive: if the block is unexpectedly large, drop oldest turns until it fits.
     while rows:
@@ -335,6 +337,6 @@ def render_recent_turns_block(digests: list[dict[str, Any]], *, source_continuit
         if len(block) <= _MAX_BLOCK_CHARS or len(rows) == 1:
             if len(block) > _MAX_BLOCK_CHARS:
                 block = block[:_MAX_BLOCK_CHARS] + "\n…"
-            return block
+            return block + hints
         rows = rows[1:]  # drop oldest
     return ""

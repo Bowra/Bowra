@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * file-management-v2 Use in New Chat—guard **consumer placement** for the one-shot channel.
  *

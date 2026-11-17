@@ -24,6 +24,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
+    from collections.abc import Sequence
+
     from bowhead_core.deliverable_ledger import DeliverableLedger
 
 __all__ = [
@@ -185,10 +187,36 @@ _FILE_READY_CLAIM = re.compile(
     rf"(?:{_KIND_NOUN['file'].pattern}|{'|'.join(noun.pattern for noun in _FMT_NOUN.values())})[\s*`]*(?:均|都)?已(?:完成|就绪)",
     re.I,
 )
+# 116 dogfood N13: honest answers said "本轮**没有产出任何可下载文件**", "文件没做出来", "这一轮您拿不到可下载的
+# PPTX" and "没有可下载文件登记成功"; the negated "可下载" read as a delivery and got the "no file" footer.
 _NEGATED_FILE_CLAUSE = re.compile(
-    r"(?:没有|并未|尚未|未能|未)\s*(?:成功)?(?:生成|导出|制作|提供)"
+    r"(?:没有|没|并未|尚未|未能|未|拿不到|得不到)[\s*`]*(?:成功)?(?:任何)?[\s*`]*"
+    r"(?:生成|导出|制作|提供|产出|做出|做好|做成|可(?:直接|供)?下载)"
     r"[^，,。！？!?；;\n]*?(?=[，,。！？!?；;\n]|但|不过|然而|$)"
 )
+# "可下载" right after a production verb with no 已 before it describes what a file would be: "我可以帮你……
+# 产出可下载的报告" (what the assistant can do), "才能按模板产出可下载的演示稿" (advice). A delivery says 已/了.
+_PROSPECTIVE_DOWNLOAD = re.compile(r"(产出|生成|导出|制作|提供|输出|做出)[\s*`]*(?:一份|一个|多份)?可(?:直接)?下载的?")
+# "下载链接以原生文件列表为准" points the user at another list; it delivers nothing itself.
+_DOWNLOAD_POINTER = re.compile(r"下载(?:链接|地址)?以[^，,。！？!?；;\n]{0,24}?为准")
+
+
+def _strip_prospective_download(text: str) -> str:
+    def keep_verb(match: re.Match[str]) -> str:
+        return match.group(0) if "已" in text[max(0, match.start() - 4) : match.start()] else match.group(1)
+
+    return _PROSPECTIVE_DOWNLOAD.sub(keep_verb, text)
+
+
+def _positive_claim_text(text: str) -> str:
+    """``text`` without negated, ingestion, prospective and pointer wording: what remains can claim completion."""
+    text = _NEGATED_FILE_CLAUSE.sub("", _FILE_PROCESSING_DONE.sub("", text))
+    return _strip_prospective_download(_DOWNLOAD_POINTER.sub("", text))
+
+
+def _claims_completion(text: str) -> bool:
+    positive = _positive_claim_text(text)
+    return bool(_DONE_VERB.search(positive) or _FILE_READY_CLAIM.search(positive))
 
 
 def _file_claim_segments(text: str | None) -> tuple[str, ...]:
@@ -199,8 +227,7 @@ def _file_claim_segments(text: str | None) -> tuple[str, ...]:
         hit = False
         for raw in _CLAIM_SEGMENT_SPLIT.split(block):
             segment = raw.strip()
-            positive = _NEGATED_FILE_CLAUSE.sub("", _FILE_PROCESSING_DONE.sub("", segment))
-            if not segment or not (_DONE_VERB.search(positive) or _FILE_READY_CLAIM.search(positive)):
+            if not segment or not _claims_completion(segment):
                 continue
             if _KIND_NOUN["file"].search(segment) or any(noun.search(segment) for noun in _FMT_NOUN.values()):
                 segments.append(segment)
@@ -254,10 +281,36 @@ _REPORT_CLAIM = re.compile(r"报告(已|都已)?(生成|写好|写完|完成|就
 
 # r4 terminal-answer gate revision family: actual 116 R6 wording "全报告各段正文与 5 张图均按新口径重算重画"
 # is neither report-generated nor necessarily see-canvas, missed by both patterns. Recalculate / redraw / revise themselves claim revision;
-# update / change-to are broad, requiring adjacent report / canvas / body / chart / chapter / paragraphs nouns.
-_REPORT_REVISION_CLAIM = re.compile(
-    r"(已|均|都)[^。\n]{0,12}?(重算|重画|修订)|(报告|画布|正文|图表|章节|各段)[^。\n]{0,30}?(已|均|都)[^。\n]{0,12}?(更新|改为|改成)"
+# update / change-to are broad, requiring a report / canvas / body / chart / chapter / paragraphs noun at most 30 characters
+# before the anchor. Both patterns are lookaheads so every anchor is tried: in "其余均未改动，已重算第二章" the negated
+# "均…重算" must not swallow the affirmed "已重算".
+_REVISION_REDO = re.compile(r"(?=(?:已|均|都)(?P<gap>[^。\n]{0,12}?)(?:重算|重画|修订))")
+_REVISION_CHANGE = re.compile(
+    r"(?=(?:已|均|都)(?P<gap>[^。\n]{0,12}?)(?:更新|改为|改成)"
+    r"(?:[\s*`]*(?:为|成)?[\s*`]*[《「“『\"](?P<target>[^》」”』\"\n]{1,60})[》」”』\"])?)"
 )
+_REVISION_NOUN_BEFORE = re.compile(r"(?:报告|画布|正文|图表|章节|各段)[^。\n]{0,30}$")
+# 116 dogfood N13 follow-up: zero-tool answers said "也没有生成报告", "未写报告" and "其余均未改动，也没有重新取数或重算";
+# the gate read each as report work and bounced the answer twice. A negator right before the verb, or between the anchor
+# and the verb, makes the clause a statement that the work was not done. "不仅/不但/不同/不少/不对/不含" are not negations.
+_NEGATION_BEFORE = re.compile(r"(?:没有|没能|没|并未|尚未|未能|未|不会|不用|不必|不需要|无需|无法|不|别)(?:成功|再|另外|额外|单独|重新)?[\s*`]*$")
+_GAP_NEGATION = re.compile(r"未|没|不(?!仅|但|同|少|对|含)|无法|无需")
+
+
+def _affirmed_report_claim(text: str) -> bool:
+    return any(not _NEGATION_BEFORE.search(text[max(0, m.start() - 6) : m.start()]) for m in _REPORT_CLAIM.finditer(text))
+
+
+def _report_revision_targets(text: str) -> list[str | None]:
+    """Affirmed revision claims in ``text``: the quoted target of a "改为《…》" claim, else None."""
+    claims: list[str | None] = [None for m in _REVISION_REDO.finditer(text) if not _GAP_NEGATION.search(m.group("gap"))]
+    for m in _REVISION_CHANGE.finditer(text):
+        if _GAP_NEGATION.search(m.group("gap")) or not _REVISION_NOUN_BEFORE.search(text[max(0, m.start() - 32) : m.start()]):
+            continue
+        target = re.sub(r"\s+", "", m.group("target") or "")
+        claims.append(target or None)
+    return claims
+
 
 # Memory claims lack noun+verb structure; each is a complete assertion.
 _MEMORY_CLAIM = re.compile(r"我记住了|已记住|已为你记住|我记下了|已记录到(长期)?记忆")
@@ -286,22 +339,33 @@ def detect_completion_claims(text: str | None) -> frozenset[str]:
     kinds: set[str] = set()
     if _MEMORY_CLAIM.search(text):
         kinds.add("memory")
-    if _REPORT_POINTER.search(text) or _REPORT_CLAIM.search(text):
+    if _REPORT_POINTER.search(text) or _affirmed_report_claim(text):
         kinds.add("report")
     if _file_claim_segments(text):
         kinds.add("file")
     return frozenset(kinds)
 
 
-def detect_report_work_claims(text: str | None) -> bool:
+def detect_report_work_claims(text: str | None, earlier_answers: Sequence[str] = ()) -> bool:
     """r4 终答闸的判据：答案声称**这一轮**对报告做了事（生成 / 修订 / 重算 / 重画），或明确说报告已生成。
 
     只指路「见画布」不算——那可能是在指上一轮的报告（「上一轮的报告已在画布，你想改哪一段？」），退回它反而错。
+
+    A change that an earlier answer already reported with the same quoted target restates that turn's result:
+    asked about the HTML versions, the answer said "画布上那份报告是另一份产物，标题已改为《2025年度经营复盘》"
+    (116 the regression case / the regression case), which the title-change turn had already said. ``earlier_answers`` are
+    the session's earlier assistant answers; a target missing from them is still treated as this turn's claim.
     """
     if not text:
         return False
     text = _GUARD_STATUS_BLOCK.sub("", text)
-    return bool(_REPORT_REVISION_CLAIM.search(text) or _REPORT_CLAIM.search(text))
+    if _affirmed_report_claim(text):
+        return True
+    claims = _report_revision_targets(text)
+    if not claims:
+        return False
+    restated = {target for answer in earlier_answers if answer for target in _report_revision_targets(_GUARD_STATUS_BLOCK.sub("", answer)) if target}
+    return any(target is None or target not in restated for target in claims)
 
 
 def claimed_file_formats(text: str | None) -> frozenset[str]:
@@ -426,6 +490,10 @@ def peer_facts_and_directive(ledger: DeliverableLedger, peer_answer: str | None)
             "memories": ledger.memories_verified,
         },
     }
+    if ledger.files_verified and ledger.delivered:
+        # Names alone cannot be revised later. The pair survives when history hygiene shortens this result,
+        # where a bare identifier list did not say which file an identifier was.
+        facts["delivered_files"] = [{"artifact_id": identity, "name": name} for identity, name in ledger.delivered]
     # Three stages; order matters:
     #   ① Peer never claimed file delivery → no prohibition. **Completion verb + file noun required**;
     #      format mention alone must not trigger, or honest "I cannot generate PDF" also gains prohibitions
@@ -485,8 +553,47 @@ _FORMAT_LABEL = {
 }
 
 
+_VERSION_REFERENCE = re.compile(
+    r"第\s*(?P<zh>\d+|[零〇一二两三四五六七八九十]+)\s*(?:个)?版(?:本)?|版本\s*(?P<num>\d+)|(?<![A-Za-z])(?:v|version)\s*(?P<v>\d+)(?![\d.])",
+    re.I,
+)
+
+
+def _names_earlier_file(clause: str, ledger: DeliverableLedger) -> bool:
+    """Whether a completion clause describes a file an earlier Turn of the session delivered.
+
+    116 dogfood N13: asked how many versions the HTML report had, Lead answered "第4版……但文件本身已生成并登记为
+    第4版". Version 4 came from an earlier Turn, this Turn wrote nothing, and the check removed the sentence and
+    added "本轮没有成功生成可下载文件". A clause names an earlier file when it names an existing version number,
+    or (for availability wording such as "可下载", not "已生成") an earlier file's name. A format the earlier files
+    do not have ("第4版已导出为 PDF") is a new file and stays checked.
+    """
+    named = {ext for ext, noun in _FMT_NOUN.items() if noun.search(_EMBEDDED_FORMAT.sub(" ", clause))}
+    if named - ledger.session_file_exts:
+        return False
+    newest = max(version for _, version in ledger.session_files)
+    for match in _VERSION_REFERENCE.finditer(clause):
+        number = _parse_count(match.group("zh")) if match.group("zh") else int(match.group("num") or match.group("v"))
+        if number is not None and 1 <= number <= newest:
+            return True
+    if _NEW_FILE_VERB.search(_positive_claim_text(clause)):
+        # A name alone does not show that "已生成" means the earlier file rather than a failed regeneration.
+        return False
+    folded = clause.casefold()
+    return any(name.casefold() in folded for name, _ in ledger.session_files)
+
+
+def _describes_earlier_files(segment: str, ledger: DeliverableLedger) -> bool:
+    if not ledger.session_files:
+        return False
+    clauses = [clause for line in segment.splitlines() for clause in _CLAUSE_SPLIT.split(line) if clause.strip() and _claims_completion(clause)]
+    return bool(clauses) and all(_names_earlier_file(clause, ledger) for clause in clauses)
+
+
 def _invalid_file_claim_segment(segment: str, ledger: DeliverableLedger) -> bool:
     if not _file_claim_segments(segment):
+        return False
+    if _describes_earlier_files(segment, ledger):
         return False
     file_count = _file_count(segment, ledger)
     if file_count < 0:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.release_skill_versions import skill_updates_conn
-from bowhead_core.skill_upload import bundle_sha256
+from bowhead_core.skill_upload import builtin_bundle_sha256, bundle_sha256
 from bowhead_core.user_store import TeamSkill, UserStore
 from core_legacy_database import upgrade
 
@@ -47,7 +47,8 @@ async def test_skill_updates_list_skills_whose_approved_revision_changed(tmp_pat
             updated_at="2026-10-01T00:00:00+00:00",
         )
     )
-    builtin_current = f"sha256:{bundle_sha256(builtin_catalog_dir() / 'python_sandbox')}"
+    # Builtin revisions exclude Python caches (3816214d1); another test may have run its scripts.
+    builtin_current = f"sha256:{builtin_bundle_sha256(builtin_catalog_dir() / 'python_sandbox')}"
     definition = {
         "skill_grants": [
             _grant("team", "oskill_sales", "sales-report", released),

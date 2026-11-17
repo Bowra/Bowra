@@ -9,8 +9,6 @@ const api = vi.hoisted(() => ({
   updateShopifyTool: vi.fn(),
   setShopifyEnabled: vi.fn(),
   deleteShopifyTool: vi.fn(),
-  createShopifyPlugin: vi.fn(),
-  createShopifyContentPlugin: vi.fn(),
 }));
 vi.mock("@/lib/team-builtin-tools-api", () => api);
 import { ShopifyToolSection } from "./shopify-tool-section";
@@ -78,36 +76,6 @@ describe("Shopify connection management", () => {
       }),
     );
   });
-
-  it("creates a Plugin for this connection and reports where to select it", async () => {
-    renderIntl(<ShopifyToolSection tools={[tool]} createRequest={0} onChanged={vi.fn()} />, { locale: "en-US" });
-    fireEvent.click(screen.getByRole("button", { name: "Create analysis Plugin" }));
-    await waitFor(() => expect(api.createShopifyPlugin).toHaveBeenCalledWith("ibt_one"));
-    expect(await screen.findByText("Plugin created. Select it in the Agent editor to use this shop.")).toBeInTheDocument();
-  });
-
-  it("offers a separate content Plugin only when its Tools are available", async () => {
-    const { unmount } = renderIntl(<ShopifyToolSection tools={[tool]} createRequest={0} onChanged={vi.fn()} />, { locale: "en-US" });
-    expect(screen.queryByRole("button", { name: "Create content Plugin" })).not.toBeInTheDocument();
-    unmount();
-    renderIntl(
-      <ShopifyToolSection
-        tools={[
-          {
-            ...tool,
-            supported_tools: [...tool.supported_tools, "shopify_preview_content_update"],
-          },
-        ]}
-        createRequest={0}
-        onChanged={vi.fn()}
-      />,
-      { locale: "en-US" },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Create content Plugin" }));
-    await waitFor(() => expect(api.createShopifyContentPlugin).toHaveBeenCalledWith("ibt_one"));
-    expect(api.createShopifyPlugin).not.toHaveBeenCalled();
-  });
-
 
   it("requires delete confirmation and never shows raw provider errors", async () => {
     api.deleteShopifyTool.mockRejectedValue({ code: "upstream", message: "secret-private-provider-response" });

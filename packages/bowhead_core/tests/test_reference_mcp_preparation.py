@@ -1207,7 +1207,8 @@ async def test_native_model_loop_sees_and_calls_only_exact_mcp_reference(tmp_pat
                 parent_ctx=ctx,
                 parent_bus=TurnEventBus(),
             )
-        assert route.call_count == 2
+        # The MCP call, the prose answer, and the answer to the one unreturned-work note.
+        assert route.call_count == 3
     finally:
         await adapter.close()
 

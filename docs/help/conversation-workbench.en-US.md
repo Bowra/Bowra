@@ -14,7 +14,7 @@ This article describes the parts of the conversation page that show progress, re
 - The sidebar (and the conversation list on a phone) shows your most recent conversations. When there are more, the last line of the **Older** group reads **Show older**. Select it to add the next 50 conversations below the ones already shown; the list doesn't jump, and the keyboard focus moves to the first newly added conversation. When there is nothing older, the list ends with **No older sessions**.
 - Older conversations never load on their own when you scroll to the bottom. If loading fails, the conversations already shown stay, and **Retry** loads the same batch again.
 - The search box at the top of the sidebar always searches all your conversations, not just the ones loaded in the list. A conversation is found by its title or by words from your own messages, so you can find it even after its title was renamed. When a result was found in your message rather than its title, it's tagged **In message** and shows a few words around the match.
-- Each result group shows how many matches it has. The Sessions group shows the first five; select **Show more sessions (N more)** to add 20 more at a time. Clear the search box to return to your list; older conversations you already loaded stay in it.
+- Each result group shows how many matches it has. The Sessions group shows the first five. Select **Show more sessions (N more)** to add 20 more at a time. Keyboard focus stays on the button while results load, then moves to the first new conversation. Clear the search box to return to your list, where older conversations you already loaded stay visible.
 - If one kind of result can't be searched right now, a line in its place says so, and the other results are still correct.
 
 ## Running progress
@@ -33,7 +33,8 @@ In a follow-up, state the new question and which files to use. An Agent selected
 
 - After you send a message, the progress box above the answer shows the current stage, step number, and elapsed time on the first line. Below it are the recent steps and the current action. Select the first line to see the full process. Select a failed step to see what went wrong. Select the first line again to collapse the process.
 - To stop an answer, select **Stop** at the bottom right of the composer (a gray button, so it's easy to tell apart from Send). The button changes to **Stopping…** until the task has actually ended.
-- While an answer is running, you can type an instruction to adjust it. Once you start typing, the bottom-right button becomes **Add instruction**, which queues your text for the current answer, and **Stop** moves to its left, so the button you usually press never cancels the answer. Pressing Enter does the same as **Add instruction**.
+- While an answer is running, you can type an instruction to adjust it. Once you start typing, the bottom-right button becomes **Add instruction**, and **Stop** moves to its left, so the button you usually press never cancels the answer. Pressing Enter does the same as **Add instruction**.
+- An added instruction is used as soon as the answer reaches its next step, also while an Agent is still working on part of the task. It then appears inside that answer, at the point where it was picked up. If the answer is already being written, the instruction runs right after it as a follow-up. An instruction with an attachment or a referenced resource always runs after the answer.
 - When the answer is done, the progress collapses into one neutral line, "Execution ended", with the elapsed time. Select it to see the process again. If the task couldn't finish, the progress collapses into one line, "Not finished · steps done · time taken" ("3 of 5 steps" when the plan length is known); select it to see the whole process, and find the reason and any recovery action on the failure card below it.
 
 Expand the existing process to see business queries, reads, computations and result actions in their original order. Internal result packing and closeout corrections do not appear as separate finished steps. A batch lists its individual query outcomes once, while keeping successful results available. When these outcomes already explain the batch failure, it adds no duplicate generic error or diagnostic block; specific access/input problems and uncertain outcomes retain their original explanation. The execution-ended line does not claim every requested result was delivered: the answer explains actual missing work, uncertain results or required permissions/materials. A verified recovery needs no additional warning merely because an earlier attempt failed; an unrelated later success does not establish recovery.
@@ -114,6 +115,8 @@ A failed turn may still have saved report sections and files. Check **Results** 
 
 Cards that ask you to choose, add information, or approve a plan have a warning-colored border while they're waiting for you. After you answer or approve, the card collapses into a one-line result that stays in the conversation, including after a refresh.
 
+When an email or external tool needs your confirmation, its card appears under the waiting step in the conversation. Check what will be sent or changed and make your choice before the countdown ends. If time runs out, the action is skipped. The card keeps the recorded outcome after the task continues.
+
 To answer a question card:
 
 1. Pick an option, or type your answer in **Other, type your own…**. Picking only selects; you can change your choice until you send it.
@@ -164,7 +167,7 @@ You can also ask to show a line, bar, horizontal bar, area or stacked bar chart 
 
 Browser Back and Forward follow the selected Agent or settings editor. Leaving an editor through history keeps its unsaved input in the current conversation; returning through history restores it. A settings link opens only in its matching Space and with your current permissions.
 
-When a generated file is corrected during an answer, the answer's file cards show the final revision. Expand the execution process to find earlier versions. Independent files remain separate, even when their filenames match; files are kept separate when their revision relationship cannot be established.
+When a generated file is corrected during an answer, the answer's file cards show the final revision. The run trace can list intermediate files. If an earlier version has been cleaned up, its trace entry may still be visible. Independent files remain separate, even when their filenames match; files are kept separate when their revision relationship cannot be established.
 
 When you reopen a conversation, the latest answer may appear while its saved results are still loading. If you see **Loading results…** below the answer, wait for the file card to appear before opening or downloading it.
 
@@ -175,15 +178,21 @@ When you reopen a conversation, the latest answer may appear while its saved res
 
 HTML file previews fill the available height below the Results controls and resize with the window. Scroll inside the page to see longer content.
 
-When a file delivered earlier is revised, Results and the Files page list it once and show its latest version, for example "Version 2 of 2". Deleting the file from the Files page deletes every version; **Undo** or the trash restores them together. Earlier file cards in the conversation open and download the latest version, say "Updated to version N", and offer "Download version N" for the version they delivered. Each file keeps its three newest versions (a draft replaced by a later save in the same request goes first); older versions are cleaned up automatically, and the card says so. Versions used by a report, the knowledge base, a document or an export snapshot are never cleaned up. After opening the file in Results, **Version History** in the **More actions** menu downloads any kept version. A file added to the knowledge base stays at the version you added: the knowledge base says "Newer version N available", and the Files page says the knowledge base uses an older version and offers **Add version N**. After adding it, remove the old entry from the knowledge base.
-
 HTML previews also offer **Stop interaction** and **Restart interaction**. Restarting resets local page state. If a page exceeds preview complexity or preparation limits, simplify it or download the original. Preview isolation does not impose a hard CPU or memory limit on your browser. Downloaded original HTML retains its scripts and can run outside preview restrictions when opened locally.
 
 Dragging files into the conversation, resizing and enlarging from the keyboard, and the dot for new results are described in [Drag and drop, shortcuts, and hints on the conversation page](conversation-workbench-actions.en-US.md).
 
+### Find or download a file version
+
+After a revision, **Results** and **Files** show the file once, at its latest version. Open an earlier file card to see the latest version, or use **Download version N** on the card to get the version it originally delivered, when available.
+
+If you own the conversation, open the file in **Results** and choose **More actions → Version History** to download a retained version. Bowhead keeps the three newest versions and older versions protected by references such as reports, knowledge-base entries, documents or saved exports. Older versions are removed only when no answer in the conversation is running or waiting for your reply, so the list can briefly show more. Download a copy while it is available if you need to keep a specific historical version.
+
+Deleting a file from **Files** moves all its versions to the trash. Undo or restore the file to recover them together.
+
 ## Reviewing and finding document files
 
-To fill or update a PowerPoint file in an ordinary conversation, attach the PPTX and say what it should contain, for example that it is only a format template and which data to use. The filled file appears in **Results** as a PPTX you can open and download; there is no draft to confirm. Check the pages before you use it: charts, number formats and leftover template text are the usual places to look. Ask in the same conversation for corrections or for a PDF of the file. If you allow demo values, the answer says which figures are illustrative.
+To fill a template and download the PPTX from Results, see [Fill or update a PowerPoint template](powerpoint-templates.en-US.md).
 
 The draft review described below applies to document drafts that already exist, and to Agents that include the **PPTX template drafts** Plugin.
 
@@ -320,3 +329,7 @@ An available Agent may still need an optional Team service for a particular task
 The bell shows a number for items that need your action and a dot when there are only unread updates. Reading an unresolved action does not resolve it. Open the original item to answer or decide; archive hides its notification for you.
 
 If notification counts or the list cannot load, open the bell and select **Retry**. Previously confirmed counts may remain visible while the failure is shown. A failed read/archive or **Mark all read** leaves its previous state available for retry. Switching categories keeps the selected category's results together.
+
+## When an instruction is awaiting confirmation
+
+If the app is still confirming a send, the composer keeps the submitted text visible and temporarily locks it. Keep the conversation open while the app checks the existing send.

@@ -101,8 +101,8 @@ async def test_python_sandbox_result_separates_script_facts_artifacts_and_file_l
         else {"code": "print('done')"}
     )
     res = await tool.handler(arguments, object())
-    # Relative names, without host paths.
-    assert res["outputs"] == ["rev_monthly.csv", "nested/debug.txt"]
+    # Only what was saved: an unsaved nested file is not listed as an output, and no host path leaks.
+    assert res["outputs"] == ["rev_monthly.csv"]
     assert res["workdir"] is None
     assert str(tmp_path) not in str(res["outputs"])
     # Artifact refs remain exposed (the supported way to reuse data across calls).
@@ -218,32 +218,58 @@ async def test_python_sandbox_rejects_ambiguous_deliverable_without_filename(
     assert rt.calls == []
 
 
-async def test_python_sandbox_rejects_deliverable_filename_with_path(
-    tmp_path: Path,
-) -> None:
+@pytest.mark.parametrize(
+    ("entries", "message"),
+    [
+        (["nested\\final.mp4"], "relative path inside the working directory"),
+        ([123], "file or folder paths"),
+        (["/etc/passwd"], "relative path inside the working directory"),
+        (["../x.html"], "relative path inside the working directory"),
+        (["a/./b.html"], "relative path inside the working directory"),
+        (["a//b.html"], "relative path inside the working directory"),
+        (["a/b/c/d/e.html"], "deeper than 4 levels"),
+        (["inputs/rows.csv"], "inside inputs/, skill/ or __pycache__"),
+        (["skill/"], "inside inputs/, skill/ or __pycache__"),
+        (["x/__pycache__/"], "inside inputs/, skill/ or __pycache__"),
+        (["site/", "site/index.html"], "already inside the declared folder 'site/'"),
+        (["report.pdf", "build/report.pdf"], "would both be saved as 'report.pdf'"),
+        (["site/", "site.zip"], "would both be saved as 'site.zip'"),
+    ],
+)
+async def test_python_sandbox_refuses_unsafe_or_conflicting_deliverable_entries(tmp_path: Path, entries: list, message: str) -> None:
     _mk_skill(tmp_path, "python_sandbox", script="runner.py")
     cat = SkillCatalog(roots=[tmp_path])
     cat.refresh()
     rt = _FixedRuntime(_FakeResult())
     tool = _invoke_tool(cat, rt)
-
-    for filename in ("nested/final.mp4", "nested\\final.mp4", 123):
-        result = await tool.handler(
-            {
-                "name": "python_sandbox",
-                "script": "runner.py",
-                "input": {
-                    "code": "print('done')",
-                    "purpose": "deliverable",
-                    "deliverable_outputs": [filename],
-                },
-            },
-            object(),
-        )
-
-        assert result["error_kind"] == "invalid_args"
-        assert "top-level output filenames" in result["error"]
+    result = await tool.handler(
+        {
+            "name": "python_sandbox",
+            "script": "runner.py",
+            "input": {"code": "print('done')", "purpose": "deliverable", "deliverable_outputs": entries},
+        },
+        object(),
+    )
+    assert result["error_kind"] == "invalid_args"
+    assert message in result["error"]
     assert rt.calls == []
+
+
+async def test_python_sandbox_accepts_nested_file_and_folder_deliverables(tmp_path: Path) -> None:
+    _mk_skill(tmp_path, "python_sandbox", script="runner.py")
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult())
+    tool = _flat_tool(cat, rt)
+    await tool.handler(
+        {
+            "code": "print('done')",
+            "purpose": "deliverable",
+            "deliverable_outputs": ["game.html", " build/report.pdf ", "site/", "game.html"],
+        },
+        object(),
+    )
+    assert rt.calls[0]["_deliverable_outputs"] == ["game.html", "build/report.pdf", "site/"]
 
 
 async def test_other_skill_keeps_host_paths(tmp_path: Path) -> None:

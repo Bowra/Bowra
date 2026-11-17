@@ -74,6 +74,7 @@ CONFIGURATION_READ = "configuration_read"
 CONFIGURATION_RESULT = "configuration_result"
 CONFIGURATION_SUBMIT = "configuration_submit"
 EDIT_CHART = "edit_chart"
+FIND_RESULTS = "find_results"
 GET_CURRENT_USER = "get_current_user"
 GOOGLE_DOC_WRITE = "google_doc_write"
 GOOGLE_SHEET_WRITE = "google_sheet_write"
@@ -185,6 +186,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "configuration_result",
     "configuration_submit",
     "edit_chart",
+    "find_results",
     "get_current_user",
     "google_doc_write",
     "google_sheet_write",

@@ -12,7 +12,7 @@ import respx
 from bowhead_core.events import TurnEventBus
 from bowhead_core.skill_bridge import register_skill_tools
 from bowhead_core.skill_read_access import SkillReadAccessError
-from bowhead_core.subagent import SubagentRunner
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.tool_registry import ToolRegistry
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope
 from test_skill_model_invocation import adapter_for, router_for, success
@@ -177,6 +177,10 @@ async def test_native_runner_reads_unselected_sop_and_completes_original_executi
         tool = next(item for item in body["messages"] if item["role"] == "tool")
         assert json.loads(tool["content"])["body"] == "BASELINE_SOP_unused 2026"
         assert body["stream"] is True
+        if len(seen) == 3:
+            # A prose ending after successful Tool work gets one runtime note (ce9390072);
+            # the same prose answer then ends the run.
+            assert UNRETURNED_WORK_NOTE in body["messages"][-1]["content"]
         return success("openai", "stream")
 
     try:
@@ -184,9 +188,9 @@ async def test_native_runner_reads_unselected_sop_and_completes_original_executi
             route = mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             runner = SubagentRunner(router=router_for(adapter), tool_registry=registry, team_subagent_store=case.users)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
-            assert result.ok and route.call_count == 2, (result.error, [[m for m in body["messages"] if m["role"] == "tool"] for body in seen])
+            assert result.ok and route.call_count == 3, (result.error, [[m for m in body["messages"] if m["role"] == "tool"] for body in seen])
         calls = rows(case, "chat_reference_model_invocations")
-        assert len(calls) == 2 and all(item["status"] == "completed" for item in calls)
+        assert len(calls) == 3 and all(item["status"] == "completed" for item in calls)
         assert {item["execution_id"] for item in calls} == {case.primary.binding.execution_id}
     finally:
         await adapter.close()

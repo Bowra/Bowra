@@ -24,6 +24,7 @@ from bowhead_skill.runtime import RunLimits, RunResult, SkillRuntime
 from bowhead_skill.script_langs import (
     all_entry_extensions,
     entry_extensions,
+    guaranteed_browser_libraries,
     guaranteed_cli,
     guaranteed_node_packages,
     guaranteed_runtimes,
@@ -42,6 +43,7 @@ __all__ = [
     "builtin_skill_names",
     "default_catalog",
     "entry_extensions",
+    "guaranteed_browser_libraries",
     "guaranteed_cli",
     "guaranteed_node_packages",
     "guaranteed_runtimes",

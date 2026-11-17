@@ -319,6 +319,57 @@ def test_inventory_names_a_checkpoint_only_when_unique() -> None:
     assert render_delivered_files_block([]) == ""
 
 
+def test_a_cut_list_says_how_many_files_exist_and_names_the_lookup() -> None:
+    from bowhead_core.delivered_files import refusal, render_delivered_files_block
+
+    files = [_artifact(f"art_{number}", f"store-{number}.html") for number in range(12)]
+    cut = render_delivered_files_block(files, now=NOW, total=20)
+    notice = "Showing the newest 12 of 20 delivered files. To find another, call find_results with part of its name."
+    assert cut.splitlines()[-2:] == [notice, "</delivered_files>"]
+    # A list that shows everything, or whose total is unknown, adds nothing.
+    for total in (12, None):
+        assert "find_results" not in render_delivered_files_block(files, now=NOW, total=total)
+
+    # A refusal lists the same newest files; it says so, and where an older file's identifier comes from.
+    refused = refusal("revise_files_not_found", ids=["art_missing"], available=files[:2])
+    assert "Newest files delivered in this session: art_0 (store-0.html); art_1 (store-1.html)." in refused["hint"]
+    assert "call find_results with part of its name to get its artifact_id" in refused["hint"]
+    assert (refused["reason_code"], refused["path"], refused["error_kind"]) == ("revise_files_not_found", "revise_files", "invalid_args")
+    # A newer version is named outright, so that refusal needs no lookup.
+    assert "find_results" not in refusal("revise_files_not_latest", ids=["art_0"], latest="art_9")["hint"]
+
+
+async def test_lead_counts_the_delivered_files_only_when_the_list_is_full(files_enabled) -> None:
+    from bowhead_core.agents.lead_orchestrator import _add_delivered_files_block
+
+    class Store:
+        def __init__(self, listed: int, total: int) -> None:
+            self.files = [_artifact(f"art_{number}", f"store-{number}.html") for number in range(listed)]
+            self.total, self.counted = total, 0
+
+        async def list_session_deliverables(self, **_scope):
+            return self.files
+
+        async def count_session_deliverables(self, *, session_id, user_id, exclude_turn_id):
+            assert (session_id, user_id, exclude_turn_id) == ("s1", "u", "t9"), "the total uses the list's own scope"
+            self.counted += 1
+            return self.total
+
+    async def block_for(store: Store) -> str:
+        blocks: list[str] = []
+        ctx = SimpleNamespace(artifact_store=store, session_id="s1", user_id="u")
+        await _add_delivered_files_block(ctx, "t9", lambda block, **_more: blocks.append(block), checkpoints=())
+        return blocks[0]
+
+    full = Store(listed=12, total=20)
+    assert "Showing the newest 12 of 20 delivered files." in await block_for(full)
+    assert full.counted == 1
+    # A list below its limit shows everything, so nothing is counted and nothing is added.
+    short = Store(listed=3, total=3)
+    assert "find_results" not in await block_for(short)
+    assert short.counted == 0
+
+
 def test_spawn_schema_and_history_hint_treat_a_requested_file_as_the_report(monkeypatch) -> None:
     """Regression check N3: the first follow-up to a requested HTML file revises the file, not the Canvas report."""
     from bowhead_core.cross_turn_digest import render_history_rules_block
@@ -391,6 +442,10 @@ async def test_session_deliverables_lists_only_revisable_files_of_earlier_turns(
         await db.commit()
     listed = await artifacts.list_session_deliverables(session_id="s1", user_id="u", exclude_turn_id="t2")
     assert [artifact.id for artifact in listed] == [newest.id, older.id]
+    # The total a cut list states is counted with the list's own rule, exclusions included.
+    assert await artifacts.count_session_deliverables(session_id="s1", user_id="u", exclude_turn_id="t2") == 2
+    assert await artifacts.count_session_deliverables(session_id="s1", user_id="u") == 3
+    assert await artifacts.count_session_deliverables(session_id="s_other", user_id="u") == 1
     assert [artifact.id for artifact in await artifacts.list_session_deliverables(session_id="s1", user_id="u", limit=1)] == [
         (await artifacts.list_session_deliverables(session_id="s1", user_id="u"))[0].id
     ]

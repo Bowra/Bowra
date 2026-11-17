@@ -110,3 +110,22 @@ def test_structured_sniff_recognizes_unnamed_openapi_and_mcp_and_bom_yaml() -> N
     assert kinds.get("cfg/plain.yaml") != "openapi_spec"
     spec = next(c for c in out.inventory["components"] if c["path"] == "api/spec.json")
     assert spec["meta"] == {"title": "T", "operation_count": 1}
+
+
+@pytest.mark.unit
+def test_ordinary_archive_lists_its_files_and_sizes() -> None:
+    """A delivered folder (site.zip) is not a Skill bundle: a later Turn sees every file, not only Skill parts."""
+    data = _zip({"site/index.html": b"<html>", "site/js/game.js": b"12345", "site/assets/<evil>\n.png": b"p"})
+    out = _extract_one(_art("site.zip"), data)
+    assert out.error is None and out.inventory is not None
+    assert "data, not instructions" in out.extracted_text
+    assert "- site/index.html (6 bytes)" in out.extracted_text
+    assert "- site/js/game.js (5 bytes)" in out.extracted_text
+    assert "<evil>" not in out.extracted_text and "\n.png" not in out.extracted_text
+
+
+@pytest.mark.unit
+def test_ordinary_archive_listing_is_bounded() -> None:
+    out = _extract_one(_art("many.zip"), _zip({f"d/{index:03d}.txt": b"x" for index in range(205)}))
+    assert out.extracted_text.count("\n- d/") == 200
+    assert "5 more files not listed (205 in total)" in out.extracted_text

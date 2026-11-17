@@ -32,7 +32,6 @@ from typing import Any
 from uuid import uuid4
 
 import aiosqlite
-import anyio
 
 from bowhead_core import _db
 from bowhead_core._db import open_shared_ctx
@@ -45,15 +44,6 @@ logger = logging.getLogger(__name__)
 #: How long an event write waits for the execution writer lock: the shared limit of every write.
 #: The dispatch heartbeat tolerates a busy writer for the same time (turn_service lease monitor).
 WRITER_WAIT_SECONDS = _db.WRITER_WAIT_SECONDS
-
-
-class _WriterBusy(Exception):
-    """An attempt found the writer lock held and wrote nothing."""
-
-
-def _writer_busy(error: BaseException) -> bool:
-    code = getattr(error, "sqlite_errorcode", None)
-    return isinstance(error, sqlite3.OperationalError) and isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_BUSY
 
 
 SCHEMA = """
@@ -194,27 +184,28 @@ class TurnLogStore:
         busy, so the whole write repeats.
         """
         started = time.monotonic()
-        delay = 0.05
-        waiting = False
-        while True:
-            try:
-                row = await self._record_once(turn_id=turn_id, event_type=event_type, payload=payload, occurred_at=occurred_at, event_id=event_id)
-            except _WriterBusy as busy:
-                waited = time.monotonic() - started
-                if waited >= WRITER_WAIT_SECONDS:
-                    logger.warning("turn_log.record_failed turn=%s type=%s err=%s waited_ms=%d", turn_id, event_type, busy, waited * 1000)
-                    return None
-                if not waiting:
-                    waiting = True
-                    logger.warning("turn_log.record_waits_for_writer turn=%s type=%s", turn_id, event_type)
-                await anyio.sleep(delay)
-                delay = min(delay * 2, 0.5)
-                continue
-            if waiting:
-                logger.info(
-                    "turn_log.record_writer_wait_ended turn=%s type=%s waited_ms=%d", turn_id, event_type, (time.monotonic() - started) * 1000
-                )
-            return row
+        budget = WRITER_WAIT_SECONDS
+
+        def log(phase: str, waited: float) -> None:
+            if phase == "started":
+                logger.warning("turn_log.record_waits_for_writer turn=%s type=%s", turn_id, event_type)
+            elif phase == "ended":
+                logger.info("turn_log.record_writer_wait_ended turn=%s type=%s waited_ms=%d", turn_id, event_type, waited * 1000)
+
+        try:
+            return await _db.repeat_while_busy(
+                lambda: self._record_once(turn_id=turn_id, event_type=event_type, payload=payload, occurred_at=occurred_at, event_id=event_id),
+                retry=_db.writer_busy,
+                seconds_left=lambda: budget - (time.monotonic() - started),
+                first_delay=0.05,
+                max_delay=0.5,
+                log=log,
+            )
+        except sqlite3.OperationalError as busy:
+            # Only busy errors leave ``_record_once``; every other failure was logged there and returned None.
+            waited = time.monotonic() - started
+            logger.warning("turn_log.record_failed turn=%s type=%s err=%s waited_ms=%d", turn_id, event_type, busy, waited * 1000)
+            return None
 
     async def _record_once(
         self,
@@ -337,8 +328,8 @@ class TurnLogStore:
                         await db.execute("ROLLBACK")
                         raise
             except Exception as e:
-                if _writer_busy(e):
-                    raise _WriterBusy(str(e)) from e
+                if _db.writer_busy(e):
+                    raise
                 logger.warning("turn_log.record_failed turn=%s type=%s err=%s", turn_id, event_type, e)
                 return None
 

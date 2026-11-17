@@ -54,7 +54,12 @@ async def test_direct_search_question_resume_retains_policy_budget_and_results(h
             active_generation_id=None,
         )
         orchestrator.kb_files_store = SimpleNamespace(get=AsyncMock(return_value=file))
-        orchestrator.kb_file_authorizer = AsyncMock(return_value=True)
+
+        # A plain authorizer: an AsyncMock would also invent a history_validation boundary.
+        async def authorize(*_args, **_kwargs):
+            return True
+
+        orchestrator.kb_file_authorizer = authorize
     searches = []
 
     async def search(args, _ctx):

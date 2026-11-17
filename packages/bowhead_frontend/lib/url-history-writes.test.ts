@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Every page-owned history write must keep Next routing aligned with the real URL (see `withoutNextRouterHistoryMarkers`).
  *

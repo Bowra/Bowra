@@ -25,6 +25,7 @@ from bowhead_router.transport import (
 )
 
 from bowhead_router import (
+    ImageRef,
     LLMRequest,
     Message,
     OpenAICompatibleAdapter,
@@ -114,7 +115,8 @@ async def test_responses_invoke_posts_input_shape_to_responses_path() -> None:
         await adapter.close()
 
     body = json.loads(route.calls.last.request.content)
-    assert body["input"] == [{"role": "user", "content": "ping"}]
+    # JSON mode on /responses needs "json" in an input message; instructions do not count.
+    assert body["input"] == [{"role": "user", "content": "ping\n\nRespond with a JSON object."}]
     assert body["instructions"] == "You are terse."
     assert body["max_output_tokens"] == 32000
     assert body["store"] is False  # DashScope defaults to true (provider-side retention); explicitly disable it.
@@ -133,6 +135,136 @@ async def test_responses_invoke_posts_input_shape_to_responses_path() -> None:
     assert resp.usage.output_tokens == 2
     assert resp.usage.cached_tokens == 4
     assert resp.finish_reason == "stop"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("messages", "expected_input"),
+    [
+        # Instructions alone mention JSON (the Skill-only receiver selection shape): the note joins the user message.
+        (
+            [Message(role="user", content='{"task":"t","candidates":[]}')],
+            [{"role": "user", "content": '{"task":"t","candidates":[]}\n\nRespond with a JSON object.'}],
+        ),
+        # A user message that already names JSON is sent unchanged, in any case.
+        ([Message(role="user", content="Answer as Json, please")], [{"role": "user", "content": "Answer as Json, please"}]),
+        # Block content gains a text block instead of losing its image.
+        (
+            [Message(role="user", content="look", images=[ImageRef(mime="image/png", base64="AAAA")])],
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "look"},
+                        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                        {"type": "input_text", "text": "Respond with a JSON object."},
+                    ],
+                }
+            ],
+        ),
+        # An assistant-final history keeps alternation with a separate trailing user item.
+        (
+            [Message(role="user", content="q"), Message(role="assistant", content="a")],
+            [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}, {"role": "user", "content": "Respond with a JSON object."}],
+        ),
+    ],
+)
+@respx.mock
+async def test_responses_json_mode_names_json_in_input(messages, expected_input) -> None:
+    route = respx.post(f"{BASE}/responses").respond(200, json=_responses_ok())
+    adapter = _adapter()
+    try:
+        await adapter.invoke(
+            LLMRequest(
+                model="resp-model",
+                system='Return JSON only as {"candidate_index": integer}.',
+                messages=messages,
+                response_format={"type": "json_object"},
+            )
+        )
+    finally:
+        await adapter.close()
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["input"] == expected_input
+    assert body["text"] == {"format": {"type": "json_object"}}
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_json_note_only_for_responses_json_object() -> None:
+    """Chat Completions counts the system message, and other formats have no such rule."""
+    chat_route = respx.post(f"{BASE}/chat/completions").respond(
+        200,
+        json={"model": "chat-model", "choices": [{"message": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}]},
+    )
+    responses_route = respx.post(f"{BASE}/responses").respond(200, json=_responses_ok())
+    schema_format = {"type": "json_schema", "name": "x", "schema": {"type": "object"}}
+    adapter = _adapter()
+    try:
+        await adapter.invoke(
+            LLMRequest(
+                model="chat-model", system="Return JSON.", messages=[Message(role="user", content="ping")], response_format={"type": "json_object"}
+            )
+        )
+        await adapter.invoke(LLMRequest(model="resp-model", messages=[Message(role="user", content="ping")], response_format=schema_format))
+        await adapter.invoke(LLMRequest(model="resp-model", messages=[Message(role="user", content="ping")]))
+    finally:
+        await adapter.close()
+
+    assert json.loads(chat_route.calls.last.request.content)["messages"][-1] == {"role": "user", "content": "ping"}
+    assert [json.loads(call.request.content)["input"] for call in responses_route.calls] == [[{"role": "user", "content": "ping"}]] * 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stream", [False, True])
+@respx.mock
+async def test_responses_400_logs_upstream_reason_not_surface_hint(stream, caplog) -> None:
+    error = {
+        "error": {
+            "message": "Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'.",
+            "type": "invalid_request_error",
+            "param": "input",
+            "code": None,
+        }
+    }
+    respx.post(f"{BASE}/responses").respond(400, json=error)
+    adapter = _adapter()
+    request = LLMRequest(model="resp-model", messages=[Message(role="user", content="x")], response_format={"type": "json_schema"}, stream=stream)
+    caplog.set_level("WARNING", logger="bowhead_router.adapters.openai_compat")
+    try:
+        with pytest.raises(OpenAICompatError):
+            if stream:
+                await _collect_stream(adapter, request)
+            else:
+                await adapter.invoke(request)
+    finally:
+        await adapter.close()
+
+    lines = [record.getMessage() for record in caplog.records if "openai_compat.responses." in record.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].startswith("openai_compat.responses.request_rejected provider=test_provider model=resp-model status=400")
+    assert "type=invalid_request_error" in lines[0] and "param=input" in lines[0]
+    assert "must contain the word 'json'" in lines[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status", [404, 405])
+@respx.mock
+async def test_responses_missing_route_keeps_surface_hint(status, caplog) -> None:
+    respx.post(f"{BASE}/responses").respond(status, text="Not Found")
+    adapter = _adapter()
+    caplog.set_level("WARNING", logger="bowhead_router.adapters.openai_compat")
+    try:
+        with pytest.raises(OpenAICompatError):
+            await adapter.invoke(LLMRequest(model="resp-model", messages=[Message(role="user", content="x")]))
+    finally:
+        await adapter.close()
+
+    lines = [record.getMessage() for record in caplog.records if "openai_compat.responses." in record.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].startswith(f"openai_compat.responses.surface_error provider=test_provider model=resp-model status={status}")
+    assert "set the model's api_surface back to chat_completions" in lines[0]
 
 
 @pytest.mark.unit

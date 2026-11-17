@@ -269,6 +269,7 @@ async def test_archived_kb_history_reads_are_side_effect_free(
             "post",
             "/api/v1/kb/presign",
             {
+                "knowledge_intent": "add_to_knowledge",
                 "filename": "archived.pdf",
                 "mime": "application/pdf",
                 "size_bytes": 100,
@@ -285,6 +286,7 @@ async def test_archived_kb_history_reads_are_side_effect_free(
             "post",
             "/api/v1/kb/presign/bundle",
             {
+                "knowledge_intent": "add_to_knowledge",
                 "filename": "archived.zip",
                 "mime": "application/zip",
                 "size_bytes": 100,

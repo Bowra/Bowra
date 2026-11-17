@@ -71,9 +71,10 @@ describe("notification read and mutation failures", () => {
   it.each([503, 500, 502])("keeps unavailable list %i retryable", async (status) => {
     api.fetchNotifications.mockRejectedValueOnce(failure(status)).mockResolvedValue(page([item("Recovered")]));
     mount(); await open();
-    // The surface sentence stays first; the kind of server failure follows it.
-    expect(await screen.findByText(startsWith("Couldn't load notifications. Try again later."))).toBeVisible();
+    // The surface sentence stays first; the kind of server failure and its next step follow it.
+    expect(await screen.findByText(startsWith("Couldn't load notifications."))).toBeVisible();
     expect(document.body.textContent).toContain("Try again shortly");
+    expect(document.body.textContent).not.toContain("Try again later");
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Recovered")).toBeVisible();
@@ -87,14 +88,14 @@ describe("notification read and mutation failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("2 pending · 0 unread updates")).toBeVisible();
     act(() => publishNotificationCount({ ok: false, error: failure(503) }));
-    expect(await screen.findByText(startsWith("Couldn't refresh notification counts. Retry to check the current counts."))).toBeVisible();
+    expect(await screen.findByText(startsWith("Couldn't refresh notification counts."))).toBeVisible();
     expect(screen.getByText("2 pending · 0 unread updates")).toBeVisible();
   });
   it.each([404, 500, 503])("keeps a failed row-read %i from navigating or hiding the center", async (status) => {
     api.fetchNotifications.mockResolvedValue(page([item("Read target")]));
     api.markNotificationRead.mockRejectedValue(failure(status));
     mount(); await open(); fireEvent.click(await screen.findByText("Read target"));
-    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't mark this notification as read. Try again later."));
+    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't mark this notification as read."));
     expect(api.push).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     if (status !== 404) expect(rows()[0]).toHaveClass("unread");
@@ -104,7 +105,7 @@ describe("notification read and mutation failures", () => {
     api.archiveNotification.mockRejectedValue(failure(status));
     mount(); await open(); await screen.findByText("Archive target");
     fireEvent.click(screen.getByRole("button", { name: "Archive notification" }));
-    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't archive this notification. Try again later."));
+    await screen.findByText(status === 404 ? "This notification is no longer available. Refresh the list." : startsWith("Couldn't archive this notification."));
     expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     if (status !== 404) expect(rows()).toHaveLength(1);
   });
@@ -117,7 +118,7 @@ describe("notification read and mutation failures", () => {
     fireEvent.click(button); fireEvent.click(button);
     expect(api.markAllNotificationsRead).toHaveBeenCalledTimes(1);
     await act(async () => write.reject(failure(503)));
-    expect(await screen.findByText(startsWith("Couldn't mark all notifications as read. Try again."))).toBeVisible();
+    expect(await screen.findByText(startsWith("Couldn't mark all notifications as read."))).toBeVisible();
     expect(rows()[0]).toHaveClass("unread");
     expect(button).not.toBeDisabled();
     fireEvent.click(button);

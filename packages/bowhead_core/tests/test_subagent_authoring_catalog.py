@@ -336,6 +336,39 @@ def test_catalog_version_label_follows_the_opened_tools(monkeypatch) -> None:
     assert native_allowlist_version() == "native-authoring-v3"
 
 
+@pytest.mark.asyncio
+async def test_openapi_operations_are_named_by_operation_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Plugin and Agent editors show `addPet`, as the Tools page does, never `teammcp.<source>.<op>`."""
+    from bowhead_core.openapi_tool_source import OpenApiOp, openapi_entry
+
+    op = OpenApiOp(
+        operation_id="addPet",
+        method="post",
+        path="/pet",
+        summary="Add a new pet",
+        params=(),
+        body_required=True,
+        body_schema={"type": "object"},
+        input_schema={"type": "object"},
+        body_prop_names=frozenset(),
+    )
+    entry = openapi_entry("ots_1", op)
+    assert entry.dispatch_name.startswith("teammcp.")
+
+    async def _load(team_id: str, store: object):
+        return [entry], {"ots_1": SimpleNamespace(id="ots_1", name="Petstore", updated_at="2026-11-15")}
+
+    monkeypatch.setattr("bowhead_core.subagent_authoring_catalog.load_team_tool_entries", _load)
+    snapshot = await SubagentAuthoringCatalogService().build(
+        store=object(), team_id="team_a", actor_user_id="user_a", actor_active=True, mcp_entitled=True
+    )
+
+    tool = next(t for t in snapshot.team_tools if t.stable_ref == entry.advertised_name)
+    assert tool.display_name == "addPet"
+    assert tool.description == "Add a new pet"
+    assert tool.source_display_name == "Petstore"
+
+
 def test_memory_tools_are_not_offered_for_agent_authoring() -> None:
     """remember/recall are Lead built-ins listed in tool_aliases.yaml for display names only."""
     from bowhead_core.agents._generated.role_bindings import _PARADIGM_V2_ROLE_MAP
@@ -344,6 +377,24 @@ def test_memory_tools_are_not_offered_for_agent_authoring() -> None:
     for name in ("remember", "recall"):
         assert "analyst" in _PARADIGM_V2_ROLE_MAP[name]  # would otherwise qualify
         assert name not in NATIVE_ALLOWLIST
+
+
+def test_pickers_list_only_user_visible_tools_with_a_declared_risk() -> None:
+    """A listed built-in Tool is `kind: tool` with a risk; system parts never show as locked rows nobody can unlock.
+
+    render_deck, tool_switch_context and find_results are parts that reached the list through role bindings
+    (Plugin editor walkthrough on 116, 2026-11-15). They stay in the allowlist for dependency compilation.
+    """
+    from bowhead_core.agents._generated.tool_kinds import TOOL_KINDS
+    from bowhead_core.subagent_authoring_catalog import NATIVE_ALLOWLIST, native_authoring_tools
+
+    listed = [tool for tool in native_authoring_tools() if tool.discoverable]
+    assert listed
+    assert [tool.stable_ref for tool in listed if TOOL_KINDS.get(tool.stable_ref) != "tool"] == []
+    assert [tool.stable_ref for tool in listed if tool.risk == "unknown"] == []
+    hidden = {tool.stable_ref for tool in native_authoring_tools() if not tool.discoverable}
+    assert {"render_deck", "tool_switch_context", "find_results"} <= hidden
+    assert {"render_deck", "tool_switch_context", "find_results"} <= NATIVE_ALLOWLIST
 
 
 @pytest.mark.asyncio

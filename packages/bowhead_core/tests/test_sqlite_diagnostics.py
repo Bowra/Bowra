@@ -187,6 +187,55 @@ async def test_async_worker_preserves_only_safe_request_correlation(tmp_path: Pa
         owner.close()
 
 
+async def test_cursor_block_failure_names_the_calling_frame(tmp_path: Path, captured: CapturedLog) -> None:
+    path = tmp_path / "bowhead.db"
+    database(path).close()
+    async with diagnostics.connect(path, timeout=0.01) as connection:
+        with pytest.raises(sqlite3.OperationalError):
+            async with connection.execute("SELECT missing FROM users") as cursor:
+                await cursor.fetchone()
+    # The driver's own context manager stands between the runtime and this test; it is not the caller.
+    assert "test_cursor_block_failure_names_the_calling_frame" in str(captured.events[-1]["callsite"])
+
+
+async def test_statement_under_a_standard_library_timeout_names_the_calling_frame(tmp_path: Path, captured: CapturedLog) -> None:
+    import asyncio
+
+    path = tmp_path / "bowhead.db"
+    database(path).close()
+    async with diagnostics.connect(path, timeout=0.01) as connection:
+        with pytest.raises(sqlite3.OperationalError):
+            await asyncio.wait_for(connection.execute("SELECT missing FROM users"), 5)
+    # ``asyncio.wait_for`` awaits the statement on the caller's behalf; it is not the caller.
+    assert "test_statement_under_a_standard_library_timeout" in str(captured.events[-1]["callsite"])
+
+
+async def test_statement_the_runtime_issues_itself_names_the_runtime_frame(tmp_path: Path, captured: CapturedLog) -> None:
+    import asyncio
+
+    path = tmp_path / "bowhead.db"
+    database(path).close()
+    # Stands for runtime code that runs as its own task, as the pool's release does: nothing above the task asked for it.
+    scope: dict[str, object] = {}
+    exec(  # noqa: S102 -- Fixed probe source compiled under a runtime file name.
+        compile("async def release(connection):\n    await connection.execute('SELECT missing FROM users')\n", "/runtime/_db.py", "exec"),
+        scope,
+    )
+    async with diagnostics.connect(path, timeout=0.01) as connection:
+        with pytest.raises(sqlite3.OperationalError):
+            await asyncio.create_task(scope["release"](connection))  # type: ignore[operator]
+    assert str(captured.events[-1]["callsite"]) == "_db.py:2:release"
+
+
+def test_installed_packages_below_the_standard_library_remain_callers() -> None:
+    standard_library = diagnostics._STANDARD_LIBRARY
+    assert diagnostics._between_runtime_and_caller(standard_library + "contextlib.py")
+    assert diagnostics._between_runtime_and_caller(diagnostics._DRIVER_DIRECTORY + "context.py")
+    assert not diagnostics._between_runtime_and_caller(standard_library + "site-packages/bowhead_core/session_store.py")
+    assert not diagnostics._between_runtime_and_caller(standard_library + "dist-packages/bowhead_core/session_store.py")
+    assert not diagnostics._between_runtime_and_caller("/app/packages/bowhead_core/src/bowhead_core/core.py")
+
+
 async def test_connection_failure_omits_customer_path(tmp_path: Path, captured: CapturedLog) -> None:
     with pytest.raises(sqlite3.OperationalError) as failure:
         async with diagnostics.connect(tmp_path / "private-customer" / "bowhead.db"):

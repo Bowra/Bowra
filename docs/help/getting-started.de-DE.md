@@ -16,6 +16,8 @@ Nutzen Sie diese Anleitung, wenn Bowra Material analysieren, eine Frage struktur
 4. Fügen Sie nur relevante Dateien hinzu und erklären Sie, wie jede Datei verwendet werden soll.
 5. Senden Sie die Anfrage und prüfen Sie Ablauf und Ergebnis. Verfeinern Sie Bedingungen oder Umfang in derselben Arbeit. Erstellen Sie nur für eine neue Fragestellung eine neue Arbeit.
 
+Wenn Sie eine vorhandene Präsentation weiterverwenden möchten, lesen Sie [Eine PowerPoint-Vorlage ausfüllen oder aktualisieren](powerpoint-templates.de-DE.md).
+
 ## Während der Analyse Fragen beantworten
 
 In einer normalen Unterhaltung kann ein Agent eine Fragekarte anzeigen, um einen Zeitraum, eine Kennzahlendefinition oder eine andere Bedingung zu bestätigen. Beantworten Sie jede Frage, ergänzen Sie bei Bedarf eigene Angaben und senden Sie die Antworten ab, damit die Analyse fortgesetzt wird. Die Karte bedeutet, dass die Analyse auf Ihre Eingabe wartet; sie ist kein Hinweis darauf, dass die Analyse abgeschlossen ist. Wenn keine Karte erscheint, antworten Sie mit den in der Unterhaltung angezeigten Fragen und ergänzen Sie weitere Details.
@@ -31,6 +33,8 @@ Wenn eine Aufgabe einen Datarc-Arbeitsbereich benötigt, wählen Sie bei der Auf
 Die persönlichen Einstellungen sind direkt aufrufbare Seiten. Öffnen Sie **Persönliche Einstellungen** im Kontomenü oder verwenden Sie die passende Adresse: Konto `/settings/profile/`, Sicherheit `/settings/security/`, Darstellung `/settings/appearance/`, Memory `/settings/memory/` oder Export `/settings/export/`. Sie können diese Adressen als Lesezeichen speichern oder direkt von einer anderen Seite öffnen.
 
 ## Prüfen, ob ein Ergebnis verwendbar ist
+
+Wenn laut Antwort ein Filter nicht angewandt wurde oder eine Kennzahl oder Dimension fehlt, prüfen Sie den tatsächlichen Datenumfang, bevor Sie Summen verwenden. Bitten Sie Bowhead um eine neue Abfrage mit dem gewünschten Zeitraum, der Region oder der Kategorie und prüfen Sie das neue Ergebnis.
 
 Bevor Sie ein fertiges Ergebnis teilen, prüfen Sie, ob es die Frage beantwortet, den gewünschten Zeitraum und die Filter berücksichtigt, wichtige Zahlen mit den Schlussfolgerungen verknüpft und die passenden Freigaben für Bericht, Anhänge und Quelldaten hat. Ein geteilter Bericht gewährt Kolleginnen und Kollegen keinen Zugriff auf Ihre private Unterhaltung, sämtliche Anhänge oder Ihre Datenidentität.
 

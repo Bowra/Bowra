@@ -11,6 +11,7 @@ import anyio
 import pytest
 from bowhead_core.chat_reference_admission import prepare_skill_reference_start_admission
 from bowhead_core.chat_references import InputDocument, ReferenceNode
+from bowhead_core.skill_method_policy import TaskMethodReadPolicy
 from bowhead_core.skill_read_closure import SkillReadClosureError, snapshot_prepared_skill_read_closure
 from bowhead_core.skill_read_material import SkillReadMaterialError
 from bowhead_core.skill_read_primary import prepare_reference_primary_skill_reads
@@ -133,11 +134,19 @@ async def test_changed_preflight_facts_roll_back_every_acceptance_record(receive
 
 
 @pytest.mark.parametrize("receiver_case", ["admission_root_only"], indirect=True)
-async def test_dependency_outside_published_baseline_rolls_back_the_reserved_primary(receiver_case):
+async def test_selected_dependency_outside_published_baseline_is_read_only_for_this_task(receiver_case):
+    # An explicit /Skill selection outside the Agent baseline is admitted as a task-scoped
+    # method (5622a4375) and never widens the baseline. A dependency the user did not select
+    # still needs its own baseline grant (test_implicit_dependency_requires_its_own_baseline_*).
     await candidate(receiver_case)
-    with pytest.raises(SkillReadReceiverError, match="^reference_skill_extension_denied$"):
-        await receiver_case.case.store.finalize_started_chat_submission(**receiver_case.case.args)
-    _assert_no_acceptance(receiver_case.case)
+    result = await receiver_case.case.store.finalize_started_chat_submission(**receiver_case.case.args)
+    assert result.outcome == "started"
+    actual_scope = receiver_case.scope.model_copy(update={"session_id": "s_reference"})
+    prepared, rendered = await prepare_reference_primary_skill_reads(receiver_case.sources, scope=actual_scope, turn_id="t_reference")
+    assert [grant.id for grant in prepared.receiver.grants] == [receiver_case.selected.id]
+    assert prepared.extension is not None and isinstance(prepared.extension.policy, TaskMethodReadPolicy)
+    assert receiver_case.child in prepared.extension.policy.resources
+    assert {item["resource"]["id"] for item in rendered.document()["skills"]} == {"builtin:method", "builtin:support"}
 
 
 @pytest.mark.parametrize("receiver_case", ["admission_selected_invoke", "admission_unused_invoke"], indirect=True)
@@ -277,13 +286,22 @@ async def test_transaction_uses_detached_parameters_without_file_io(receiver_cas
         prepared.input_document.nodes[0].parameters["year"] = 2099
         return await original(db, proof)
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("file IO during admission")
+    # Admission must not touch the installed Skill packages. Locating the SQLite domain files
+    # (aea6191e3) checks the database layout record, which is not Skill material.
+    def forbidden(name):
+        path_method = getattr(Path, name)
+
+        def call(self, *args, **kwargs):
+            if self.is_relative_to(receiver_case.root):
+                raise AssertionError("file IO during admission")
+            return path_method(self, *args, **kwargs)
+
+        return call
 
     monkeypatch.setattr(receiver_case.sources, "revalidate_in_connection", observe)
     with monkeypatch.context() as patch:
         for name in ("resolve", "stat", "read_bytes", "read_text", "open"):
-            patch.setattr(Path, name, forbidden)
+            patch.setattr(Path, name, forbidden(name))
         await receiver_case.case.store.finalize_started_chat_submission(**receiver_case.case.args)
     assert visits == [receiver_case.child, receiver_case.selected]
     _, rendered = await prepare_reference_primary_skill_reads(

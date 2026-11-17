@@ -1246,6 +1246,7 @@ async def test_chart_evidence_read_history_edit_and_revocation_use_current_artif
         from types import SimpleNamespace
 
         from bowhead_gateway.source_access_projection import project_event_payloads_for_viewer, project_live_event_payload_for_viewer
+        from starlette.requests import Request
 
         class EventSessions:
             async def get_turn(self, turn_id):
@@ -1255,7 +1256,8 @@ async def test_chart_evidence_read_history_edit_and_revocation_use_current_artif
                 return SimpleNamespace(id=session_id, workspace_id=canvas.workspace_id)
 
         app_ctx.state.session_store = EventSessions()
-        event_request = SimpleNamespace(app=app_ctx)
+        # Projection resolves the viewer from the request (9ca0bc4a0); this is the author's own dev-session request.
+        event_request = Request({"type": "http", "app": app_ctx, "method": "GET", "path": "/", "headers": [], "query_string": b""})
         event_payload = {"canvas_id": canvas.id, "seq": current.seq, "section": current.to_report_section()}
         live = await project_live_event_payload_for_viewer(event_request, "t_notes", "canvas.section_added", event_payload, event_ordinal=1)
         replay = await project_event_payloads_for_viewer(event_request, "t_notes", [("canvas.section_added", event_payload)], event_ordinals=[1])

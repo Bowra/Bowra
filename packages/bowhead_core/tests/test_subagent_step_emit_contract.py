@@ -472,7 +472,8 @@ def _bi_query_result_with_heavy_metadata(n_rows: int) -> dict[str, Any]:
         "_columns_before_projection": 6,
         "artifact_id": "art_rows",
         "query_explain": {"filters": ["region = east"], "measures": ["sales", "target", "attainment"]},
-        "_parse": {"tokens": tokens, "unknown_words": []},
+        # Since 1b7f93358 the model sees `_parse` without its tokens; the unmatched words remain model-visible.
+        "_parse": {"tokens": tokens, "unknown_words": [f"{t['word'].strip()} ({t['kind']}, {t['field']})" for t in tokens]},
         "_debug_cut_props": [{"word": t["word"], "prop": f"d{i}"} for i, t in enumerate(tokens)],
         "_how_to_use_in_sandbox": "Pass inputs to python_sandbox and read INPUTS['rows']['path']. " * 10,
     }

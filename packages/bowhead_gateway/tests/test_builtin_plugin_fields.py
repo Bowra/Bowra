@@ -33,8 +33,9 @@ def test_proposal_documents_refuse_invalid_builtin_selections(monkeypatch):
 
     _validate_builtin_plugin_selection({"builtin_plugin_ids": []})
     _validate_builtin_plugin_selection({"builtin_plugin_ids": ["builtin:designs"]})
+    # Settings Plugins belong to system Agents and are never selectable by team Agents.
     with pytest.raises(AgentChangeProposalError, match="builtin_plugin_not_selectable"):
-        _validate_builtin_plugin_selection({"builtin_plugin_ids": ["builtin:email"]})
+        _validate_builtin_plugin_selection({"builtin_plugin_ids": ["builtin:settings-space-preferences"]})
 
 
 def test_valid_selection_is_kept():
@@ -50,7 +51,7 @@ def test_valid_selection_is_kept():
     [
         (["designs"], "builtin_plugin_ids_invalid"),
         (["builtin:nope"], "builtin_plugin_unknown"),
-        (["builtin:email"], "builtin_plugin_not_selectable"),
+        (["builtin:settings-space-preferences"], "builtin_plugin_not_selectable"),
     ],
 )
 def test_invalid_selection_uses_the_core_codes(value, code):

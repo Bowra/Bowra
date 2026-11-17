@@ -2,6 +2,7 @@
 
 Les instantanés Community ont leur propre historique. Une version de l’application ne signifie pas que des images ou un service hébergé ont été publiés.
 
+- [v1.7.49](releases/v1.7.49.fr-FR.md) — Ajoutez des instructions pendant une exécution, retrouvez des fichiers et gérez les Plugins d’équipe sur leur propre page.
 - [v1.7.44](releases/v1.7.44.fr-FR.md) — Révisez les fichiers livrés avec leur historique et confirmez les appels d’outils dans la conversation.
 - [v1.7.31](releases/v1.7.31.fr-FR.md) — Améliorer les graphiques, les confirmations d’outils, la continuité des conversations et la sécurité des dépendances.
 - [v1.7.24](releases/v1.7.24.fr-FR.md) — Améliorer les graphiques, les confirmations d’outils, la continuité des conversations et la sécurité des dépendances.

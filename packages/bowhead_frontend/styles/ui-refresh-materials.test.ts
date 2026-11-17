@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * P2 batch 1 style-source contracts: three material tiers, three divider tiers, accent text on materials, opaque persistent sidebar.
  *

@@ -17,8 +17,8 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def saved_draft(tmp_path, monkeypatch):
-    users, store, schemas, owner, other = _setup(tmp_path, monkeypatch)
+def saved_draft(tmp_path, monkeypatch, initialize_migrated_core_database):
+    users, store, schemas, owner, other = _setup(tmp_path, initialize_migrated_core_database)
     monkeypatch.setenv("FEATURE_SUBAGENT_DRAFT_CHAT_EDIT", "1")
     monkeypatch.setenv("FEATURE_SUBAGENT_DRAFT_CHAT_EDIT_PCT", "100")
     now = _now()
@@ -204,7 +204,9 @@ def test_empty_draft_inspection_explains_required_candidate_fields(saved_draft):
     empty = AgentCoachDraftAdapter(replace(adapter.editor, draft_id=draft.id, expected_version=draft.row_version))
     inspected = _run(empty.inspect())
     assert inspected["ok"] and inspected["definition"] is None
-    assert set(inspected["patch_schema"]["required"]) == {"name", "display_name", "description", "system_prompt", "tool_refs", "max_iterations"}
+    # The step limit follows the Team run limits and is no longer authored per Agent (f879d4630).
+    assert set(inspected["patch_schema"]["required"]) == {"name", "display_name", "description", "system_prompt", "tool_refs"}
+    assert "max_iterations" not in inspected["patch_schema"]["properties"]
     assert inspected["pending_proposals"] == []
 
 

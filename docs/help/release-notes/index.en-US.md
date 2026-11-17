@@ -2,6 +2,7 @@
 
 Community source snapshots have independent history. Application versions do not imply that images or a hosted service have been published.
 
+- [v1.7.49](releases/v1.7.49.en-US.md) — Add instructions during a run, find earlier files, and manage Team Plugins from their own page.
 - [v1.7.44](releases/v1.7.44.en-US.md) — Revise delivered files with version history and answer tool confirmations in the conversation.
 - [v1.7.31](releases/v1.7.31.en-US.md) — Improve chart edits, tool confirmations, conversation continuity and dependency security.
 - [v1.7.24](releases/v1.7.24.en-US.md) — Improve chart edits, tool confirmations, conversation continuity and dependency security.

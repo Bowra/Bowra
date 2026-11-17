@@ -109,38 +109,91 @@ def salvage_misnested_sandbox_args(args: dict[str, Any]) -> tuple[dict[str, Any]
 
 #: Runner fields that `skill_invoke` nests under `input`. A model used to the flat entry sometimes writes them
 #: beside `input` instead; `skill_invoke` reads only `input`, so those values used to vanish (116
-#: t_78ba5d3b1429: `inputs` beside `input`, then "no inputs declared" five times in a row).
+#: the regression case: `inputs` beside `input`, then "no inputs declared" five times in a row).
 SKILL_INVOKE_INPUT_FIELDS = ("code", "inputs", "timeout_sec", "purpose", "deliverable_outputs", "work_outputs", "revises", "intent")
 
 
-def salvage_flattened_skill_invoke_args(args: dict[str, Any]) -> tuple[dict[str, Any], str | None, tuple[str, ...]]:
-    """Move python_sandbox runner fields given beside `input` into it.
+#: Fields that `skill_invoke` reads beside `input`. A model sometimes writes them inside it instead (116
+#: the regression case: `name` and `script` inside `input` on four of eight calls, each refused as missing a name).
+SKILL_INVOKE_IDENTITY_FIELDS = ("name", "script")
 
-    Returns ``(args, shape, conflicts)``. A field given in both places with different values is a
-    conflict: it is left in place and reported, never guessed. Equal duplicates collapse into `input`.
+
+def _blank(value: Any) -> bool:
+    """The way `skill_invoke` reads `name` and `script`: missing, None and whitespace are all empty."""
+    return not str(value or "").strip()
+
+
+def _lift_nested_sandbox_identity(args: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Move `name`/`script` written inside `input` beside it, for python_sandbox only.
+
+    Acts only when the call has no top-level name, which `skill_invoke` always refuses, and `input.name`
+    is exactly python_sandbox: an uploaded Skill may take an input called `name`, so no other value is
+    read as the Skill. A field already set beside `input` is kept; an equal copy inside is dropped and a
+    different one stays where it is, which the runner ignores as it does for any correctly named call.
     """
+    inner = args.get("input")
+    if not isinstance(inner, dict) or not _blank(args.get("name")):
+        return args, []
+    inner_name = inner.get("name")
+    if not isinstance(inner_name, str) or inner_name.strip() != SANDBOX_SKILL_NAME:
+        return args, []
+    out = dict(args)
+    rest = dict(inner)
+    lifted: list[str] = []
+    for key in SKILL_INVOKE_IDENTITY_FIELDS:
+        if key not in rest:
+            continue
+        if _blank(out.get(key)):
+            value = rest.pop(key)
+            out[key] = value.strip() if isinstance(value, str) else value
+            lifted.append(key)
+        elif str(rest[key]).strip() == str(out[key]).strip():
+            rest.pop(key)
+    out["input"] = rest
+    return out, lifted
+
+
+def _move_runner_fields_inside(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], tuple[str, ...]]:
+    """Move python_sandbox runner fields given beside `input` into it: ``(args, moved, conflicts)``."""
     if args.get("name") != SANDBOX_SKILL_NAME:
-        return args, None, ()
+        return args, [], ()
     inner = args.get("input")
     if inner is None:
         inner = {}
     if not isinstance(inner, dict):
-        return args, None, ()
+        return args, [], ()
     misplaced = [key for key in SKILL_INVOKE_INPUT_FIELDS if key in args]
     if not misplaced:
-        return args, None, ()
+        return args, [], ()
     conflicts = tuple(key for key in misplaced if key in inner and inner[key] != args[key])
     settled = [key for key in misplaced if key not in conflicts]
     if not settled:
-        return args, None, conflicts
+        return args, [], conflicts
     moved = [key for key in settled if key not in inner]
     out = {key: value for key, value in args.items() if key not in settled}
     out["input"] = {**inner, **{key: args[key] for key in moved}}
-    return out, ("flattened_input_" + "+".join(sorted(moved)) if moved else None), conflicts
+    return out, moved, conflicts
+
+
+def salvage_flattened_skill_invoke_args(args: dict[str, Any]) -> tuple[dict[str, Any], str | None, tuple[str, ...]]:
+    """Put each field of a python_sandbox `skill_invoke` call on its side of `input`.
+
+    `name`/`script` written inside `input` move beside it; runner fields written beside `input` move
+    into it. Returns ``(args, shape, conflicts)``. A runner field given in both places with different
+    values is a conflict: it is left in place and reported, never guessed. Equal duplicates collapse.
+    """
+    args, lifted = _lift_nested_sandbox_identity(args)
+    args, moved, conflicts = _move_runner_fields_inside(args)
+    shapes = []
+    if lifted:
+        shapes.append("nested_identity_" + "+".join(lifted))
+    if moved:
+        shapes.append("flattened_input_" + "+".join(sorted(moved)))
+    return args, (",".join(shapes) or None), conflicts
 
 
 def settle_skill_invoke_calls(tool_calls: Any) -> None:
-    """Move misplaced python_sandbox fields into `input` on the model's tool calls, in place.
+    """Put misplaced python_sandbox fields on their side of `input` on the model's tool calls, in place.
 
     Runs where tool names are canonicalized, before the call is recorded, shown in history or
     executed, so the recorded arguments, the retained question-card material and the runner all
@@ -215,11 +268,14 @@ def normalize_sandbox_tool_args(tool_name: str, args: Any, ctx: Any) -> Any:
         # recording first would miscount supplied-but-misnested as absent.
         _count_intent_coverage(tool_name, args)
         return args
-    if tool_name == SKILL_INVOKE_TOOL and args.get("name") == SANDBOX_SKILL_NAME:
+    if tool_name == SKILL_INVOKE_TOOL:
+        # Salvage first: a call with its name inside `input` names python_sandbox only after it.
         args, shape, _conflicts = salvage_flattened_skill_invoke_args(args)
         if shape:
             _metric(shape)
             logger.info("sandbox_inputs.salvaged tool=%s shape=%s", tool_name, shape)
+        if args.get("name") != SANDBOX_SKILL_NAME:
+            return args
         inner = args.get("input")
         if not isinstance(inner, dict):
             return args

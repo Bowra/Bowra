@@ -45,6 +45,7 @@ def _req(**kw):
         "language_context": None,
         "team_router": None,
         "interactive_session": True,
+        "context_maintenance": None,
     }
     base.update(kw)
     return SimpleNamespace(**base)

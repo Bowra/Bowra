@@ -290,7 +290,10 @@ export type TurnBeat =
   // replay-safe). applied/reverted/ignored terminal states are render-layer overlays (localStorage session state).
   | { kind: "lite"; proposalId: string }
   // Config copilot batch 1-b: config-draft chip (open drawer/save receipt/discard/expired); draftId points to server truth.
-  | { kind: "draft"; draftId: string };
+  | { kind: "draft"; draftId: string }
+  // Mid-run steering: an instruction the running answer took (`steer.applied`), at the
+  // place in the Turn where the Lead took it. `key` identifies the event item.
+  | { kind: "steer"; key: string; text: string; queuedAt?: string };
 
 export interface TurnState {
   operationKind?: "context_maintenance";
@@ -1971,6 +1974,31 @@ export function pushPlanBeat(turnId: string, planId: string): void {
   const exists = prev.beats.some((b) => b.kind === "plan" && b.planId === planId);
   if (exists) return;
   _commit(turnId, { ...prev, beats: [...prev.beats, { kind: "plan", planId }] });
+}
+
+/**
+ * Mid-run steering: push a `steer` beat for one instruction the running answer took.
+ * Idempotent by key, so a `steer.applied` event delivered again adds nothing.
+ */
+export function pushSteerBeat(turnId: string, beat: { key: string; text: string; queuedAt?: string }): void {
+  const prev = _states.get(turnId) ?? _emptyTurnState(turnId);
+  if (prev.beats.some((b) => b.kind === "steer" && b.key === beat.key)) return;
+  _commit(turnId, { ...prev, beats: [...prev.beats, { kind: "steer", ...beat }] });
+}
+
+/**
+ * The 🤝 acknowledgements whose instruction is still queued. An instruction the running
+ * answer took is shown in the Turn instead: each `steer` beat removes the earliest
+ * acknowledgement with its text. The result does not depend on which event arrived first.
+ */
+export function pendingSteerAcks(state: Pick<TurnState, "emojiAcks" | "beats"> | undefined): EmojiAck[] {
+  const pending = (state?.emojiAcks ?? []).filter((ack) => ack.emoji === "🤝" && Boolean(ack.text));
+  for (const beat of state?.beats ?? []) {
+    if (beat.kind !== "steer") continue;
+    const taken = pending.findIndex((ack) => ack.text === beat.text);
+    if (taken >= 0) pending.splice(taken, 1);
+  }
+  return pending;
 }
 
 /** The draft a revision Turn revises: its file name and "draft N" (no task identifiers). */

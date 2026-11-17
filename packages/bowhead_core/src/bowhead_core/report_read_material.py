@@ -58,6 +58,8 @@ class ReportReadAccess(Protocol):
 
     async def authorize_reference(self, reference: Any) -> bool: ...
 
+    async def authorize_references(self, references: list[Any]) -> list[bool]: ...
+
 
 def note_report_read(ctx: Any, arguments: dict[str, Any], result: dict[str, Any], observation: ReportReadObservation | None) -> None:
     from bowhead_core.ordinary_lead_material import collecting, material_observations

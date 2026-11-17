@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from bowhead_core._db import SQLiteStoreBusy
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.config_copilot import AppliedChange, FormContext, LiteApplyError, get_form
 from bowhead_core.config_draft_store import (
@@ -227,7 +228,8 @@ async def _execute(
         changes = await reg.lite_applier(fctx, rows, op)
     except LiteApplyError as exc:
         raise _error(409, exc.code) from exc
-    except HTTPException:
+    except (HTTPException, SQLiteStoreBusy):
+        # A busy storage lock wrote nothing; the gateway answers it as 503 store_busy.
         raise
     except Exception as exc:
         logger.warning("config_proposal.%s_failed proposal=%s", op, draft.id, exc_info=True)

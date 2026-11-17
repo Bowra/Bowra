@@ -104,13 +104,12 @@ async def test_category_axis_and_constant_group_are_explicit_without_type_overri
     [
         {"force_kind": "bar"},
         {"force_kind": "bar", "axes": {"x": "decile", "y": ["hospitals"], "x_scale": "category"}},
-        {"force_kind": "bar", "axes": {"x": "decile", "y": ["hospitals"]}, "group_by": []},
         {"force_kind": "bar", "axes": {"x": "missing", "y": ["hospitals"], "x_scale": "category"}, "group_by": []},
         {"force_kind": "bar", "axes": {"x": "decile", "y": ["region"], "x_scale": "category"}, "group_by": []},
         {"axes": {"y": ["hospitals"]}},
         {"force_kind": "bar", "columns": "all", "axes": {"x": "decile", "y": ["hospitals"], "x_scale": "category"}, "group_by": []},
     ],
-    ids=["no-axes", "no-group-declaration", "no-scale", "missing-x", "text-y", "table-axes", "two-selectors"],
+    ids=["no-axes", "no-group-declaration", "missing-x", "text-y", "table-axes", "two-selectors"],
 )
 async def test_invalid_or_missing_plot_bindings_do_not_guess_or_save(fields: dict) -> None:
     ctx, canvas = context()
@@ -372,6 +371,140 @@ async def test_composition_does_not_silently_ignore_root_selection(root_field, v
     ctx, canvas = context()
     result = await _add_chart(args(views=[{"id": "detail", "title": "Prepared fields"}], **{root_field: value}), ctx)
     assert "does not accept" in result["error"]
+    assert canvas.appended_payload is None
+
+
+MONTHLY = "月份,营业额_亿,2024营业额_亿,同比%\n2025-01,19.6,19.5,0.5\n2025-02,17.6,17.0,3.5\n".encode()
+
+
+async def test_the_116_combo_request_is_drawn_as_a_dual_axis_chart() -> None:
+    """116 the regression case: the first call of a brand helper copied the view's selection beside views,
+    omitted x_scale and gave a combo a right-hand axis. Each was refused in turn until add_chart was
+    disabled for the helper; each has one reading, so the chart is now drawn and the result says how."""
+    ctx, canvas = context(MONTHLY)
+    combo_view = {
+        "id": "monthly_combo",
+        "title": "月度营业额与同比",
+        "force_kind": "combo",
+        "axes": {"x": "月份", "y": ["营业额_亿"], "y_right": ["同比%"]},
+        "group_by": [],
+    }
+    request = args(
+        views=[combo_view, {"id": "monthly_table", "title": "月度明细", "force_kind": "table", "columns": ["月份", "营业额_亿", "同比%"]}],
+        layout="stack",
+        force_kind="combo",
+        axes=combo_view["axes"],
+        group_by=[],
+        column_types={"同比%": "percent_points"},
+        column_units={"营业额_亿": "亿元", "同比%": "%"},
+    )
+    result = await _add_chart(request, ctx)
+    assert "error" not in result, result
+    assert [view["kind"] for view in result["views"]] == ["dual_axis", "table"]
+    codes = [entry["code"] for entry in result["presentation_fallbacks"]]
+    assert codes.count("root_selection_ignored") == 3
+    assert {"combo_drawn_as_dual_axis", "x_scale_set"} <= set(codes)
+    saved = canvas.appended_payload["spec"]["views"][0]["spec"]
+    assert saved["kind"] == "dual_axis"
+    assert saved["explicit_presentation"]["axes"] == {"x": "月份", "y": ["营业额_亿", "同比%"], "y_right": ["同比%"], "x_scale": "category"}
+
+
+async def test_one_reply_names_every_problem_left_after_adjustments() -> None:
+    """A root selection that contradicts the views is still refused, with each view's own problems."""
+    ctx, canvas = context(MONTHLY)
+    view = {
+        "id": "monthly_combo",
+        "title": "月度营业额",
+        "force_kind": "combo",
+        "axes": {"x": "月份", "y": ["营业额_亿"]},
+        "group_by": ["同比%", "2024营业额_亿"],
+    }
+    result = await _add_chart(args(views=[view], force_kind="line"), ctx)
+    message = result["error"]
+    assert message.startswith("Explicit composition does not accept ['force_kind']")
+    assert "View monthly_combo: Fix all 3 problems" in message
+    assert "At most one explicit group" in message and "at least two explicitly named y fields" in message
+    assert canvas.appended_payload is None
+
+
+def test_a_single_problem_keeps_its_message_and_path() -> None:
+    from bowhead_core.chart.explicit import validate_request
+
+    with pytest.raises(ExplicitPresentationError) as caught:
+        validate_request({"force_kind": "combo", "axes": {"x": "m", "y": ["a", "b"]}, "group_by": []})
+    assert str(caught.value).startswith("combo requires x_scale='category'.") and caught.value.path == "/axes/x_scale"
+    with pytest.raises(ExplicitPresentationError) as caught:
+        validate_request({"force_kind": "combo", "axes": {"x": "m", "y": ["a"], "y_right": ["b"], "x_scale": "category"}, "group_by": []})
+    assert str(caught.value).startswith("Fix all 2 problems before resending: 1. combo requires at least two")
+    assert caught.value.path == "/axes/y"
+    with pytest.raises(ExplicitPresentationError, match="Only dual_axis accepts y_right"):
+        validate_request({"force_kind": "bar", "axes": {"x": "m", "y": ["a"], "y_right": ["a"], "x_scale": "category"}, "group_by": []})
+
+
+TREND = "month,rev_yi,traffic_wan,mom\n2025年1月,19.6,232.4,\n2025年2月,17.6,216.6,-0.1\n".encode()
+
+
+async def test_fields_a_view_does_not_accept_are_named_with_where_they_belong() -> None:
+    """116 the regression case: a helper put column_types inside views and got only "each view must use only
+    the declared view fields". An agreeing copy is now moved beside views; one that conflicts with the
+    top level, and a field no add_chart level accepts, are named with their view."""
+    ctx, canvas = context(TREND)
+    views = [
+        {"id": "trend", "title": "营业额", "force_kind": "bar", "axes": {"x": "month", "x_scale": "category", "y": ["rev_yi"]}, "group_by": []},
+        {
+            "id": "mom",
+            "title": "环比",
+            "force_kind": "bar",
+            "axes": {"x": "month", "x_scale": "category", "y": ["mom"]},
+            "group_by": [],
+            "column_types": {"mom": "percent_fraction"},
+        },
+        {"id": "detail", "title": "明细", "force_kind": "table", "columns": "all", "sort_by": "month"},
+    ]
+    first = args(views=views, layout="stack", force_kind="line", column_types={"mom": "percent_points"})
+    message = (await _add_chart(first, ctx))["error"]
+    assert message.startswith("Explicit composition does not accept ['force_kind']")
+    assert "Also fix: View mom has column_types, which a view does not accept. View detail has sort_by, which a view does not accept." in message
+    assert "Give column_types once at the top level beside views instead" in message
+    assert "sort_by once" not in message
+
+    root = {key: value for key, value in first.items() if key != "force_kind"}
+    second = (await _add_chart(root, ctx))["error"]
+    assert second.startswith("View mom has column_types, which a view does not accept.")
+    assert canvas.appended_payload is None
+
+    agreeing = [{key: value for key, value in view.items() if key != "sort_by"} for view in views]
+    result = await _add_chart({**root, "views": agreeing, "column_types": {"mom": "percent_fraction"}}, ctx)
+    assert "error" not in result, result
+    assert {
+        "code": "view_field_lifted",
+        "path": "/views/1/column_types",
+        "detail": "column_types applies to every view; moved it beside views.",
+    } in result["presentation_fallbacks"]
+
+
+async def test_column_units_refusal_names_the_entry_that_failed() -> None:
+    ctx, canvas = context(MONTHLY)
+    requested = args(
+        force_kind="bar",
+        axes={"x": "月份", "y": ["营业额_亿"], "x_scale": "category"},
+        group_by=[],
+        column_units={"营业额_亿": "亿元", "2025营业额_亿": "亿元", "同比%": "%", "2024营业额_亿": "x" * 40},
+    )
+    result = await _add_chart(requested, ctx)
+    assert result["path"] == "/column_units"
+    assert "'同比%' uses unit % without a percentage shape" in result["error"]
+    assert "'2024营业额_亿' needs nonempty unit text of at most 32 characters." in result["error"]
+    assert "2025营业额_亿" not in result["error"]
+    assert canvas.appended_payload is None
+
+
+async def test_absent_fields_name_the_data_that_was_read() -> None:
+    """116 the regression case: a helper asked a brand table for a dimension field and sent the same call again."""
+    ctx, canvas = context(MONTHLY)
+    result = await _add_chart(args(force_kind="hbar", axes={"x": "维度", "y": ["同比%"], "x_scale": "category"}, group_by=[]), ctx)
+    assert "Requested fields are absent: ['维度']" in result["error"]
+    assert "data_artifact_id 'art_aaaaaaaaaaaa' is 'result.csv' (art_aaaaaaaaaaaa); those are its fields." in result["error"]
     assert canvas.appended_payload is None
 
 

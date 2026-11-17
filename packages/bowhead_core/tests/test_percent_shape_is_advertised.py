@@ -23,6 +23,10 @@ _SURFACES = {
     "compute 系统提示词": _ROOT / "packages/bowhead_core/src/bowhead_core/agents/prompts/system/compute.md",
     "python_sandbox SKILL": _ROOT / "packages/bowhead_skill/catalog/python_sandbox/SKILL.md",
 }
+# c164afa1d reduced the compute prompt to the explicit presentation contract: it still names both
+# storage values ("Declare ratio storage as percent_fraction or percent_points"), while the reason
+# and the `15.37%` text channel stay in the add_chart description and the python_sandbox Skill.
+_EXPLAINING_SURFACES = sorted(name for name in _SURFACES if name != "compute 系统提示词")
 
 
 @pytest.mark.unit
@@ -42,12 +46,12 @@ def test_both_percent_shape_values_are_stated(name: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", sorted(_SURFACES))
+@pytest.mark.parametrize("name", _EXPLAINING_SURFACES)
 def test_the_reason_is_stated_not_just_the_syntax(name: str) -> None:
     """★ 光给语法不够，要说清**为什么只有它知道**。
 
     模型照抄语法但判不准该传哪个值，等于把一次瞎猜换成另一次瞎猜。
-    三处都得点出「除没除 100 只有你知道」这层意思。
+    工具描述和 Skill 都得点出「除没除 100 只有你知道」这层意思。
     """
     text = _SURFACES[name].read_text(encoding="utf-8")
     assert "100" in text, f"{name} 没说清 ×100 这件事"
@@ -55,7 +59,7 @@ def test_the_reason_is_stated_not_just_the_syntax(name: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", sorted(_SURFACES))
+@pytest.mark.parametrize("name", _EXPLAINING_SURFACES)
 def test_the_free_channel_is_mentioned(name: str) -> None:
     """★ 既有通道也要说：CSV 里写成 `15.37%` 文本本身就是一次声明。
 

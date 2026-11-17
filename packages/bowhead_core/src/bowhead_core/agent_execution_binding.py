@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.agent_behavior_contract import AgentBehaviorDescriptor
 from bowhead_core.agent_behavior_flags import agent_behavior_m3_enabled
 from bowhead_core.agent_behavior_materializer import AgentBehaviorMaterializer, default_agent_behavior_materializer
@@ -291,14 +291,21 @@ async def persist_prepared_system_revision(
     manifest_fingerprint: str,
     override_version: int | None,
 ) -> None:
-    """Persist immutable core revision data before opening an execution transaction."""
+    """Persist immutable core revision data before opening an execution transaction.
+
+    The write needs the exclusive core authority lease, which fails at once while a running Turn holds
+    its shared side. On 116 (1.7.49, 2026-11-17) the first compute spawn after the release failed this
+    way three times in a row while another Turn ran parallel helpers, so the Turn delivered nothing. The
+    write is idempotent (insert-if-absent plus an immutable projection), so it runs as one authority
+    write that repeats after a full rollback within the writer wait budget.
+    """
     if not domain_layout_active(db_path):
         return
     definition_json = _canonical_json(prepared.definition)
     if _hash_text(definition_json) != prepared.definition_hash:
         raise AgentExecutionBindingError("agent_system_revision_preparation_mismatch")
-    timestamp = _now()
-    async with open_shared_ctx(domain_database_path(db_path, "core")) as db:
+    core_path = domain_database_path(db_path, "core")
+    async with open_shared_ctx(core_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT revision.*,behavior.descriptor_json AS behavior_descriptor_json
@@ -312,45 +319,45 @@ async def persist_prepared_system_revision(
         if existing is not None:
             _validate_system_snapshot(existing)
             return
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            inserted = await db.execute(
-                """INSERT INTO system_agent_effective_revision(
-                    id,team_id,agent_id,manifest_fingerprint,override_version,definition_json,definition_hash,created_at
-                ) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(team_id,agent_id,definition_hash) DO NOTHING""",
-                (
-                    prepared.revision_ref,
-                    team_id,
-                    prepared.agent_id,
-                    manifest_fingerprint,
-                    override_version,
-                    definition_json,
-                    prepared.definition_hash,
-                    timestamp,
-                ),
-            )
-            if inserted.rowcount == 1:
-                await AgentBehaviorMaterializer.persist_system_revision_conn(
-                    db,
-                    revision_id=prepared.revision_ref,
-                    team_id=team_id,
-                    agent_id=prepared.agent_id,
-                    descriptor=prepared.behavior_descriptor,
-                    created_at=timestamp,
-                )
-            projection, edges = stable_edges_from_definition(
+    timestamp = _now()
+
+    async def write(db: aiosqlite.Connection) -> None:
+        db.row_factory = aiosqlite.Row
+        inserted = await db.execute(
+            """INSERT INTO system_agent_effective_revision(
+                id,team_id,agent_id,manifest_fingerprint,override_version,definition_json,definition_hash,created_at
+            ) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(team_id,agent_id,definition_hash) DO NOTHING""",
+            (
+                prepared.revision_ref,
+                team_id,
+                prepared.agent_id,
+                manifest_fingerprint,
+                override_version,
+                definition_json,
+                prepared.definition_hash,
+                timestamp,
+            ),
+        )
+        if inserted.rowcount == 1:
+            await AgentBehaviorMaterializer.persist_system_revision_conn(
+                db,
+                revision_id=prepared.revision_ref,
                 team_id=team_id,
-                subject_kind="system_agent_revision",
-                subject_ref=prepared.revision_ref,
                 agent_id=prepared.agent_id,
-                subject_fingerprint=prepared.definition_hash,
-                definition=prepared.definition,
+                descriptor=prepared.behavior_descriptor,
+                created_at=timestamp,
             )
-            await replace_subject_projection_conn(db, projection=projection, edges=edges, projected_at=timestamp)
-            await db.commit()
-        except BaseException:
-            await db.rollback()
-            raise
+        projection, edges = stable_edges_from_definition(
+            team_id=team_id,
+            subject_kind="system_agent_revision",
+            subject_ref=prepared.revision_ref,
+            agent_id=prepared.agent_id,
+            subject_fingerprint=prepared.definition_hash,
+            definition=prepared.definition,
+        )
+        await replace_subject_projection_conn(db, projection=projection, edges=edges, projected_at=timestamp)
+
+    await run_sqlite_authority_write(core_path, write)
 
 
 class AgentExecutionBindingStore:

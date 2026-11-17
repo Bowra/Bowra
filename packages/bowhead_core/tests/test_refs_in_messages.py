@@ -67,7 +67,7 @@ class _GrowingArtifactStore:
     def __init__(self) -> None:
         self.n = 0
 
-    async def list_for_session(self, *, session_id: str, user_id: str) -> list[_Art]:
+    async def list_for_session(self, *, session_id: str, user_id: str, limit: int = 100) -> list[_Art]:
         self.n += 1
         return [_Art(i) for i in range(self.n)]
 

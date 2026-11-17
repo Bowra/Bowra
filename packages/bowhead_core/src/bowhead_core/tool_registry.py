@@ -1023,6 +1023,9 @@ class ToolExecutionContext:
     collaboration_store: Any = field(default=None, repr=False)
     collaboration_call: Any = field(default=None, repr=False)
     collaboration_execution: Any = field(default=None, repr=False)
+    # Mid-run steering: set only on an ordinary Lead's context. The Runner clears it
+    # for every helper, so a helper never takes the user's instruction directly.
+    steer_inbox: Any = field(default=None, repr=False)
     # Latch timed-out row-level queries to avoid repeated sequential outage waits.
     # The marker belongs to an execution context, not the whole turn: Lead and peers
     # have distinct contexts. Concurrent sibling calls can already be in flight before
@@ -1472,6 +1475,11 @@ class ToolSpec:
     personal_mcp_label: str | None = None
     # Trusted registration only; MCP annotations cannot authorize terminal handling.
     terminal_payload_field: str | None = None
+    # Trusted built-in registration only: the Tool reads the state of a background operation that
+    # changes without the agent acting, so polling it is expected. Such calls neither count toward
+    # nor break a repeated-call chain (agent_repeat_guard). Team, MCP and personal MCP specs never
+    # set it; their annotations stay display-only.
+    status_poll: bool = False
 
 
 def _opened_to_role(name: str, role: str) -> bool:
@@ -1913,6 +1921,11 @@ class ToolRegistry:
     def has(self, name: str) -> bool:
         return name in self._specs
 
+    def is_status_poll(self, name: str) -> bool:
+        """Whether ``name`` is a trusted built-in status read that may be polled (``ToolSpec.status_poll``)."""
+        spec = self._specs.get(name)
+        return spec is not None and spec.status_poll
+
     def set_allowed_roles(self, name: str, roles: frozenset[str]) -> None:
         """M158 paradigm v2: 给已注册 tool 批量打 role binding.
         没注册的 tool 静默 skip (允许 paradigm v2 在 tool subset 上启用).
@@ -2299,6 +2312,9 @@ def build_default_registry() -> ToolRegistry:
     from bowhead_core.attachment_read import register_attachment_read
 
     register_attachment_read(reg)
+    from bowhead_core.result_lookup import register_result_lookup
+
+    register_result_lookup(reg)
     from bowhead_core.kb.management_tools import register_management_tools
 
     register_management_tools(reg)

@@ -283,6 +283,7 @@
       "unsupported_binding": "La version ou les dépendances de cette ressource ne sont pas disponibles pour la sélection actuelle.",
       "skill_unsupported_binding": "Aucun Agent disponible ne peut utiliser ce Skill avec la sélection actuelle. Choisissez un Agent configuré pour ce Skill, y compris via un Plugin, ou une méthode en lecture seule autorisée pour cette tâche. Sinon, demandez au responsable de l’Agent de le configurer. Les Skills personnels exigent « Moi uniquement ».",
       "skill_readonly_unavailable": "Ce Skill n’a pas encore de contenu en lecture seule pour les références rapides.",
+      "skill_personally_disabled": "Vous avez désactivé ce Skill. Réactivez-le dans « Centre des capacités → Skills et workflows ».",
       "agent_unsupported_binding": "Cet Agent ne peut pas être sélectionné directement pour le moment. Demandez à Lead de le faire intervenir dans la conversation.",
       "resource_unavailable": "Cette ressource est actuellement indisponible.",
       "catalog_adapter_unavailable": "Cette catégorie de ressources n’est pas encore disponible.",
@@ -872,7 +873,6 @@
       "load_failed": "Impossible de charger les capacités. Réessayez.",
       "retry": "Réessayer",
       "catalog_search": "Rechercher dans le catalogue",
-      "catalog_description": "Consultez les ressources ici et sélectionnez-les dans la configuration de votre agent. Les droits d’accès et d’exécution sont vérifiés séparément.",
       "builtin_source": "Intégré",
       "team_source": "Équipe",
       "runtime_access": "L’accès est vérifié lors de l’utilisation.",
@@ -910,7 +910,6 @@
       "builtin_plugins": "Plugins intégrés",
       "team_plugins": "Plugins de l’équipe",
       "team_plugins_empty": "Aucun plugin d’équipe n’est encore activé.",
-      "system_plugin_usage": "Bowhead fournit ces plugins. Vous pouvez les choisir pour vos agents personnalisés.",
       "system_plugins": {
         "settings-personal-appearance": {
           "name": "Apparence personnelle",
@@ -931,6 +930,10 @@
         "settings-space-instructions": {
           "name": "consignes de travail de l’ia",
           "description": "Gérez les instructions que suit chaque conversation de l’espace actuel, selon vos droits sur l’espace."
+        },
+        "settings-team-administration": {
+          "name": "Paramètres d’administration de l’équipe",
+          "description": "Gérer les limites d’exécution, la configuration des modèles et les nouvelles tentatives d’appel de modèle de l’équipe avec les droits d’administrateur d’équipe."
         }
       },
       "external_tools": "Outils externes",
@@ -958,7 +961,6 @@
         "tool_usage": "Agents et tâches planifiées qui l’utilisent",
         "overview_my_disabled": "{count, plural, =0 {Vous n’avez désactivé aucun plugin} one {Vous avez désactivé # plugin} other {Vous avez désactivé # plugins}}",
         "my_disabled": "Désactivé pour moi",
-        "settings_only": "Utilisé uniquement par l’assistant des paramètres système.",
         "disable": "Désactiver",
         "enable": "Activer",
         "undo": "Annuler",
@@ -977,6 +979,8 @@
         "tool_switch": "Activer ou désactiver « {name} »",
         "enabled": "Activé",
         "not_enabled": "Non activé",
+        "system_capabilities": "Capacités système",
+        "always_on": "Toujours actif",
         "enable_risk_title": "Activer « {name} » ?",
         "enable_risk_irreversible": "Les agents écriront ou enverront du contenu à l’extérieur avec cet outil, sans retour possible dans certains cas.",
         "enable_risk_audit": "Chaque appel est enregistré dans le journal d’audit.",
@@ -1008,7 +1012,10 @@
       "manage_workflows_button": "Gérer les skills et workflows de l’équipe",
       "manage_tools_button": "Gérer les sources d’outils",
       "manage_capabilities_button": "Gérer les plugins de l’équipe",
-      "settings_plugin_usage": "Utilisé uniquement par l’assistant des paramètres système."
+      "catalog_description_plugins": "Un plugin regroupe des outils et des compétences pour les choisir ensemble lorsque vous configurez un agent.",
+      "catalog_description_tools": "Voici les outils que les agents peuvent appeler. Choisissez-les lorsque vous configurez un agent.",
+      "settings_plugins": "Utilisés par l’assistant de paramètres",
+      "settings_plugins_hint": "Seul l’assistant de paramètres du système utilise ces plugins ; ils ne peuvent pas être choisis pour des agents personnalisés. Si vous en désactivez un, l’assistant ne modifie plus ce type de paramètre pour vous."
     },
     "answer_language_link": "Langue des réponses"
   },
@@ -3221,7 +3228,7 @@
     "draft_merging": "Fusion…",
     "placeholder": "Posez une question sur vos données…",
     "readonly_placeholder": "Envoi désactivé",
-    "steer_placeholder": "↻ Ajoutez une instruction — elle sera mise en attente jusqu’à la fin de la réponse en cours",
+    "steer_placeholder": "↻ Ajoutez une instruction — elle s’applique à la prochaine étape, sinon après cette réponse",
     "steer_send_label": "Ajouter l’instruction",
     "steer_send_title": "Ajouter cette instruction à la réponse en cours (⏎)",
     "stopped_draft_restored": "Arrêté · demande d’origine restaurée pour modification et renvoi",
@@ -3364,10 +3371,9 @@
       "cancel": "Annuler",
       "name": "Nom",
       "description": "Description",
-      "added_tools": "Outils ajoutés",
-      "system_tools": "Outils système",
       "no_added_tools": "Aucun outil ajouté n’est disponible. Configurez-en et activez-en d’abord un dans Paramètres de l’équipe → Sources d’outils.",
-      "skills": "Skills",
+      "resources_loading": "Chargement des outils et compétences disponibles…",
+      "resources_load_failed": "Les outils et compétences disponibles n’ont pas pu être chargés. Vos saisies sont conservées.",
       "save": "Enregistrer le plugin",
       "active": "Disponible",
       "disabled": "Désactivé",
@@ -3379,12 +3385,44 @@
       "delete_failed": "Impossible de supprimer ce plugin. Un autre administrateur l’a peut-être modifié. Examinez la liste et réessayez.",
       "resource_count": "{count} ressources",
       "manage": "Gérer les plugins d’équipe",
-      "unavailable_resource": "Ressource indisponible",
       "load_failed": "Impossible de charger les plugins d’équipe. Actualisez et réessayez.",
       "save_failed": "Impossible d’enregistrer ce plugin. Vérifiez ses ressources et vos accès, puis réessayez.",
       "read_only": "Ce plugin est actuellement en lecture seule.",
       "selected_resources": "Ressources sélectionnées",
-      "changed_skills": "De nouvelles versions sont disponibles pour {names}. Retirez-les puis sélectionnez-les à nouveau pour utiliser les versions actuelles."
+      "changed_skills": "De nouvelles versions sont disponibles pour {names}. Retirez-les puis sélectionnez-les à nouveau pour utiliser les versions actuelles.",
+      "resources_title": "Outils et compétences",
+      "selected_summary": "{tools, plural, one {# outil} other {# outils}} · {skills, plural, one {# compétence} other {# compétences}} sélectionnés",
+      "search_label": "Rechercher des outils et des compétences",
+      "search_placeholder": "Rechercher par nom, usage ou source…",
+      "no_match": "Aucun outil ni aucune compétence ne correspond à « {query} ».",
+      "group_count": "{selected} sur {total} sélectionnés",
+      "group_connection": "Connexion d’équipe",
+      "group_builtin": "Outils intégrés",
+      "skill_source_team": "Compétence d’équipe",
+      "skill_source_builtin": "Compétence intégrée",
+      "locked_set_category": "Confirmer sa catégorie dans les paramètres des outils",
+      "unavailable_title": "Sélections qui ne sont plus disponibles",
+      "unavailable_reason": "N’est plus disponible",
+      "readonly_team_tools": "Outils d’équipe",
+      "readonly_builtin_tools": "Outils intégrés",
+      "template_label": "Partir d’un modèle",
+      "template_blank": "Vide",
+      "template_replace_title": "Remplacer votre saisie ?",
+      "template_replace_description": "Le modèle remplace le nom, la présentation et les outils et compétences sélectionnés.",
+      "template_replace_confirm": "Remplacer",
+      "template_load_failed": "Les modèles n’ont pas pu être chargés.",
+      "templates": {
+        "shopify_analysis": {
+          "option": "Analyse Shopify · {connection}",
+          "name": "Analyse Shopify - {connection}",
+          "description": "Analyse en lecture seule des commandes, produits, stocks et contenus de cette boutique."
+        },
+        "shopify_content": {
+          "option": "Optimisation du contenu Shopify · {connection}",
+          "name": "Optimisation du contenu Shopify - {connection}",
+          "description": "Améliore le contenu des produits et des pages de cette boutique ; le demandeur vérifie chaque modification avant son application."
+        }
+      }
     },
     "reference_retention": {
       "title": "Conservation des documents de référence",
@@ -4314,6 +4352,8 @@
       "cap_cat_orchestrate": "Orchestration",
       "cap_cat_media": "Images",
       "cap_cat_unknown": "Autre",
+      "cap_cat_system": "Capacités système",
+      "system_capabilities_desc": "Chaque Agent en dispose. Elles sont toujours actives : rien à configurer ni à désactiver.",
       "kind_openapi": "OpenAPI",
       "kind_mcp": "MCP",
       "auth_none": "Sans authentification",
@@ -9168,7 +9208,7 @@
     "hdr_clear_report_changed": "Le rapport a changé ; rien n’a donc été effacé. Réessayez sur le rapport actuel.",
     "hdr_delete_report": "Supprimer le rapport",
     "steer_you": "Vous",
-    "steer_ack": "En attente · sera appliqué après la réponse actuelle",
+    "steer_ack": "En attente · appliquée à la prochaine étape, sinon après cette réponse",
     "readonly_account": "Ce compte est en lecture seule",
     "readonly_streaming": "Le rapport est en cours de génération — la modification est momentanément indisponible",
     "readonly_no_context": "Ce rapport n’a pas de contexte permettant son enregistrement",
@@ -14172,7 +14212,6 @@
       "document_revision_inputs_unsupported": "Une révision de document ne peut pas inclure de nouvelles pièces jointes ou d’autres références. Retirez-les ou créez une nouvelle demande.",
       "document_revision_unavailable": "La révision de document n’est pas disponible pour le moment. Votre message est conservé.",
       "context_maintenance_unsupported": "Cette conversation ou ce modèle ne prend pas en charge le compactage. Choisissez un modèle compatible et envoyez d’abord un message.",
-      "context_maintenance_inputs_unsupported": "Le compactage ne peut pas inclure de question, de pièce jointe ou d’action en attente. Utilisez le menu de la conversation.",
       "context_conversation_head_changed": "La conversation a changé. Relancez le compactage avec le contexte actuel.",
       "context_maintenance_session_busy": "Une tâche est encore en cours dans cette conversation. Attendez sa fin avant de compacter le contexte.",
       "context_maintenance_pending_operation": "Cette conversation contient une question, une approbation ou une reprise en attente. Traitez-la d’abord."
@@ -14948,8 +14987,6 @@
   },
   "shopify_tool": {
     "operation_count": "{count} opérations disponibles",
-    "create_plugin": "Create analysis Plugin",
-    "plugin_created": "Plugin created. Select it in the Agent editor to use this shop.",
     "edit": "Edit",
     "disable": "Disable",
     "enable": "Enable",
@@ -14966,14 +15003,12 @@
     "cancel": "Cancel",
     "verify_save": "Verify and save",
     "delete_title": "Delete {name}?",
-    "delete_note": "Agents and Plugins using this connection will lose access to this shop.",
+    "delete_note": "Les Agents et Plugins qui utilisent cette connexion perdront l’accès à cette boutique.",
     "changed": "The connection changed. Refresh the list and retry.",
-    "name_conflict": "A connection or Plugin with this name already exists.",
+    "name_conflict": "Une connexion ou un Plugin portant ce nom existe déjà.",
     "access_denied": "Shopify denied access. Check the installed app and granted permissions.",
     "failed": "Could not complete the operation. Check the app configuration and try again.",
-    "picker_desc": "Read shop data and content for selected Agents.",
-    "create_content_plugin": "Créer le Plugin de contenu",
-    "content_plugin_created": "Plugin de contenu créé. Sélectionnez-le dans l’éditeur d’Agent ; chaque modification nécessite votre validation."
+    "picker_desc": "Lire les données et contenus de la boutique pour les Agents sélectionnés."
   },
   "shopifyContentConfirmation": {
     "notice": "Vérifiez les modifications complètes avant de les appliquer à votre boutique. Coordonnez-vous avec les autres personnes qui modifient ce contenu.",

@@ -61,6 +61,13 @@ async def list_delivered_files(store: ArtifactStore, *, session_id: str, user_id
     return await store.list_session_deliverables(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id, limit=DELIVERED_FILES_LIMIT)
 
 
+async def count_delivered_files(store: ArtifactStore, *, session_id: str, user_id: str, exclude_turn_id: str = "") -> int:
+    """How many files ``list_delivered_files`` would list without its limit."""
+    if not session_id or not user_id:
+        return 0
+    return await store.count_session_deliverables(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id)
+
+
 def file_type(artifact: Artifact) -> str:
     suffix = PurePosixPath(artifact.filename or "").suffix.lstrip(".").lower()
     return suffix or (artifact.mime or "file").split(";", 1)[0].strip()
@@ -85,8 +92,14 @@ def quoted(value: Any, limit: int = 120) -> str:
     return " ".join(str(value or "").replace('"', "'").split())[:limit]
 
 
-def render_delivered_files_block(files: Sequence[Artifact], *, checkpoints: Sequence[ResumeCheckpoint] = (), now: datetime | None = None) -> str:
-    """Turn-tail list of earlier deliverables; a helper run is named only when it is its Turn's only listed run."""
+def render_delivered_files_block(
+    files: Sequence[Artifact], *, checkpoints: Sequence[ResumeCheckpoint] = (), now: datetime | None = None, total: int | None = None
+) -> str:
+    """Turn-tail list of earlier deliverables; a helper run is named only when it is its Turn's only listed run.
+
+    ``total`` is how many such files the session has. When the list shows fewer, its last
+    line says so and names the lookup: a silent cut read as "that file was never made".
+    """
     if not files:
         return ""
     current = now or datetime.now(UTC)
@@ -116,6 +129,8 @@ def render_delivered_files_block(files: Sequence[Artifact], *, checkpoints: Sequ
         if len(producers) == 1:
             line += f" checkpoint_id={producers[0]}"
         lines.append(line)
+    if total is not None and total > len(files):
+        lines.append(f"Showing the newest {len(files)} of {total} delivered files. To find another, call find_results with part of its name.")
     lines.append("</delivered_files>")
     return "\n".join(lines)
 
@@ -242,11 +257,14 @@ def refusal(reason: str, *, ids: Sequence[str], available: Sequence[Artifact] = 
         "reason_code": reason,
         "path": "revise_files",
         **({"latest_id": latest} if latest else {}),
+        # The list is the newest delivered files, not all of them. Without that sentence Lead took a file
+        # outside it for one that was never made (docs/sprints/result-lookup-2026-11-15, FR19).
         "hint": hints.get(
             reason,
-            f"Files delivered in this session: {listed}. Retry with the exact artifact_id of the file the user means, "
+            f"Newest files delivered in this session: {listed}. If the file the user means is not among them, call find_results "
+            "with part of its name to get its artifact_id. Retry with the exact artifact_id of the file the user means, "
             "or omit revise_files when the user means the Canvas report or only wants to read an existing file. "
-            "For a lookup, name the source file in task.",
+            "To read or analyse an existing file, name the source file in task.",
         ),
     }
 
@@ -337,7 +355,12 @@ def _declared(invocation: Any, name: Any) -> bool:
     arguments = getattr(invocation, "arguments", None) or {}
     inner = arguments.get("input", arguments) if isinstance(arguments, dict) else {}
     declared = inner.get("deliverable_outputs") if isinstance(inner, dict) and inner.get("purpose") == "deliverable" else None
-    return isinstance(declared, list) and name in declared
+    if not isinstance(declared, list):
+        return False
+    from bowhead_skill.sandbox_deliverables import deliverable_saved_name
+
+    # A nested file or folder entry is saved under its base name or as <folder>.zip.
+    return name in {deliverable_saved_name(entry.strip()) for entry in declared if isinstance(entry, str) and entry.strip()}
 
 
 def _flatten(invocations: Iterable[Any]) -> list[Any]:
@@ -370,6 +393,7 @@ __all__ = [
     "MAX_REVISE_FILES",
     "REVISED_FILES_DIRECTIVE",
     "FileTarget",
+    "count_delivered_files",
     "file_target_context_line",
     "is_revise_files_refusal",
     "list_delivered_files",

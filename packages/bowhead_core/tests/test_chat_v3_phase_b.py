@@ -71,7 +71,8 @@ def test_pick_top_rows_by_delta_sorts_desc_abs():
     assert [r["brand"] for r in result2] == ["B", "C", "D"]  # 1.28, 0.50, 0.20
 
 
-def test_pick_top_rows_string_percent_coerced():
+def test_pick_top_rows_keeps_formatted_strings_in_natural_order():
+    # Formatted strings are display evidence, not a safe numeric sort key.
     rows = [
         {"brand": "A", "营业额同比变化率": "-1.28%"},
         {"brand": "B", "营业额同比变化率": "-0.50%"},
@@ -79,7 +80,7 @@ def test_pick_top_rows_string_percent_coerced():
     ]
     cols = ["brand", "营业额同比变化率"]
     result = _pick_top_rows_by_delta(rows, cols, n=2)
-    assert [r["brand"] for r in result] == ["C", "A"]  # 2.00, 1.28
+    assert [r["brand"] for r in result] == ["A", "B"]
 
 
 def test_pick_top_rows_empty_rows():

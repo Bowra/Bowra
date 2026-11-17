@@ -558,3 +558,17 @@ plugins:
       - configuration_submit
       - skill_read
     skill_revision: sha256:de8985434931565edca66839d7c448e19cde3c92b939357352f34f9683609c3d
+  - name: settings-team-administration
+    version: 2
+    family: settings
+    selectable: false
+    tools: []
+    parts:
+      - configuration_read
+      - configuration_open
+      - configuration_propose
+      - configuration_apply
+      - configuration_result
+      - configuration_submit
+      - skill_read
+    skill_revision: sha256:d6b5b1b3ff6c9ddd81085b0ea4072763959000de091f60dd416491bf1809420d

@@ -788,6 +788,8 @@ function V2ComposerScope({
   const [steerPending, setSteerPending] = useState(false);
   const [sendPending, setSendPending] = useState(false);
   const sendPendingRef = useRef(false);
+  // Mirrors steerPending for the autosave timer, which must not write while an instruction is on its way.
+  const steerPendingRef = useRef(false);
   const submitRef = useRef<() => void>(() => undefined);
   const handledSubmitRequest = useRef(submitRequest ?? 0);
   useEffect(() => {
@@ -1473,6 +1475,7 @@ function V2ComposerScope({
       || acceptedCleanupBlocked
       || draftReconcilePending
       || sendPending
+      || steerPending
       || revisionStagePending
     ) return;
     const attachments: AttachmentRef[] = items
@@ -1491,6 +1494,7 @@ function V2ComposerScope({
     const timer = window.setTimeout(() => {
       if (
         sendPendingRef.current
+        || steerPendingRef.current
         || draftReadBlockedRef.current
         || draftConflictRef.current
         || draftPersistenceUnavailableRef.current
@@ -1505,7 +1509,7 @@ function V2ComposerScope({
       }).catch(() => undefined);
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [acceptedCleanupBlocked, draftConflict, draftPersistenceScope, draftPersistenceUnavailable, draftReadBlocked, draftReconcilePending, draftScopeSignature, items, ordinaryDraftReadyFor, recoveryLocked, sendPending, val, inputDocument, documentRevision, revisionStagePending]);
+  }, [acceptedCleanupBlocked, draftConflict, draftPersistenceScope, draftPersistenceUnavailable, draftReadBlocked, draftReconcilePending, draftScopeSignature, items, ordinaryDraftReadyFor, recoveryLocked, sendPending, steerPending, val, inputDocument, documentRevision, revisionStagePending]);
   // Prefill existing artifacts: bytes are already in the store, so directly create done chips.
   // Explicit references refresh metadata and selected scope on the existing chip; manual question edits stay separate.
   useEffect(() => {
@@ -2611,6 +2615,9 @@ function V2ComposerScope({
         surface,
         composer_mode: layoutMode,
       });
+      // A save of the same text during the send would replace the revision the acceptance clears,
+      // and the accepted instruction would come back as if it were newer input.
+      steerPendingRef.current = true;
       setSteerPending(true);
       submissionHandedOffRef.current = false;
       const steerResult = invokePreparedSubmission("steer");
@@ -2627,6 +2634,7 @@ function V2ComposerScope({
         })
         .finally(() => {
           submissionHandedOffRef.current = false;
+          steerPendingRef.current = false;
           setSteerPending(false);
         }));
       return;

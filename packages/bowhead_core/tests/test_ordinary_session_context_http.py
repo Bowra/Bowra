@@ -755,14 +755,18 @@ async def test_existing_session_retains_original_context_through_question(
         # published view references only its cumulative dependency manifest.
         generations = {row["id"]: row for row in rows(case, "model_context_generations") if row["session_id"] == session_id}
         published = [row["generation_id"] for row in rows(case, "model_context_conversation_heads") if row["session_id"] == session_id]
-        assert len(published) == 1
-        reachable, pending = set(), list(published)
-        while pending:
-            identity = pending.pop()
-            if identity not in reachable:
-                reachable.add(identity)
-                pending.extend(json.loads(generations[identity]["source_refs_json"]))
-        assert len(reachable) == 2
+        if observed_inputs and not checkpoint.context_projection_enabled:
+            # The observed-input suite can turn Router context maintenance off; then no model view is published.
+            assert published == []
+        else:
+            assert len(published) == 1
+            reachable, pending = set(), list(published)
+            while pending:
+                identity = pending.pop()
+                if identity not in reachable:
+                    reachable.add(identity)
+                    pending.extend(json.loads(generations[identity]["source_refs_json"]))
+            assert len(reachable) == 2
         if observed_inputs:
             assert checkpoint.contract == "ordinary-lead-loop.v15"
             assert (checkpoint.preferred_provider, checkpoint.preferred_model) == ("primary", "large")

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.personal_theme_models import (
     KEY_APPEARANCE_THEME_CONFIG_V3,
     KEY_APPEARANCE_THEME_UNDO_V3,
@@ -74,6 +74,7 @@ class PersonalAppearanceStore:
         async with open_shared_ctx(self.db_path) as db:
             return await self._read_on_connection(db, user_id)
 
+    @repeat_when_authority_busy()
     async def compare_and_write(
         self,
         *,

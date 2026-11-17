@@ -7,9 +7,10 @@ import copy
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_args, get_type_hints
 
 import pytest
+from bowhead_core.context_action import ContextActionRejected
 from bowhead_core.entitlements import EntitlementDenied
 from bowhead_core.error_catalog import (
     default_error_catalog_dir,
@@ -34,6 +35,10 @@ from bowhead_gateway import chat_attachment_access, chat_reference_request, chat
 
 CHAT_SEND_ROUTE_CODES = frozenset(
     {
+        "context_maintenance_unsupported",
+        "context_conversation_head_changed",
+        "context_maintenance_session_busy",
+        "context_maintenance_pending_operation",
         "document_not_found",
         "document_revision_conflict",
         "document_input_unavailable",
@@ -44,6 +49,7 @@ CHAT_SEND_ROUTE_CODES = frozenset(
         "reference_input_invalid",
         "reference_request_too_large",
         "reference_input_media_type_required",
+        "reference_receiver_selection_failed",
         "unsupported_entry",
         "coach_mention_unsupported",
         "coach_mention_unavailable",
@@ -196,6 +202,11 @@ def _chat_http_error_details() -> list[dict[str, Any]]:
     return details
 
 
+def _context_action_rejection_codes() -> frozenset[str]:
+    """Maintenance refusals are re-raised with their typed code, which the literal scan cannot see."""
+    return frozenset(get_args(get_type_hints(ContextActionRejected.__init__)["code"]))
+
+
 def _app() -> FastAPI:
     app = FastAPI()
     register_error_handlers(app)
@@ -221,6 +232,7 @@ def test_chat_send_route_has_a_closed_code_inventory_without_inline_prose() -> N
     assert (
         codes
         | chat_routes._TERMINAL_ADMISSION_PUBLIC_CODES
+        | _context_action_rejection_codes()
         | {
             "chat_action_not_found",
         }

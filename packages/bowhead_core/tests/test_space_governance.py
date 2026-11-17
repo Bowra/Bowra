@@ -10,6 +10,8 @@ from bowhead_core.space_governance import (
 )
 from bowhead_core.user_store import UserStore
 
+from bowhead_core import _db, sqlite_domain_runtime
+
 
 @pytest.fixture
 async def store(tmp_path) -> UserStore:
@@ -234,3 +236,67 @@ async def test_stale_metadata_update_does_not_overwrite(
         )
     assert stale.value.code == "stale_workspace_update"
     assert stale.value.details == {"current_revision": 2}
+
+
+def _lose_lease_in_metadata_write(monkeypatch: pytest.MonkeyPatch, times: int) -> list[int]:
+    """Fail the audit write inside the metadata transaction, after its UPDATE, with the lease conflict."""
+    attempts: list[int] = []
+    original = UserStore.write_admin_audit_log
+
+    async def write_admin_audit_log(self: UserStore, **kwargs: object) -> object:
+        if kwargs.get("action") == "workspace_metadata_updated":
+            attempts.append(len(attempts) + 1)
+            if len(attempts) <= times:
+                raise sqlite_domain_runtime._busy()
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(UserStore, "write_admin_audit_log", write_admin_audit_log)
+    return attempts
+
+
+async def test_metadata_update_repeats_after_losing_the_authority_lease(
+    store: UserStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    team_id, owner_id = await _seed_owner(store)
+    created = await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Original")
+    attempts = _lose_lease_in_metadata_write(monkeypatch, 1)
+
+    updated = await store.update_governed_workspace(
+        team_id=team_id,
+        actor_user_id=owner_id,
+        workspace_id=created["workspace_id"],
+        expected_revision=1,
+        description="Retail data",
+    )
+
+    assert attempts == [1, 2]
+    # The failed attempt rolled back its UPDATE, so the revision advanced exactly once.
+    assert updated["revision"] == 2
+    assert updated["description"] == "Retail data"
+
+
+async def test_metadata_update_reports_busy_and_writes_nothing_once_the_wait_is_spent(
+    store: UserStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    team_id, owner_id = await _seed_owner(store)
+    created = await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Original")
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    attempts = _lose_lease_in_metadata_write(monkeypatch, 10_000)
+
+    with pytest.raises(_db.SQLiteStoreBusy) as busy:
+        await store.update_governed_workspace(
+            team_id=team_id,
+            actor_user_id=owner_id,
+            workspace_id=created["workspace_id"],
+            expected_revision=1,
+            name="Renamed",
+        )
+
+    assert busy.value.code == "store_busy"
+    assert _db.is_authority_busy(busy.value.__cause__)
+    assert len(attempts) > 1
+    unchanged = await store.get_workspace(created["workspace_id"])
+    assert unchanged is not None
+    assert (unchanged["name"], unchanged["revision"]) == ("Original", 1)

@@ -2540,11 +2540,13 @@ async def agent_authoring_catalog(
     skill_rows: dict[str, dict[str, Any]] = {}
     configured_catalog = getattr(request.app.state, "skill_catalog", None)
     if configured_catalog is not None:
+        from bowhead_core.builtin_tool_providers import builtin_skill_available
         from bowhead_core.subagent_authoring_catalog import is_platform_only_skill
 
         for spec in configured_catalog.list_specs():
             name = str(spec.name)
-            if is_platform_only_skill(name):
+            # Skills written for a built-in connection are offered only while that connection can be enabled.
+            if is_platform_only_skill(name) or not builtin_skill_available(name):
                 continue
             skill_rows[name] = {
                 "name": name,

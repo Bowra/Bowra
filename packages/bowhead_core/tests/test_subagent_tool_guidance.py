@@ -178,7 +178,7 @@ async def test_tool_success_clears_failure_counts(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.parametrize("parallel", ["1", "0"], ids=["parallel", "sequential"])
 async def test_failures_in_one_batch_count_as_one_attempt(monkeypatch: pytest.MonkeyPatch, parallel: str) -> None:
-    """116 t_78ba5d3b1429: three add_chart calls of one batch failed on their arguments, the gate counted three
+    """116 the regression case: three add_chart calls of one batch failed on their arguments, the gate counted three
     failures in a row, and the corrected calls of the next decision were refused unseen."""
     monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
     monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", parallel)
@@ -223,7 +223,7 @@ async def test_failures_in_one_batch_count_as_one_attempt(monkeypatch: pytest.Mo
 
 
 async def test_skill_invoke_fields_beside_input_are_recorded_and_run_inside_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """116 t_78ba5d3b1429: `inputs` written beside `input` reached the runner as no inputs. The loop moves it
+    """116 the regression case: `inputs` written beside `input` reached the runner as no inputs. The loop moves it
     before the call is recorded, so history, retained material and the runner see one call."""
     monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
     received: list[dict] = []
@@ -520,9 +520,12 @@ async def test_delivery_review_preserves_execution_success_and_reports_requireme
     assert result.ok, result.error
     assert result.completion == ("complete" if covered else "partial")
     assert result.payload["exec_summary"] == "Confirmed annual revenue."
-    assert result.payload.get("caveats")
     if covered:
-        assert "table" in result.payload["caveats"][0]
+        # A covered failure stays in the internal review evidence, never in user-facing caveats.
+        assert not result.payload.get("caveats")
+        assert result.payload["delivery_review"]["issues"][0]["evidence_call_ids"] == ["table"]
+    else:
+        assert result.payload["caveats"] == ["Store performance"]
     terminal = [event.payload for event in events if event.event_type == "tool_result" and event.payload.get("call_id") == "reviewed"]
     assert terminal and terminal[0]["ok"] is True
     assert any(event.event_type == "step_done" and event.payload["state"] == ("success" if covered else "partial") for event in events)

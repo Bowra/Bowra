@@ -80,3 +80,7 @@ Zuständigkeit und Skills helfen dem System bei der Auswahl eines Agents. Sie ge
 | Eine vom Produkt nicht angebotene Plattformfunktion                | Zuständige Produktpflege                                                                                                                              |
 
 Ein Outcome beschreibt das zugesagte Ergebnis eines Agents und kann Nachweise oder Verfügbarkeit anzeigen. Ein Team-Plugin bündelt Tools und Skills für die Auswahl durch Agent-Autoren. Beides ersetzt keine Berechtigung für Funktionen, Tools oder Daten.
+
+## Gemeinsame Workflows verwalten
+
+Wenn Team-Workflows verfügbar sind, öffnen Sie die Verwaltung aus dem Workflow-Katalog. Prüfen Sie offene Freigaben und die veröffentlichte Liste. Verwenden Sie die verfügbaren Aktionen zum Teilen, Aktivieren, Deaktivieren oder Löschen. Prüfen Sie vorher die angezeigten Auswirkungen auf laufende oder geplante Arbeit. Eigene Workflows finden Sie weiterhin unter **Skills und Workflows → Meine**.

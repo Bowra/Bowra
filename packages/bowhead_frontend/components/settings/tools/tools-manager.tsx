@@ -26,7 +26,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { builtinTools, type BuiltinTool } from "@/lib/tool-display";
+import { builtinTools, systemCapabilities, type BuiltinTool } from "@/lib/tool-display";
 import { fetchMe } from "@/lib/auth-api";
 import { formatDateTime } from "@/lib/locale";
 import { DatarcMark, PowerBiMark, TavilyMark } from "@/components/settings/data-source-icons";
@@ -627,6 +627,11 @@ function BuiltinCapabilities({ query }: { query: string }) {
     ? all.filter((c) => `${c.name}${c.blurb}${c.ref}`.toLowerCase().includes(q))
     : all;
 
+  // Capabilities every Agent has from the runtime. They are not counted with the Tools above:
+  // nothing selects or disables them.
+  const system = useMemo(() => systemCapabilities(), []);
+  const shownSystem = q ? system.filter((c) => `${c.name}${c.blurb}${c.ref}`.toLowerCase().includes(q)) : system;
+
   const groups = useMemo(() => {
     const by = new Map<string, BuiltinTool[]>();
     for (const c of shown) {
@@ -649,7 +654,7 @@ function BuiltinCapabilities({ query }: { query: string }) {
           ? t("builtin_filtered", { shown: shown.length, total: all.length })
           : t("builtin_subtitle", { count: all.length })}
       </p>
-      {groups.length === 0 ? (
+      {groups.length === 0 && shownSystem.length === 0 ? (
         <div className="legacy-ai-tools-nomatch ai-tools-nomatch">{t("builtin_no_match")}</div>
       ) : (
         <div className="legacy-ai-tools-cap-groups">
@@ -674,6 +679,23 @@ function BuiltinCapabilities({ query }: { query: string }) {
               </div>
             </div>
           ))}
+          {shownSystem.length > 0 ? (
+            <div data-testid="system-capabilities">
+              <div className="legacy-ai-tools-cap-cat ai-tools-cap-cat">{t("cap_cat_system")}</div>
+              <p className="legacy-ai-tools-caps-desc ui-section-desc">{t("system_capabilities_desc")}</p>
+              <div className="legacy-ai-tools-cap-grid ai-tools-cap-grid">
+                {shownSystem.map((c) => (
+                  <div key={c.ref} className="legacy-ai-tools-cap ai-tools-cap">
+                    <span aria-hidden className="legacy-ai-tools-cap-sigil"><CharIcon ch={c.sigil} aria-hidden /></span>
+                    <div className="legacy-ai-min0">
+                      <div className="legacy-ai-tools-cap-name ai-tools-cap-name">{c.name}</div>
+                      <div className="legacy-ai-tools-cap-blurb ai-tools-cap-blurb">{c.blurb}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </section>

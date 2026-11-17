@@ -64,7 +64,8 @@ def test_builtin_catalog_peer_only_set_pinned() -> None:
     Configuration Agent's `settings-*` domain skills (4aac905ba, c493fc9ef, 3e922b6aa)
     and the coach's `agent-authoring` (5801c95e8). They bring the pinned set to 24.
     The Shopify plugin Skills (`shopify-analysis` 4bf720ce2, `shopify-content-optimization`
-    85b68da2a) are peer-only by design as well, bringing the pinned set to 26; `settings-space-instructions` (c058b8843) makes it 27.
+    85b68da2a) are peer-only by design as well, bringing the pinned set to 26; `settings-space-instructions` (c058b8843) makes it 27
+    and `settings-team-administration` (9690ecf07) makes it 28.
 
     批 3（compute-agent-optimize，2026-08-20）删掉 `bi-concept-resolve`：它的名字在批 1 之前
     一直明写在 compute.md 里，**有名字的整整一个月依然 0 读**（116 30 天 `skill_read` 聚合），
@@ -84,13 +85,14 @@ def test_builtin_catalog_peer_only_set_pinned() -> None:
         "settings-space-instructions",
         "settings-space-metadata",
         "settings-space-preferences",
+        "settings-team-administration",
     }
     plugin_skills = {"shopify-analysis", "shopify-content-optimization"}
-    assert len(peer_only) == 27, sorted(peer_only)
+    assert len(peer_only) == 28, sorted(peer_only)
     assert "python_sandbox" in peer_only
     assert system_agent_skills <= peer_only, sorted(system_agent_skills - peer_only)
     assert plugin_skills <= peer_only, sorted(plugin_skills - peer_only)
-    # After batch 3 removed bi-concept-resolve, its absence is tautological; len==27 above guards reintroduction. Check the set shape here.
+    # After batch 3 removed bi-concept-resolve, its absence is tautological; len==28 above guards reintroduction. Check the set shape here.
     assert "analyst-framework" not in peer_only  # Lead routing signal; keep visible.
     analyst_skills = peer_only - {"python_sandbox"} - system_agent_skills - plugin_skills
     assert len(analyst_skills) == 17, sorted(analyst_skills)

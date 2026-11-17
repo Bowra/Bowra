@@ -570,7 +570,13 @@ async def test_unknown_resume_response_never_reopens_the_question(continuation_c
         route = mock.post(url__regex=r"https://api\..*").mock(side_effect=workspace_question)
         question = await pause(case)
         request = await resolve_request(case, question)
-        route.mock(side_effect=httpx2.ReadTimeout("response lost"))
+        # A transport failure is settled not applied and retried (4a2f0ab7e); a reply
+        # without usage leaves the delivery outcome unknown.
+        route.mock(
+            return_value=httpx2.Response(
+                200, json={"choices": [{"message": {"role": "assistant", "content": "unconfirmed"}, "finish_reason": "stop"}]}
+            )
+        )
         spawned = await spawn_resume_turn(
             case.orchestrator,
             request,

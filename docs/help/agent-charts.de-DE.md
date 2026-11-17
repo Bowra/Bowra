@@ -1,6 +1,6 @@
 # Agent-Ranglisten entdecken
 
-Öffnen Sie **Agenten** und wählen Sie unter dem Seitenkopf den Tab **Ranglisten**. **Marktplatz**, **Meine Agenten** und **Ranglisten** teilen sich einen Seitenkopf, sodass Sie jederzeit wechseln können.
+Öffnen Sie **Agenten → Ranglisten** in der Seitenleiste. **Marktplatz**, **Meine Agenten** und **Ranglisten** sind eigene Seiten. Ein Klick auf **Agenten** öffnet Ihre angeheuerten Agents.
 
 - **Top** zeigt die Agents, die in den letzten 28 Tagen von den meisten Mitgliedern Ihres Teams genutzt wurden.
 - **Im Trend** zeigt den Zuwachs aktiver Mitglieder in den letzten 7 Tagen gegenüber den vorherigen 7 Tagen.

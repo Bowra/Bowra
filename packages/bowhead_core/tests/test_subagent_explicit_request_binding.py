@@ -77,7 +77,9 @@ def test_binding_rule_covers_surface_shape_columns_and_no_verbal_delivery(live_c
     block = live_compute_prompt[start : start + 1600]
     assert "点名了形态就等于点名了交付面" in block, "交付面没绑住 → 会被 chat 短答吃掉（事故 ③）"
     assert 'force_kind="table"' in block, "点名要表格时该走哪条路没写（事故 ①）"
-    assert "series" in block, "点名了字段要写进 series 没写（事故 ②）"
+    # c164afa1d retired `series`: Tables now keep every source column unless the user asks for a subset.
+    assert "Include every requested field/metric in the answer" in block, "点名的字段/指标必须交付（事故 ②）"
+    assert "Tables default to all source columns" in block, "点名的列不能被表格静默丢掉（事故 ②）"
     assert "禁止口头交付" in block, "没禁「声称有产物却没调 canvas_add_*」（事故 ③ 的第二半）"
     assert "caveats" in block, "交付不了必须明说，否则退回静默少交付"
 
@@ -122,19 +124,31 @@ def test_fallback_reads_the_same_compute_md_as_live() -> None:
 
 
 def test_table_entry_points_are_not_discouraged_by_their_own_schema() -> None:
-    """Explicit Table requests use force_kind; raw alone leaves inference active."""
+    """Explicit Table requests reach a native Table; the schema must not talk the model out of it.
+
+    c164afa1d made a Table the default for an omitted `force_kind` and removed inference, so
+    the old "fill force_kind=table when named" sentence became the default behavior itself.
+    """
+    from bowhead_core.canvas_tools import _add_chart_schema
+
     src = CANVAS_TOOLS_PY.read_text(encoding="utf-8")
     assert "raw=无明显意图" not in src, "`raw` 又被写回「无明显意图」——用户意图明确时模型不会选它"
-    assert "For an explicitly requested Table, use " in src
-    assert "force_kind=table" in src
     assert "绝大部分场景别填，让推断引擎决定" not in src, "`force_kind` 的劝退句回来了"
-    force_kind_block = src[src.index('"force_kind"') : src.index('"column_types"')]
-    assert "用户点名了形态就填" in force_kind_block
+    schema = _add_chart_schema()
+    force_kind = schema.input_schema["properties"]["force_kind"]
+    assert "table" in force_kind["enum"]
+    assert "Omit for a Table" in force_kind["description"]
+    assert "Tables default to every original column" in schema.description
 
 
-def test_series_description_warns_that_unlisted_columns_vanish() -> None:
-    """series 漏列 = 用户点名的指标静默消失（事故 ② 的直接机制）。"""
-    src = CANVAS_TOOLS_PY.read_text(encoding="utf-8")
-    block = src[src.index('"series"') : src.index('"series"') + 1400]
-    assert "用户点名的指标列必须写进来" in block
-    assert "同比变化率" in block, "真机例子被删了——这条规则会退化成一句没人当真的泛泛提醒"
+def test_table_columns_default_to_every_source_column() -> None:
+    """A user-named metric column must not silently vanish from the Table (incident ②).
+
+    The retired `series` list dropped unlisted columns; c164afa1d replaced it with `columns`,
+    which keeps every original column unless the user asked for a subset.
+    """
+    from bowhead_core.canvas_tools import _add_chart_schema
+
+    columns = _add_chart_schema().input_schema["properties"]["columns"]["description"]
+    assert "Omit or use all for every original column" in columns
+    assert "Narrow only for a user-requested subset" in columns

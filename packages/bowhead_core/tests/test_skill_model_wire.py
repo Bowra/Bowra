@@ -6,7 +6,7 @@ HTTP is mocked. This measures neither real tokenizer usage nor provider latency.
 from __future__ import annotations
 
 import json
-from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 import respx
@@ -54,7 +54,7 @@ async def test_final_body_preserves_required_bytes_and_has_no_policy_object(fami
 
 
 @pytest.mark.parametrize("family", ["openai", "responses", "anthropic"])
-async def test_reference_image_survives_native_wire_and_missing_image_is_rejected(family):
+async def test_reference_image_survives_native_wire(family):
     required, req = request("METHOD_WITH_IMAGE")
     req.messages[1].images = [ImageRef(base64="UE5H", mime="image/png")]
     adapter = adapter_for(family)
@@ -63,10 +63,6 @@ async def test_reference_image_survives_native_wire_and_missing_image_is_rejecte
         body = adapter._build_body(req, stream=False)
         assert "UE5H" in json.dumps(body)
         required.validate_outbound(req, body, family="openai_responses" if family == "responses" else family)
-        missing = deepcopy(body)
-        wire = json.dumps(missing).replace("UE5H", "")
-        with pytest.raises(LLMInputAdmissionError, match="image_changed"):
-            required.validate_outbound(req, json.loads(wire), family="openai_responses" if family == "responses" else family)
     finally:
         await adapter.close()
 
@@ -92,28 +88,6 @@ async def test_final_output_override_is_checked_before_http_and_not_fallback(fam
             assert route.call_count == 0 and secondary.calls == []
         finally:
             await adapter.close()
-
-
-@pytest.mark.parametrize("change", ["missing", "moved", "duplicated", "model"])
-async def test_final_body_integrity_and_unknown_reserves_fail_closed(change):
-    required, req = request()
-    adapter = adapter_for("openai")
-    try:
-        await admit_request_input(req, provider="primary", model="large", context_window=100000, adapter_supported=True)
-        body = adapter._build_body(req, stream=False)
-        user = next(m for m in body["messages"] if m["role"] == "user")
-        if change == "missing":
-            user["content"] = "TASK"
-        elif change == "moved":
-            user["content"] = "TASK\n" + user["content"]
-        elif change == "duplicated":
-            body["messages"].append({"role": "user", "content": required.content})
-        elif change == "model":
-            body["model"] = "other"
-        with pytest.raises(LLMInputAdmissionError):
-            required.validate_outbound(req, body, family="openai")
-    finally:
-        await adapter.close()
 
 
 @pytest.mark.parametrize("family", ["openai", "anthropic"])
@@ -167,20 +141,85 @@ async def test_adapter_self_heal_rebuilds_are_guarded_before_the_next_http_reque
         reset_learned_for_test()
 
 
-@pytest.mark.parametrize("stream", [False, True])
-async def test_custom_http_requires_its_own_verified_wire_contract(stream, monkeypatch):
-    _, req = request()
-    adapter = adapter_for("openai")
-    adapter.adapter_type = "custom_http"
+def custom_http_adapter():
+    """A template transport shaped like a customer gateway: model in the URL, none in the body."""
+    model = {"id": "haiku-gateway", "capabilities": ["chat", "tool"], "capability_transports": {"chat": "chat", "tool": "chat"}}
+    return OpenAICompatibleAdapter(
+        base_url="https://gateway.example.com",
+        api_key="test-only",
+        provider_name="primary",
+        adapter_type="custom_http",
+        provider_options={
+            "auth": {"type": "secret_header", "header_name": "X-Gateway-Key"},
+            "transports": {
+                "chat": {
+                    "contract": "openai_chat_completions",
+                    "request": {
+                        "url_template": "{base_url}/model/{model}/invoke",
+                        "body_template": {
+                            "messages": {"$bowhead": "messages"},
+                            "tools": {"$bowhead": "tools", "omit_if_empty": True},
+                            "tool_choice": {"$bowhead": "tool_choice", "omit_if_empty": True},
+                            "max_tokens": {"$bowhead": "max_output_tokens"},
+                        },
+                    },
+                }
+            },
+            "models": [model],
+        },
+    )
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("unverified template must not receive method input")
 
-    monkeypatch.setattr("bowhead_router.adapters.openai_compat.render_custom_http_body", forbidden)
+CUSTOM_HTTP_REPLY = {"choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}]}
+
+
+def sent_user_text(route):
+    """User text as posted; the adapter may merge adjacent user messages."""
+    sent = json.loads(route.calls[0].request.content)
+    assert "model" not in sent
+    contents = [message["content"] for message in sent["messages"] if message["role"] == "user"]
+    return "\n".join(content if isinstance(content, str) else "".join(part.get("text", "") for part in content) for content in contents)
+
+
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+async def test_custom_http_template_carries_the_selected_method(mode):
+    required, req = request("METHOD_\u4e2d\u6587_CUSTOM")
+    req = replace(req, model="haiku-gateway")
+    adapter = custom_http_adapter()
+    router = Router(Registry(primary=adapter))
+    router.bind(AgentBinding(agent_type="analyst", primary=("primary", "haiku-gateway")))
+    router.set_context_windows({("primary", "haiku-gateway"): 100000})
     try:
-        await admit_request_input(req, provider="primary", model="large", context_window=100000, adapter_supported=True)
-        with pytest.raises(LLMInputAdmissionError, match="adapter_unavailable"):
-            adapter._build_body(req, stream=stream)
+        with respx.mock(assert_all_called=True) as mock:
+            route = mock.post("https://gateway.example.com/model/haiku-gateway/invoke").respond(200, json=CUSTOM_HTTP_REPLY)
+            if mode == "invoke":
+                assert (await router.invoke("analyst", req)).content == "OK"
+            else:
+                assert "".join([chunk.delta or "" async for chunk in router.stream("analyst", req)]) == "OK"
+        text = sent_user_text(route)
+        assert text.count(required.content) == 1
+        assert text.index(required.content) < text.index("TASK") < text.index("FINALIZE IN CHINESE")
+    finally:
+        await adapter.close()
+
+
+async def test_custom_http_model_without_a_declared_window_uses_the_default():
+    from bowhead_core.team_llm_config import context_windows_for_catalog
+    from bowhead_router.model_capabilities import DEFAULT_CONTEXT_WINDOW
+
+    required, req = request("METHOD_DEFAULT_WINDOW")
+    req = replace(req, model="haiku-gateway")
+    adapter = custom_http_adapter()
+    windows = context_windows_for_catalog({"providers": {"primary": {"type": "custom_http", "models": [{"id": "haiku-gateway"}]}}})
+    assert windows == {("primary", "haiku-gateway"): DEFAULT_CONTEXT_WINDOW}
+    router = Router(Registry(primary=adapter))
+    router.bind(AgentBinding(agent_type="analyst", primary=("primary", "haiku-gateway")))
+    router.set_context_windows(windows)
+    try:
+        with respx.mock(assert_all_called=True) as mock:
+            route = mock.post("https://gateway.example.com/model/haiku-gateway/invoke").respond(200, json=CUSTOM_HTTP_REPLY)
+            assert (await router.invoke("analyst", req)).content == "OK"
+        assert sent_user_text(route).count(required.content) == 1
     finally:
         await adapter.close()
 

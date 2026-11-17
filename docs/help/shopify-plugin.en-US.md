@@ -8,9 +8,9 @@ The Team owner or administrator manages the connection. Members use its Tools th
 
 1. Create or use a Shopify App in the same Shopify organization that owns your shop. Release its configuration and install it on the shop.
 2. Grant the read permissions needed for your task: products, orders, inventory, locations and online store content. Orders older than 60 days also need approved all-orders access. Customer permissions are unnecessary for this Plugin.
-3. Open **Settings → Tools**, choose **Shopify**, and enter a connection name, the `store.myshopify.com` domain, Client ID and Client secret.
+3. Open **Capability Center → Tools**, choose **Manage tool sources** and **Add built-in third-party tool**, then choose **Shopify** and enter a connection name, the `store.myshopify.com` domain, Client ID and Client secret.
 4. Choose **Verify and save**. The application verifies the shop and stores the credentials encrypted. Saved secrets are never displayed.
-5. Choose **Create analysis Plugin** on the connection. In the Agent editor, select that Plugin and use the existing validation and publication flow for the Agent. Each Plugin binds to the selected shop's Tools and the Shopify analysis Skill.
+5. Open **Capability Center → Plugins → Manage Team Plugins**, choose **Create Plugin**, and under **Start from a template** choose **Shopify analysis · <shop name>**. The form fills in a name, an introduction, that shop's Tools and the Shopify analysis Skill; change anything you need, then save. In the Agent editor, select that Plugin and use the existing validation and publication flow for the Agent.
 
 If Shopify is absent from the Tools picker, contact your deployment administrator. This experimental integration is disabled by default in the source preview; inclusion of its source does not enable it.
 
@@ -24,7 +24,7 @@ Each read has bounded pagination. An incomplete list is not a complete total. Su
 
 ## Improve product and page copy
 
-When available, choose **Create content Plugin** on the connection and select it in the Agent editor. It uses a separate content Skill. The analysis Plugin remains for reading and analysis. Product updates need granted product write access; ordinary page updates need granted online-store page/content write access. After changing the Shopify App's permissions and approving them in Shopify, edit and verify the connection again. Without write access, the Agent can still prepare a draft.
+When available, create it the same way from the **Shopify content optimization · <shop name>** template, save it, and select it in the Agent editor. It uses a separate content Skill. The analysis Plugin remains for reading and analysis. Product updates need granted product write access; ordinary page updates need granted online-store page/content write access. After changing the Shopify App's permissions and approving them in Shopify, edit and verify the connection again. Without write access, the Agent can still prepare a draft.
 
 Ask for suggestions to receive copy without saving, or explicitly request an update. Product title, description and SEO title/description are supported; ordinary pages support title and body. Theme layout, publication state, URL handles, page SEO, price and stock are outside this workflow. A page containing shipping text is an ordinary page, not Shopify's dedicated shipping-policy setting.
 

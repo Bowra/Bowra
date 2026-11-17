@@ -16,6 +16,8 @@ Ce guide vous aide à analyser des documents, préciser une question ou produire
 4. Ajoutez uniquement les fichiers utiles et précisez l’usage de chacun.
 5. Envoyez la demande et examinez le déroulement et le résultat. Poursuivez dans le même travail pour préciser les conditions ou corriger le périmètre ; créez un nouveau travail pour une nouvelle question.
 
+Pour réutiliser une présentation existante, consultez [Remplir ou mettre à jour un modèle PowerPoint](powerpoint-templates.fr-FR.md).
+
 ## Répondre aux questions pendant l’analyse
 
 Un Agent peut afficher une carte de questions pour confirmer une période, la définition d’un indicateur ou une autre condition. Répondez à chaque question, ajoutez votre propre réponse si nécessaire et envoyez pour continuer. La carte indique que l’analyse attend votre réponse, pas qu’elle est terminée. Sans carte, apportez les précisions demandées dans la conversation.
@@ -35,7 +37,7 @@ Pendant un envoi normal, seul l’état d’attente apparaît. Si le réseau se 
 - **Abandonner et continuer à modifier** permet de ne plus attendre. Si la tâche d’origine avait démarré, sa conversation s’ouvre ; le brouillon redevient modifiable uniquement si elle n’avait pas démarré.
 - Si la vérification échoue temporairement, réessayez plus tard. Votre contenu n’est pas effacé.
 
-Un brouillon avec des références `@` ou `/` peut aussi afficher une copie en lecture seule. Choisissez **Voir les références et paramètres** pour la consulter, **Copier le texte** ou **Copier le brouillon complet** pour le conserver. Tant que l’état de l’envoi est indéterminé, utilisez d’abord les actions près du champ de saisie.
+Un brouillon avec des références `@` ou `/` peut aussi afficher une copie en lecture seule. Elle n’apparaît pas pendant un envoi en cours ; elle apparaît lorsqu’un envoi a été interrompu ou que son résultat ne peut pas être confirmé. Choisissez **Voir les références et paramètres** pour la consulter, **Copier le texte** ou **Copier le brouillon complet** pour le conserver. Tant que l’état de l’envoi est indéterminé, utilisez d’abord les actions près du champ de saisie.
 
 ## Choisir un Agent, une méthode ou un outil
 
@@ -48,6 +50,8 @@ Si la tâche nécessite un espace de travail Datarc, choisissez-le dans la liste
 Les paramètres personnels sont des pages accessibles directement. Ouvrez **Paramètres personnels** depuis le menu du compte ou l’adresse correspondante : Compte `/settings/profile/`, Sécurité `/settings/security/`, Apparence `/settings/appearance/`, Mémoire `/settings/memory/` ou Exportation `/settings/export/`. Vous pouvez enregistrer ces adresses dans vos favoris ou les ouvrir depuis une autre page.
 
 ## Déterminer si un résultat est utilisable
+
+Si la réponse indique qu’un filtre n’a pas été appliqué ou qu’une mesure ou une dimension manque, vérifiez le périmètre des données avant d’utiliser les totaux. Demandez à Bowhead de relancer la requête en précisant la période, la région ou la catégorie voulue, puis contrôlez le nouveau résultat.
 
 Avant de partager un résultat, vérifiez qu’il répond à la question, utilise la période et les filtres demandés, relie les chiffres importants aux conclusions et prévoit un partage adapté du rapport, des pièces jointes et des données sources. Partager un rapport ne donne pas accès à votre conversation privée, à toutes les pièces jointes ni à votre identité de données.
 

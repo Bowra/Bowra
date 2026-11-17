@@ -129,5 +129,7 @@ def register_management_tools(registry: ToolRegistry) -> None:
                     idempotency=ToolEffectIdempotency.STABLE_TOKEN,
                     effect_contract_key="tool_external/v1",
                 ),
+                # Reads an ingestion operation that keeps changing while it runs; polling it is expected.
+                status_poll=name == "kb_operation_status",
             )
         )

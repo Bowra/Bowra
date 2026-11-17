@@ -63,3 +63,7 @@ HTTP 200 bedeutet, dass der Dienst geantwortet hat, aber nicht unbedingt mit ein
 Die Testparameter enthalten wesentliche Modell-, Ausgabe- und Denkeinstellungen, soweit vorhanden, aber keine Zugangsdaten oder vollständige Anfrage. Die Verbrauchsübersicht zeigt erkannte numerische Tokenzahlen; weitere Felder bleiben im Antwortausschnitt. JSON wird lesbar formatiert; Leerzeichen und Zeilenumbrüche innerhalb von Zeichenfolgen bleiben erhalten. Bekannte Zugangsdaten werden auch bei Wiederholungen in anderen Feldern oder Stream-Ereignissen ausgeblendet. Prüfen Sie den Inhalt vor der Weitergabe. Nach dem Ausblenden werden höchstens 64 KiB der Antwort angezeigt und kopiert.
 
 Für ältere Versuche oder nicht gespeicherte Details wiederholen Sie die Prüfung und kontrollieren vorher Anfragezahl und mögliche Kosten. Das Anzeigen und Kopieren vorhandener Details sendet keine Modellanfrage und speichert keine Konfigurationsänderung.
+
+## Neuaufbau des Wissensindex prüfen
+
+Wenn der Neuaufbau des Teamindex fehlschlägt, öffnen Team-Eigentümer und Administratoren über die Meldung den Wissensdatenbankindex. Prüfen Sie ausstehendes Embedding-Modell und Status vor dem erneuten Start. Falls das Modell geändert werden muss, öffnen Sie die Modellzuordnung der Wissensdatenbank. Der Verarbeitungsstatus einzelner Dateien steht gesondert auf der Wissensseite.

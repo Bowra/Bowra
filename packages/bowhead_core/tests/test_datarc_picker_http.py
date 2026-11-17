@@ -135,7 +135,8 @@ async def test_helper_native_switch_continues_its_admitted_task_after_selection(
     turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
     assert turn["status"] == "completed", turn["error"]
     assert turn["execution_generation"] == 2
-    assert len(lead_calls) == 2 and len(helper_calls) == switch_index + 3
+    # After a successful delegation, Lead's answer gets one review against the original request.
+    assert len(lead_calls) == 3 and len(helper_calls) == switch_index + 3
     assert source.source_reads.count(("query", "87")) == 1
     assert {workspace for _, workspace in source.source_reads} == {"87"}
     assert {kind for kind, _ in source.source_reads} == {"measures", "dimensions", "query"}
@@ -295,7 +296,8 @@ async def test_helper_workspace_picker_pauses_without_empty_result_and_resumes(h
     turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
     assert turn["status"] == "completed", turn["error"]
     assert turn["execution_generation"] == 2
-    assert len(lead_calls) in (2, 3)
+    # After a successful delegation, Lead's answer gets one review against the original request.
+    assert len(lead_calls) in (3, 4)
     assert len(helper_calls) == 3
     assert "Source A selected." in turn["final_answer"]
     assert sorted(source_reads) == [("dimensions", "1"), ("measures", "1")]

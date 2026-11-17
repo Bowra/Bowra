@@ -20,7 +20,6 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.agent_eval_datarc import TeamOwnerDatarcResolver
 from bowhead_gateway.member_resolver import MemberUidResolver
 from cryptography.fernet import Fernet
-from gateway_legacy_database import upgrade
 
 from bowhead_gateway import datarc_context
 
@@ -59,10 +58,15 @@ class Untouchable:
         raise AssertionError(f"process-global Datarc client used: {name}")
 
 
-async def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, verified: bool = True, connection: bool = True) -> SimpleNamespace:
+@pytest.fixture
+def db_path(tmp_path: Path, initialize_migrated_core_database) -> Path:
+    path = tmp_path / "bowhead.db"
+    initialize_migrated_core_database(path)
+    return path
+
+
+async def _setup(db_path: Path, monkeypatch: pytest.MonkeyPatch, *, verified: bool = True, connection: bool = True) -> SimpleNamespace:
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
-    db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     team = await users.create_team(name="Datarc eval", max_seats=5)
     owner = await users.create_user(team_id=team.id, email="owner@example.com", display_name="Olivia", email_verified=verified)
@@ -126,11 +130,11 @@ def _run(env: SimpleNamespace, *, created_by: str) -> Any:
     ids=["default-on", "explicit-on", "explicit-off", "system-agent-excluded"],
 )
 async def test_runtime_defaults_to_owner_reads_and_preserves_explicit_disable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str | None, source_kind: str, enabled: bool
+    db_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str | None, source_kind: str, enabled: bool
 ) -> None:
     from bowhead_gateway.agent_eval_runtime import _datarc_live_scope
 
-    env = await _setup(tmp_path, monkeypatch)
+    env = await _setup(db_path, monkeypatch)
     if setting is None:
         monkeypatch.delenv("FEATURE_AGENT_EVAL_DATARC_READ_ONLY", raising=False)
     else:
@@ -151,9 +155,9 @@ async def test_runtime_defaults_to_owner_reads_and_preserves_explicit_disable(
     assert env.state.datarc_client_factory.keys == [("https://demo.datarc.example", "team-key")]
 
 
-async def test_the_owner_who_started_the_run_reads_as_their_own_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_owner_who_started_the_run_reads_as_their_own_member(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Owner start, Coach start and an automation grant all record the Owner as the run's actor.
-    env = await _setup(tmp_path, monkeypatch)
+    env = await _setup(db_path, monkeypatch)
     identity = await TeamOwnerDatarcResolver(db_path=env.db_path, state=env.state).resolve(_run(env, created_by=env.owner.id))
     assert identity.member_uid == "member_owner" and identity.workspace_id == "21" and identity.workspace_name == "Retail"
     # The member came from the Owner's verified email, through the Team connection's own client.
@@ -167,16 +171,16 @@ async def test_the_owner_who_started_the_run_reads_as_their_own_member(tmp_path:
     assert call == {"user_id": env.owner.id, "session_id": None, "read_only": True, "log": call["log"]}
 
 
-async def test_an_administrator_start_is_refused_before_any_datarc_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_an_administrator_start_is_refused_before_any_datarc_request(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
     with pytest.raises(EvalDatarcUnavailable) as caught:
         await TeamOwnerDatarcResolver(db_path=env.db_path, state=env.state).resolve(_run(env, created_by=env.admin.id))
     assert caught.value.cause == "starter_not_owner" and caught.value.owner_name == "Olivia"
     assert env.client.lookups == [] and env.state.datarc_client_factory.keys == [] and env.workspace_calls == []
 
 
-async def test_an_ownership_transfer_refuses_the_next_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_an_ownership_transfer_refuses_the_next_attempt(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
     resolver = TeamOwnerDatarcResolver(db_path=env.db_path, state=env.state)
     run = _run(env, created_by=env.owner.id)
     await resolver.resolve(run)
@@ -188,8 +192,8 @@ async def test_an_ownership_transfer_refuses_the_next_attempt(tmp_path: Path, mo
     assert caught.value.cause == "starter_not_owner"
 
 
-async def test_a_removed_owner_is_no_longer_the_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_a_removed_owner_is_no_longer_the_owner(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
     with sqlite3.connect(env.db_path) as db:
         db.execute("UPDATE team_members SET status='removed' WHERE user_id=?", (env.owner.id,))
         db.commit()
@@ -198,16 +202,16 @@ async def test_a_removed_owner_is_no_longer_the_owner(tmp_path: Path, monkeypatc
     assert caught.value.cause == "starter_not_owner"
 
 
-async def test_an_unverified_owner_email_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch, verified=False)
+async def test_an_unverified_owner_email_is_refused(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch, verified=False)
     with pytest.raises(EvalDatarcUnavailable) as caught:
         await TeamOwnerDatarcResolver(db_path=env.db_path, state=env.state).resolve(_run(env, created_by=env.owner.id))
     assert caught.value.cause == "owner_identity_unverified"
     assert env.client.lookups == []
 
 
-async def test_without_a_team_connection_there_is_no_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch, connection=False)
+async def test_without_a_team_connection_there_is_no_fallback(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch, connection=False)
     with pytest.raises(EvalDatarcUnavailable) as caught:
         await TeamOwnerDatarcResolver(db_path=env.db_path, state=env.state).resolve(_run(env, created_by=env.owner.id))
     assert caught.value.cause == "no_connection"
@@ -215,8 +219,8 @@ async def test_without_a_team_connection_there_is_no_fallback(tmp_path: Path, mo
     assert env.state.datarc_client_factory.keys == [] and env.client.lookups == []
 
 
-async def test_an_unusable_connection_names_its_cause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_an_unusable_connection_names_its_cause(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
     # The key can no longer be decrypted (the instance root secret changed).
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     with pytest.raises(EvalDatarcUnavailable) as caught:
@@ -235,9 +239,9 @@ async def test_an_unusable_connection_names_its_cause(tmp_path: Path, monkeypatc
     ],
 )
 async def test_member_resolution_failures_name_their_cause(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, member: str | None, error: Exception | None, cause: str
+    db_path: Path, monkeypatch: pytest.MonkeyPatch, member: str | None, error: Exception | None, cause: str
 ) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+    env = await _setup(db_path, monkeypatch)
     env.client.member = member
     env.client.member_error = error
     with pytest.raises(EvalDatarcUnavailable) as caught:
@@ -247,8 +251,8 @@ async def test_member_resolution_failures_name_their_cause(
         assert caught.value.workspace == "Retail"
 
 
-async def test_no_selected_workspace_names_its_cause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_no_selected_workspace_names_its_cause(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
 
     async def _none(state: Any, datarc_client: Any, user_id: str | None, **kwargs: Any) -> tuple[None, str, tuple[dict, ...], str]:
         return None, "", (), "zero_workspaces"
@@ -259,8 +263,8 @@ async def test_no_selected_workspace_names_its_cause(tmp_path: Path, monkeypatch
     assert caught.value.cause == "no_workspace"
 
 
-async def test_a_rejected_key_during_the_workspace_lookup_is_a_rejected_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = await _setup(tmp_path, monkeypatch)
+async def test_a_rejected_key_during_the_workspace_lookup_is_a_rejected_connection(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = await _setup(db_path, monkeypatch)
 
     async def _rejecting(state: Any, datarc_client: Any, user_id: str | None, **kwargs: Any) -> Any:
         # The ladder's Datarc read fails on the key; read-only mode then reports a transient snapshot.

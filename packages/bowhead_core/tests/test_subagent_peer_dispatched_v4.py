@@ -239,14 +239,14 @@ async def test_parallel_spawn_correlations_do_not_cross_siblings(dc) -> None:
             self._started_count = 0
             self._both_started = asyncio.Event()
 
-        async def emit(self, event: OrchestratorEvent) -> None:
+        async def emit(self, event: OrchestratorEvent) -> bool:
             if event.event_type == "step_started":
                 self._started_count += 1
                 if self._started_count == 2:
                     self._both_started.set()
                 else:
                     await self._both_started.wait()
-            await super().emit(event)
+            return await super().emit(event)
 
     class _PeerRunner:
         async def run(self, **kwargs) -> SubagentResult:

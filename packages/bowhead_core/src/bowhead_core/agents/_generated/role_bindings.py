@@ -80,6 +80,7 @@ _PARADIGM_V2_ROLE_MAP: dict[str, frozenset[str]] = {
     "configuration_result": frozenset({"analyst"}),
     "configuration_submit": frozenset({"analyst"}),
     "edit_chart": frozenset({"analyst"}),
+    "find_results": frozenset({"analyst", "lead"}),
     "get_current_user": frozenset({"lead"}),
     "google_doc_write": frozenset({"lead"}),
     "google_sheet_write": frozenset({"lead"}),

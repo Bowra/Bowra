@@ -32,11 +32,22 @@ def _call_name(call: ast.Call) -> str | None:
 def test_routes_do_not_construct_raw_http_exceptions() -> None:
     for path in _ROUTES:
         tree = _tree(path)
+        # Catching a gate's HTTPException (for example to derive a capability
+        # flag) is allowed; constructing or re-raising a raw one is not.
+        caught = {
+            id(name)
+            for handler in ast.walk(tree)
+            if isinstance(handler, ast.ExceptHandler) and handler.type is not None
+            for name in ast.walk(handler.type)
+            if isinstance(name, ast.Name)
+        }
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "fastapi":
-                assert all(alias.name != "HTTPException" for alias in node.names)
             if isinstance(node, ast.Call):
                 assert _call_name(node) != "HTTPException"
+            if isinstance(node, ast.Name) and node.id == "HTTPException":
+                assert id(node) in caught, f"{path.name}:{node.lineno} uses HTTPException outside an except clause"
+            if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Name):
+                assert node.exc.id != "HTTPException"
 
 
 def test_literal_route_codes_are_registered() -> None:

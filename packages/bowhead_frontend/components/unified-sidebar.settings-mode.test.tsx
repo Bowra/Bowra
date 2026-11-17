@@ -131,7 +131,7 @@ describe("UnifiedSidebar settings mode and docking (P2 batch 4)", () => {
   it.each([
     ["/capabilities/", "type=tools", "tools_catalog", "工具"],
     ["/team/settings/tools/", "capability_return=team", "tools_catalog", "工具"],
-    ["/team/settings/capabilities/", "", "capabilities_catalog", "插件"],
+    ["/team/settings/plugins/", "", "capabilities_catalog", "插件"],
     ["/skills/", "scope=mine", "skills", "技能与流程"],
     ["/team/settings/workflows/", "", "skills", "技能与流程"],
     ["/connections/", "", "connections", "我的连接"],

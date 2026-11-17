@@ -22,6 +22,20 @@ function byline(container: HTMLElement): string {
     ?.textContent ?? "";
 }
 
+describe("SteerMessage acknowledgement pill", () => {
+  it("shows the pill for a queued instruction and leaves it out for one the answer already took", () => {
+    const queued = renderIntl(<SteerMessage who="You" time="" text="Only East China" ackText="Queued" />, { locale: "en-US" });
+    expect(queued.container.textContent).toContain("Queued");
+    cleanup();
+
+    // Mutation: render the pill unconditionally → a taken instruction would still read "Queued".
+    const taken = renderIntl(<SteerMessage who="You" time="" text="Only East China" ackText="Queued" showAck={false} />, { locale: "en-US" });
+    expect(taken.container.textContent).not.toContain("Queued");
+    expect(taken.container.textContent).toContain("Only East China");
+    expect(byline(taken.container)).toBe("You · interjected");
+  });
+});
+
 describe("SteerMessage byline", () => {
   it("leaves the time out when the acknowledgement has none: one separator, no blank segment", () => {
     // Mutation: join who · time · suffix unconditionally → "You ·  · interjected".

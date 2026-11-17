@@ -59,7 +59,9 @@ class _ExecuteCallVisitor(ast.NodeVisitor):
 
 def _registry_execute_callers() -> set[tuple[str, str]]:
     found: set[tuple[str, str]] = set()
-    for base in [*REPO_ROOT.glob("packages/*/src"), REPO_ROOT / "enterprise"]:
+    # Production sources only: shared packages and the private Business adapters. Tests
+    # (packages/*/tests, enterprise/tests) may drive a registry directly as a fixture.
+    for base in [*REPO_ROOT.glob("packages/*/src"), REPO_ROOT / "enterprise/python"]:
         for path in base.rglob("*.py"):
             visitor = _ExecuteCallVisitor(path.relative_to(REPO_ROOT).as_posix())
             visitor.visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))

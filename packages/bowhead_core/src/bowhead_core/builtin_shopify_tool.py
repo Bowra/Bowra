@@ -15,6 +15,7 @@ import anyio
 from bowhead_router.types import ToolSchema
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from bowhead_core.builtin_tool_providers import PluginTemplate
 from bowhead_core.llm_config_crypto import decrypt_llm_config, encrypt_llm_config
 from bowhead_core.shopify_client import ADMIN_API_VERSION, ShopifyClient, ShopifyClientError, ShopifyCredential, ShopifyReadResult
 from bowhead_core.shopify_content import CONTENT_OPERATIONS, ContentApply, ContentPreview, ContentTarget, content_writes_enabled, execute_content
@@ -107,6 +108,34 @@ def shopify_tool_ref(tool_id: str, operation: str) -> str:
 
 def shopify_source_label(name: str) -> str:
     return f"Shopify - {name}"
+
+
+# Built-in Skills written for the Shopify connection, by the switch they need beyond FEATURE_SHOPIFY_PLUGIN.
+_ANALYSIS_SKILL = "shopify-analysis"
+_CONTENT_SKILL = "shopify-content-optimization"
+# The content template also reads the shop and the objects it may change.
+_CONTENT_TEMPLATE_READS = frozenset({"shopify_shop_context", "shopify_list_products", "shopify_list_pages"})
+
+
+def shopify_skill_available(name: str) -> bool | None:
+    """Whether a Shopify Skill can work here; None for any other Skill."""
+    if name == _ANALYSIS_SKILL:
+        return feature_enabled()
+    if name == _CONTENT_SKILL:
+        return feature_enabled() and content_writes_enabled()
+    return None
+
+
+def shopify_plugin_templates(tool: Any) -> tuple[PluginTemplate, ...]:
+    """The analysis template, and the content template when this connection can preview content changes."""
+    operations = supported_operations(tool)
+    if not operations:
+        return ()
+    templates = [PluginTemplate("shopify_analysis", tuple(op for op in operations if op not in CONTENT_OPERATIONS), _ANALYSIS_SKILL)]
+    if "shopify_preview_content_update" in operations:
+        content = tuple(op for op in operations if op in CONTENT_OPERATIONS or op in _CONTENT_TEMPLATE_READS)
+        templates.append(PluginTemplate("shopify_content", content, _CONTENT_SKILL))
+    return tuple(templates)
 
 
 def supported_operations(tool: Any) -> tuple[str, ...]:

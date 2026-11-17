@@ -54,14 +54,27 @@ def registry(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
     return registry
 
 
-def response(summary: str) -> LLMResponse:
+def probe_batch() -> LLMResponse:
+    # Two calls make the batch eligible for parallel execution with per-call context copies.
     return LLMResponse(
         content="",
         tool_calls=[
-            ToolCall(id="probe", name="result_probe", arguments={}),
-            ToolCall(id="return", name="subagent_return", arguments={"payload": {"delivery_surface": "chat", "exec_summary": summary}}),
+            ToolCall(id="probe", name="result_probe", arguments={"part": 1}),
+            ToolCall(id="probe-2", name="result_probe", arguments={"part": 2}),
         ],
     )
+
+
+def return_call(summary: str, call_id: str = "return") -> LLMResponse:
+    # Terminal delivery review accepts a terminal payload only alone in its batch.
+    return LLMResponse(
+        content="",
+        tool_calls=[ToolCall(id=call_id, name="subagent_return", arguments={"payload": {"delivery_surface": "chat", "exec_summary": summary}})],
+    )
+
+
+def response(summary: str) -> list[LLMResponse]:
+    return [probe_batch(), return_call(summary)]
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
@@ -89,7 +102,7 @@ async def test_native_payload_and_compose_marker_cross_batch_without_scope_leaks
         return payload
 
     monkeypatch.setattr("bowhead_core.subagent_return_tool.consume_returned_payload", observe_consume)
-    runner = SubagentRunner(router=router([response("Accepted result.")]), tool_registry=registry)
+    runner = SubagentRunner(router=router(response("Accepted result.")), tool_registry=registry)
     result = await runner.run(
         profile_name=PROFILE, task="Return a short answer.", parent_turn_id=ctx.turn_id, parent_ctx=ctx, parent_bus=TurnEventBus()
     )
@@ -112,7 +125,7 @@ async def test_first_batch_keeps_profile_output_schema(registry: ToolRegistry, m
         replace(PROFILES[PROFILE], output_schema={"type": "object", "properties": {"exec_summary": {"const": "Approved result."}}}),
     )
     ctx = context()
-    runner = SubagentRunner(router=router([response("Rejected result."), response("Approved result.")]), tool_registry=registry)
+    runner = SubagentRunner(router=router([return_call("Rejected result."), return_call("Approved result.", "return-2")]), tool_registry=registry)
     result = await runner.run(
         profile_name=PROFILE, task="Return the approved result.", parent_turn_id=ctx.turn_id, parent_ctx=ctx, parent_bus=TurnEventBus()
     )
@@ -128,7 +141,7 @@ async def test_sibling_helpers_keep_their_own_return_channels(registry: ToolRegi
     ctx = context()
 
     async def run(summary: str) -> SubagentResult:
-        runner = SubagentRunner(router=router([response(summary)]), tool_registry=registry)
+        runner = SubagentRunner(router=router(response(summary)), tool_registry=registry)
         return await runner.run(profile_name=PROFILE, task=summary, parent_turn_id=ctx.turn_id, parent_ctx=ctx, parent_bus=TurnEventBus())
 
     results = await asyncio.gather(run("First result."), run("Second result."))
@@ -173,6 +186,8 @@ async def test_lead_spawn_handlers_receive_finalized_batch_policy(registry: Tool
                         ToolCall(id="second", name="subagent_spawn", arguments={"profile": PROFILE, "task": "Second task."}),
                     ],
                 ),
+                LLMResponse(content="Both tasks completed."),
+                # Successful delegation receives one original-scope review before the Lead finishes.
                 LLMResponse(content="Both tasks completed."),
             ]
         ),

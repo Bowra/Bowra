@@ -159,7 +159,9 @@ def primary_skill_read_receiver(primary: ReferencePrimaryInput, scope: Reference
     # The descriptor hashes the authored definition. A team Agent with Plugins runs the
     # Plugin-expanded definition, which its binding carries beside the authored one.
     authored = binding.authored_definition if binding.authored_definition is not None else definition
-    selections = [node.resource for node in primary.source.input_document.nodes if isinstance(node, ReferenceNode)]
+    # A plain-text Turn carries no input document, so it selected no references.
+    document = primary.source.input_document
+    selections = [node.resource for node in document.nodes if isinstance(node, ReferenceNode)] if document is not None else []
     if baseline.source_definition_hash != canonical_fingerprint(authored) or not supports_skill_method_input(
         baseline,
         allow_unproven_primary=any(isinstance(resource, SkillResourceRef) for resource in selections)

@@ -8,6 +8,7 @@ import pytest
 import respx
 from bowhead_core.chat_references import InputDocument
 from bowhead_core.skill_reference_metadata import build_builtin_skill_metadata
+from bowhead_core.subagent import UNRETURNED_WORK_NOTE
 from test_reference_http_start import answer_response, payload, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import prohibit_unmocked_network as prohibit_unmocked_network
@@ -276,9 +277,12 @@ async def test_temporary_method_does_not_grant_scripts_and_preserves_the_origina
         await settled(accepted.json()["turn_id"])
     assert (await case.fixture.case.store.get_turn(accepted.json()["turn_id"])).status == "completed"
     assert calls == ["unused"]
-    assert len(requests) == 3
+    # A prose ending after successful Tool work gets one runtime note and one more model
+    # call (ce9390072); the same prose answer then ends the run.
+    assert len(requests) == 4
     assert "reading only" in json.dumps(requests[1])
     assert "CALCULATED 42" in json.dumps(requests[2])
+    assert any(UNRETURNED_WORK_NOTE in (message.get("content") or "") for message in requests[3]["messages"])
     assert all(json.loads(row["policy_check_json"])["schema_version"] == 3 for row in rows(case, "chat_reference_extension_checks"))
 
 

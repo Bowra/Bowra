@@ -41,19 +41,30 @@ def test_b3_subagent_sentinel_break_revived_exactly_once() -> None:
     必须就地终止 loop（回喂 LLM = act-first 模型双问/自选，dogfood t_102a292a65b0
     实锤）。pin：调用点恰 1 处（防散播），且与批2 注释共现。
 
-    Two later reviewed consumers only *read* the sentinel and do not add a loop break:
-    d48d6c87b prepares native ordinary questions before publication, and 16e44bbc5 keeps a
-    collaboration open while Lead pauses for clarification. Pin all three exact call sites.
+    c42cce048 moved the loop break and the collaboration pause onto the shared
+    `collect_clarification_sentinels` detector, so nested domain selections stop the
+    loop the same way. The remaining direct checks only *read* the sentinel and add no
+    loop break: d48d6c87b prepares native ordinary questions before publication,
+    c42cce048 keeps the ordinary-capture boundary for model questions only, and
+    c42cce048 suppresses data findings while a selection is pending. Pin every exact
+    call site of both detectors.
     """
     src = SUBAGENT_PY.read_text()
-    loop_break = 'any(is_clarification_sentinel(getattr(_inv, "result", None)) for _inv in invocations)'
-    ordinary_question = "if ordinary_state is None or not is_clarification_sentinel(inv.result):"
-    collaboration_pause = "any(is_clarification_sentinel(inv.result) for inv in invocations)"
-    n = src.count("is_clarification_sentinel(")
-    assert n == 3, (
-        f"subagent.py has {n} is_clarification_sentinel call sites; only the batch-2 loop break and the two reviewed read-only checks are allowed"
+    loop_break = "if collect_clarification_sentinels(invocations):"
+    collaboration_pause = "collaboration_paused = bool(collect_clarification_sentinels(invocations))"
+    assert src.count("collect_clarification_sentinels(") == 2, "only the batch-2 loop break and the collaboration pause may collect sentinels"
+    for site in (loop_break, collaboration_pause):
+        assert src.count(site) == 1, site
+
+    read_only_checks = (
+        "if ordinary_state is None or not is_clarification_sentinel(inv.result):",
+        "any(is_clarification_sentinel(inv.result) and not is_tool_context_selection(inv.result) for inv in invocations)",
+        "if inv.error is None and admission_block_code is None and not is_clarification_sentinel(inv.result):",
+        'and not tc.name.startswith("personalmcp.") and not is_clarification_sentinel(inv.result):',
     )
-    for site in (loop_break, ordinary_question, collaboration_pause):
+    n = src.count("is_clarification_sentinel(")
+    assert n == len(read_only_checks), f"subagent.py has {n} is_clarification_sentinel call sites; only the reviewed read-only checks are allowed"
+    for site in read_only_checks:
         assert src.count(site) == 1, site
     idx = src.index(loop_break)
     assert "批2" in src[max(0, idx - 800) : idx], "sentinel break 调用点缺批2 上下文注释——请勿在别处新增调用"
@@ -62,7 +73,12 @@ def test_b3_subagent_sentinel_break_revived_exactly_once() -> None:
 def test_b3_subagent_import_of_is_clarification_sentinel_revived() -> None:
     """批2: import 随 loop-break 复活（见上一测试的演进说明）。pin 恰 1 行."""
     src = SUBAGENT_PY.read_text()
-    assert src.count("from bowhead_core.agents.clarification_tool import is_clarification_sentinel") == 1
+    imports = [
+        line
+        for line in src.splitlines()
+        if line.startswith("from bowhead_core.agents.clarification_tool import ") and "is_clarification_sentinel" in line
+    ]
+    assert len(imports) == 1, imports
 
 
 # ── I2: lead_orchestrator.py CH2 collapse ──────────────────────────────

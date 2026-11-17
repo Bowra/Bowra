@@ -210,7 +210,7 @@ def test_skill_invoke_entry_normalizes_the_nested_inputs() -> None:
 
 
 def test_skill_invoke_fields_beside_input_move_inside_it() -> None:
-    """116 t_78ba5d3b1429: `inputs` written beside `input` (the flat entry's habit) was dropped,
+    """116 the regression case: `inputs` written beside `input` (the flat entry's habit) was dropped,
     the runner said no inputs were declared, and the helper repeated the call until it was refused."""
     args = {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c"}, "inputs": {"rows": "17"}, "purpose": "analysis"}
     out = normalize_sandbox_tool_args("skill_invoke", args, _ctx(_Allowlist()))
@@ -278,6 +278,67 @@ def test_model_tool_calls_are_settled_before_they_are_recorded() -> None:
     assert flattened.arguments == {"name": "python_sandbox", "input": {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}}
     assert conflicting.arguments["inputs"] == {"rows": {}}  # Left for the wrapper to refuse by name.
     assert other.arguments == {"code": "c", "inputs": {"rows": {"artifact_id": REAL}}}
+
+
+def test_skill_invoke_name_and_script_inside_input_move_beside_it() -> None:
+    """116 the regression case: four of eight calls wrote `name` and `script` inside `input`, and each was
+    refused as missing a name although the Skill and the code were both there."""
+    args = {"input": {"code": "c", "inputs": {"rows": "17"}, "name": "python_sandbox", "purpose": "analysis", "script": "runner.py"}}
+    out, shape, conflicts = salvage_flattened_skill_invoke_args(args)
+    assert out == {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c", "inputs": {"rows": "17"}, "purpose": "analysis"}}
+    assert shape == "nested_identity_name+script" and conflicts == ()
+    assert args["input"]["name"] == "python_sandbox"  # The model's call is not mutated.
+    out = normalize_sandbox_tool_args("skill_invoke", args, _ctx(_Allowlist()))
+    assert out["name"] == "python_sandbox" and out["input"]["inputs"]["rows"] == {"artifact_id": REAL}
+
+
+def test_skill_invoke_with_both_misplacements_settles_both_ways() -> None:
+    args = {"input": {"name": " python_sandbox "}, "code": "c", "script": "runner.py"}
+    out, shape, conflicts = salvage_flattened_skill_invoke_args(args)
+    assert out == {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c"}}
+    assert shape == "nested_identity_name,flattened_input_code" and conflicts == ()
+
+
+def test_nested_skill_identity_never_overrides_or_guesses() -> None:
+    """Only a call `skill_invoke` would refuse is rewritten, and only for python_sandbox."""
+    named = {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c", "name": "python_sandbox"}}
+    out, shape, _ = salvage_flattened_skill_invoke_args(named)
+    assert out is named and shape is None
+    uploaded = {"input": {"name": "Q3 deck", "inputs": {"rows": "17"}}}
+    out, shape, _ = salvage_flattened_skill_invoke_args(uploaded)
+    assert out is uploaded and shape is None
+    other_script = {"script": "runner.py", "input": {"code": "c", "name": "python_sandbox", "script": "main.py"}}
+    out, shape, _ = salvage_flattened_skill_invoke_args(other_script)
+    assert out == {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c", "script": "main.py"}}
+    assert shape == "nested_identity_name"
+    same_script = {"script": "runner.py", "input": {"code": "c", "name": "python_sandbox", "script": "runner.py"}}
+    out, _, _ = salvage_flattened_skill_invoke_args(same_script)
+    assert out["input"] == {"code": "c"}
+
+
+def test_agent_loop_settles_a_call_with_its_name_inside_input() -> None:
+    from bowhead_core.sandbox_inputs_normalize import settle_skill_invoke_calls
+    from bowhead_core.subagent import ToolCall
+
+    call = ToolCall(id="c1", name="skill_invoke", arguments={"input": {"code": "c", "name": "python_sandbox", "script": "runner.py"}})
+    settle_skill_invoke_calls([call])
+    assert call.arguments == {"name": "python_sandbox", "script": "runner.py", "input": {"code": "c"}}
+
+
+@pytest.mark.asyncio
+async def test_wrapper_runs_a_call_with_its_name_inside_input() -> None:
+    from bowhead_core.skill_bridge import _wrap_sandbox_inputs_normalization
+
+    called: list = []
+
+    async def _handler(args, ctx):
+        called.append(args)
+        return {"ok": True}
+
+    wrapped = _wrap_sandbox_inputs_normalization("skill_invoke", _handler)
+    out = await wrapped({"input": {"code": "c", "inputs": {"a": "17"}, "name": "python_sandbox"}}, _ctx(_Allowlist()))
+    assert out == {"ok": True}
+    assert called[0] == {"name": "python_sandbox", "input": {"code": "c", "inputs": {"a": {"artifact_id": REAL}}}}
 
 
 def test_skill_invoke_for_another_skill_is_untouched() -> None:

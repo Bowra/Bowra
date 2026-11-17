@@ -194,6 +194,31 @@ def initialize_migrated_core_database(migrated_core_snapshot):
 
 
 @pytest.fixture(scope="session")
+def migrated_legacy_gateway_snapshot(tmp_path_factory):
+    """Build the original Gateway targets at the pre-split source revision."""
+    from gateway_legacy_database import TARGET_FILES, upgrade
+
+    directory = tmp_path_factory.mktemp("legacy-gateway-schema")
+    assert upgrade(f"sqlite+aiosqlite:///{directory / TARGET_FILES['core']}") == tuple(TARGET_FILES)
+    return directory
+
+
+@pytest.fixture
+def migrated_legacy_gateway_db(tmp_path, migrated_legacy_gateway_snapshot):
+    """Copy all pre-split targets and return the test's independent Core path."""
+    import sqlite3
+    from contextlib import closing
+
+    from gateway_legacy_database import TARGET_FILES
+
+    for filename in TARGET_FILES.values():
+        source_uri = (migrated_legacy_gateway_snapshot / filename).as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(source_uri, uri=True)) as source, closing(sqlite3.connect(tmp_path / filename)) as destination:
+            source.backup(destination)
+    return tmp_path / TARGET_FILES["core"]
+
+
+@pytest.fixture(scope="session")
 def migrated_kb_files_snapshot(tmp_path_factory):
     """Pristine pre-split ``files`` schema for tests that build a KbFilesStore directly."""
     from gateway_legacy_database import upgrade

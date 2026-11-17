@@ -32,7 +32,6 @@ from bowhead_gateway.turn_service import (
 from bowhead_gateway.turn_service import (
     spawn_turn as _real_spawn_turn,
 )
-from gateway_legacy_database import TARGET_FILES, upgrade
 
 
 def test_legacy_untracked_orphan_age_tracks_effective_lead_cap(
@@ -775,7 +774,7 @@ async def test_concurrent_legacy_admission_has_one_bus_owner() -> None:
 
 
 async def test_concurrent_cross_registry_spawn_runs_one_worker(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
@@ -784,9 +783,7 @@ async def test_concurrent_cross_registry_spawn_runs_one_worker(
     async def accept_event(_event) -> bool:
         return True
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
     await store.ensure_session(
         session_id="s_spawn_race",
@@ -1612,18 +1609,16 @@ async def test_cancel_before_dispatch_keeps_canonical_error_when_recovery_handof
 
 
 async def test_real_cancel_after_claim_recovers_before_worker_schedule(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
-    log_store = TurnLogStore(core_path)
+    log_store = TurnLogStore(migrated_legacy_gateway_db)
     await log_store.initialize()
     session_id = "s_cancel_after_claim"
     turn_id = "t_cancel_after_claim"
@@ -1701,18 +1696,16 @@ async def test_real_cancel_after_claim_recovers_before_worker_schedule(
 
 
 async def test_real_preworker_revalidation_failure_recovers_without_worker(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
-    log_store = TurnLogStore(core_path)
+    log_store = TurnLogStore(migrated_legacy_gateway_db)
     await log_store.initialize()
     session_id = "s_preworker_revalidation_failure"
     turn_id = "t_preworker_revalidation_failure"
@@ -2285,7 +2278,7 @@ async def test_spawn_turn_durable_cancel_request_stops_remote_worker(
 
 @pytest.mark.parametrize("fanout_flag", ["1", "0"])
 async def test_real_local_stop_monitor_recovers_missing_wire_immediately(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch: pytest.MonkeyPatch,
     fanout_flag: str,
 ) -> None:
@@ -2294,11 +2287,9 @@ async def test_real_local_stop_monitor_recovers_missing_wire_immediately(
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
     monkeypatch.setenv("BOWHEAD_SSE_FANOUT", fanout_flag)
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
-    log_store = TurnLogStore(core_path)
+    log_store = TurnLogStore(migrated_legacy_gateway_db)
     await log_store.initialize()
     session_id = "s_real_stop_monitor"
     turn_id = "t_real_stop_monitor"
@@ -2382,7 +2373,7 @@ async def test_real_local_stop_monitor_recovers_missing_wire_immediately(
         )
         == "settled"
     )
-    with sqlite3.connect(core_path) as connection:
+    with sqlite3.connect(migrated_legacy_gateway_db) as connection:
         assert connection.execute(
             "SELECT state FROM chat_turn_spawn_dispatch WHERE turn_id=?",
             (turn_id,),
@@ -2580,7 +2571,7 @@ async def test_spawn_turn_wrapped_durability_abort_keeps_completed_dispatch_acti
 
 
 async def test_spawn_turn_terminal_log_failure_waits_for_expiry_recovery(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch,
 ) -> None:
     from datetime import UTC, datetime, timedelta
@@ -2589,11 +2580,9 @@ async def test_spawn_turn_terminal_log_failure_waits_for_expiry_recovery(
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
-    log_store = TurnLogStore(core_path)
+    log_store = TurnLogStore(migrated_legacy_gateway_db)
     await log_store.initialize()
     turn_id = "t_terminal_log_failure"
     session_id = "s_terminal_log_failure"
@@ -2671,7 +2660,7 @@ async def test_spawn_turn_terminal_log_failure_waits_for_expiry_recovery(
             break
         await asyncio.sleep(0.01)
     assert not any(task.get_name() == monitor_name for task in chat_mod._inflight_tasks)
-    with sqlite3.connect(core_path) as connection:
+    with sqlite3.connect(migrated_legacy_gateway_db) as connection:
         assert connection.execute(
             "SELECT state,owner_id FROM chat_turn_spawn_dispatch WHERE turn_id=?",
             (turn_id,),
@@ -2708,12 +2697,10 @@ async def test_spawn_turn_terminal_log_failure_waits_for_expiry_recovery(
 # ─── spawn_resume_turn / resume_already_in_flight ────────────────────────────
 
 
-async def test_spawn_failure_handoff_is_idempotent_after_recovery(tmp_path) -> None:
+async def test_spawn_failure_handoff_is_idempotent_after_recovery(migrated_legacy_gateway_db) -> None:
     from bowhead_core.session_store import SessionStore
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
     session_id = "s_double_spawn_failure_handoff"
     turn_id = "t_double_spawn_failure_handoff"
@@ -2740,7 +2727,7 @@ async def test_spawn_failure_handoff_is_idempotent_after_recovery(tmp_path) -> N
     failed = await store.get_turn(turn_id)
     assert failed is not None and failed.status == "failed"
     assert await store.get_active_turn(session_id) is None
-    with sqlite3.connect(core_path) as connection:
+    with sqlite3.connect(migrated_legacy_gateway_db) as connection:
         assert connection.execute(
             "SELECT state FROM chat_turn_spawn_dispatch WHERE turn_id=?",
             (turn_id,),
@@ -2758,13 +2745,11 @@ async def test_spawn_failure_handoff_is_idempotent_after_recovery(tmp_path) -> N
     assert await store.get_active_turn(session_id) is None
 
 
-async def _build_real_paused_resume_store(tmp_path, *, suffix: str, bounded: bool = False):
+async def _build_real_paused_resume_store(core_path, *, suffix: str, bounded: bool = False):
     from bowhead_core.chat_turn_source import ChatTurnUserSource
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_log_store import TurnLogStore
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     session_id = f"s_resume_preworker_{suffix}"
@@ -2890,14 +2875,14 @@ async def _assert_real_resume_preworker_failure_is_retryable(
 
 @pytest.mark.parametrize("bounded", [False, True])
 async def test_real_resume_notice_rejection_restores_paused_retry_state(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch,
     bounded,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
 
     store, session_id, turn_id = await _build_real_paused_resume_store(
-        tmp_path,
+        migrated_legacy_gateway_db,
         suffix="notice_rejected",
         bounded=bounded,
     )
@@ -2951,8 +2936,8 @@ async def test_real_resume_notice_rejection_restores_paused_retry_state(
         ("cancel_requested_at", "2026-10-03T00:00:00+00:00"),
     ],
 )
-async def test_bounded_resume_retry_requires_exact_settled_preworker_dispatch(tmp_path, monkeypatch, field, value):
-    store, _, turn_id = await _build_real_paused_resume_store(tmp_path, suffix="bounded_retry_fence", bounded=True)
+async def test_bounded_resume_retry_requires_exact_settled_preworker_dispatch(migrated_legacy_gateway_db, monkeypatch, field, value):
+    store, _, turn_id = await _build_real_paused_resume_store(migrated_legacy_gateway_db, suffix="bounded_retry_fence", bounded=True)
     with sqlite3.connect(store.db_path) as connection:
         card_id = connection.execute("SELECT request_id FROM clarification_requests WHERE turn_id=?", (turn_id,)).fetchone()[0]
     assert await store.advance_turn_execution_generation(turn_id=turn_id, clarification_id=card_id) == 2
@@ -2965,14 +2950,14 @@ async def test_bounded_resume_retry_requires_exact_settled_preworker_dispatch(tm
 
 
 async def test_real_resume_monitor_start_failure_restores_paused_retry_state(
-    tmp_path,
+    migrated_legacy_gateway_db,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
     store, session_id, turn_id = await _build_real_paused_resume_store(
-        tmp_path,
+        migrated_legacy_gateway_db,
         suffix="monitor_start_failed",
     )
 
@@ -3027,7 +3012,7 @@ async def test_real_resume_monitor_start_failure_restores_paused_retry_state(
 
 
 async def test_real_store_idle_pause_can_spawn_and_rollback_resume(
-    tmp_path,
+    migrated_legacy_gateway_db,
     captured_runner,
 ) -> None:
     from bowhead_core.events import EventBusRegistry
@@ -3037,9 +3022,7 @@ async def test_real_store_idle_pause_can_spawn_and_rollback_resume(
     async def accept_event(_event) -> bool:
         return True
 
-    core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
-    store = SessionStore(core_path)
+    store = SessionStore(migrated_legacy_gateway_db)
     await store.initialize()
     session_id = "s_real_idle_resume"
     turn_id = "t_real_idle_resume"
@@ -3072,7 +3055,7 @@ async def test_real_store_idle_pause_can_spawn_and_rollback_resume(
         )
         == []
     )
-    log_store = TurnLogStore(core_path)
+    log_store = TurnLogStore(migrated_legacy_gateway_db)
     await log_store.initialize()
     assert await log_store.record(
         turn_id=turn_id,

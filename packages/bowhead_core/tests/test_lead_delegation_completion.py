@@ -77,8 +77,9 @@ async def test_ordinary_delegation_preserves_remaining_work(http_start: SimpleNa
     turn = await case.fixture.case.store.get_turn(turn_id)
     assert turn.status == "completed", turn
     assert turn.final_answer == COMPLETE
-    # Includes the existing final session-title call, separate from Lead orchestration.
-    assert len(calls) == (3 if role == "primary" else 6)
+    # Includes the existing final session-title call, separate from Lead orchestration. A Lead that
+    # finishes after successful delegation answers one original-scope review first.
+    assert len(calls) == (3 if role == "primary" else 7)
     if role != "primary":
         results = [json.loads(m["content"]) for m in calls[2]["messages"] if m["role"] == "tool" and m.get("name") == "subagent_spawn"]
         assert results and results[0]["final_answer"] == INSPECTION

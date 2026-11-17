@@ -221,8 +221,8 @@ async def test_lead_routing_input_accepts_vision_message(lead_case):
     request = policy.attach(
         LLMRequest(model="large", messages=[Message(role="user", content="读图", images=[ImageRef(base64="UE5H", mime="image/png")])])
     )
+    # Capacity belongs to the shared final-body accounting; this gate only verifies the retained input.
     await policy.validate(request, provider="primary", model="large", context_window=100000)
-    assert policy.budget(request, provider="primary", model="large", context_window=100000).estimate_contract == "utf8-bytes+image-reserve.v1"
 
 
 async def test_reference_policy_change_is_a_public_access_failure(lead_case, monkeypatch):

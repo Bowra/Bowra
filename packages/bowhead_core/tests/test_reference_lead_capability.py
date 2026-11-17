@@ -129,6 +129,7 @@ async def test_image_reference_lead_preserves_execution_and_requires_a_real_deli
                         "profile": case.fixture.case.args["reference_start"].profile_name,
                         "task": "Create a Minimal launch image." if pause == "lead" else "Create the requested launch image.",
                         "delegation_role": "primary",
+                        "required_source_urls": [],
                     },
                     stream=body.get("stream", False),
                 )
@@ -191,7 +192,8 @@ async def test_image_reference_lead_preserves_execution_and_requires_a_real_deli
         if pause == "read":
             restored = primary_calls[question_round]["messages"]
             assert any(message["role"] == "tool" and "BODY_method" in message.get("content", "") for message in restored)
-            assert len(primary_calls) == 4
+            # Read, question, resumed image, prose answer, and the same answer after one unreturned-work note.
+            assert len(primary_calls) == 5
         if outcome in {"no_image", "effect_then_question"}:
             assert final[0]["status"] == "failed"
             assert final[0]["failure_code"] == (
@@ -238,6 +240,7 @@ async def test_queued_image_keeps_accepted_contract_after_admission_switch_chang
                         "profile": case.fixture.case.args["reference_start"].profile_name,
                         "task": "Handle the requested image task.",
                         "delegation_role": "primary",
+                        "required_source_urls": [],
                     },
                     stream=body.get("stream", False),
                 )
@@ -289,6 +292,7 @@ async def test_queued_image_keeps_accepted_contract_after_admission_switch_chang
         # The parent's selected Team Agent answer is delivered directly (5006e9348): one Lead call.
         # A queued Lead child spawns, and its generated image keeps ordinary Lead finalization.
         assert lead_calls == (3 if lead_queue else 1)
-        assert primary_calls == 3 and len(case.generated) == 1
+        # Parent prose (no Tool work); child image, prose, and the same prose after one unreturned-work note.
+        assert primary_calls == 4 and len(case.generated) == 1
         capability = [row for row in rows(case, "turn_capability_execution") if row["turn_id"] == child_id]
         assert len(capability) == 1 and capability[0]["status"] == "completed"

@@ -107,10 +107,8 @@ async def authorize_material_supplement(ctx: Any, supplement: MaterialSupplement
             return False
         async with open_shared_ctx(ctx.session_store.db_path) as db:
             await require_reference_request_scope(db, scope)
-        for item in supplement.references.items:
-            if not await ctx.report_read_access.authorize_reference(item):
-                return False
-        return True
+        # One pass: the report and the conversation's recorded sources are read once, not once per pointer.
+        return all(await ctx.report_read_access.authorize_references(list(supplement.references.items)))
     except Exception:
         logger.warning("retained_material_supplement_authority_unavailable turn=%s", getattr(ctx, "turn_id", None))
         return False
@@ -120,6 +118,16 @@ async def load_material_history(ctx: Any, turn_ids: list[str]) -> dict[str, dict
     access = getattr(ctx, "report_read_access", None)
     if not recovery_enabled() or access is None or not turn_ids:
         return {}
+    from bowhead_core.report_read_material import report_read_validation_pass
+
+    # One pass over the history: the report, its sections and the conversation's recorded sources are
+    # read once, not once per reference (116, 1.7.49: a 24-Turn conversation re-read ~20k events for
+    # every Report section reference, before every Lead model call).
+    with report_read_validation_pass():
+        return await _load_material_history(ctx, access, turn_ids)
+
+
+async def _load_material_history(ctx: Any, access: Any, turn_ids: list[str]) -> dict[str, dict]:
     result = {}
     try:
         scope = ReferenceRequestScope(team_id=ctx.team_id, user_id=ctx.user_id, workspace_id=ctx.workspace_id, session_id=ctx.session_id)
@@ -262,8 +270,8 @@ async def load_material_history(ctx: Any, turn_ids: list[str]) -> dict[str, dict
                 )
                 receipt = bounded_references(items, incomplete=incomplete, reason="legacy_receipt")
                 allowed = []
-                for item in receipt.items:
-                    if await access.authorize_reference(item):
+                for item, authorized in zip(receipt.items, await access.authorize_references(list(receipt.items)), strict=True):
+                    if authorized:
                         allowed.append(item)
                     else:
                         incomplete = True

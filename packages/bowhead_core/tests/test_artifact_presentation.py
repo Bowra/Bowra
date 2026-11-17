@@ -541,3 +541,23 @@ async def test_presenting_an_older_version_states_the_newer_one(presentation):
     assert older["output_artifacts"][0]["newer_version"] == {"id": second.id, "version": 2}
     latest = await present_artifacts({"artifacts": [{"artifact_id": second.id}]}, ctx)
     assert "newer_version" not in latest["output_artifacts"][0]
+
+
+async def test_declared_folder_archive_is_presented_by_its_saved_name(presentation):
+    """A `site/` entry is delivered as site.zip; the producer declaration matches the saved name."""
+    ctx, _ = presentation
+    artifact = await ctx.artifact_store.put_bytes(
+        content=b"PK\x05\x06" + b"\x00" * 18,
+        filename="site.zip",
+        mime="application/zip",
+        source="python_sandbox",
+        created_by=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_id=ctx.session_id,
+        kind="deliverable",
+        created_by_turn=ctx.turn_id,
+    )
+    output = {"ok": True, "output_artifacts": [{"artifact_id": artifact.id, "name": "site.zip", "path": "site/", "files": 2}]}
+    result = await normalize_producer_declaration("python_exec", {"purpose": "deliverable", "deliverable_outputs": ["site/"]}, output, ctx)
+    assert isinstance(result, NativePresentationResult)
+    assert result.declaration["items"] == [{"artifact_id": artifact.id}]

@@ -25,6 +25,11 @@ export interface SteerMessageProps {
   emojiLabel?: string;
   /** Short text shown beside the emoji (e.g. "收到"). */
   ackText?: string;
+  /**
+   * Whether to show the acknowledgement pill. A queued instruction shows it; an
+   * instruction the running answer already took is part of the Turn and has none.
+   */
+  showAck?: boolean;
   compact?: boolean;
 }
 
@@ -35,6 +40,7 @@ export function SteerMessage({
   emoji = "🤝",
   emojiLabel,
   ackText,
+  showAck = true,
   compact = false,
 }: SteerMessageProps) {
   const tStep = useTranslations("step_list");
@@ -53,6 +59,7 @@ export function SteerMessage({
         alignItems: "flex-end",
       }}
     >
+      {showAck ? (
       <span
         aria-label={resolvedEmojiLabel}
         title={resolvedEmojiLabel}
@@ -87,6 +94,7 @@ export function SteerMessage({
           </span>
         ) : null}
       </span>
+      ) : null}
       <div
         style={{
           fontFamily: "var(--f-mono)",

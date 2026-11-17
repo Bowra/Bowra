@@ -113,14 +113,14 @@ describe("Capability Center resource state", () => {
       team_plugins_my_disabled: [],
     });
     authenticate("member");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
     expect(await screen.findByText("Not ready")).toBeTruthy();
   });
 
   it("previews who is affected before a team disables a Plugin", async () => {
     authenticate("owner");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
     expect(await screen.findByText("v2")).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Turn “Web research” on or off for the team" }));
@@ -134,7 +134,7 @@ describe("Capability Center resource state", () => {
 
   it("applies a personal disable at once and hides the team switch from members", async () => {
     authenticate("member");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
     await screen.findByText("Web research");
     expect(screen.queryByRole("switch", { name: /for the team/ })).toBeNull();
@@ -143,24 +143,48 @@ describe("Capability Center resource state", () => {
     expect(fetchDisableImpact).not.toHaveBeenCalled();
   });
 
-  it("lets settings Plugins be turned off like any other Plugin", async () => {
+  it("lists settings Plugins in a closed group of their own with their switches", async () => {
     vi.mocked(fetchBuiltinPlugins).mockResolvedValue({
-      plugins: [plugin("settings-space-preferences", [], { family: "settings", selectable: false, version: 5, listing: {} })],
+      plugins: [
+        plugin("web-research", ["web_search"]),
+        plugin("settings-team-administration", [], { family: "settings", selectable: false, listing: {} }),
+      ],
       team_plugins_my_disabled: [],
     });
     authenticate("owner");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
-    expect(await screen.findByText("v5")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: /“Space Preferences” on or off for the team/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: "Turn “Space Preferences” on or off for me" }));
-    await waitFor(() => expect(setBuiltinPluginMyState).toHaveBeenCalledWith("settings-space-preferences", true));
+
+    const row = (await screen.findByText("Team Administration Settings")).closest("li")!;
+    const group = row.closest("details")!;
+    expect(group.open).toBe(false);
+    expect(within(group).getByRole("heading", { name: /Used by the settings assistant/ }).textContent).toContain("1");
+    expect(screen.queryByText("settings-team-administration")).toBeNull();
+    expect(screen.getByRole("heading", { name: /Built-in Plugins/ }).textContent).toContain("1");
+    // The switches decide which settings forms the assistant may open, so they stay.
+    expect(within(row).getByRole("switch", { name: /“Team Administration Settings” on or off for the team/ })).toBeTruthy();
+    fireEvent.click(within(row).getByRole("switch", { name: "Turn “Team Administration Settings” on or off for me" }));
+    await waitFor(() => expect(setBuiltinPluginMyState).toHaveBeenCalledWith("settings-team-administration", true));
+  });
+
+  it("opens the settings group when a search matches one of its Plugins", async () => {
+    vi.mocked(fetchBuiltinPlugins).mockResolvedValue({
+      plugins: [plugin("web-research", ["web_search"]), plugin("settings-space-preferences", [], { family: "settings", selectable: false, listing: {} })],
+      team_plugins_my_disabled: [],
+    });
+    authenticate("member");
+    state.query = "type=plugins";
+    renderIntl(<CapabilityCenter />, { locale: "en-US" });
+    await screen.findByText("Space Preferences");
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: "space pref" } });
+    expect(screen.getByText("Space Preferences").closest("details")!.open).toBe(true);
+    expect(screen.queryByText("Web research")).toBeNull();
   });
 
   it("offers Undo only after a personal disable was saved", async () => {
     vi.mocked(setBuiltinPluginMyState).mockRejectedValueOnce(new Error("offline"));
     authenticate("member");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
     await screen.findByText("Web research");
     fireEvent.click(screen.getByRole("switch", { name: "Turn “Web research” on or off for me" }));
@@ -240,17 +264,27 @@ describe("Capability Center resource state", () => {
     expect(heading.textContent).toBe("Built-in Tools 2");
   });
 
-  it("keeps the read-only catalog while the state endpoints are off", async () => {
-    vi.mocked(fetchBuiltinPlugins).mockResolvedValue(null);
+  it("waits for the Plugin state, and explains a failed state load with a retry", async () => {
+    // On 116 the catalog answered about two seconds before the Plugin state; until then the page listed
+    // only the settings-assistant Plugins, as Built-in Plugins one could choose for an Agent.
+    let answer!: (value: null) => void;
+    vi.mocked(fetchBuiltinPlugins).mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
     vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({
       tools: [],
       builtin_plugins: [{ id: "builtin:settings-space-preferences@5", name: "settings-space-preferences", tool_count: 7, skill_count: 1 }],
       capabilities: [],
     });
     authenticate("owner");
-    state.query = "type=capabilities";
+    state.query = "type=plugins";
     renderIntl(<CapabilityCenter />, { locale: "en-US" });
-    expect(await screen.findByRole("heading", { name: "Built-in Plugins" })).toBeTruthy();
-    expect(screen.queryByRole("switch")).toBeNull();
+    await waitFor(() => expect(fetchCapabilityDiscoveryCatalog).toHaveBeenCalled());
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.queryByText("Space Preferences")).toBeNull();
+    answer(null);
+    expect((await screen.findByRole("alert")).textContent).toContain("Unable to load capabilities");
+    expect(screen.queryByRole("heading", { name: /Built-in Plugins/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("heading", { name: /Built-in Plugins/ })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Turn “Web research” on or off for the team" })).toBeTruthy();
   });
 });

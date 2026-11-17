@@ -398,6 +398,7 @@ def test_upload_with_invalid_doc_type_id_404(
             )
         },
         data={
+            "knowledge_intent": "add_to_knowledge",
             "scope": "workspace",
             "scope_id": "ws_test",
             "use_llm": "false",
@@ -439,6 +440,7 @@ async def test_upload_cross_ws_doc_type_leak_blocked(
             )
         },
         data={
+            "knowledge_intent": "add_to_knowledge",
             "scope": "workspace",
             "scope_id": "ws_bob",
             "use_llm": "false",

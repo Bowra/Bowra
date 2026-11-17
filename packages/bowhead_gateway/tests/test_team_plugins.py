@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx2
@@ -153,3 +154,89 @@ async def test_plugin_edit_after_skill_reapproval_keeps_the_skill_and_stores_its
         )
         assert refused.status_code == 422
         assert refused.json()["detail"]["code"] == "capability_skill_unavailable"
+
+
+def _lose_lease(monkeypatch, times: int) -> list[int]:
+    """Make the next Plugin write statements fail inside their transaction with the runtime's lease error."""
+    from bowhead_core import sqlite_domain_runtime, team_plugin_store
+
+    attempts: list[int] = []
+    original = team_plugin_store._stamp
+
+    def stamp() -> str:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) <= times:
+            raise sqlite_domain_runtime._busy()
+        return original()
+
+    monkeypatch.setattr(team_plugin_store, "_stamp", stamp)
+    return attempts
+
+
+@pytest.mark.asyncio
+async def test_plugin_writes_repeat_after_losing_the_authority_lease(tmp_path, monkeypatch, initialize_migrated_core_database):
+    from bowhead_core.team_plugin_store import TeamPluginStore
+
+    path = tmp_path / "bowhead.db"
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
+    _seed(path)
+    plugins = TeamPluginStore(str(path))
+    contents = {"description": "", "tool_refs": ["web_search"], "skill_grants": []}
+
+    attempts = _lose_lease(monkeypatch, 1)
+    created = await plugins.create(team_id="team_1", actor_user_id="user_1", name="Research", **contents)
+    assert attempts == [1, 2]
+    attempts = _lose_lease(monkeypatch, 1)
+    updated = await plugins.update(
+        team_id="team_1", plugin_id=created["id"], actor_user_id="user_1", expected_row_version=created["row_version"], name="Research 2", **contents
+    )
+    attempts = _lose_lease(monkeypatch, 1)
+    # Only the status transaction repeats; the read that follows it must not meet its own new row version.
+    disabled = await plugins.set_enabled(team_id="team_1", plugin_id=created["id"], enabled=False, expected_row_version=updated["row_version"])
+    assert disabled["status"] == "disabled"
+    assert disabled["row_version"] == updated["row_version"] + 1
+    attempts = _lose_lease(monkeypatch, 1)
+    await plugins.delete(team_id="team_1", plugin_id=created["id"], expected_row_version=disabled["row_version"])
+    assert attempts == [1, 2]
+    assert await plugins.list("team_1", include_disabled=True) == []
+
+
+@pytest.mark.asyncio
+async def test_plugin_write_that_never_gets_the_lease_answers_busy_and_writes_nothing(tmp_path, monkeypatch, initialize_migrated_core_database):
+    from bowhead_core.error_catalog import default_error_catalog_dir, load_error_catalog
+    from bowhead_gateway.error_handler import register_error_handlers
+
+    from bowhead_core import _db
+
+    path = tmp_path / "bowhead.db"
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
+    _seed(path)
+    store = UserStore(path)
+    current = User(id="user_1", team_id="team_1", email="user_1@example.com", status="active")
+    monkeypatch.setattr(team_plugins, "_check_resources", AsyncMock(return_value=[]))
+    elapsed = 0.0
+
+    async def pause(delay: float) -> None:
+        nonlocal elapsed
+        elapsed += delay
+
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(_db, "time", SimpleNamespace(monotonic=lambda: elapsed, time=_db.time.time))
+    monkeypatch.setattr(_db, "anyio", SimpleNamespace(sleep=pause))
+    attempts = _lose_lease(monkeypatch, 10_000)
+    app = FastAPI()
+    register_error_handlers(app)
+    app.state.error_catalog = load_error_catalog(default_error_catalog_dir())
+    app.include_router(team_plugins.router, prefix="/api/v1/team-capabilities")
+    app.dependency_overrides[_current_user] = lambda: current
+    app.dependency_overrides[_store] = lambda: store
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test") as client:
+        busy = await client.post(
+            "/api/v1/team-capabilities", json={"name": "Research", "tool_refs": ["web_search"]}, headers={"Accept-Language": "zh-CN"}
+        )
+        assert busy.status_code == 503
+        assert busy.headers["Retry-After"] == "2"
+        assert busy.json()["detail"]["code"] == "capability_store_busy"
+        assert "请几秒后重试" in busy.json()["detail"]["message"]
+        assert len(attempts) > 1
+        assert (await client.get("/api/v1/team-capabilities")).json() == []

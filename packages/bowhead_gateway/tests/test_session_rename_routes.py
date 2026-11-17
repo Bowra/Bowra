@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -21,7 +22,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path):
+async def app_ctx(tmp_path: Path, initialize_migrated_core_database):
+    # Session detail reads migration-owned context tables (0206); start from the real baseline.
+    initialize_migrated_core_database(tmp_path / "sessions.db")
     store = SessionStore(tmp_path / "sessions.db")
     await store.initialize()
     app = create_app()
@@ -159,7 +162,9 @@ async def test_rename_conceals_foreign_deleted_and_missing_sessions(app_ctx) -> 
     foreign = await store.ensure_session(session_id="s_foreign", workspace_id="w1", user_id="u_foreign")
     await store.set_title(session_id=foreign.id, title="Someone else's work")
     deleted = await store.ensure_session(session_id="s_deleted", workspace_id="w1", user_id=uid)
-    await store.soft_delete_session(deleted.id)
+    # On the migrated schema only the lifecycle coordinator deletes sessions; seed the deleted state directly.
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute("UPDATE sessions SET deleted_at='2026-11-01T00:00:00+00:00' WHERE id=?", (deleted.id,))
 
     async with _client(app_ctx) as client:
         for session_id in (foreign.id, deleted.id, "s_missing"):

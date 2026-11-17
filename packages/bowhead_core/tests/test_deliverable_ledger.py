@@ -96,6 +96,17 @@ async def test_files_counts_turn_deliverables(store: ArtifactStore) -> None:
     assert led.produced_anything is True
 
 
+async def test_delivered_files_carry_their_identifiers_and_data_files_do_not(store: ArtifactStore) -> None:
+    report = await store.put_bytes(
+        content=b"x", filename="report.html", mime="text/html", kind="deliverable", created_by="u_1", created_by_turn="t_1"
+    )
+    await store.put_bytes(content=b"y", filename="rows.csv", mime="text/csv", kind="sandbox_output", created_by="u_1", created_by_turn="t_1")
+    led = await build_deliverable_ledger(turn_id="t_1", artifact_store=store)
+    # Only what was delivered is named with its identifier; a data or work file is counted and found by lookup.
+    assert led.delivered == ((report.id, "report.html"),)
+    assert led.files >= 1
+
+
 async def test_files_zero_is_the_prod_miss_shape(store: ArtifactStore) -> None:
     """07-23 那两轮：skill 跑成功、答案说"PDF 已经导出好了"、库里 0 个交付物。"""
     led = await build_deliverable_ledger(
@@ -473,3 +484,35 @@ async def test_the_ledger_actually_uses_the_receipts_not_just_the_helper():
     )
     assert led.memories == 1
     assert led.memories_verified is True, "有回执就算核过——不能因为旧表读不到就说'未验证'"
+
+
+class _SessionFilesStore:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[dict] = []
+        self._fail = fail
+
+    async def list_result_artifacts_for_turn(self, turn_id: str) -> list:
+        return []
+
+    async def list_session_deliverables(self, **scope) -> list:
+        self.calls.append(scope)
+        if self._fail:
+            raise RuntimeError("store unavailable")
+        return [SimpleNamespace(filename="report.html", version_no=4), SimpleNamespace(filename="rows.xlsx", version_no=None)]
+
+
+async def test_session_files_are_read_only_when_asked() -> None:
+    store = _SessionFilesStore()
+    led = await build_deliverable_ledger(turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=store)
+    assert led.session_files == () and store.calls == []
+    led = await build_deliverable_ledger(turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=store, include_session_files=True)
+    assert led.session_files == (("report.html", 4), ("rows.xlsx", 1))
+    assert led.session_file_exts == frozenset({".html", ".xlsx"})
+    assert store.calls[0]["exclude_turn_id"] == "t_2" and store.calls[0]["session_id"] == "s_1"
+
+
+async def test_unreadable_session_files_leave_the_file_count_verified() -> None:
+    led = await build_deliverable_ledger(
+        turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=_SessionFilesStore(fail=True), include_session_files=True
+    )
+    assert led.session_files == () and led.files_verified and led.files == 0

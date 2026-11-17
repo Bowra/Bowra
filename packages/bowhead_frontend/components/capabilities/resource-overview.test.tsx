@@ -25,10 +25,28 @@ vi.mock("@/lib/api", () => ({
   })),
 }));
 
-import { PersonalOverview, SkillsOverview } from "./resource-overview";
+import type { BuiltinPluginState } from "@/lib/builtin-resources-api";
+import { PersonalOverview, PluginOverview, SkillsOverview, type ResourceState } from "./resource-overview";
 
 describe("Capability Center overview sections", () => {
   afterEach(cleanup);
+
+  it("counts choosable built-in Plugins and still reports a turned-off settings Plugin", () => {
+    const builtin = (name: string, family: "general" | "settings", extra: Partial<BuiltinPluginState> = {}): BuiltinPluginState => ({
+      name, version: 1, family, selectable: family === "general", listing: { "en-US": { name, description: "" } }, tools: [], tool_count: 0,
+      skill_count: 0, prompt_modules: [], availability: [], team_disabled: false, my_disabled: false, ...extra,
+    });
+    const state = {
+      plugins: { plugins: [builtin("web-research", "general"), builtin("settings-space-preferences", "settings", { my_disabled: true })], team_plugins_my_disabled: [] },
+      tools: [],
+      catalog: null,
+    } as unknown as ResourceState;
+    renderIntl(<PluginOverview state={state} onlyMine={false} />, { locale: "en-US" });
+    expect(screen.getByText("Built-in 1 · Off 1")).toBeTruthy();
+    cleanup();
+    renderIntl(<PluginOverview state={state} onlyMine />, { locale: "en-US" });
+    expect(screen.getByText("You turned off 1 Plugin")).toBeTruthy();
+  });
 
   it("shows Skill counts and the viewer's own Skills first", () => {
     renderIntl(<SkillsOverview onlyMine={false} />, { locale: "en-US" });

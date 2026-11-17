@@ -49,13 +49,15 @@ def test_system_evidence_uses_effective_team_skill_and_prompt_overrides() -> Non
 def test_catalog_loads_versioned_definitions_and_reviewed_image_implementation() -> None:
     catalog = CapabilityCatalog.bootstrap()
 
-    assert len(catalog.definitions) == 14
-    assert len(catalog.implementations) == 10
+    # cap_template_document@2 (Word drafts, a4a51bf4d) is the second reviewed template version.
+    assert len(catalog.definitions) == 15
+    assert len(catalog.implementations) == 11
     assert catalog.get_definition("cap_report", 1).outputs[0].exact_ref == "report.document.v1"
     assert catalog.latest_definition("cap_presentation").listing["zh-CN"].name == "制作演示文稿"  # type: ignore[union-attr]
     assert {item.exact_ref for item in catalog.implementations if item.review_state == "reviewed"} == {
         "capi_image_generation_native@1",
         "capi_template_document_native@1",
+        "capi_template_document_native@2",
     }
     report_implementations = catalog.implementations_for(catalog.get_definition("cap_report", 1))
     assert [item.exact_ref for item in report_implementations] == ["capi_report_canvas@1"]

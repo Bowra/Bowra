@@ -112,6 +112,7 @@ async def test_first_primary_after_lead_answer_retains_its_read_and_second_quest
                     "profile": case.fixture.case.args["reference_start"].profile_name,
                     "task": "Read the assigned method, retain the confirmed quarter and ask for the comparison period.",
                     "delegation_role": "primary",
+                    "required_source_urls": [],
                 },
             )
         if step == 2:

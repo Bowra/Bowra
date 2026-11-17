@@ -190,7 +190,7 @@ async def test_builtin_metadata_uses_real_grants_capability_and_preferences(clie
         raise AssertionError("request-time package scan")
 
     monkeypatch.setattr(metadata, "load_skill", forbidden)
-    monkeypatch.setattr(metadata, "bundle_sha256", forbidden)
+    monkeypatch.setattr(metadata, "builtin_bundle_sha256", forbidden)
     assert get()["groups"][0]["items"] == []
     await grant("dupont")
     await grant("python_sandbox")
@@ -207,6 +207,8 @@ async def test_builtin_metadata_uses_real_grants_capability_and_preferences(clie
     disabled = get()
     assert disabled["groups"][0]["items"][0]["reason_code"] == "resource_unavailable"
     assert disabled["catalog_generation"] != first["catalog_generation"]
+    body = {**body, "reason_code_version": 2}
+    assert get()["groups"][0]["items"][0]["reason_code"] == "personally_disabled"
     await grant("dupont", effect="deny")
     assert [item["id"] for item in get()["groups"][0]["items"]] == ["builtin:python_sandbox"]
 
@@ -450,6 +452,56 @@ async def test_uploaded_metadata_route_uses_current_cache_and_permissions(client
     clock[0] = 130.0
     stale = next(item for item in get() if item["id"] == personal.id)
     assert stale["resource"] is None and stale["read_only_parameter_schema"] is None and stale["reason_code"] == "catalog_metadata_unavailable"
+
+
+async def test_uploaded_skill_reason_names_only_the_viewers_own_switch(client_ctx, app_ctx, builtin_ctx, tmp_path):
+    from shutil import copytree
+
+    from bowhead_core.skill_upload import bundle_sha256
+    from bowhead_core.uploaded_skill_reference_metadata import UploadedSkillMetadataCache
+    from bowhead_core.user_store import TeamSkill
+
+    client, body = client_ctx
+    root, _, _, instances, grant = builtin_ctx
+    await grant("dupont")
+    personal = await instances.upsert(
+        user_id=app_ctx.member.id,
+        name="dupont",
+        source_type="user_upload",
+        source_path=str(copytree(root / "dupont", tmp_path / "personal")),
+        enabled=False,
+    )
+    team_path = copytree(root / "dupont", tmp_path / "team")
+    team = await app_ctx.users.create_team_skill(
+        TeamSkill(
+            id="oskill_switch",
+            team_id=app_ctx.team.id,
+            name="dupont",
+            source_path=str(team_path),
+            created_by=app_ctx.owner.id,
+            approved_sha256=bundle_sha256(team_path),
+        )
+    )
+    await instances.upsert(user_id=app_ctx.member.id, name=f"team:{team.id}", source_type="team_shared", source_path="", enabled=False)
+    cache = UploadedSkillMetadataCache(app_ctx.users.db_path)
+    await cache.refresh()
+    app_ctx.app.state.uploaded_skill_reference_metadata = cache
+
+    def reasons(version=None):
+        request = {**body, "trigger": "/", **({"reason_code_version": version} if version else {})}
+        response = client.post(URL, json=request, cookies=_as(app_ctx.member))
+        assert response.status_code == 200, response.text
+        items = response.json()["groups"][0]["items"]
+        assert all(item["availability"] == "unavailable" and item["resource"] is None for item in items if item["source_kind"] != "builtin")
+        return {item["id"]: item["reason_code"] for item in items if item["source_kind"] != "builtin"}
+
+    assert reasons(2) == {personal.id: "personally_disabled", team.id: "personally_disabled"}
+    # Pages loaded before reason-code version 2 reject unknown codes.
+    assert reasons() == {personal.id: "resource_unavailable", team.id: "resource_unavailable"}
+    # Re-enabling cannot fix a pending import or a Team-level stop, so do not point the viewer at their switch.
+    await instances.set_import_status(user_id=app_ctx.member.id, name="dupont", import_status="pending", import_report_json=None)
+    await app_ctx.users.update_team_skill_meta(app_ctx.team.id, team.id, status="disabled")
+    assert reasons(2) == {personal.id: "resource_unavailable", team.id: "resource_unavailable"}
 
 
 @pytest.mark.parametrize("prefix", ["", "/bowhead"])

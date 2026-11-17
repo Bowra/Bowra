@@ -45,9 +45,7 @@ async def skill_visible_by_grants(
 
         from bowhead_core.grant_evaluation import iter_grant_verdicts
 
-        skill_target = ("team_skill", team_skill_id, permission) if team_skill_id else ("skill", skill_name, permission)
-        targets = [skill_target]
-        targets.extend(("builtin_capability", capability_id, "use") for capability_id in builtin_capability_ids_for_skill(skill_name))
+        targets = _skill_targets(skill_name, permission, team_skill_id)
         async with aclosing(iter_grant_verdicts(ctx, access_store, access_ctx, targets, team_skill_created_by=team_skill_created_by)) as verdicts:
             async for verdict in verdicts:
                 if verdict.allowed:
@@ -90,6 +88,56 @@ async def skill_visible_by_grants(
         return not enforce
 
 
+def _skill_targets(skill_name: str, permission: str, team_skill_id: str | None = None) -> list[tuple[str, str, str]]:
+    skill_target = ("team_skill", team_skill_id, permission) if team_skill_id else ("skill", skill_name, permission)
+    return [skill_target, *(("builtin_capability", capability_id, "use") for capability_id in builtin_capability_ids_for_skill(skill_name))]
+
+
+async def skills_visible_by_grants(ctx: Any, skill_names: Iterable[str], *, permission: str = "use") -> dict[str, bool]:
+    """``skill_visible_by_grants`` for a listing, decided in one batch per resource kind.
+
+    Each name gets the value and log lines the single check gives without audit or a team skill
+    key: the first refusal is logged and, when enforced, hides the Skill; a failed decision hides
+    every name when enforced and shows it in shadow mode.
+    """
+    names = list(dict.fromkeys(str(name) for name in skill_names))
+    access_store = getattr(ctx, "access_control_store", None)
+    access_ctx = getattr(ctx, "access_context", None)
+    if access_store is None or not access_ctx or not names:
+        return dict.fromkeys(names, True)
+    if not callable(getattr(access_store, "explain_decisions", None)):
+        return {name: await skill_visible_by_grants(ctx, name, permission=permission) for name in names}
+    enforce = False
+    try:
+        from bowhead_core.access_control import resource_grants_enforce_enabled
+        from bowhead_core.grant_evaluation import grant_verdicts_batch
+
+        enforce = resource_grants_enforce_enabled()
+        verdict_lists = await grant_verdicts_batch(ctx, access_store, access_ctx, [_skill_targets(name, permission) for name in names])
+    except Exception as exc:
+        logger.warning("resource_grant.skill_check_failed skills=%d enforce=%s err=%s", len(names), enforce, exc)
+        return dict.fromkeys(names, not enforce)
+    visible: dict[str, bool] = {}
+    for name, verdicts in zip(names, verdict_lists, strict=True):
+        visible[name] = True
+        for verdict in verdicts:
+            if verdict.allowed:
+                continue
+            logger.info(
+                "resource_grant.skill_would_deny skill=%s resource=%s:%s permission=%s reason=%s enforce=%s",
+                name,
+                verdict.resource_kind,
+                verdict.resource_id,
+                verdict.permission,
+                verdict.reason,
+                enforce,
+            )
+            if enforce:
+                visible[name] = False
+                break
+    return visible
+
+
 def lead_can_read_skill(spec: Any) -> bool:
     """A Skill the system Lead's index lists is one whose body it can read.
 
@@ -110,11 +158,9 @@ class _FilteredCatalog:
 
 
 async def filter_skill_specs_by_grants(ctx: Any, specs: Iterable[Any]) -> list[Any]:
-    out: list[Any] = []
-    for spec in specs:
-        if await skill_visible_by_grants(ctx, str(spec.name)):
-            out.append(spec)
-    return out
+    specs = list(specs)
+    visible = await skills_visible_by_grants(ctx, [str(spec.name) for spec in specs])
+    return [spec for spec in specs if visible[str(spec.name)]]
 
 
 # Method/SOP summary in the Lead catalog: explains the 17 analyst-method-* / analyst-sop-* skills hidden

@@ -37,7 +37,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import bootstrap_shared_db, open_shared_ctx
+from bowhead_core._db import bootstrap_shared_db, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.sqlite_readable_schema import readable_table_exists
 from bowhead_core.subagent_write_boundary import (
@@ -1462,6 +1462,7 @@ class TeamSubagentStore:
                 await db.rollback()
                 raise
 
+    @repeat_when_authority_busy()
     async def compare_and_update_team_subagent(
         self,
         team_id: str,

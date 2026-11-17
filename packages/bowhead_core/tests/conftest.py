@@ -300,6 +300,25 @@ def _restore_canvas_export_job_store():
 
 
 @pytest.fixture(autouse=True)
+def _restore_turn_language_contextvars():
+    """Undo Turn-language ContextVar writes made on the worker's main context.
+
+    Production sets these inside each Turn task (`run_turn` keeps the token and the
+    task context ends with the Turn), and `pin_turn_output_language` re-pins without a
+    token. Synchronous tests that pin directly write the xdist worker's main context,
+    so a later test on the same worker read the stale pin and rendered English chrome
+    where its `language_context` asked for de-DE, fr-FR or zh-CN.
+    """
+    from bowhead_core.agents import _lead_context
+
+    variables = (_lead_context._CURRENT_OUTPUT_LANGUAGE_CONTEXTVAR, _lead_context._CURRENT_UI_LANGUAGE_CONTEXTVAR)
+    saved = [variable.get() for variable in variables]
+    yield
+    for variable, value in zip(variables, saved, strict=True):
+        variable.set(value)
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_db_bootstrap():
     """用例结束后清 `_db._bootstrap_done`（按路径记「已设 WAL」）。
 

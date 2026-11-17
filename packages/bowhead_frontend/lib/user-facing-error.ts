@@ -19,6 +19,12 @@ export function genericUserFacingErrorMessage(): string {
 export const GENERIC_ERROR_CODE = "E_USER_VISIBLE_GENERIC";
 
 /**
+ * The Gateway's code for a save that kept losing its storage lock to running work for its whole
+ * wait (503). Nothing was written, so every surface gets the same reason and next step.
+ */
+export const STORE_BUSY_CODE = "store_busy";
+
+/**
  * Why an HTTP request failed when the response names no specific error code: the
  * application or an intermediate proxy answered with only a status, or with an HTML page.
  */
@@ -28,7 +34,8 @@ export type HttpFailureKind =
   | "server_error"
   | "rate_limited"
   | "payload_too_large"
-  | "blocked_by_gateway";
+  | "blocked_by_gateway"
+  | "store_busy";
 
 const HTTP_FAILURE_MESSAGES: Record<Locale, Record<HttpFailureKind, string>> = {
   "zh-CN": {
@@ -38,6 +45,7 @@ const HTTP_FAILURE_MESSAGES: Record<Locale, Record<HttpFailureKind, string>> = {
     rate_limited: "请求过于频繁，请稍等片刻再试。",
     payload_too_large: "提交的内容过大，请减小后重试。",
     blocked_by_gateway: "请求被网关或代理拦截，没有到达应用；请联系管理员检查网关规则。",
+    store_busy: "服务器正忙于其他任务，这次修改没有保存，也没有丢失任何内容。请几秒后重试。",
   },
   "en-US": {
     service_unavailable: "The service is temporarily unavailable, possibly restarting or under maintenance. Try again shortly.",
@@ -47,6 +55,7 @@ const HTTP_FAILURE_MESSAGES: Record<Locale, Record<HttpFailureKind, string>> = {
     payload_too_large: "What you submitted is too large. Make it smaller and try again.",
     blocked_by_gateway:
       "A gateway or proxy blocked the request before it reached the application. Ask your administrator to check the gateway rules.",
+    store_busy: "The server was busy with other work, so this change was not saved and nothing was lost. Try again in a few seconds.",
   },
   "de-DE": {
     service_unavailable:
@@ -59,6 +68,8 @@ const HTTP_FAILURE_MESSAGES: Record<Locale, Record<HttpFailureKind, string>> = {
     payload_too_large: "Die übermittelten Daten sind zu groß. Verkleinern Sie sie und versuchen Sie es erneut.",
     blocked_by_gateway:
       "Ein Gateway oder Proxy hat die Anfrage blockiert, bevor sie die Anwendung erreicht hat. Bitten Sie die Administration, die Gateway-Regeln zu prüfen.",
+    store_busy:
+      "Der Server war mit anderen Aufgaben beschäftigt, daher wurde diese Änderung nicht gespeichert; es ging nichts verloren. Versuchen Sie es in einigen Sekunden erneut.",
   },
   "fr-FR": {
     service_unavailable:
@@ -71,6 +82,8 @@ const HTTP_FAILURE_MESSAGES: Record<Locale, Record<HttpFailureKind, string>> = {
     payload_too_large: "Le contenu envoyé est trop volumineux. Réduisez-le, puis réessayez.",
     blocked_by_gateway:
       "Une passerelle ou un proxy a bloqué la requête avant qu’elle n’atteigne l’application. Demandez à votre administrateur de vérifier les règles de la passerelle.",
+    store_busy:
+      "Le serveur était occupé par d’autres tâches : cette modification n’a pas été enregistrée et rien n’a été perdu. Réessayez dans quelques secondes.",
   },
 };
 
@@ -100,6 +113,7 @@ function classifyHttpResponse(response: object): HttpFailureKind | null {
     nonApiResponse?: unknown;
   };
   if (typeof status !== "number") return null;
+  if (code === STORE_BUSY_CODE) return "store_busy";
   if (typeof code === "string" && code.trim() && code !== GENERIC_ERROR_CODE) return null;
   if (status === 504) return "gateway_timeout";
   if (status === 502 || status === 503) return "service_unavailable";
@@ -172,8 +186,11 @@ export interface HttpFailureReasonOptions {
 
 /**
  * Add the reason for an uncoded HTTP failure to a surface's own failure sentence, so
- * "what failed" stays and "why / what to do" follows. A timeout of a change replaces the
- * sentence: its result is unconfirmed, so a claim that nothing was saved would be wrong.
+ * "what failed" stays and "why / what to do" follows. The surface's own next step was
+ * written for an unknown cause ("Refresh and try again", "Check the name"), so it is
+ * dropped and the reason's next step applies; facts such as "Your draft was preserved"
+ * stay. A timeout of a change replaces the sentence: its result is unconfirmed, so a
+ * claim that nothing was saved would be wrong.
  */
 export function withHttpFailureReason(
   message: string,
@@ -186,12 +203,71 @@ export function withHttpFailureReason(
   const reason = kind === "gateway_timeout" && options.read
     ? READ_TIMEOUT_MESSAGES[locale]
     : httpFailureMessage(kind, locale);
-  const base = message.trim();
+  const trimmed = message.trim();
   // A message that already names a reason (a parsed error message, or a caller that added it) stays as is.
-  if (hasHttpFailureReason(base, locale)) return message;
-  if ((kind === "gateway_timeout" && !options.read) || !base || base === GENERIC_ERROR_MESSAGES[locale]) return reason;
+  if (hasHttpFailureReason(trimmed, locale)) return message;
+  if ((kind === "gateway_timeout" && !options.read) || !trimmed || trimmed === GENERIC_ERROR_MESSAGES[locale]) return reason;
+  const base = withoutOwnNextStep(trimmed, locale);
   if (locale === "zh-CN") return `${base}${SENTENCE_END_RE.test(base) ? "" : "。"}${reason}`;
   return `${base}${SENTENCE_END_RE.test(base) ? "" : "."} ${reason}`;
+}
+
+/**
+ * The start of a sentence or clause that tells the reader what to do next: retry,
+ * refresh or reload, reopen, check or confirm, wait, or save again. Chinese also accepts
+ * a short lead-in before 请 ("启用前请确认"); 邀请 and 申请 never qualify.
+ */
+const NEXT_STEP_START: Record<Locale, RegExp> = {
+  "en-US": /^(?:please\s+)?(?:try|retry|refresh|reload|reopen|check|wait|save|confirm|make sure)\b/i,
+  "zh-CN":
+    /^(?:[^，,。；;：:]{0,12}?[前后时])?请(?:稍后|稍等|重试|再|刷新|重新|检查|先|核对|确认|等待|保存)|^或(?:刷新|重试|重新)|^稍后(?:再试|重试)|^重试|^刷新后/u,
+  "de-DE":
+    /^(?:(?:bitte\s+)?(?:versuchen|aktualisieren|laden|öffnen|prüfen|überprüfen|warten|wiederholen|speichern|bestätigen)\s+Sie\b|stellen\s+Sie\s+sicher\b|wählen\s+Sie\b.*\berneut\b|(?:versuche|prüfe|aktualisiere|lade|öffne|warte|speichere)\b|bitte\s+(?:erneut|aktualisieren|versuchen|warten|neu\s+laden)\b|erneut\s+versuchen\b|prüfen\s+und\b)/iu,
+  "fr-FR":
+    /^(?:veuillez\s+)?(?:réessayez|essayez|actualisez|rechargez|rouvrez|vérifiez|patientez|recommencez|relancez|enregistrez|confirmez|assurez-vous)/iu,
+};
+const LATIN_SENTENCE_END = /[.!?;](?=\s)\s*|\s[;—–]\s+/gu;
+const LATIN_CLAUSE_END = /[,:](?=\s)\s*/gu;
+const CJK_SENTENCE_END = /[。！？；;]/gu;
+const CJK_CLAUSE_END = /[，,：:]/gu;
+/** A Chinese lead-in that means nothing without the instruction it introduces. */
+const CJK_LEAD_IN = /^(?:如果|如|若|假如|要是|要|一旦|为了|为|在|当|对于|关于|请)|[前后时]$/u;
+const TRAILING_SEPARATOR = /[\s,，、;；:：—–]+$/u;
+
+function splitAfter(text: string, separators: RegExp): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (const match of text.matchAll(separators)) {
+    const end = (match.index ?? 0) + match[0].length;
+    parts.push(text.slice(start, end));
+    start = end;
+  }
+  if (start < text.length) parts.push(text.slice(start));
+  return parts;
+}
+
+/**
+ * Drop a failure message's own next step, from the first sentence or clause that gives
+ * one to the end. The message's first clause (what failed) always stays. In a later
+ * sentence, the words before the instruction stay only when they state a fact in
+ * Chinese ("草稿已保留，请重试"); elsewhere they are a lead-in or a companion
+ * instruction ("Before enabling, check …"), so the whole sentence goes.
+ */
+export function withoutOwnNextStep(message: string, locale: Locale): string {
+  const cjk = locale === "zh-CN";
+  const nextStep = NEXT_STEP_START[locale];
+  const sentences = splitAfter(message, cjk ? CJK_SENTENCE_END : LATIN_SENTENCE_END);
+  for (let index = 0; index < sentences.length; index += 1) {
+    const clauses = splitAfter(sentences[index], cjk ? CJK_CLAUSE_END : LATIN_CLAUSE_END);
+    const at = clauses.findIndex((clause, position) => (index > 0 || position > 0) && nextStep.test(clause.trim()));
+    if (at < 0) continue;
+    const before = clauses.slice(0, at).join("").replace(TRAILING_SEPARATOR, "");
+    const keepBefore = before !== "" && (index === 0 || (cjk && !CJK_LEAD_IN.test(before.trim())));
+    const failed = `${sentences.slice(0, index).join("")}${keepBefore ? before : ""}`.replace(TRAILING_SEPARATOR, "");
+    // A fragment with no statement of its own (", please wait.") stays whole.
+    return failed || message;
+  }
+  return message;
 }
 
 function hasHttpFailureReason(message: string, locale: Locale): boolean {

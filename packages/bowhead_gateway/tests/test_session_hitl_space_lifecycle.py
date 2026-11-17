@@ -280,7 +280,6 @@ async def test_clarification_routes_use_inventory_operations(
             request,
             SimpleNamespace(),
             store,
-            SimpleNamespace(),
         ),
         lambda: clarifications.dismiss_clarification(
             "clarification_a",

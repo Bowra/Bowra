@@ -86,7 +86,9 @@ The first token of your narrative MUST be `<response_kind>chat</response_kind>` 
 `<response_kind>canvas</response_kind>`, followed directly by the body.
 
 There is exactly one criterion: **did the user explicitly ask for a "document" this time** — a report / document /
-long multi-section write-up (报告 / 文档 / 分章节长文), or a named PDF·Word·Excel·PPT export.
+long multi-section write-up (报告 / 文档 / 分章节长文), or an export of such a write-up.
+A file the user asks for (a PPTX filled from their template, a new deck, a spreadsheet, a CSV) is written by the
+helper as a result file and comes back with either marker; it does not need a report.
 This marker selects the delivery surface, not a renderer. Do not create a report solely to enable a file export.
 
 · Explicitly asked → canvas
@@ -350,6 +352,10 @@ _POST_STEP2_CODE_LINE_TMPL = '- **Run code / pure calculation / draw a chart** (
 _CHART_DISPLAY_GUIDANCE = """For a requested native or editable data chart, delegate to the existing native chart Tool when available; do not require a Matplotlib image unless the user asks for one or the native Tool cannot express the request. Preserve supplied values and their source units. Source units do not determine the visible axis magnitude: the renderer may automatically rescale labels. Do not assert or prescribe the displayed axis unit, a lack of display conversion, or a visual position before it is confirmed by a renderer receipt. If the actual display unit is unavailable, report that limitation instead of guessing.
 A request to change only how an existing chart is presented (title, subtitle, colors, labels, legend, formats or a chart type that chart supports) edits that chart in place, including a chart shown in an earlier chat answer; it does not create a new chart. Delegate it with the chart's title and real `sec_…` ID, taken from that answer's `[figure:sec_…]` marker or, when available, `read_report` figures, and ask for `read_chart` + `edit_chart`. Whether a chart type is supported depends on the chart; when the helper reports that a change is not offered in place, tell the user which changes the chart does offer and ask before drawing a new chart. A change of data, metric, period or scope still draws a new chart."""
 
+# 116 the regression case: Lead asked the helper for three.js from a CDN twice; the offline Results preview removed it and the game
+# could not start. Only rendered with a compute holder, like the chart guidance.
+_SELF_CONTAINED_HTML_GUIDANCE = """An HTML page, game or visualization the user will open is one self-contained file: never ask the helper to load a library from a CDN or the network, because the Results preview runs offline and removes external scripts. For 3D, ask it to check for a local browser library and inline it only when available. If it is absent, use a supported offline technique or explain which part requires the library."""
+
 _POST_STEP2_CODE_LINE_ABSENT = "- **Run code / pure calculation / draw a chart** → likewise no Agent here can run code; say so plainly, and **never** write code for the user to copy as a stand-in for the deliverable."
 
 _GUIDANCE_POST_STEP2_REST = """
@@ -383,7 +389,7 @@ def _render_guidance_body(data_peer: str | None, compute_peer: str | None) -> st
     head = _GUIDANCE_PRE_STEP2_TMPL.format(compute_route=f" via {compute_peer}" if compute_peer else "")
     data_line = _STEP2_DATA_LINE_ABSENT if data_peer is None else _STEP2_DATA_LINE_TMPL.format(data=data_peer)
     code_line = _POST_STEP2_CODE_LINE_ABSENT if compute_peer is None else _POST_STEP2_CODE_LINE_TMPL.format(compute=compute_peer)
-    chart_guidance = "\n" + _CHART_DISPLAY_GUIDANCE if compute_peer is not None else ""
+    chart_guidance = "\n" + _CHART_DISPLAY_GUIDANCE + "\n" + _SELF_CONTAINED_HTML_GUIDANCE if compute_peer is not None else ""
     return head + data_line + "\n" + code_line + chart_guidance + _GUIDANCE_POST_STEP2_REST
 
 

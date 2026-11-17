@@ -349,6 +349,12 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     if _build_edition == "community" and read_installation(db_path) is None:
         raise RuntimeError("Community installation preparation must run before Gateway startup")
 
+    from bowhead_core.clarification_store import ClarificationStore
+
+    # Check before Store initializers can add current columns to an unprepared database.
+    clarification_store = ClarificationStore(db_path=db_path)
+    await clarification_store.require_invalidation_schema()
+
     # Context-engineering sprint reduced option B: record registered flags' enablement times beside the SQLite directory
     # in append-only flag_transitions.jsonl, then partition llm_usage_daily into before/after changes.
     # Batch 2 flags took effect in 1.2.25 without a baseline; this timestamp was missing. Best effort, never blocks startup.
@@ -1049,12 +1055,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     schema_cache = DatarcSchemaCache(ttl_sec=300, max_entries=64)
 
     # ─── M156-M3b: Clarification HITL store + background expiration task ───
-    from bowhead_core.clarification_store import ClarificationStore
-
-    clarification_store = ClarificationStore(db_path=db_path)
     await clarification_store.initialize()
-    # Move migration gates earlier: unmigrated databases (or only 1.0.0 baseline) must reject startup before any recovery/maintenance
-    # jobs touch new tables, asking for migration first instead of background no-such-table failures (e.g. KB maintenance kb_rebuild_jobs).
     # Stores participating in atomic invalidation must share one SQLite file, with core 0017 installed.
     from bowhead_gateway.clarification_invalidation import require_shared_core_database
 
@@ -1064,7 +1065,6 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         turn_log_store,
         session_store,
     )
-    await clarification_store.require_invalidation_schema()
     _clarification_invalidation_publisher_task: asyncio.Task[None] | None = None
 
     _terminal_recovery_monitor_task: asyncio.Task[Any] | None = None

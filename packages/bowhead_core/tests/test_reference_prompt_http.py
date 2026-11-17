@@ -40,6 +40,38 @@ pytestmark = [
 ]
 
 
+def registered_datarc_context(team_id, workspaces, pinned_project):
+    """A Datarc context resolved through the team connection registry, as production supplies it."""
+    from bowhead_core.datarc_selection import DatarcConnectionBinding
+    from bowhead_gateway.datarc_context import DatarcTurnContext
+
+    client = object()
+    return DatarcTurnContext(
+        datarc_client=client,
+        connection_binding=DatarcConnectionBinding(team_id, "dc_prompt_http", "revision_1", client),
+        accessible_datarc_workspaces=workspaces,
+        active_datarc_project=pinned_project,
+        datarc_project_for_calls=pinned_project or "",
+    )
+
+
+async def datarc_member_identity(case, monkeypatch, workspaces):
+    """Let resume reauthorize the chosen workspace and resolve its member identity."""
+    from bowhead_gateway.connector_context_service import DatarcWorkspaceRef
+
+    async def accessible_workspaces_ex(_client, user_id, *, refresh=False):
+        assert user_id == case.fixture.scope.user_id and refresh
+        return tuple(DatarcWorkspaceRef(id=item["id"], name=item["name"]) for item in workspaces), ""
+
+    async def resolve_member(email, project, **_kwargs):
+        return f"member_{project}"
+
+    with sqlite3.connect(case.path) as db:
+        db.execute("UPDATE users SET email_verified=1 WHERE id=?", (case.fixture.scope.user_id,))
+    monkeypatch.setattr(case.app.state, "tool_context_service", SimpleNamespace(accessible_workspaces_ex=accessible_workspaces_ex), raising=False)
+    monkeypatch.setattr(case.app.state, "member_resolver", SimpleNamespace(resolve=resolve_member), raising=False)
+
+
 @pytest.fixture
 async def prompt_http(http_start, monkeypatch):
     case = http_start
@@ -143,10 +175,11 @@ async def test_prompt_http_catalog_native_baseline_and_replay(prompt_http, monke
         await settled(turn_id)
         turn = await case.fixture.case.store.get_turn(turn_id)
         assert turn is not None and turn.status == "completed", turn
-        assert route.call_count == 2
+        # The primary read the Skill and answered in prose: one unreturned-work note, then the same answer.
+        assert route.call_count == 3
         replay = await case.client.post("/api/v1/chat/send", json=p.body)
         assert replay.status_code == 200 and replay.json() == response.json()
-        assert route.call_count == 2
+        assert route.call_count == 3
     assert p.calls == [("profitability", {"period": "FY2026"})]
     evidence = await case.client.get(f"/api/v1/turns/{turn_id}/reference-evidence")
     assert evidence.status_code == 200, evidence.text
@@ -318,7 +351,6 @@ async def test_prompt_steer_runs_exact_child_after_parent(prompt_http, monkeypat
     if after_acceptance == "attachment_only":
         p.body = await _prompt_upload_body(p)
     if after_acceptance == "bi_resume":
-        from bowhead_gateway.datarc_context import DatarcTurnContext
         from bowhead_gateway.routes import chat, clarifications
 
         from bowhead_gateway import datarc_context
@@ -327,14 +359,13 @@ async def test_prompt_steer_runs_exact_child_after_parent(prompt_http, monkeypat
 
         async def connector(*args, **kwargs):
             assert kwargs["team_id"] == case.fixture.scope.team_id
-            return DatarcTurnContext(
-                datarc_client=object(),
-                accessible_datarc_workspaces=({"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"}),
-                active_datarc_project=kwargs.get("pinned_project"),
+            return registered_datarc_context(
+                kwargs["team_id"], ({"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"}), kwargs.get("pinned_project")
             )
 
         monkeypatch.setattr(chat, "resolve_datarc_turn_context", connector)
         monkeypatch.setattr(datarc_context, "resolve_datarc_turn_context", connector)
+        await datarc_member_identity(case, monkeypatch, ({"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"}))
     child_model_calls = []
 
     async def respond(request):
@@ -586,7 +617,8 @@ async def test_prompt_steer_runs_exact_child_after_parent(prompt_http, monkeypat
                 )
         assert child.status == "completed", child
         assert p.calls == [("profitability", {"period": "FY2026"})]
-        assert len(child_model_calls) == (3 if after_acceptance == "bi_resume" else 2)
+        # A read then a prose answer gets one unreturned-work note; the resumed BI question answers without one.
+        assert len(child_model_calls) == 3
         if after_acceptance == "attachment_only":
             assert all("period,profit\\nFY2026,42" in json.dumps(model) for model in child_model_calls)
         source = await case.fixture.case.store.get_chat_turn_user_source(
@@ -615,7 +647,7 @@ async def test_prompt_steer_runs_exact_child_after_parent(prompt_http, monkeypat
         assert parent_evidence.json()["source_locator"]["kind"] == "turn_source"
         replay = await case.client.post("/api/v1/chat/send", json=body)
         assert replay.json() == accepted.json()
-        assert len(child_model_calls) == (3 if after_acceptance == "bi_resume" else 2) and len(p.calls) == 1
+        assert len(child_model_calls) == 3 and len(p.calls) == 1
 
 
 async def test_queued_evidence_keeps_accepted_parent_after_holder_transfer(prompt_http):
@@ -933,7 +965,6 @@ async def test_reference_attachment_revocation_stops_subsequent_model_requests(p
 )
 @pytest.mark.parametrize("read_before_pause", [False, True])
 async def test_prompt_http_resumes_original_material_once(prompt_http, monkeypatch, tmp_path, change, with_file, read_before_pause):
-    from bowhead_gateway.datarc_context import DatarcTurnContext
     from bowhead_gateway.routes import chat, clarifications
 
     from bowhead_gateway import datarc_context
@@ -945,14 +976,11 @@ async def test_prompt_http_resumes_original_material_once(prompt_http, monkeypat
 
     async def connector(*args, **kwargs):
         assert kwargs["team_id"] == case.fixture.scope.team_id
-        return DatarcTurnContext(
-            datarc_client=object(),
-            accessible_datarc_workspaces=workspaces,
-            active_datarc_project=kwargs.get("pinned_project"),
-        )
+        return registered_datarc_context(kwargs["team_id"], workspaces, kwargs.get("pinned_project"))
 
     monkeypatch.setattr(chat, "resolve_datarc_turn_context", connector)
     monkeypatch.setattr(datarc_context, "resolve_datarc_turn_context", connector)
+    await datarc_member_identity(case, monkeypatch, workspaces)
     if with_file:
         p.body = await _prompt_upload_body(p)
     bodies = []
