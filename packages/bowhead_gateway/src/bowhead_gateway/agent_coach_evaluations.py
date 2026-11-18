@@ -93,15 +93,15 @@ class AgentCoachEvaluations:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             await self.authorize_owner(db, agent_id)
-            cursor = await db.execute(
+            async with db.execute(
                 """SELECT s.id,s.name,s.state,r.id AS revision_id,r.definition_hash,r.case_count
                    FROM agent_eval_suite s LEFT JOIN agent_eval_suite_revision r ON r.suite_id=s.id
                      AND r.sequence=(SELECT MAX(sequence) FROM agent_eval_suite_revision WHERE suite_id=s.id)
                    WHERE s.team_id=? AND s.agent_id=? AND s.suite_kind='owner_quality' AND s.state!='archived'
                    ORDER BY s.id LIMIT ? OFFSET ?""",
                 (self.resources.user.team_id, agent_id, limit + 1, offset),
-            )
-            rows = await cursor.fetchall()
+            ) as cursor:
+                rows = await cursor.fetchall()
             items = [
                 {
                     "name": row["name"],

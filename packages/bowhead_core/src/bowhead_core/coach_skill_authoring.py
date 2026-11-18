@@ -4,6 +4,13 @@ The operation lock fences workers across processes. A prepared plan is committed
 before canonical files move. Recovery never guesses from the most recent Skill:
 it checks original metadata and input/output hashes under both locks and a fresh
 write transaction. Uncertain or conflicting packages retain their recovery data.
+
+Each write step (reserve, prepare, publish/recover and cancel) repeats as a whole
+when its transaction loses the cross-file authority lease. Its file effects are
+already restartable: prepare rebuilds an unpublished staging copy, and publish and
+cancel decide every move from the hashes of the canonical, staged and backup
+packages, so a repeat after a rolled-back transaction continues where the moves
+stopped, exactly as recovery after a lost process does.
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ from typing import Any
 import aiosqlite
 from bowhead_skill.bundle_files import bundle_file_path
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import is_authority_busy, open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.skill_bundle_lock import skill_bundle_lock, skill_write_conflict
 from bowhead_core.skill_import.hook import import_review_summary
@@ -114,12 +121,27 @@ class CoachSkillAuthoring:
         async with open_shared_ctx(self.db_path) as db:
             yield db
 
+    @asynccontextmanager
+    async def _read_transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+        """One consistent read snapshot that takes no cross-file authority lease.
+
+        The read tools only read. On a write-capable connection their scope check pins the
+        execution file's shared lease and fails at once beside an authority writer (a session
+        deletion, say). Every save step re-authorizes inside its own write transaction.
+        """
+        async with open_pooled_read_ctx(self.db_path) as db:
+            await db.execute("BEGIN")
+            try:
+                yield db
+            finally:
+                await db.rollback()
+
     async def _quota(self, db: aiosqlite.Connection, name: str, size: int) -> None:
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT name,size_bytes FROM skill_instances WHERE user_id=? AND source_type IN ('user_upload','user_generated')",
             (self.scope.user_id,),
-        )
-        _check_user_quota({r[0]: int(r[1] or 0) for r in await cursor.fetchall()}, name=name, new_size_bytes=size)
+        ) as cursor:
+            _check_user_quota({r[0]: int(r[1] or 0) for r in await cursor.fetchall()}, name=name, new_size_bytes=size)
 
     def _path(self, name: str, instance: SkillInstance | None) -> Path:
         if not NAME_PATTERN.fullmatch(name):
@@ -135,8 +157,7 @@ class CoachSkillAuthoring:
         return await self.instances.get(user_id=self.scope.user_id, name=name, connection=db)
 
     async def inspect(self, *, name: str, offset: int = 0, limit: int = 100, finding_offset: int = 0) -> dict:
-        async with self._connection() as db:
-            await db.execute("BEGIN")
+        async with self._read_transaction() as db:
             await self.authorize(db, name, False)
             instance = await self._current(db, name)
             path = self._path(name, instance)
@@ -176,8 +197,7 @@ class CoachSkillAuthoring:
         return current, path
 
     async def read(self, *, target: dict, file: str, offset: int = 0, limit: int = 16000) -> dict:
-        async with self._connection() as db:
-            await db.execute("BEGIN")
+        async with self._read_transaction() as db:
             await self.authorize(db, target["name"], False)
             current = await self._current(db, target["name"])
             with skill_bundle_lock(self._path(target["name"], current), shared=True):
@@ -219,8 +239,7 @@ class CoachSkillAuthoring:
     async def validate(self, *, target: dict, changes: list[dict]) -> dict:
         from bowhead_core.coach_validation import authoring_validation_report
 
-        async with self._connection() as db:
-            await db.execute("BEGIN")
+        async with self._read_transaction() as db:
             await self.authorize(db, target["name"], False)
             current = await self._current(db, target["name"])
             with skill_bundle_lock(self._path(target["name"], current)), tempfile.TemporaryDirectory(prefix="coach-skill-check-") as tmp:
@@ -245,11 +264,11 @@ class CoachSkillAuthoring:
 
     async def _row(self, db: aiosqlite.Connection, operation_id: str) -> dict | None:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM coach_skill_operation WHERE id=? AND team_id=? AND user_id=? AND workspace_id=?",
             (operation_id, self.scope.team_id, self.scope.user_id, self.scope.workspace_id),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         return dict(row) if row else None
 
     @staticmethod
@@ -267,8 +286,7 @@ class CoachSkillAuthoring:
         }
 
     async def get(self, *, operation_id: str, recover: bool = False) -> dict:
-        async with self._connection() as db:
-            await db.execute("BEGIN")
+        async with self._read_transaction() as db:
             row = await self._row(db, operation_id)
             if row is None:
                 raise ValueError("skill_operation_unavailable")
@@ -278,6 +296,7 @@ class CoachSkillAuthoring:
         with skill_bundle_lock(self.root / ".coach-operations" / operation_id):
             return await self._recover(operation_id)
 
+    @repeat_when_authority_busy(spent=None, kind="turn")
     async def cancel(self, *, operation_id: str) -> dict:
         """Stop unapplied work; reconcile published bytes without undoing a save."""
         if re.fullmatch(r"csw_[0-9a-f]{64}", operation_id) is None:
@@ -355,78 +374,11 @@ class CoachSkillAuthoring:
         intent = _digest({"target": target, "changes": changes})
         op_dir = self.root / ".coach-operations" / operation_id
         with skill_bundle_lock(op_dir):
-            async with self._connection() as db:
-                await db.execute("BEGIN IMMEDIATE")
-                await self.authorize(db, target["name"], True)
-                row = await self._row(db, operation_id)
-                if row:
-                    if row["request_hash"] != intent:
-                        raise ValueError("skill_idempotency_conflict")
-                    return self._receipt(row)
-                cursor = await db.execute(
-                    "SELECT id FROM coach_skill_operation WHERE user_id=? AND state IN ('reserved','prepared') AND json_extract(target_json,'$.name')=?",
-                    (self.scope.user_id, target["name"]),
-                )
-                if await cursor.fetchone():
-                    raise ValueError("skill_pending_save_requires_recovery")
-                cursor = await db.execute(
-                    "SELECT count(*) FROM coach_skill_operation WHERE user_id=? AND state IN ('reserved','prepared')", (self.scope.user_id,)
-                )
-                if (await cursor.fetchone())[0] >= 8:
-                    raise ValueError("skill_pending_operation_limit")
-                now = datetime.now(UTC).isoformat()
-                await db.execute(
-                    """INSERT INTO coach_skill_operation(id,team_id,user_id,workspace_id,session_id,turn_id,request_hash,target_json,state,created_at,updated_at)
-                       VALUES(?,?,?,?,?,?,?,?,'reserved',?,?)""",
-                    (
-                        operation_id,
-                        self.scope.team_id,
-                        self.scope.user_id,
-                        self.scope.workspace_id,
-                        self.scope.session_id or "",
-                        turn_id,
-                        intent,
-                        _json(target),
-                        now,
-                        now,
-                    ),
-                )
-                await db.commit()
+            existing = await self._reserve(operation_id, intent, target, turn_id)
+            if existing is not None:
+                return self._receipt(existing)
             try:
-                async with self._connection() as db:
-                    await db.execute("BEGIN IMMEDIATE")
-                    await self.authorize(db, target["name"], True)
-                    current = await self._current(db, target["name"])
-                    with skill_bundle_lock(self._path(target["name"], current)):
-                        current, path = await self._check_target(db, target)
-                        validated = self._stage(path, op_dir / "package", changes, target["name"])
-                        await self._quota(db, target["name"], validated.size_bytes)
-                        original_review = asdict(current) if current else None
-                        if current:
-                            # Quarantine before the first filesystem effect is
-                            # visible. A crash cannot expose new bytes under an
-                            # old import override or business verdict.
-                            await db.execute(
-                                "UPDATE skill_instances SET import_status='pending',import_report_json=NULL,verdict=NULL,verdict_json=NULL WHERE id=?",
-                                (current.id,),
-                            )
-                            current = await self._current(db, target["name"])
-                        plan = {
-                            "original_review": original_review,
-                            "path": str(path),
-                            "baseline": asdict(current) if current else None,
-                            "revision": validated.content_hash,
-                            "name": validated.name,
-                            "version": validated.version,
-                            "description": validated.description,
-                            "size_bytes": validated.size_bytes,
-                            "risk_report": validated.risk_report,
-                        }
-                        await db.execute(
-                            "UPDATE coach_skill_operation SET state='prepared',plan_json=?,updated_at=? WHERE id=? AND state='reserved'",
-                            (_json(plan), datetime.now(UTC).isoformat(), operation_id),
-                        )
-                        await db.commit()
+                await self._prepare(operation_id, target, changes, op_dir)
                 return await self._recover(operation_id)
             except Exception as exc:
                 # A commit can fail after durable success. Read the ledger before
@@ -435,10 +387,15 @@ class CoachSkillAuthoring:
                     await db.execute("BEGIN IMMEDIATE")
                     row = await self._row(db, operation_id)
                     if row and row["state"] == "reserved":
-                        code = exc.code if isinstance(exc, SkillUploadError) else "skill_preparation_failed"
-                        await db.execute(
-                            "UPDATE coach_skill_operation SET state='failed',result_json=? WHERE id=?", (_json({"error": code}), operation_id)
-                        )
+                        if isinstance(exc, SkillUploadError):
+                            outcome = {"error": exc.code}
+                        elif is_authority_busy(exc):
+                            # Preparation kept losing the lease for its whole wait. Nothing
+                            # was published or quarantined; a new save request can try again.
+                            outcome = {"error": "skill_store_busy", "effect": "not_applied"}
+                        else:
+                            outcome = {"error": "skill_preparation_failed"}
+                        await db.execute("UPDATE coach_skill_operation SET state='failed',result_json=? WHERE id=?", (_json(outcome), operation_id))
                         await db.commit()
                     row = await self._row(db, operation_id)
                 if row is None:
@@ -447,6 +404,94 @@ class CoachSkillAuthoring:
                     shutil.rmtree(op_dir, ignore_errors=True)
                 return self._receipt(row)
 
+    @repeat_when_authority_busy(spent=None, kind="turn")
+    async def _reserve(self, operation_id: str, intent: str, target: dict, turn_id: str) -> dict | None:
+        """Record the operation, or return the existing row of the same request."""
+        async with self._connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await self.authorize(db, target["name"], True)
+            row = await self._row(db, operation_id)
+            if row:
+                if row["request_hash"] != intent:
+                    raise ValueError("skill_idempotency_conflict")
+                return row
+            async with db.execute(
+                "SELECT id FROM coach_skill_operation WHERE user_id=? AND state IN ('reserved','prepared') AND json_extract(target_json,'$.name')=?",
+                (self.scope.user_id, target["name"]),
+            ) as cursor:
+                if await cursor.fetchone():
+                    raise ValueError("skill_pending_save_requires_recovery")
+            async with db.execute(
+                "SELECT count(*) FROM coach_skill_operation WHERE user_id=? AND state IN ('reserved','prepared')", (self.scope.user_id,)
+            ) as cursor:
+                if (await cursor.fetchone())[0] >= 8:
+                    raise ValueError("skill_pending_operation_limit")
+            now = datetime.now(UTC).isoformat()
+            await db.execute(
+                """INSERT INTO coach_skill_operation(id,team_id,user_id,workspace_id,session_id,turn_id,request_hash,target_json,state,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,'reserved',?,?)""",
+                (
+                    operation_id,
+                    self.scope.team_id,
+                    self.scope.user_id,
+                    self.scope.workspace_id,
+                    self.scope.session_id or "",
+                    turn_id,
+                    intent,
+                    _json(target),
+                    now,
+                    now,
+                ),
+            )
+            await db.commit()
+        return None
+
+    @repeat_when_authority_busy(spent=None, kind="turn")
+    async def _prepare(self, operation_id: str, target: dict, changes: list[dict], op_dir: Path) -> None:
+        """Stage the candidate, quarantine the current review and commit the plan."""
+        async with self._connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await self.authorize(db, target["name"], True)
+            row = await self._row(db, operation_id)
+            if row is None or row["state"] != "reserved":
+                return
+            current = await self._current(db, target["name"])
+            with skill_bundle_lock(self._path(target["name"], current)):
+                current, path = await self._check_target(db, target)
+                stage = op_dir / "package"
+                # A reserved operation has published nothing, so its staging copy is its own:
+                # an attempt that lost the lease after staging left it behind.
+                shutil.rmtree(stage, ignore_errors=True)
+                validated = self._stage(path, stage, changes, target["name"])
+                await self._quota(db, target["name"], validated.size_bytes)
+                original_review = asdict(current) if current else None
+                if current:
+                    # Quarantine before the first filesystem effect is
+                    # visible. A crash cannot expose new bytes under an
+                    # old import override or business verdict.
+                    await db.execute(
+                        "UPDATE skill_instances SET import_status='pending',import_report_json=NULL,verdict=NULL,verdict_json=NULL WHERE id=?",
+                        (current.id,),
+                    )
+                    current = await self._current(db, target["name"])
+                plan = {
+                    "original_review": original_review,
+                    "path": str(path),
+                    "baseline": asdict(current) if current else None,
+                    "revision": validated.content_hash,
+                    "name": validated.name,
+                    "version": validated.version,
+                    "description": validated.description,
+                    "size_bytes": validated.size_bytes,
+                    "risk_report": validated.risk_report,
+                }
+                await db.execute(
+                    "UPDATE coach_skill_operation SET state='prepared',plan_json=?,updated_at=? WHERE id=? AND state='reserved'",
+                    (_json(plan), datetime.now(UTC).isoformat(), operation_id),
+                )
+                await db.commit()
+
+    @repeat_when_authority_busy(spent=None, kind="turn")
     async def _recover(self, operation_id: str) -> dict:
         op_dir = self.root / ".coach-operations" / operation_id
         async with self._connection() as db:

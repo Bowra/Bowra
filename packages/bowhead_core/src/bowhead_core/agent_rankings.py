@@ -65,7 +65,8 @@ class AgentRankingStore:
             # A single source view covers qualification, membership, assignment,
             # access and the complete snapshot insert, including concurrent reads.
             await db.execute("BEGIN IMMEDIATE")
-            coverage = await (await db.execute("SELECT complete_days_from FROM agent_ranking_coverage WHERE singleton=1")).fetchone()
+            async with db.execute("SELECT complete_days_from FROM agent_ranking_coverage WHERE singleton=1") as cursor:
+                coverage = await cursor.fetchone()
             coverage_start = datetime.fromisoformat(coverage[0])
             if (previous or start) < coverage_start:
                 result["generated_at"] = None
@@ -75,23 +76,18 @@ class AgentRankingStore:
                 return result
 
             decisions = await resolver.resolve_many_in_connection(db, team_id=team_id, actor_user_id=user_id, now=instant)
-            overrides = {
-                f"system:{row['name']}": row
-                for row in await (
-                    await db.execute("SELECT name,enabled,row_version,updated_by FROM team_builtin_subagent_override WHERE team_id=?", (team_id,))
-                ).fetchall()
-            }
-            owner = await (await db.execute("SELECT created_by_user_id FROM teams WHERE id=? AND status='active'", (team_id,))).fetchone()
-            members = {
-                row["user_id"]
-                for row in await (
-                    await db.execute(
-                        """SELECT member.user_id FROM team_members member JOIN users actor ON actor.id=member.user_id
+            async with db.execute(
+                "SELECT name,enabled,row_version,updated_by FROM team_builtin_subagent_override WHERE team_id=?", (team_id,)
+            ) as override_cursor:
+                overrides = {f"system:{row['name']}": row for row in await override_cursor.fetchall()}
+            async with db.execute("SELECT created_by_user_id FROM teams WHERE id=? AND status='active'", (team_id,)) as cursor_2:
+                owner = await cursor_2.fetchone()
+            async with db.execute(
+                """SELECT member.user_id FROM team_members member JOIN users actor ON actor.id=member.user_id
                        WHERE member.team_id=? AND member.status='active' AND actor.status='active'""",
-                        (team_id,),
-                    )
-                ).fetchall()
-            }
+                (team_id,),
+            ) as member_cursor:
+                members = {row["user_id"] for row in await member_cursor.fetchall()}
             if owner is None or user_id not in members:
                 await db.commit()
                 return result
@@ -132,13 +128,12 @@ class AgentRankingStore:
                 eligible[agent_id] = item
 
             adopted: dict[str, set[str]] = defaultdict(set)
-            assignments = await (
-                await db.execute(
-                    """SELECT agent_id,user_id FROM agent_assignment WHERE team_id=?
+            async with db.execute(
+                """SELECT agent_id,user_id FROM agent_assignment WHERE team_id=?
                    AND personal_state='active' AND access_state='granted'""",
-                    (team_id,),
-                )
-            ).fetchall()
+                (team_id,),
+            ) as cursor_3:
+                assignments = await cursor_3.fetchall()
             member_decisions: dict[str, dict[str, TeamSubagentAccessDecision]] = {}
             for assignment in assignments:
                 agent_id, actor = assignment["agent_id"], assignment["user_id"]
@@ -158,9 +153,10 @@ class AgentRankingStore:
                     adopted[agent_id] = members - maintainers[agent_id]
 
             use: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-            rows = await (
-                await db.execute(_QUALIFIED_USAGE_SQL, {"team": team_id, "start": (previous or start).isoformat(), "end": end.isoformat()})
-            ).fetchall()
+            async with db.execute(
+                _QUALIFIED_USAGE_SQL, {"team": team_id, "start": (previous or start).isoformat(), "end": end.isoformat()}
+            ) as cursor_4:
+                rows = await cursor_4.fetchall()
             for row in rows:
                 agent_id, actor = row["agent_id"], row["user_id"]
                 if agent_id not in eligible or actor in maintainers[agent_id]:
@@ -228,17 +224,16 @@ class AgentRankingStore:
 
     @staticmethod
     async def _critical_failure(db: aiosqlite.Connection, team_id: str, agent_id: str) -> bool:
-        row = await (
-            await db.execute(
-                """SELECT 1 FROM team_subagent agent
+        async with db.execute(
+            """SELECT 1 FROM team_subagent agent
                JOIN agent_eval_evidence_state evidence ON evidence.team_id=agent.team_id AND evidence.agent_id=agent.id
                JOIN agent_eval_run run ON run.id=evidence.current_run_id
                WHERE agent.team_id=? AND agent.id=? AND evidence.agent_source_kind='team'
                  AND run.revision_ref=agent.live_revision_id AND run.release_id=agent.live_release_id
                  AND json_extract(run.summary_json,'$.critical_failure')=1 LIMIT 1""",
-                (team_id, agent_id),
-            )
-        ).fetchone()
+            (team_id, agent_id),
+        ) as cursor:
+            row = await cursor.fetchone()
         return row is not None
 
 

@@ -405,6 +405,24 @@ describe("TurnContainer · narrative-vs-answer dedup (0.39.8 #5)", () => {
     // Narrative content doesn't appear as a prefix in answer → keep it.
     expect(container.textContent).toContain("短句独立内容");
   });
+
+  it("hides a narrative whose bracketed artifact IDs the final cleanup removed (Observed case)", () => {
+    const narrative =
+      "《2025年经营分析报告.html》一共5个版本，最新是第5版（art_000000000005，约32小时前）。这轮只回答版本问题，没有重新生成文件。\n\n"
+      + "**第1版**（art_000000000001，2天前）—首版完整报告。\n\n**第3版**（art_000000000003）—在门店排名后插入「品牌分析」章节。";
+    const answer =
+      "《2025年经营分析报告.html》一共 5 个版本，最新是第 5 版（约 32 小时前）。这轮只回答版本问题，没有重新生成文件。\n\n"
+      + "**第 1 版**（2 天前）— 首版完整报告。\n\n**第 3 版**— 在门店排名后插入「品牌分析」章节。";
+    applyCardCreated({ turnId: "t-bracket" });
+    applyNarrativeAppend({ turnId: "t-bracket", text: narrative, segId: "seg_bracket" });
+    applyFinalAnswer({ turnId: "t-bracket", text: answer, payload: { turnId: "t-bracket" } });
+    const { container } = render(
+      <TurnContainer runner={runner({ turnId: "t-bracket", user: "q", running: false, answer })} />,
+    );
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("art_");
+    expect(text.match(/这轮只回答版本问题/g) ?? []).toHaveLength(1);
+  });
 });
 
 describe("TurnContainer suppresses explicitly superseded narratives", () => {

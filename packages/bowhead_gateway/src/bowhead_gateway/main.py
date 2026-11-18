@@ -3810,8 +3810,11 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
             await vector_client.aclose()
         await provider_registry.close_all()
         from bowhead_core._db import close_pooled_readers
+        from bowhead_core.sqlite_lease_wait import flush_summary as flush_lease_wait_summary
 
         await close_pooled_readers()
+        # Write the last window of authority-lease waits; a restart would otherwise drop it.
+        flush_lease_wait_summary()
 
 
 def _read_version() -> str:

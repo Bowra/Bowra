@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from bowhead_core.agent_execution_binding import TurnAgentBindingInput
     from bowhead_core.chat_reference_runtime import ReferencePrimaryRuntime
     from bowhead_core.chat_reference_storage import ReferenceScope
+    from bowhead_core.chat_references import SkillResourceRef
     from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
     from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
     from bowhead_core.language_context import LanguageContext
@@ -147,6 +148,9 @@ class TurnRequest:
     member_uid: str  # datarc member uid (from user memory)
     text: str
     context_maintenance: ContextMaintenanceAction | None = None
+    # Exact Skills of a Skill-only `/` send admitted as an ordinary Lead Turn
+    # persisted with the canonical Chat source.
+    selected_skills: tuple[SkillResourceRef, ...] | None = None
     turn_id: str = field(default_factory=lambda: _new_id("t"))
     # Durable same-Turn resumes increment this fence before their worker starts.
     # Fresh turns remain generation 1; cancellation usage finalization must

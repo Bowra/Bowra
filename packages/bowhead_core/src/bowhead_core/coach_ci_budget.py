@@ -19,26 +19,26 @@ async def begin_invocation(db_path: str, *, run_id: str, job_id: str | None, lea
     async with open_shared_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN IMMEDIATE")
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT e.coach_delegation_id FROM agent_eval_comparison_execution e
                JOIN agent_eval_comparison_run l ON l.execution_id=e.id WHERE l.run_id=?""",
             (run_id,),
-        )
-        linked = await cursor.fetchone()
+        ) as cursor:
+            linked = await cursor.fetchone()
         if linked is None or not linked["coach_delegation_id"]:
             raise CoachCIError("coach_ci_not_found")
         grant = await require_active_conn(db, linked["coach_delegation_id"])
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT 1 FROM agent_eval_case_job WHERE id=? AND run_id=? AND lease_generation=? AND status='running' AND lease_expires_at>?",
             (job_id, run_id, lease_generation, now()),
-        )
-        if await cursor.fetchone() is None:
-            raise CoachCIError("coach_ci_lease_lost")
-        cursor = await db.execute("SELECT count(*) FROM coach_ci_invocation WHERE delegation_id=?", (grant["id"],))
-        if int((await cursor.fetchone())[0]) >= grant["max_provider_calls"]:
-            await stop_delegation_conn(db, grant, reason="coach_ci_provider_budget_exhausted", state="exhausted")
-            await db.commit()
-            raise CoachCIError("coach_ci_provider_budget_exhausted")
+        ) as cursor:
+            if await cursor.fetchone() is None:
+                raise CoachCIError("coach_ci_lease_lost")
+        async with db.execute("SELECT count(*) FROM coach_ci_invocation WHERE delegation_id=?", (grant["id"],)) as cursor:
+            if int((await cursor.fetchone())[0]) >= grant["max_provider_calls"]:
+                await stop_delegation_conn(db, grant, reason="coach_ci_provider_budget_exhausted", state="exhausted")
+                await db.commit()
+                raise CoachCIError("coach_ci_provider_budget_exhausted")
         identity = "acii_" + uuid4().hex
         await db.execute(
             """INSERT INTO coach_ci_invocation(id,delegation_id,run_id,job_id,lease_generation,provider,model,adapter_contract_key,
@@ -78,11 +78,11 @@ class CoachCIInvocation:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT state,tokens_input,tokens_output,tokens_cached,response_digest,outcome_code FROM coach_ci_invocation WHERE id=? AND delegation_id=?",
                 (self.identity, self.delegation_id),
-            )
-            old = await cursor.fetchone()
+            ) as cursor:
+                old = await cursor.fetchone()
             if old is None:
                 raise CoachCIError("coach_ci_usage_not_found")
             if old["state"] != "pending":

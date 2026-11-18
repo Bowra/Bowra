@@ -1434,7 +1434,7 @@ async def patch_section(
     except SourcePatchError as exc:
         conflict = exc.code in {"source_alias_stale", "source_shape_conflict"}
         return JSONResponse(
-            status_code=status.HTTP_409_CONFLICT if conflict else status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_409_CONFLICT if conflict else status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
                     "code": exc.code,
@@ -1452,7 +1452,7 @@ async def patch_section(
     added_ids = proposed_ids - current_ids
     if added_ids and added_ids != set(await authorized_report_artifact_ids(request, canvas, list(added_ids))):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             {"code": "report_artifact_reference_denied", "message": "Select a file you can access in this Team, then try again."},
         )
     # citation-audit M1-6① (permanent ingress boundary): revision rollback writes prevPayload unchanged,
@@ -2249,7 +2249,7 @@ async def split_section(
     except CanvasSplitDegenerateError as e:
         # affordance r3 §5.2: reject degenerate boundary-offset splits that would create empty shells.
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"offset at markdown boundary (offset={e.offset}, length={e.length}); both halves must be non-empty",
         ) from e
     if pair is None:
@@ -2999,7 +2999,7 @@ def _map_export_create_error(exc: Exception) -> HTTPException:
             )
         if code in {"asset_too_large", "snapshot_assets_too_large"}:
             return _export_v2_error(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status.HTTP_413_CONTENT_TOO_LARGE,
                 code,
                 "报告引用的文件超过导出限制",
                 retryable=False,
@@ -3021,7 +3021,7 @@ def _map_export_create_error(exc: Exception) -> HTTPException:
             )
         if code in {"snapshot_too_large", "snapshot_section_limit"}:
             return _export_v2_error(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status.HTTP_413_CONTENT_TOO_LARGE,
                 "snapshot_too_large",
                 "报告内容超过当前导出限制",
                 retryable=False,

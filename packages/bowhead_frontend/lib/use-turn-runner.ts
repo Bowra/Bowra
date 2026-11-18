@@ -1039,6 +1039,13 @@ export async function postSendMessage(
   if (referenceDocument && (!clientSubmissionId || chatAction || replaySourceTurnId || !frozenWireSnapshot)) {
     throw Object.assign(new Error("reference send identity unavailable"), { code: "reference_input_invalid" });
   }
+  // A Skill-only `/` start travels as an ordinary durable start with its exact Skills. The source
+  // document stays local: it owns the journal, the draft cleanup and the scope check below.
+  const selectedSkills = frozenWireSnapshot?.selectedSkills ?? null;
+  if (selectedSkills && (!referenceDocument || revisionTarget || frozenWireSnapshot?.contextMaintenance)) {
+    throw Object.assign(new Error("selected Skill send identity unavailable"), { code: "reference_input_invalid" });
+  }
+  const wireDocument = selectedSkills ? null : referenceDocument;
   if (chatAction && (clientSubmissionId || replaySourceTurnId)) {
     throw new Error("composer chat action cannot use legacy submission identity");
   }
@@ -1119,9 +1126,10 @@ export async function postSendMessage(
     ...(clientSubmissionId ? {
       client_submission_id: clientSubmissionId,
       submission_kind: replaySourceTurnId ? "replay" : "start",
-      submission_contract_version: referenceDocument ? "chat-references.v1" : "chat-submit.v1",
-      model_control_batch: referenceDocument ? "references" : "a",
-      ...(referenceDocument ? { input_document: referenceDocument } : {}),
+      submission_contract_version: wireDocument ? "chat-references.v1" : "chat-submit.v1",
+      model_control_batch: wireDocument ? "references" : "a",
+      ...(wireDocument ? { input_document: wireDocument } : {}),
+      ...(selectedSkills ? { selected_skills: selectedSkills.map((skill) => ({ ...skill })) } : {}),
       ...(replaySourceTurnId
         ? { replay_source_turn_id: replaySourceTurnId }
         : {}),
@@ -1133,7 +1141,7 @@ export async function postSendMessage(
     // An @ send keeps the single-attempt rule but, like an ordinary send, has no client deadline: the server prepares
     // it (exact versions, materials, possibly a model call to pick the receiver) before accepting, and 116 measured
     // 16s against the 15s bound it used to inherit.
-    const fetchMutation = referenceDocument || revisionTarget || frozenWireSnapshot?.contextMaintenance
+    const fetchMutation = wireDocument || revisionTarget || frozenWireSnapshot?.contextMaintenance
       ? (input: RequestInfo | URL, init?: RequestInit) => singleAttemptChatActionFetch(input, init, null)
       : chatAction
         ? singleAttemptChatActionFetch
@@ -1141,10 +1149,10 @@ export async function postSendMessage(
     return fetchMutation("/api/v1/chat/send", {
       method: "POST",
       headers: {
-        "Content-Type": referenceDocument
+        "Content-Type": wireDocument
           ? "application/vnd.bowhead.chat-references.v1+json"
           : "application/json",
-        ...(referenceDocument || revisionTarget ? {} : TERMINAL_CHAT_CAPABILITY_HEADERS),
+        ...(wireDocument || revisionTarget ? {} : TERMINAL_CHAT_CAPABILITY_HEADERS),
         ...viewerTimeZoneHeaders(),
       },
       body: JSON.stringify(requestBody),
@@ -1164,7 +1172,7 @@ export async function postSendMessage(
       requireMaintenanceReceipt(value, frozenWireSnapshot.contextMaintenance, sessionId!);
       return value;
     }
-    if (!referenceDocument && !revisionTarget) return value;
+    if (!wireDocument && !revisionTarget) return value;
     if (revisionTarget && !sameDocumentRevisionTarget(revisionTarget, (value as { document_revision_target?: unknown })?.document_revision_target))
       throw new Error("Document revision receipt target mismatch");
     const result = value as StartedResponse & { status?: unknown };

@@ -88,6 +88,8 @@ export interface MeUser {
     composer?: {
       submission_protocol?: boolean;
       reference_input?: boolean;
+      /** Skill-only `/` starts are sent as ordinary submissions with `selected_skills`. */
+      skill_via_lead?: boolean;
       reference_plan?: boolean;
       agent_start_use?: boolean;
       model_panel_v2: boolean;

@@ -20,7 +20,12 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME, REJECTED_TOOL_SYNTAX_HISTORY_NAME, RUNTIME_CORRECTION_NOTE_NAME
+from bowhead_router.runtime_notes import (
+    OUTPUT_RECOVERY_STATE_NAME,
+    REJECTED_TOOL_SYNTAX_HISTORY_NAME,
+    RUNTIME_CORRECTION_NOTE_NAME,
+    VISUAL_VIEW_NOTE_NAME,
+)
 from bowhead_router.token_estimator import estimate_tokens
 from bowhead_router.types import Message
 
@@ -43,7 +48,11 @@ MESSAGE_KIND_POLICY: dict[str, HistoryPolicy] = {
     "bowhead_material_supplement_v1": "turn_local",
     # A connection probe request; it never belongs to a conversation.
     "bowhead_connection_probe": "turn_local",
+    # Rendered views of saved files for the next request only (visual self-check).
+    VISUAL_VIEW_NOTE_NAME: "turn_local",
     "context_summary": "conversation",
+    # A user-selected Skill stays with the request it belongs to.
+    "skill_content": "conversation",
     "context_attachment_dependencies_v1": "dependency",
     "context_attachment_dependencies_v2": "dependency",
     "context_material_dependencies_v1": "dependency",

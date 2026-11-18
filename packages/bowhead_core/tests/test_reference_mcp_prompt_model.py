@@ -393,3 +393,35 @@ async def test_unknown_model_result_cannot_be_resent_or_reported_as_success(prom
         assert projected["outcome"] == "partial" and "delivery_unknown" in projected["usage"]
     finally:
         await adapter.close()
+
+
+@pytest.mark.parametrize(
+    ("error_name", "reason_code"),
+    [("ReadTimeout", "llm_provider_timeout"), ("ConnectError", "llm_provider_unavailable")],
+)
+async def test_exhausted_transport_failure_keeps_the_model_reason_in_the_ledger(prompt_case, error_name, reason_code):
+    """Retries exhausted on a transport failure: the ledger records the model failure, not a generic error."""
+    import httpx2
+
+    case = prompt_case
+    adapter = adapter_for("openai")
+    router = router_for(adapter)
+    # Exhaust at once: the retry loop itself is covered by the Router tests.
+    router.max_retries = 0
+    runner = SubagentRunner(router=router, tool_registry=ToolRegistry(), team_subagent_store=case.users)
+
+    def fail(request):
+        raise getattr(httpx2, error_name)("transport failed", request=request)
+
+    try:
+        with respx.mock() as mock:
+            route = mock.post(url__regex=r"https://api\..*").mock(side_effect=fail)
+            result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=TurnEventBus())
+        assert route.call_count == 1 and not result.ok
+        # The run result keeps its existing code; the typed model failure travels beside it.
+        assert result.error == "subagent_internal_error" and result.llm_failure.reason_code == reason_code
+        assert [r["status"] for r in rows(case, "chat_reference_model_invocations")] == ["not_applied"]
+        assert [(r["status"], r["failure_code"]) for r in rows(case, "turn_agent_execution")] == [("failed", reason_code)]
+        assert (await prompt_projection(case))["outcome"] == "failed"
+    finally:
+        await adapter.close()

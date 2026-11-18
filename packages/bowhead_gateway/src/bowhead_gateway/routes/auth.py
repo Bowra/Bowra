@@ -2694,6 +2694,7 @@ async def me(
                 "agent_start_use": False,
                 "model_panel_v2": False,
                 "thinking_effort": False,
+                "skill_via_lead": False,
             },
             "planning": False,
             "custom_branding": False,
@@ -2831,6 +2832,10 @@ async def me(
             "agent_start_use": agent_start_use_ready,
             "model_panel_v2": composer.model_panel_v2,
             "thinking_effort": composer.thinking_effort,
+            # A Skill-only `/` send is an ordinary Lead Turn with `selected_skills`. It
+            # needs only the `/` reference menu: a reference input always opens its own
+            # durable submission, even while the general submission protocol is off.
+            "skill_via_lead": bool(reference_input_ready),
         },
         "planning": _planning_enabled(),
         "custom_branding": await is_feature_licensed_request(request, "custom_branding"),

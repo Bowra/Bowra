@@ -101,6 +101,25 @@ describe("PlanCard 批3", () => {
     expect(rec.onRevise).toHaveBeenCalledWith("s_failed");
   });
 
+  it.each([
+    ["llm_provider_timeout", "等待模型回复超时。稍后点「继续执行」可重新运行这一步。"],
+    ["llm_provider_unavailable", "模型服务暂时不可用。稍后点「继续执行」可重新运行这一步。"],
+  ])("a step whose model call failed (%s) shows readable copy and makes resuming primary", (errorKind, copy) => {
+    const plan = blockedPlanWithFailedStep();
+    plan.steps[1] = { ...plan.steps[1], errorKind, reason: "Timed out waiting for the model. Resume the plan to run this step again." };
+    const { container } = renderIntl(<PlanCard plan={plan} recovery={recovery()} />);
+    const detail = container.querySelector(".pblock.is-failed") as HTMLElement;
+    expect(detail.textContent).toContain(copy);
+    // Neither the stored English reason nor the raw kind reaches the card.
+    expect(detail.textContent).not.toContain("Resume the plan");
+    expect(detail.textContent).not.toContain(errorKind);
+    expect(detail.querySelector(".why")).toBeNull();
+    const bar = container.querySelector(".pblock-acts") as HTMLElement;
+    const button = (label: string) => [...bar.querySelectorAll("button")].find((b) => b.textContent?.includes(label));
+    expect(button("继续执行")?.className).toContain("primary");
+    expect(button("修订重试")?.className).not.toContain("primary");
+  });
+
   it("superseded 死行滤除渲染; 替代步上「已修订」章; 进度分母收窄", () => {
     const { container } = renderIntl(
       <PlanCard plan={blockedPlanWithFailedStep()} recovery={recovery()} />,

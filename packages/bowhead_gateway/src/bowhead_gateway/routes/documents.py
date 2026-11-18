@@ -2,7 +2,7 @@
 
 from urllib.parse import quote
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.space_governance import SpaceOperation
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -47,7 +47,8 @@ def _service(request):
 
 async def _scope(request: Request, *, session_id: str | None = None, job_id: str | None = None, write: bool = False):
     service = _service(request)
-    async with open_shared_ctx(service.delivery.path) as db:
+    # Only reads; a write route rechecks membership inside its own write transaction.
+    async with (open_shared_ctx if write else open_pooled_read_ctx)(service.delivery.path) as db:
         if job_id is not None:
             async with db.execute("SELECT session_id FROM document_jobs WHERE id=? AND requested_by=?", (job_id, _user_id(request))) as cursor:
                 row = await cursor.fetchone()

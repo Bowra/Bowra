@@ -6,12 +6,11 @@ V3 admin credits 数据正确性 + transactional + audit + cooldown + 跨 team �
 from __future__ import annotations
 
 import json
-from typing import Any
+from pathlib import Path
 
 import aiosqlite
 import pytest
 from bowhead_core.user_store import UserStore, _id, _now
-from core_legacy_database import TARGET_FILES, upgrade
 
 
 async def _seed_team(
@@ -55,12 +54,8 @@ async def _seed_user(
 
 
 @pytest.fixture
-async def store(tmp_path: Any) -> UserStore:
-    db = tmp_path / TARGET_FILES["core"]
-    # Current Stores run at the migration head; the user ledger reads the migrated
-    # credit_model_usage table (0173, 5bca471f7).
-    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
-    s = UserStore(str(db))
+async def store(migrated_legacy_core_db: Path) -> UserStore:
+    s = UserStore(str(migrated_legacy_core_db))
     await s.initialize()
     return s
 

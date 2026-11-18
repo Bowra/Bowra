@@ -736,11 +736,11 @@ class KbExtractedRecordStore:
         # Sprint 2 I-B4: pre-INSERT dedup check
         if dedup_check:
             async with diagnostic_connect(self._db_path) as db:
-                cur = await db.execute(
+                async with db.execute(
                     "SELECT record_id FROM kb_extracted_records WHERE file_id = ? AND doc_type_id = ? AND soft_deleted_at IS NULL LIMIT 1",
                     (file_id, doc_type_id),
-                )
-                existing = await cur.fetchone()
+                ) as cur:
+                    existing = await cur.fetchone()
                 if existing:
                     raise RecordAlreadyExistsError(
                         file_id=file_id,

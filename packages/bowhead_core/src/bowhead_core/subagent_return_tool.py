@@ -1902,6 +1902,7 @@ def _make_handler() -> Any:
                 "evidence_total": sum(len(i.evidence) for i in obj.insights),
                 "recommendations_count": len(obj.recommendations),
                 "kpis_count": len(obj.kpis),
+                "ground_facts_count": len(obj.ground_facts),
             }
         except Exception as e:
             logger.warning("subagent_return: from_dict failed (payload已存): %s", e)

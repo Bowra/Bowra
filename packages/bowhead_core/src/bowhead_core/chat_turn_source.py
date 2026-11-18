@@ -6,9 +6,13 @@ import copy
 from dataclasses import dataclass
 from typing import Any
 
-from bowhead_core.chat_references import InputDocument
+from bowhead_core.chat_references import InputDocument, SkillResourceRef
 from bowhead_core.context_action import ContextMaintenanceAction
 from bowhead_core.document_revision_target import DocumentRevisionTarget
+
+# Same bound as `skill_read_closure.MAX_SELECTED_SKILLS` (a test pins the two);
+# importing it here would pull the Skill read kernel into this leaf module.
+MAX_SELECTED_SKILLS = 3
 
 
 class ReferenceExecutionUnavailableError(ValueError):
@@ -31,6 +35,8 @@ class ChatTurnUserSource:
     input_document: InputDocument | None = None
     document_revision_target: DocumentRevisionTarget | None = None
     context_maintenance: ContextMaintenanceAction | None = None
+    # Skill-only `/` sends admitted as ordinary Lead Turns.
+    selected_skills: tuple[SkillResourceRef, ...] | None = None
 
     def __post_init__(self) -> None:
         identities = (
@@ -70,6 +76,18 @@ class ChatTurnUserSource:
             if target.session_id != self.session_id or self.input_document is not None:
                 raise ValueError("chat Turn document revision scope or mode is invalid")
             object.__setattr__(self, "document_revision_target", target)
+        if self.selected_skills is not None:
+            if not isinstance(self.selected_skills, tuple) or not 1 <= len(self.selected_skills) <= MAX_SELECTED_SKILLS:
+                raise ValueError("chat Turn selected Skills are invalid")
+            if self.input_document is not None or self.document_revision_target is not None or self.context_maintenance is not None:
+                raise ValueError("chat Turn selected Skills cannot combine with a structured source")
+            skills = tuple(
+                SkillResourceRef.model_validate(item.model_dump(mode="python") if isinstance(item, SkillResourceRef) else item)
+                for item in self.selected_skills
+            )
+            if len({(item.source_kind, item.id) for item in skills}) != len(skills):
+                raise ValueError("chat Turn selected Skills repeat a Skill")
+            object.__setattr__(self, "selected_skills", skills)
         if self.input_document is not None:
             if not isinstance(self.input_document, InputDocument):
                 raise TypeError("chat Turn input document is invalid")
@@ -106,6 +124,8 @@ def chat_turn_user_source_projection(source: ChatTurnUserSource) -> dict[str, ob
         projection["document_revision_target"] = source.document_revision_target.model_dump(mode="json")
     if source.context_maintenance is not None:
         projection["context_maintenance"] = source.context_maintenance.model_dump()
+    if source.selected_skills is not None:
+        projection["selected_skills"] = [item.model_dump(mode="json") for item in source.selected_skills]
     return projection
 
 
@@ -126,6 +146,7 @@ def snapshot_chat_turn_user_source(source: ChatTurnUserSource) -> ChatTurnUserSo
         input_document=source.input_document,
         document_revision_target=source.document_revision_target,
         context_maintenance=source.context_maintenance,
+        selected_skills=source.selected_skills,
     )
 
 

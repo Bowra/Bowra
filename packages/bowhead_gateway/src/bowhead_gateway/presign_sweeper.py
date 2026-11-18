@@ -77,13 +77,13 @@ async def _sweep_once(
             if await has_confirmation_schema(db)
             else ""
         )
-        cur = await db.execute(
+        async with db.execute(
             "SELECT id, path FROM artifacts WHERE status='pending_upload' AND expires_at IS NOT NULL AND expires_at < ?"
             + confirmation_guard
             + " LIMIT ?",
             (now_iso, _BATCH_LIMIT),
-        )
-        rows = await cur.fetchall()
+        ) as cur:
+            rows = await cur.fetchall()
 
     metrics["scanned"] = len(rows)
     for row in rows:

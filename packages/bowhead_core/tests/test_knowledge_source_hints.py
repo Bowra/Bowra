@@ -161,7 +161,7 @@ async def test_personal_team_and_space_filters_do_not_cross_current_authority():
 
 
 @pytest.mark.usefixtures("_fernet")
-async def test_continuation_rechecks_retained_source_names_before_any_model_call(tmp_path, monkeypatch):
+async def test_continuation_rechecks_retained_source_names_before_any_model_call(migrated_legacy_core_db, monkeypatch):
     from dataclasses import replace
 
     from bowhead_core.session_store import SessionStore
@@ -170,7 +170,7 @@ async def test_continuation_rechecks_retained_source_names_before_any_model_call
     from bowhead_core import subagent_resume as sr
 
     ctx, rows = with_sources(source("kbf_a", "Travel policy.pdf"))
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     ctx.session_store = SessionStore(db_path)
     result, _, _ = await run_shared(monkeypatch, [calculate_response(), closeout()], ctx=ctx)
     assert result.ok and result.resume_checkpoint_id

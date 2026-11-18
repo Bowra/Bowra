@@ -95,13 +95,31 @@ async def _authorize(ctx, db, source, files: list[ContextAttachment]) -> list:
     return artifacts
 
 
+def _bytes_key(art, item: ContextAttachment) -> str:
+    return json.dumps(["attachment_bytes", str(art.path), item.size, item.content_hash], separators=(",", ":"))
+
+
+async def _bind_stored_bytes(ctx, item: ContextAttachment, art, verified_bytes: set[str]) -> ContextAttachment:
+    """Bind a file that has no upload receipt to the bytes it holds now.
+
+    This is the proof ``_validate_bytes`` repeats on every later load. The
+    bytes are hashed, not parsed; reading Office contents still needs a receipt.
+    """
+    data = await ctx.artifact_store.backend.read_bounded(art.path, limit=item.size)
+    if len(data) != item.size:
+        raise _attachment_unavailable(item, "context_attachment_bytes_changed")
+    bound = item.model_copy(update={"content_hash": "sha256:" + hashlib.sha256(data).hexdigest()})
+    verified_bytes.add(_bytes_key(art, bound))
+    return bound
+
+
 async def _validate_bytes(ctx, files: list[ContextAttachment], artifacts: list, *, verified_bytes: set[str] | None = None) -> None:
     for item, art in zip(files, artifacts, strict=True):
         if item.content_hash is not None:
             # A Session file is recorded once per Turn that kept it. Inside one
             # storage operation the same stored bytes are hashed once, however
             # many Turns depend on them; authority is still checked per proof.
-            key = json.dumps(["attachment_bytes", str(art.path), item.size, item.content_hash], separators=(",", ":"))
+            key = _bytes_key(art, item)
             if verified_bytes is not None and key in verified_bytes:
                 continue
             data = await ctx.artifact_store.backend.read_bounded(art.path, limit=item.size)
@@ -133,6 +151,7 @@ async def capture_attachment_dependencies(ctx, db, source) -> AttachmentContextD
     allowed = set(source.attachment_ids) | {item["artifact_id"] for item in pins}
     files = {}
     unavailable = set()
+    stored_bytes = set()
     for item in parsed:
         if item.artifact_id not in allowed:
             raise ValueError("context_attachment_selection_changed")
@@ -147,13 +166,17 @@ async def capture_attachment_dependencies(ctx, db, source) -> AttachmentContextD
         content = has_body or item.artifact_id in source.attachment_ids
         digest = item.content_hash if has_body or observed and content else None
         if observed and content and digest is None and item.content_deferred:
-            from bowhead_core.documents.upload_confirmation import confirmed_content_hash
+            from bowhead_core.documents.upload_confirmation import receipt_content_hash
 
             art = await ctx.artifact_store.get(item.artifact_id, connection=db)
-            confirmed = await confirmed_content_hash(ctx.artifact_store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id) if art else None
-            if confirmed is None:
+            if art is None:
                 raise ValueError("context_attachment_digest_unavailable")
-            digest = confirmed
+            # A receipt that no longer matches the file raises. Files without
+            # one (Knowledge base files, produced results, uploads made before
+            # receipts) are bound to their stored bytes once authorized below.
+            digest = await receipt_content_hash(ctx.artifact_store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
+            if digest is None:
+                stored_bytes.add(item.artifact_id)
         retained = (ContextAttachmentUse if observed else ContextAttachment)(
             artifact_id=item.artifact_id,
             filename=item.filename,
@@ -199,7 +222,11 @@ async def capture_attachment_dependencies(ctx, db, source) -> AttachmentContextD
             )
     values = list(files.values())
     artifacts = await _authorize(ctx, db, source, values)
-    await _validate_bytes(ctx, values, artifacts)
+    verified: set[str] = set()
+    for index, (item, art) in enumerate(zip(values, artifacts, strict=True)):
+        if item.artifact_id in stored_bytes and item.content_hash is None:
+            values[index] = await _bind_stored_bytes(ctx, item, art, verified)
+    await _validate_bytes(ctx, values, artifacts, verified_bytes=verified)
     return (AttachmentContextDependenciesV2 if observed else AttachmentContextDependencies)(
         turn_id=ctx.turn_id, source_hash=content_hash(chat_turn_user_source_projection(source)), files=values
     )

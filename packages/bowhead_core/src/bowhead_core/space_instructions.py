@@ -110,29 +110,35 @@ class SpaceInstructionsStore:
         self._db_path = str(domain_database_path(db_path, "core"))
 
     async def current(self, workspace_id: str) -> SpaceInstructionsVersion | None:
-        async with open_shared_ctx(self._db_path) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
                 f"SELECT {self._COLUMNS} FROM space_instruction_versions WHERE workspace_id=? ORDER BY version DESC LIMIT 1",
                 (workspace_id,),
-            )
+            ) as cur,
+        ):
             row = await cur.fetchone()
         return _row(tuple(row)) if row else None
 
     async def get_version(self, workspace_id: str, version: int) -> SpaceInstructionsVersion | None:
-        async with open_shared_ctx(self._db_path) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
                 f"SELECT {self._COLUMNS} FROM space_instruction_versions WHERE workspace_id=? AND version=?",
                 (workspace_id, version),
-            )
+            ) as cur,
+        ):
             row = await cur.fetchone()
         return _row(tuple(row)) if row else None
 
     async def list_versions(self, workspace_id: str, *, limit: int = 50) -> list[SpaceInstructionsVersion]:
-        async with open_shared_ctx(self._db_path) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
                 f"SELECT {self._COLUMNS} FROM space_instruction_versions WHERE workspace_id=? ORDER BY version DESC LIMIT ?",
                 (workspace_id, limit),
-            )
+            ) as cur,
+        ):
             rows = await cur.fetchall()
         return [_row(tuple(row)) for row in rows]
 
@@ -157,22 +163,22 @@ class SpaceInstructionsStore:
         async with open_shared_ctx(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
-                cur = await db.execute(
+                async with db.execute(
                     "SELECT version, content FROM space_instruction_versions WHERE workspace_id=? ORDER BY version DESC LIMIT 1",
                     (workspace_id,),
-                )
-                latest = await cur.fetchone()
+                ) as cur:
+                    latest = await cur.fetchone()
                 current_version = int(latest[0]) if latest else 0
                 if current_version != expected_version:
                     raise SpaceInstructionsError("stale_version", current_version=current_version)
                 if (latest[1] if latest else "") == text:
                     raise SpaceInstructionsError("unchanged", current_version=current_version)
                 if restored_from is not None:
-                    cur = await db.execute(
+                    async with db.execute(
                         "SELECT content FROM space_instruction_versions WHERE workspace_id=? AND version=?",
                         (workspace_id, restored_from),
-                    )
-                    source = await cur.fetchone()
+                    ) as cur:
+                        source = await cur.fetchone()
                     if source is None:
                         raise SpaceInstructionsError("restore_source_missing", version=restored_from)
                     if source[0] != text:
@@ -207,11 +213,13 @@ class SpaceInstructionsStore:
 
     async def versions_from_candidate(self, candidate_id: str) -> dict[str, SpaceInstructionsVersion]:
         """The latest version per Space that added this suggestion's wording."""
-        async with open_shared_ctx(self._db_path) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
                 f"SELECT {self._COLUMNS} FROM space_instruction_versions WHERE source_candidate_id=? ORDER BY version",
                 (candidate_id,),
-            )
+            ) as cur,
+        ):
             rows = await cur.fetchall()
         return {item.workspace_id: item for item in (_row(tuple(row)) for row in rows)}
 
@@ -220,11 +228,13 @@ class SpaceInstructionsStore:
         if not workspace_ids:
             return {}
         marks = ",".join("?" * len(workspace_ids))
-        async with open_shared_ctx(self._db_path) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
                 f"SELECT workspace_id, MAX(version) FROM space_instruction_versions WHERE workspace_id IN ({marks}) GROUP BY workspace_id",
                 tuple(workspace_ids),
-            )
+            ) as cur,
+        ):
             rows = await cur.fetchall()
         return {row[0]: int(row[1]) for row in rows}
 
@@ -267,11 +277,13 @@ class SpaceInstructionsStore:
         return SpaceInstructionsSnapshot(workspace_id=version.workspace_id, version=version.version, block=render_block(version.content))
 
     async def version_for_turn(self, turn_id: str) -> tuple[str, int] | None:
-        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
-            cur = await db.execute(
+        async with (
+            open_shared_ctx(domain_database_path(self._db_path, "execution")) as db,
+            db.execute(
                 "SELECT workspace_id, version FROM turn_space_instructions WHERE turn_id=?",
                 (turn_id,),
-            )
+            ) as cur,
+        ):
             row = await cur.fetchone()
         return (row[0], int(row[1])) if row else None
 

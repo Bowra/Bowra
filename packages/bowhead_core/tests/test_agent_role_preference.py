@@ -25,7 +25,6 @@ from bowhead_core.agent_role_preference import (
     AgentRolePreferenceStore,
 )
 from bowhead_core.user_store import TeamSubagent, UserStore
-from core_legacy_database import upgrade
 
 _NOW = "2026-09-07T00:00:00+00:00"
 _DEPENDENCY = "sha256:" + "d" * 64
@@ -230,9 +229,7 @@ async def _install_release(fixture: _Fixture, *, sequence: int, role: str) -> No
         db.commit()
 
 
-async def _setup(tmp_path: Path) -> _Fixture:
-    db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+async def _setup(db_path: Path) -> _Fixture:
     users = UserStore(db_path)
     await users.initialize()
     team = await users.create_team(name="Role preference", max_seats=4)
@@ -266,8 +263,8 @@ async def _setup(tmp_path: Path) -> _Fixture:
 
 
 @pytest.mark.asyncio
-async def test_role_preference_is_cas_scoped_and_cycle_bound(tmp_path: Path) -> None:
-    fixture = await _setup(tmp_path)
+async def test_role_preference_is_cas_scoped_and_cycle_bound(migrated_legacy_core_db: Path) -> None:
+    fixture = await _setup(migrated_legacy_core_db)
     unavailable = await AgentRolePreferenceStore(fixture.db_path).snapshot(
         team_id=fixture.team_id,
         user_id=fixture.user_id,
@@ -340,9 +337,9 @@ async def test_role_preference_is_cas_scoped_and_cycle_bound(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_clearing_preference_retains_monotonic_cas_tombstone(
-    tmp_path: Path,
+    migrated_legacy_core_db: Path,
 ) -> None:
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     store = _store(fixture)
     await store.set(
         team_id=fixture.team_id,
@@ -404,8 +401,8 @@ async def test_clearing_preference_retains_monotonic_cas_tombstone(
 
 
 @pytest.mark.asyncio
-async def test_role_preference_rechecks_access_and_live_role(tmp_path: Path) -> None:
-    fixture = await _setup(tmp_path)
+async def test_role_preference_rechecks_access_and_live_role(migrated_legacy_core_db: Path) -> None:
+    fixture = await _setup(migrated_legacy_core_db)
     store = _store(fixture)
     await store.set(
         team_id=fixture.team_id,
@@ -450,9 +447,9 @@ async def test_role_preference_rechecks_access_and_live_role(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_role_candidate_rejects_mismatched_safety_content(
-    tmp_path: Path,
+    migrated_legacy_core_db: Path,
 ) -> None:
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     with sqlite3.connect(fixture.db_path) as db:
         db.execute("DROP TRIGGER trg_agent_safety_report_immutable_update")
         db.execute(
@@ -471,9 +468,9 @@ async def test_role_candidate_rejects_mismatched_safety_content(
 
 @pytest.mark.asyncio
 async def test_role_candidate_freshly_scans_listing_even_with_pass_report(
-    tmp_path: Path,
+    migrated_legacy_core_db: Path,
 ) -> None:
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     unsafe_listing_json = json.dumps(
         {
             "display_name": "Revenue Investigator",
@@ -508,10 +505,10 @@ async def test_role_candidate_freshly_scans_listing_even_with_pass_report(
 
 @pytest.mark.asyncio
 async def test_behavior_reader_and_structured_choice_are_flagged_and_fail_closed(
-    tmp_path: Path,
+    migrated_legacy_core_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     store = _store(fixture)
     monkeypatch.setenv("FEATURE_AGENT_BEHAVIOR_M3", "0")
     assert all(
@@ -612,8 +609,8 @@ def test_structured_choice_cannot_bypass_personal_role_preference(
 
 
 @pytest.mark.asyncio
-async def test_database_guards_scope_cycle_and_row_version(tmp_path: Path) -> None:
-    fixture = await _setup(tmp_path)
+async def test_database_guards_scope_cycle_and_row_version(migrated_legacy_core_db: Path) -> None:
+    fixture = await _setup(migrated_legacy_core_db)
     with sqlite3.connect(fixture.db_path) as db:
         db.execute("PRAGMA foreign_keys=ON")
         with pytest.raises(sqlite3.IntegrityError, match="assignment mismatch"):

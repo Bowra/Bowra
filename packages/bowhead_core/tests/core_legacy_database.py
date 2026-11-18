@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import atexit
+import shutil
+import sqlite3
+import tempfile
+from contextlib import closing
+from functools import cache
 from pathlib import Path
 
 from alembic import command
@@ -13,6 +19,24 @@ from bowhead_core.sqlite_domains import ORIGINAL_TARGET_FILES
 from bowhead_core import migrations
 
 TARGET_FILES = dict(ORIGINAL_TARGET_FILES)
+
+
+@cache
+def migrated_core_template() -> Path:
+    """Build the historical Core schema once per test process."""
+    directory = Path(tempfile.mkdtemp(prefix="bowhead-legacy-core-"))
+    atexit.register(shutil.rmtree, directory, True)
+    path = directory / TARGET_FILES["core"]
+    upgrade(f"sqlite:///{path}", target="core")
+    return path
+
+
+def copy_migrated_core(path: Path) -> None:
+    """Give a test its own writable copy of the migrated Core database."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = f"{migrated_core_template().as_uri()}?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True)) as source, closing(sqlite3.connect(path)) as destination:
+        source.backup(destination)
 
 
 def upgrade(db_url: str | None = None, target: str | None = None) -> tuple[str, ...]:

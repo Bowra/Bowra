@@ -42,7 +42,7 @@ class Recorder:
 @pytest.mark.parametrize("search", [False, True], ids=["unconfigured-search", "configured-search"])
 @pytest.mark.parametrize("kb_mode", ["specialist", "absent", "direct"])
 async def test_lead_request_matches_admitted_search_and_knowledge_mode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: bool, search: bool, kb_mode: str
+    migrated_legacy_core_db: Path, monkeypatch: pytest.MonkeyPatch, stream: bool, search: bool, kb_mode: str
 ) -> None:
     monkeypatch.setenv("BOWHEAD_PLANNING_MODE", "0")
     registry = ToolRegistry()
@@ -58,7 +58,7 @@ async def test_lead_request_matches_admitted_search_and_knowledge_mode(
         ),
     )
     peers = [p for p in default_prompt_peers() if kb_mode != "absent" or p.name != "kb-analyst"]
-    path = await _db(tmp_path)
+    path = await _db(migrated_legacy_core_db)
     from bowhead_core.session_store import SessionStore
 
     ctx = ToolExecutionContext(

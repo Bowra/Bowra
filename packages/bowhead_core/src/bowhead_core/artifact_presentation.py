@@ -260,21 +260,29 @@ async def present_artifacts(arguments: dict, ctx) -> dict:
         }
 
 
+def declared_deliverable_names(tool_name: str, arguments: Any) -> set[str] | None:
+    """File names a native producer call declares as deliverables; None when it declares none."""
+    if not isinstance(arguments, dict):
+        return None
+    inner = arguments.get("input", {}) if tool_name == "skill_invoke" else arguments
+    if not isinstance(inner, dict):
+        return None
+    if tool_name == "skill_invoke" and arguments.get("name") == "latex-report":
+        return {"main.tex", "report.pdf"}
+    if inner.get("purpose") == "deliverable" and isinstance(inner.get("deliverable_outputs"), list):
+        from bowhead_skill.sandbox_deliverables import deliverable_saved_name
+
+        # A nested file or folder entry is saved under its base name or as <folder>.zip.
+        return {deliverable_saved_name(name.strip()) for name in inner["deliverable_outputs"] if isinstance(name, str) and name.strip()}
+    return None
+
+
 async def normalize_producer_declaration(tool_name: str, arguments: dict, result: Any, ctx) -> Any:
     """Stamp only native producers' explicit, individually retained outputs."""
     if not isinstance(result, dict) or not getattr(ctx, "artifact_presentation_call", None) or not getattr(ctx, "execution_generation", None):
         return result
-    inner = arguments.get("input", {}) if tool_name == "skill_invoke" else arguments
-    if not isinstance(inner, dict):
-        return result
-    if tool_name == "skill_invoke" and arguments.get("name") == "latex-report":
-        requested = {"main.tex", "report.pdf"}
-    elif inner.get("purpose") == "deliverable" and isinstance(inner.get("deliverable_outputs"), list):
-        from bowhead_skill.sandbox_deliverables import deliverable_saved_name
-
-        # A nested file or folder entry is saved under its base name or as <folder>.zip.
-        requested = {deliverable_saved_name(name.strip()) for name in inner["deliverable_outputs"] if isinstance(name, str) and name.strip()}
-    else:
+    requested = declared_deliverable_names(tool_name, arguments)
+    if requested is None:
         return result
     outputs = result.get("output_artifacts")
     if not isinstance(outputs, list):

@@ -121,6 +121,8 @@ class LLMRequest:
     # (verification probes). Otherwise an explicit caller limit runs without
     # Team-enabled thinking: reasoning counts against that limit and could leave no answer.
     output_limit_covers_reasoning: bool = field(default=False, repr=False, compare=False)
+    # Images this attempt's target could not read, replaced by a notice (visual_input.withhold_images).
+    images_withheld: int = field(default=0, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,13 +137,17 @@ class LLMResponseDiagnostics:
     reasoning_tokens: int | None = None
     output_token_limit: int | None = None
     output_budget: dict[str, Any] | None = None
+    # Images withheld because the serving target does not read images; absent when none.
+    images_withheld: int | None = None
 
     def trace_fields(self) -> dict[str, Any]:
         """Project a fixed, bounded shape without model-controlled strings."""
 
         count = self.upstream_tool_call_count
+        withheld = self.images_withheld
         return {
             **({"output_budget": dict(self.output_budget)} if self.output_budget is not None else {}),
+            **({"images_withheld": withheld} if type(withheld) is int and withheld > 0 else {}),
             "mode": self.transport_mode if isinstance(self.transport_mode, str) and self.transport_mode in {"stream", "invoke"} else "unknown",
             "upstream_tool_call_count": count if type(count) is int and count >= 0 else None,
             "upstream_finish_reason": (

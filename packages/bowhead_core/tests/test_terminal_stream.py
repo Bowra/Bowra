@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.terminal_auth_fence import (
     AuthFenceFaultPoint,
     AuthorizedFrame,
@@ -50,19 +49,13 @@ from bowhead_core.terminal_stream import (
     TransitionWatchMultiplexer,
     TransitionWatchSubscription,
 )
-from core_legacy_database import upgrade
 
 _NOW = datetime(2026, 8, 3, 9, 10, 11, tzinfo=UTC)
 
 
 @pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
-    return str(path)
+def db_path(migrated_legacy_core_db: Path) -> str:
+    return str(migrated_legacy_core_db)
 
 
 def _scope(*, generation: int = 1, turn_id: str = "t_1") -> TerminalScope:

@@ -27,6 +27,11 @@ export const CHAT_SEND_BACKEND_CODES = [
   "configuration_mention_unavailable",
   "resource_unavailable",
   "reference_receiver_selection_failed",
+  // Skill-only `/` starts sent to Lead with `selected_skills`; refused before admission.
+  "skill_selection_unavailable",
+  "selected_skill_unavailable",
+  "selected_skill_changed",
+  "selected_skill_too_large",
   "plan_execution_claim_lost",
   "source_projection_unavailable",
   "attachment_bundle_mismatch",

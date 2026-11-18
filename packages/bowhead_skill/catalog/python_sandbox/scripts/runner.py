@@ -702,6 +702,27 @@ def _guess_upload_mime(filename: str) -> str:
     return mime or "application/octet-stream"
 
 
+def _http_error_detail(http_error: urllib.error.HTTPError) -> dict:
+    """The Gateway's coded error (`detail.error`) of a refused request, or {} when it has none."""
+    try:
+        return (json.loads(http_error.read().decode()).get("detail") or {}).get("error") or {}
+    except Exception:  # noqa: BLE001 — an uncoded refusal falls through to the generic failure
+        return {}
+
+
+def _unsupported_type_error(name: str, mime: str, entry: str | None = None) -> str:
+    """Name a file the Gateway refused by type, and say how it can still reach the user."""
+    parts = entry.split("/") if entry else []
+    if len(parts) > 1:
+        how = f"list its folder as '{parts[0]}/' in deliverable_outputs"
+    else:
+        how = "write it into a folder and list the folder as 'folder/' in deliverable_outputs"
+    return (
+        f"sandbox file {name} ({mime}) was not saved: this file type cannot be stored as a file of its own. "
+        f"To deliver it, {how} with purpose='deliverable' (the folder arrives as one .zip), or pack it into a .zip yourself"
+    )
+
+
 def _upload_artifact(
     path: Path,
     gateway: str,
@@ -783,12 +804,12 @@ def _upload_artifact(
         except urllib.error.HTTPError as http_error:
             # A refused file version names its reason (and the latest version) so the caller can say which file to target.
             if version_of and http_error.code in {400, 409}:
-                try:
-                    detail = (json.loads(http_error.read().decode()).get("detail") or {}).get("error") or {}
-                except Exception:  # noqa: BLE001 — fall through to the generic failure below
-                    detail = {}
+                detail = _http_error_detail(http_error)
                 if str(detail.get("code") or "").startswith("version_target_"):
                     return {"name": path.name, "version_error": detail["code"], "latest_id": detail.get("latest_id")}
+            # A refused file type is named with its type, so the caller can say how to deliver it instead.
+            elif http_error.code == 415 and _http_error_detail(http_error).get("code") == "file_type_unsupported":
+                return {"name": path.name, "type_error": mime}
             raise
         return {
             "name": path.name,
@@ -1487,6 +1508,7 @@ _SKILL_CONTROL_KEYS = frozenset(
         "_deliverable_outputs",
         "_work_outputs",
         "_revises",
+        "_revises_implicit",
         "_artifact_fetch_token",
         "_sandbox_executor_url",
         "_sandbox_executor_token",
@@ -2067,6 +2089,14 @@ def main() -> int:
         for name, target in (_raw_revises.items() if isinstance(_raw_revises, dict) else ())
         if isinstance(name, str) and name in _deliverable_outputs and isinstance(target, str) and target
     }
+    # Versions the model did not ask for (one helper's rewrite of its own earlier copy): when the gateway
+    # refuses one, for example because a parallel call saved a newer version, the output is saved as a
+    # new file instead of failing (docs/sprints/same-name-results-versions-2026-11-17/tech-design.md D3).
+    _raw_implicit = payload.get("_revises_implicit")
+    _revises_implicit = frozenset(
+        str(name) for name in (_raw_implicit if isinstance(_raw_implicit, list) else ()) if isinstance(name, str) and name in _revises
+    )
+    _saved_as_new_file: list[str] = []
     # cca P3 F-B: artifact-fetch token (set by tools.py from the gateway ctx minter). Read
     # HOST-SIDE only; threaded into _materialize_inputs → _fetch_artifact as a Bearer header
     # so the gateway download owner-check runs as the real caller. NEVER written into the
@@ -2261,11 +2291,23 @@ def main() -> int:
             token=_artifact_fetch_token,  # cca P3 F-B: own outputs as the real caller
             version_of=_revises.get(p.name) if _out_kind == "deliverable" else None,
         )
+        if rec and rec.get("version_error") and p.name in _revises_implicit:
+            rec = _upload_artifact(
+                p,
+                gateway,
+                session_id=_session_id,
+                kind=_out_kind,
+                created_by_turn=_created_by_turn,
+                token=_artifact_fetch_token,
+            )
+            _saved_as_new_file.append(p.name)
         if rec and rec.get("version_error"):
             latest = f"; the latest version is {rec['latest_id']}" if rec.get("latest_id") else ""
             output_data_errors.append(
                 f"sandbox file {p.name} was not stored as a new version of {_revises.get(p.name)}: {rec['version_error']}{latest}"
             )
+        elif rec and rec.get("type_error"):
+            output_data_errors.append(_unsupported_type_error(p.name, rec["type_error"]))
         elif rec:
             # Structured tabular files (csv/tsv/json/jsonl) get previews so the canvas
             # decomposer can convert them into data_table sections in the Data tab.
@@ -2303,11 +2345,23 @@ def main() -> int:
                     token=_artifact_fetch_token,
                     version_of=_revises.get(entry),
                 )
+                if rec and rec.get("version_error") and entry in _revises_implicit:
+                    rec = _upload_artifact(
+                        source,
+                        gateway,
+                        session_id=_session_id,
+                        kind="deliverable",
+                        created_by_turn=_created_by_turn,
+                        token=_artifact_fetch_token,
+                    )
+                    _saved_as_new_file.append(entry)
                 if rec and rec.get("version_error"):
                     latest = f"; the latest version is {rec['latest_id']}" if rec.get("latest_id") else ""
                     _nested_reported[entry] = (
                         f"declared deliverable {entry} was not stored as a new version of {_revises.get(entry)}: {rec['version_error']}{latest}"
                     )
+                elif rec and rec.get("type_error"):
+                    _nested_reported[entry] = _unsupported_type_error(saved_name, rec["type_error"], entry)
                 elif rec:
                     rec["path"] = entry
                     if file_count is not None:
@@ -2327,6 +2381,8 @@ def main() -> int:
             {"key": key, "artifact_id": item["artifact_id"], "size": item["size"], "sha256": item["sha256"]} for key, item in resolved.items()
         ],
     }
+    if _saved_as_new_file:
+        result["saved_as_new_file"] = _saved_as_new_file
     missing_deliverables = [
         name
         for name in _missing_declared_deliverables(

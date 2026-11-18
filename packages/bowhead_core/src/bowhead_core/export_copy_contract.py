@@ -233,7 +233,9 @@ async def classify_export_artifact_versions(
                 )
             except Exception:
                 return {}
-            for row in await cursor.fetchall():
+            async with cursor:
+                rows = await cursor.fetchall()
+            for row in rows:
                 jobs.append(
                     _ArtifactJobEvidence(
                         id=str(row[0]),

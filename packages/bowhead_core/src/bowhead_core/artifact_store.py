@@ -31,7 +31,7 @@ from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Any, ClassVar, Final, Literal, Protocol
 from uuid import uuid4
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 logger = logging.getLogger(__name__)
@@ -226,9 +226,35 @@ async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None)
             connection.row_factory = previous_factory
         return
     async with open_shared_ctx(db_path) as db:
-        # Closed here, not dropped: a dropped cursor is an open read until the loop closes it (see _db._run_setup).
+        # Closed here, not dropped: a dropped cursor is an open read until the loop closes it (see _db.execute_and_close).
         async with db.execute("PRAGMA main.synchronous=FULL"):
             pass
+        yield db
+
+
+@contextlib.asynccontextmanager
+async def _open_read_db(db_path: str, connection: aiosqlite.Connection | None = None) -> AsyncIterator[aiosqlite.Connection]:
+    """The way this module's pure reads reach the file records database.
+
+    Without ``connection`` the block borrows a read-only pooled connection
+    (``open_pooled_read_ctx``). A write-capable connection that reads another domain
+    file (core's ``account_deletions`` and ``team_brand_asset_metadata``, execution's
+    ``turns`` and ``sessions``) takes that file's shared authority lease, so a file
+    lookup or a Results query waited for, or inside a transaction failed on, any core
+    permission or settings write, and in turn kept such a write from getting its
+    exclusive lease. A read-only connection takes no lease. Use it only for blocks
+    that never write: ``query_only`` rejects writes.
+
+    A supplied connection remains caller-owned, as with ``_open_db``.
+    """
+    if connection is not None:
+        previous_factory = connection.row_factory
+        try:
+            yield connection
+        finally:
+            connection.row_factory = previous_factory
+        return
+    async with open_pooled_read_ctx(db_path) as db:
         yield db
 
 
@@ -559,6 +585,13 @@ class ObjectHead:
 # SVG is XML source that a browser executes as a document. It is stored and read as text and
 # served only as an isolated attachment, never through the raster image paths.
 SVG_MIME = "image/svg+xml"
+
+# JavaScript and CSS are source that a browser runs or applies when a page loads them from this
+# origin, even from an attachment. They are stored under their own MIME and read as text, but served
+# only as inert `text/plain` attachments, which `nosniff` keeps from running as script or styles.
+JAVASCRIPT_MIME = "text/javascript"
+CSS_MIME = "text/css"
+INERT_SOURCE_MIMES = frozenset({JAVASCRIPT_MIME, CSS_MIME})
 
 
 # mime → business family (frontend icons / filters)
@@ -1470,8 +1503,8 @@ class ArtifactStore:
             # Multimodal V2A: artifact-side provenance for flattened design PNGs.
             await db.executescript(_DESIGN_FLATTEN_EXPORT_SCHEMA)
             # Incremental migration: ALTER adds columns absent from legacy artifacts tables.
-            cur = await db.execute("PRAGMA table_info(artifacts)")
-            cols = {row[1] for row in await cur.fetchall()}
+            async with db.execute("PRAGMA table_info(artifacts)") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
             for col, decl in (
                 ("deleted_at", "TEXT"),
                 ("last_used_at", "TEXT"),
@@ -1519,9 +1552,11 @@ class ArtifactStore:
             ):
                 if col not in cols:
                     await db.execute(f"ALTER TABLE artifacts ADD COLUMN {col} {decl}")
-            if "knowledge_intent_json" in cols or "knowledge_intent_json" in {
-                row[1] for row in await (await db.execute("PRAGMA table_info(artifacts)")).fetchall()
-            }:
+            has_knowledge_intent = "knowledge_intent_json" in cols
+            if not has_knowledge_intent:
+                async with db.execute("PRAGMA table_info(artifacts)") as cursor:
+                    has_knowledge_intent = "knowledge_intent_json" in {row[1] for row in await cursor.fetchall()}
+            if has_knowledge_intent:
                 from importlib import import_module
 
                 intent_contract = import_module("bowhead_core.migrations.versions.0202_knowledge_ingestion")
@@ -1618,8 +1653,8 @@ class ArtifactStore:
         WHERE 同时锁 source + filename，不会误伤真正的导出成品（它们文件名是
         用户可见的 pptx/xlsx/pdf）。幂等：再跑一次匹配 0 行。
         """
-        cur = await db.execute("PRAGMA user_version")
-        row = await cur.fetchone()
+        async with db.execute("PRAGMA user_version") as cur:
+            row = await cur.fetchone()
         current = int(row[0]) if row else 0
         if current >= _ARTIFACT_SECTIONS_JSON_VERSION:
             return
@@ -1639,8 +1674,8 @@ class ArtifactStore:
             )
 
     async def _maybe_backfill_kinds(self, db: aiosqlite.Connection) -> None:
-        cur = await db.execute("PRAGMA user_version")
-        row = await cur.fetchone()
+        async with db.execute("PRAGMA user_version") as cur:
+            row = await cur.fetchone()
         current = int(row[0]) if row else 0
         if current >= _ARTIFACT_USER_VERSION:
             return
@@ -1761,8 +1796,8 @@ class ArtifactStore:
         if not staged_artifacts:
             raise ValueError("at least one staged artifact is required")
         if self._asset_cols_present is None:
-            cursor = await db.execute("PRAGMA table_info(artifacts)")
-            columns = {str(row[1]) for row in await cursor.fetchall()}
+            async with db.execute("PRAGMA table_info(artifacts)") as cursor:
+                columns = {str(row[1]) for row in await cursor.fetchall()}
             self._asset_cols_present = "kind" in columns and "inject" in columns and "manifest_artifact_id" in columns
         if not self._asset_cols_present:
             raise RuntimeError("artifact asset-model schema is unavailable")
@@ -1780,8 +1815,8 @@ class ArtifactStore:
                 canvas_id=artifact.canvas_id,
             )
             if self._workspace_col_present is None:
-                _wcur = await db.execute("PRAGMA table_info(artifacts)")
-                self._workspace_col_present = "workspace_id" in {str(r[1]) for r in await _wcur.fetchall()}
+                async with db.execute("PRAGMA table_info(artifacts)") as _wcur:
+                    self._workspace_col_present = "workspace_id" in {str(r[1]) for r in await _wcur.fetchall()}
             if self._workspace_col_present:
                 artifact.workspace_id = workspace_id
             columns = "id,filename,mime,size,source,path,canvas_id,created_by,created_at,kind,scope,inject,trust,producer_kind,created_by_turn,derived_from,manifest_artifact_id"
@@ -1809,8 +1844,8 @@ class ArtifactStore:
                 values += (artifact.workspace_id,)
             if staged.version_of_target:
                 if self._version_cols_present is None:
-                    _vcur = await db.execute("PRAGMA table_info(artifacts)")
-                    self._version_cols_present = "lineage_id" in {str(r[1]) for r in await _vcur.fetchall()}
+                    async with db.execute("PRAGMA table_info(artifacts)") as _vcur:
+                        self._version_cols_present = "lineage_id" in {str(r[1]) for r in await _vcur.fetchall()}
                 if self._version_cols_present:
                     artifact.version_of, artifact.lineage_id, artifact.version_no = await _version_fields(
                         db,
@@ -2059,33 +2094,33 @@ class ArtifactStore:
             # initialize() means these are present in practice; the legacy-INSERT
             # fallback only matters for a degraded box that never migrated.
             if self._asset_cols_present is None:
-                cur = await db.execute("PRAGMA table_info(artifacts)")
-                _cols = {r[1] for r in await cur.fetchall()}
+                async with db.execute("PRAGMA table_info(artifacts)") as cur:
+                    _cols = {r[1] for r in await cur.fetchall()}
                 self._asset_cols_present = "kind" in _cols and "inject" in _cols
             # derived_from validation: drop self-ref / dangling / soft-deleted parent.
             if art.derived_from:
                 if art.derived_from == aid:
                     art.derived_from = None
                 else:
-                    pcur = await db.execute(
+                    async with db.execute(
                         "SELECT 1 FROM artifacts WHERE id=? AND deleted_at IS NULL",
                         (art.derived_from,),
-                    )
-                    if await pcur.fetchone() is None:
-                        logger.warning(
-                            "artifact_store.put_bytes: dropping invalid derived_from=%s (missing/soft-deleted) for art=%s",
-                            art.derived_from,
-                            aid,
-                        )
-                        art.derived_from = None
+                    ) as pcur:
+                        if await pcur.fetchone() is None:
+                            logger.warning(
+                                "artifact_store.put_bytes: dropping invalid derived_from=%s (missing/soft-deleted) for art=%s",
+                                art.derived_from,
+                                aid,
+                            )
+                            art.derived_from = None
             # New artifacts receive their final scope in the INSERT; a later
             # scope UPDATE is reserved for reassignment of an existing artifact.
             art.workspace_id = (workspace_id or "").strip() or await _resolve_write_workspace_id(
                 db, session_id=session_id, created_by_turn=art.created_by_turn, canvas_id=art.canvas_id
             )
             if self._workspace_col_present is None:
-                wcur = await db.execute("PRAGMA table_info(artifacts)")
-                self._workspace_col_present = "workspace_id" in {r[1] for r in await wcur.fetchall()}
+                async with db.execute("PRAGMA table_info(artifacts)") as wcur:
+                    self._workspace_col_present = "workspace_id" in {r[1] for r in await wcur.fetchall()}
             if version_of_target:
                 art.version_of, art.lineage_id, art.version_no = await _version_fields(
                     db,
@@ -2141,8 +2176,8 @@ class ArtifactStore:
             # Optional provenance columns remain readable on older stores.
             if art.origin_query:
                 if self._origin_col_present is None:
-                    _ocur = await db.execute("PRAGMA table_info(artifacts)")
-                    self._origin_col_present = "origin_query" in {r[1] for r in await _ocur.fetchall()}
+                    async with db.execute("PRAGMA table_info(artifacts)") as _ocur:
+                        self._origin_col_present = "origin_query" in {r[1] for r in await _ocur.fetchall()}
                 if self._origin_col_present:
                     await db.execute(
                         "UPDATE artifacts SET origin_query=? WHERE id=?",
@@ -2155,8 +2190,8 @@ class ArtifactStore:
                     )
             if art.row_count is not None:
                 if self._row_count_col_present is None:
-                    _rcur = await db.execute("PRAGMA table_info(artifacts)")
-                    self._row_count_col_present = "row_count" in {r[1] for r in await _rcur.fetchall()}
+                    async with db.execute("PRAGMA table_info(artifacts)") as _rcur:
+                        self._row_count_col_present = "row_count" in {r[1] for r in await _rcur.fetchall()}
                 if self._row_count_col_present:
                     await db.execute(
                         "UPDATE artifacts SET row_count=? WHERE id=?",
@@ -2276,8 +2311,7 @@ class ArtifactStore:
     async def versions_supported(self) -> bool:
         """Whether the 0228 version columns exist (the domain layout; the legacy layout is frozen)."""
         if self._version_cols_present is None:
-            async with _open_db(self.db_path) as db:
-                cur = await db.execute("PRAGMA table_info(artifacts)")
+            async with _open_db(self.db_path) as db, db.execute("PRAGMA table_info(artifacts)") as cur:
                 self._version_cols_present = "lineage_id" in {r[1] for r in await cur.fetchall()}
         return bool(self._version_cols_present)
 
@@ -2315,11 +2349,11 @@ class ArtifactStore:
         ph = ",".join("?" for _ in ids)
         async with _open_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 f"SELECT id, COALESCE(lineage_id, id) AS root, COALESCE(version_no, 1) AS no, deleted_at FROM artifacts WHERE id IN ({ph})",  # noqa: S608 — placeholders only
                 ids,
-            )
-            stored = {str(row["id"]): row for row in await cur.fetchall()}
+            ) as cur:
+                stored = {str(row["id"]): row for row in await cur.fetchall()}
             known: dict[str, tuple[str, int | None, bool]] = {}
             for item in ids:
                 row = stored.get(item)
@@ -2331,14 +2365,14 @@ class ArtifactStore:
             if not roots:
                 return {}
             rph = ",".join("?" for _ in roots)
-            cur = await db.execute(
+            async with db.execute(
                 f"SELECT * FROM (SELECT a.*, COALESCE(a.lineage_id, a.id) AS lineage_key, ROW_NUMBER() OVER ("  # noqa: S608 — placeholders only
                 "PARTITION BY COALESCE(a.lineage_id, a.id) ORDER BY COALESCE(a.version_no, 1) DESC, a.created_at DESC) AS lineage_rank "
                 f"FROM artifacts a WHERE (a.id IN ({rph}) OR a.lineage_id IN ({rph})) AND a.deleted_at IS NULL AND a.status = 'ready') "
                 "WHERE lineage_rank = 1",
                 (*roots, *roots),
-            )
-            newest = {str(row["lineage_key"]): _row_to_artifact(row) for row in await cur.fetchall()}
+            ) as cur:
+                newest = {str(row["lineage_key"]): _row_to_artifact(row) for row in await cur.fetchall()}
         out: dict[str, NewerVersion] = {}
         for item, (root, number, gone) in known.items():
             latest = newest.get(root)
@@ -2868,7 +2902,7 @@ class ArtifactStore:
         cross-user/owner-less exfil vector). Regular per-user downloads keep NULL artifacts
         readable (legit shared/system artifacts), so this stays opt-in.
         """
-        async with _open_db(self.db_path, connection) as db:
+        async with _open_read_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             q = "SELECT * FROM artifacts WHERE id=? AND COALESCE(producer_kind,'')<>'template_document_internal_v1'"
             q += " AND " + await self._retired_owner_filter(db)
@@ -2899,7 +2933,7 @@ class ArtifactStore:
         if not ordered:
             return []
         by_id: dict[str, Artifact] = {}
-        async with _open_db(self.db_path) as db:
+        async with _open_read_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             retired_owner_filter = await self._retired_owner_filter(db)
             for start in range(0, len(ordered), 400):
@@ -2922,12 +2956,12 @@ class ArtifactStore:
         async with _open_db(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT * FROM artifacts WHERE id=? AND created_by=? AND workspace_id=? "
                 "AND source='kb_upload' AND kind='user_upload' AND status='ready' AND deleted_at IS NULL",
                 (artifact_id, user_id, workspace_id),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             if row is None:
                 await db.rollback()
                 return None
@@ -2935,12 +2969,11 @@ class ArtifactStore:
                 "INSERT OR IGNORE INTO artifact_upload_bindings(artifact_id,workspace_id,user_id,session_id,created_at) VALUES (?,?,?,NULL,?)",
                 (artifact_id, workspace_id, user_id, _now()),
             )
-            binding = await (
-                await db.execute(
-                    "SELECT 1 FROM artifact_upload_bindings WHERE artifact_id=? AND workspace_id=? AND user_id=?",
-                    (artifact_id, workspace_id, user_id),
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT 1 FROM artifact_upload_bindings WHERE artifact_id=? AND workspace_id=? AND user_id=?",
+                (artifact_id, workspace_id, user_id),
+            ) as cursor_2:
+                binding = await cursor_2.fetchone()
             if binding is None:
                 await db.rollback()
                 return None
@@ -3359,7 +3392,7 @@ class ArtifactStore:
         from bowhead_core.artifact_presentation import PRESENTATION_EVENT_SQL, PresentationContractUnsupported
 
         async with (
-            _open_db(self.db_path) as db,
+            _open_read_db(self.db_path) as db,
             db.execute(
                 "SELECT COALESCE(MAX(e.rowid),0), MAX(CASE WHEN json_valid(payload_json) THEN "
                 "json_extract(payload_json,'$.result_meta.artifact_presentation.contract') != 'artifact-presentation.v1' ELSE 0 END) "
@@ -3407,7 +3440,7 @@ class ArtifactStore:
         """
         )
         params = [*scope_params, *owner_params, *internal_params]
-        async with _open_db(self.db_path) as db:
+        async with _open_read_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cursor:
                 row = await cursor.fetchone()
@@ -3484,7 +3517,7 @@ class ArtifactStore:
             *high_water_params,
         ]
         digest = hashlib.sha256()
-        async with _open_db(self.db_path) as db, db.execute(sql, params) as cursor:
+        async with _open_read_db(self.db_path) as db, db.execute(sql, params) as cursor:
             for row in await cursor.fetchall():
                 digest.update(str(row[0]).encode())
                 digest.update(b"\0")
@@ -3533,7 +3566,7 @@ class ArtifactStore:
             *owner_params,
             *internal_params,
         ]
-        async with _open_db(self.db_path) as db:
+        async with _open_read_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cursor:
                 row = await cursor.fetchone()
@@ -3785,7 +3818,7 @@ class ArtifactStore:
         ORDER BY {page_order}
         """
         )
-        async with _open_db(self.db_path) as db:
+        async with _open_read_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await self._register_results_sql_functions(db)
             await db.execute("BEGIN")
@@ -3869,7 +3902,7 @@ class ArtifactStore:
             ORDER BY {order}a.created_at DESC, a.id DESC
             """
         )
-        async with _open_db(self.db_path) as db:
+        async with _open_read_db(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (*scope_params, *owner_params, *internal_params, anchor.lineage_root, anchor.lineage_root)) as cur:
                 return [_row_to_artifact(row) for row in await cur.fetchall()]
@@ -4171,11 +4204,11 @@ class ArtifactStore:
             return ids
         ph = ",".join("?" for _ in ids)
         owner = " AND created_by = ?" if user_id is not None else ""
-        cur = await db.execute(
+        async with db.execute(
             f"SELECT id FROM artifacts WHERE COALESCE(lineage_id, id) IN (SELECT COALESCE(lineage_id, id) FROM artifacts WHERE id IN ({ph})){owner}",  # noqa: S608 — placeholders only
             (*ids, *((user_id,) if user_id is not None else ())),
-        )
-        members = [str(row[0]) for row in await cur.fetchall()]
+        ) as cur:
+            members = [str(row[0]) for row in await cur.fetchall()]
         return list(dict.fromkeys([*ids, *members]))
 
     async def lineage_overview(self, artifact_ids: Sequence[str], *, user_id: str) -> dict[str, tuple[list[str], bool]]:
@@ -4259,12 +4292,12 @@ class ArtifactStore:
             return ids
         ph = ",".join("?" for _ in ids)
         owner = " AND m.created_by = x.created_by" + (" AND x.created_by = ?" if user_id is not None else "")
-        cur = await db.execute(
+        async with db.execute(
             f"SELECT DISTINCT m.id FROM artifacts x JOIN artifacts m ON COALESCE(m.lineage_id, m.id) = COALESCE(x.lineage_id, x.id) "  # noqa: S608 — placeholders only
             f"AND m.deleted_at = x.deleted_at{owner} WHERE x.id IN ({ph}) AND x.deleted_at IS NOT NULL",
             (*((user_id,) if user_id is not None else ()), *ids),
-        )
-        return list(dict.fromkeys([*ids, *(str(row[0]) for row in await cur.fetchall())]))
+        ) as cur:
+            return list(dict.fromkeys([*ids, *(str(row[0]) for row in await cur.fetchall())]))
 
     async def list_soft_deleted_ids(self, *, limit: int = 5000, offset: int = 0) -> list[str]:
         """回收站里的 artifact id（给知识库引用对账用，见 gateway 的 GC loop）。
@@ -4366,11 +4399,11 @@ class ArtifactStore:
             return False
         async with _open_db(self.db_path) as db:
             active_sql, active_params = await self._session_turn_active_sql(db, "a.created_by_turn")
-            cur = await db.execute(
+            async with db.execute(
                 f"SELECT 1 FROM artifacts a WHERE (a.id = ? OR a.lineage_id = ?) AND {active_sql} LIMIT 1",  # noqa: S608 — fixed fragments
                 (lineage_root, lineage_root, *active_params),
-            )
-            return await cur.fetchone() is not None
+            ) as cur:
+                return await cur.fetchone() is not None
 
     async def prune_version_candidates(self, lineage_roots: Sequence[str] | None = None) -> list[str]:
         """Older versions automatic pruning would remove, before the cross-database KB check (file versions B4).
@@ -4398,8 +4431,8 @@ class ArtifactStore:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 ph = ",".join("?" for _ in checked)
-                cur = await db.execute(f"SELECT DISTINCT COALESCE(lineage_id, id) FROM artifacts WHERE id IN ({ph})", tuple(checked))  # noqa: S608 — placeholders only
-                roots = [str(row[0]) for row in await cur.fetchall()]
+                async with db.execute(f"SELECT DISTINCT COALESCE(lineage_id, id) FROM artifacts WHERE id IN ({ph})", tuple(checked)) as cur:
+                    roots = [str(row[0]) for row in await cur.fetchall()]
                 targets = sorted(set(await self._prune_candidates(db, roots)) & checked)
                 if not targets:
                     await db.rollback()
@@ -4422,6 +4455,9 @@ class ArtifactStore:
         - The latest live version is never a candidate.
         - A draft is a version that a later version from the same Turn superseded. It never
           reached the user as a card (R3), so it is removed without counting toward the three.
+          A file whose history started in that same Turn has no drafts: a helper that rewrote a
+          new file in one Turn keeps its earlier copies as versions within the three
+          (docs/sprints/same-name-results-versions-2026-11-17/tech-design.md, D2).
         - Protected (kept, as a retained older version): active references (document inputs,
           citations, user pins), an unexpired export-snapshot pin, a canvas attachment, a share
           grant on that version, and any mention in a canvas section. KB references are the
@@ -4443,20 +4479,36 @@ class ArtifactStore:
             scope, params = f"(a.id IN ({rph}) OR a.lineage_id IN ({rph}))", (*roots, *roots)
         else:
             scope, params = "COALESCE(a.lineage_id, a.id) IN (SELECT lineage_id FROM artifacts WHERE lineage_id IS NOT NULL)", ()
-        cur = await db.execute(
+        async with db.execute(
             "SELECT a.id, COALESCE(a.lineage_id, a.id), COALESCE(a.version_no, 1), a.created_by_turn FROM artifacts a "  # noqa: S608 — fixed fragments
             f"WHERE {scope} AND a.deleted_at IS NULL AND a.status = 'ready'",
             params,
-        )
-        files: dict[str, list[tuple[str, int, str | None]]] = {}
-        for artifact_id, root, number, turn in await cur.fetchall():
-            files.setdefault(str(root), []).append((str(artifact_id), int(number), turn))
+        ) as cur:
+            files: dict[str, list[tuple[str, int, str | None]]] = {}
+            for artifact_id, root, number, turn in await cur.fetchall():
+                files.setdefault(str(root), []).append((str(artifact_id), int(number), turn))
+        # The Turn that started each file: its first version's, even when that row was pruned since.
+        started_in: dict[str, str | None] = {}
+        root_ids = list(files)
+        for start in range(0, len(root_ids), 500):
+            chunk = root_ids[start : start + 500]
+            async with db.execute(
+                f"SELECT id, created_by_turn FROM artifacts WHERE id IN ({','.join('?' for _ in chunk)})",  # noqa: S608 — placeholders only
+                chunk,
+            ) as roots_cursor:
+                started_in.update((str(row[0]), row[1]) for row in await roots_cursor.fetchall())
         candidates: list[str] = []
-        for versions in files.values():
+        for root, versions in files.items():
             versions.sort(key=lambda version: version[1], reverse=True)
+            # A purged first row falls back to the oldest live version.
+            first_turn = started_in.get(root, versions[-1][2])
             kept = 1  # The latest live version.
             for artifact_id, number, turn in versions[1:]:
-                draft = bool(turn) and any(other_turn == turn and other_number > number for _, other_number, other_turn in versions)
+                draft = (
+                    bool(turn)
+                    and turn != first_turn
+                    and any(other_turn == turn and other_number > number for _, other_number, other_turn in versions)
+                )
                 if draft:
                     candidates.append(artifact_id)
                 elif kept < self.FILE_VERSIONS_KEPT:
@@ -4480,12 +4532,12 @@ class ArtifactStore:
         for start in range(0, len(candidates), 500):
             chunk = candidates[start : start + 500]
             cph = ",".join("?" for _ in chunk)
-            cur = await db.execute(
+            async with db.execute(
                 f"SELECT id FROM artifacts WHERE id IN ({cph}) AND canvas_id IS NULL AND NOT {reference_sql} AND NOT {snapshot_sql} "  # noqa: S608 — fixed fragments
                 f"AND NOT {grant_sql} AND NOT {active_sql}",
                 (*chunk, *active_params),
-            )
-            unprotected.extend(str(row[0]) for row in await cur.fetchall())
+            ) as cur:
+                unprotected.extend(str(row[0]) for row in await cur.fetchall())
         mentioned = await _canvas_mentions(db, unprotected)
         return [item for item in unprotected if item not in mentioned]
 
@@ -4976,12 +5028,12 @@ async def newer_version_facts(store: Any, artifact_ids: Sequence[str]) -> dict[s
 async def _latest_live_version(db: aiosqlite.Connection, root: str) -> str | None:
     if not root:
         return None
-    cur = await db.execute(
+    async with db.execute(
         "SELECT id FROM artifacts WHERE (id=? OR lineage_id=?) AND deleted_at IS NULL AND status='ready' "
         "ORDER BY COALESCE(version_no, 1) DESC, created_at DESC LIMIT 1",
         (root, root),
-    )
-    row = await cur.fetchone()
+    ) as cur:
+        row = await cur.fetchone()
     return str(row[0]) if row else None
 
 
@@ -5009,14 +5061,14 @@ async def _version_fields(
     if (kind or "") != "deliverable":
         raise VersionTargetRefused("version_target_out_of_scope")
     internal, internal_params = results_internal_artifact_sql("a")
-    cur = await db.execute(
+    async with db.execute(
         f"SELECT a.id, a.created_by, a.kind, a.mime, a.status, a.deleted_at, a.workspace_id, a.lineage_id, "  # noqa: S608 — fixed predicate text
         f"COALESCE(a.producer_kind, '') AS producer, t.session_id AS turn_session, ({internal}) AS internal, "
         "EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) AS claimed "
         "FROM artifacts a LEFT JOIN turns t ON t.id = a.created_by_turn WHERE a.id = ?",
         (*internal_params, target_id),
-    )
-    row = await cur.fetchone()
+    ) as cur:
+        row = await cur.fetchone()
     if row is None or not user_id or row[1] != user_id or row[5] is not None or row[4] != "ready" or row[11]:
         raise VersionTargetRefused("version_target_not_found")
     if (
@@ -5034,11 +5086,11 @@ async def _version_fields(
     latest = await _latest_live_version(db, root)
     if latest != target_id:
         raise VersionTargetRefused("version_target_not_latest", latest)
-    cur = await db.execute(
+    async with db.execute(
         "SELECT id, COALESCE(version_no, 1) FROM artifacts WHERE id=? OR lineage_id=? ORDER BY COALESCE(version_no, 1) DESC LIMIT 1",
         (root, root),
-    )
-    highest = await cur.fetchone()
+    ) as cur:
+        highest = await cur.fetchone()
     return str(highest[0]), root, int(highest[1]) + 1
 
 

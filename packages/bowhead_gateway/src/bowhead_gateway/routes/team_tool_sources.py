@@ -24,6 +24,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiosqlite
+from bowhead_core._db import SQLiteStoreBusy
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.mcp_prompt_cache import (
     validate_mcp_prompt_cache as _validate_prompt_cache,
@@ -1289,6 +1290,11 @@ async def create_source(
                 auth_type=body.auth_type,
                 auth=body.auth or {},
             )
+        except SQLiteStoreBusy:
+            # The credentials were not stored: remove the half-created source, then let the gateway
+            # answer 503 store_busy (try again) rather than this route's own 503.
+            await store.delete_team_tool_source(user.team_id, src.id)
+            raise
         except RuntimeError as e:
             await store.delete_team_tool_source(user.team_id, src.id)  # don't leave a half-created source
             raise HTTPException(503, str(e)) from e

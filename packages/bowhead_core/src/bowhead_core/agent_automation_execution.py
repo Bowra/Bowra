@@ -127,11 +127,11 @@ class AutomationExecutionGuard:
 
     async def internal_delegation(self) -> str | None:
         async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT e.coach_delegation_id FROM agent_eval_comparison_execution e JOIN agent_eval_comparison_run l ON l.execution_id=e.id WHERE l.run_id=?",
                 (self.run_id,),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             return row[0] if row else None
 
     async def is_automation(self) -> bool:
@@ -147,11 +147,11 @@ class AutomationExecutionGuard:
 
     async def requires_physical_guard(self) -> bool:
         async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT e.actor_kind,e.coach_delegation_id FROM agent_eval_comparison_execution e JOIN agent_eval_comparison_run l ON l.execution_id=e.id WHERE l.run_id=?",
                 (self.run_id,),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             return row is not None and (row[0] == "automation" or row[1] is not None)
 
     async def allowed(self) -> bool:

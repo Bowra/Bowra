@@ -167,7 +167,7 @@ You can also ask to show a line, bar, horizontal bar, area or stacked bar chart 
 
 Browser Back and Forward follow the selected Agent or settings editor. Leaving an editor through history keeps its unsaved input in the current conversation; returning through history restores it. A settings link opens only in its matching Space and with your current permissions.
 
-When a generated file is corrected during an answer, the answer's file cards show the final revision. The run trace can list intermediate files. If an earlier version has been cleaned up, its trace entry may still be visible. Independent files remain separate, even when their filenames match; files are kept separate when their revision relationship cannot be established.
+When a generated file is corrected during an answer, the answer's file cards show the final revision. When the same helper writes a file with the same name in the same folder more than once in an answer, the later copies are saved as new versions of that file. The answer's cards, **Results** and **Files** show it once, at its newest version, and the earlier copies are listed in its **Version History**. Copies written at the same moment, and copies in conversations from before this change, can stay separate files. The run trace can list intermediate files. If an earlier version has been cleaned up, its trace entry may still be visible. Files from different helpers remain separate, even when their filenames match; files are kept separate when their relationship cannot be established.
 
 When you reopen a conversation, the latest answer may appear while its saved results are still loading. If you see **Loading results…** below the answer, wait for the file card to appear before opening or downloading it.
 

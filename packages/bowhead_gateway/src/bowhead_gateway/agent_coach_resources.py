@@ -5,16 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.access_control import AccessContext, AccessControlStore
+from bowhead_core.agent_dependency_compiler import AgentDependencyCompiler, SkillReadContext
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.resource_access import builtin_capability_ids_for_skill, resource_grant_targets_for_tool
+from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.skill_read_resolution import build_reference_skill_sources
-from bowhead_core.subagent_authoring_catalog import SubagentAuthoringCatalogService
+from bowhead_core.subagent_authoring_catalog import SubagentAuthoringCatalogService, builtin_skill_offered_for_selection
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.team_tool_loader import load_team_tool_entries
 from bowhead_core.user_store import User, UserStore
@@ -31,19 +32,6 @@ MAX_EXACT_SKILL_FILE_BYTES = 64 * 1024
 
 def _digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-
-
-def _runnable_package(files: dict[str, bytes]) -> bool:
-    """A ``kind: tool`` Skill package with an entry script in any supported language."""
-    from bowhead_core.skill_upload import _split_frontmatter
-    from bowhead_skill.script_langs import all_entry_extensions
-
-    try:
-        frontmatter, _ = _split_frontmatter(files.get("SKILL.md", b"").decode("utf-8"))
-    except UnicodeDecodeError:
-        return False
-    extensions = all_entry_extensions()
-    return frontmatter.get("kind") == "tool" and any(path.startswith("scripts/") and Path(path).suffix in extensions for path in files)
 
 
 @dataclass(frozen=True)
@@ -99,7 +87,7 @@ class AuthoringResourceCatalog:
         schemas.update({entry.advertised_name: entry.input_schema for entry in entries})
         return schemas
 
-    async def _items(self, kind: str) -> tuple[list[dict], AccessContext]:
+    async def _items(self, kind: str, *, skill_identities: set[tuple[str, str]] | None = None) -> tuple[list[dict], AccessContext]:
         actor = await self._access()
         items = []
         if kind == "tool":
@@ -147,6 +135,7 @@ class AuthoringResourceCatalog:
                     limit=50,
                     include_source_identity=True,
                     baseline_selection=True,
+                    selected_identities=skill_identities,
                 )
                 for row in page["items"]:
                     resource = row["resource"]
@@ -154,6 +143,9 @@ class AuthoringResourceCatalog:
                     targets.extend(("builtin_capability", identity, "use") for identity in builtin_capability_ids_for_skill(row["name"]))
                     if not await self._allowed(actor, targets, owned_team_skill=row["owned_team_skill"]):
                         continue
+                    # The same rule as the Agent and Plugin Skill pickers: platform-only Skills and Skills for a
+                    # built-in connection that cannot be enabled stay readable but are not offered for selection.
+                    selectable = resource["source_kind"] != "builtin" or builtin_skill_offered_for_selection(row["name"])
                     items.append(
                         {
                             "reference": {
@@ -166,7 +158,8 @@ class AuthoringResourceCatalog:
                             "skill_name": row["name"],
                             "description": row["description"],
                             "allowed_audiences": row["allowed_audiences"],
-                            "can_select": True,
+                            "can_select": selectable,
+                            "restriction": None if selectable else "not_offered_for_selection",
                         }
                     )
                 if page["next_offset"] is None:
@@ -262,13 +255,25 @@ class AuthoringResourceCatalog:
             selected = file or "SKILL.md"
             if selected not in files or len(files[selected]) > MAX_EXACT_SKILL_FILE_BYTES:
                 return {"ok": False, "error": "resource_file_unavailable_or_too_large"}
-            detail["exact_read_grant"] = {
-                "skill_ref": {"kind": reference["source_kind"], "id": identity, "name": item["skill_name"]},
-                "revision": reference["revision"],
-                # Same rule as the authoring catalog: a Skill with scripts can also run them (agent-skill-gates D1).
-                "permissions": ["invoke", "read"] if _runnable_package(files) else ["read"],
-                "distribution": "reference",
-            }
+            detail["exact_read_grant"] = None
+            if item["can_select"]:
+                # The grant a Skill picker gives, so the original Agent and Plugin editors accept what Coach saves:
+                # read, plus invoke for a runnable Skill (agent-skill-gates D1).
+                compiler = AgentDependencyCompiler(personal_skill_store=SkillInstanceStore(self.store.db_path), team_skill_store=self.store)
+                audience = "private" if item["allowed_audiences"] == ["private"] else "teamwide"
+                grant = await compiler.selection_grant(
+                    resource,
+                    name=item["skill_name"],
+                    context=SkillReadContext(team_id=self.user.team_id, owner_user_id=self.user.id, audience_mode=audience),
+                )
+                if grant is None:
+                    return {"ok": False, "error": "resource_unavailable_or_changed"}
+                detail["exact_read_grant"] = {
+                    "skill_ref": {"kind": reference["source_kind"], "id": identity, "name": item["skill_name"]},
+                    "revision": reference["revision"],
+                    "permissions": list(grant.permissions),
+                    "distribution": "reference",
+                }
             detail.update(files=sorted(files), file=selected, content=files[selected].decode("utf-8"), content_role="untrusted_resource_data")
             await source.revalidate(prepared.proof)
         elif kind == "capability":

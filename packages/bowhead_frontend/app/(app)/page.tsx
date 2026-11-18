@@ -12,6 +12,7 @@
 
 import { citationFromPayload, mergeCitation } from "@/lib/citation-payload";
 import { inputDocumentDisplayText, parseInputDocument, type InputDocument } from "@/lib/composer-input-document";
+import { selectedSkillsForStart } from "@/lib/composer-selected-skills";
 import { composerAgentHandoffAdmitted, takeComposerPrefill, useComposerAgentUseHandoff } from "@/lib/composer-handoff";
 import { resolveAgentReferenceDocument } from "@/lib/agent-reference-document";
 import { randomUuid } from "@/lib/random-id";
@@ -922,6 +923,8 @@ function CanvasHomeInner() {
     && activeWorkspaceId,
   );
   const referenceInputEnabled = authSession?.me?.capabilities?.composer?.reference_input === true;
+  // Skill-only `/` starts go to Lead as ordinary submissions with their exact Skills.
+  const skillViaLeadEnabled = authSession?.me?.capabilities?.composer?.skill_via_lead === true;
   const [referenceQueueRefresh, setReferenceQueueRefresh] = useState(0);
   const [pendingReferenceDocument, setPendingReferenceDocument] = useState<InputDocument | null>(null);
   // The structured input of this page's last send, for Replay. Unlike `pendingReferenceDocument` it survives the
@@ -3445,6 +3448,17 @@ function CanvasHomeInner() {
       ))
       || inputDocumentDisplayText(referenceDocument) !== text
     )) return false;
+    // Route a fresh `/` start once, before its journal is written; a recovered submission
+    // resends the choice frozen in its wire snapshot.
+    const selectedSkills = referenceDocument && !referenceRecovery && !recoveredSubmission
+      ? selectedSkillsForStart(referenceDocument, {
+          skillViaLead: skillViaLeadEnabled,
+          submissionKind: replaySourceTurnId ? "replay" : "start",
+          chatAction: Boolean(preparedTerminalAction),
+          wireSnapshot: sendWireSnapshot,
+        })
+      : null;
+    const submittedWireSnapshot = selectedSkills ? { ...sendWireSnapshot, selectedSkills } : sendWireSnapshot;
     // The home-page prompt box supplies no attachment parameter → include the files preattached by "在新会话中使用",
     // or the first message sent after arriving from the files page omits that file, making the feature ineffective.
     // Composer sends already include preattached chips in attachments, so no duplication.
@@ -3527,7 +3541,7 @@ function CanvasHomeInner() {
         ? referenceSourceRevision
         : null);
       setPendingReplaySourceTurnId(effectiveReplaySourceTurnId);
-      setPendingSendWireSnapshot(sendWireSnapshot);
+      setPendingSendWireSnapshot(submittedWireSnapshot);
       if (sendWireSnapshot.draftChatBinding) setDraftChatSubmissionError(null);
       setMessage(text);
       setPendingAttachments(attachments ?? []);

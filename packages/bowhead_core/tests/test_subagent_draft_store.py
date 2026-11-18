@@ -5,7 +5,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.subagent_draft_store import (
     REQUEST_LEASE_SECONDS,
     DraftClaimOutcome,
@@ -20,7 +19,6 @@ from bowhead_core.team_subagent_store import (
     TeamSubagentStore,
 )
 from bowhead_core.user_store import TeamSubagent
-from core_legacy_database import upgrade
 
 
 class FakeClock:
@@ -31,19 +29,10 @@ class FakeClock:
         return self.value
 
 
-def _migrated_db(tmp_path) -> str:
-    db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
-    return str(db_path)
-
-
 @pytest.mark.asyncio
-async def test_canvas_generation_receipt_keeps_human_edits_and_applies_selected_fields(tmp_path) -> None:
+async def test_canvas_generation_receipt_keeps_human_edits_and_applies_selected_fields(migrated_legacy_core_db) -> None:
     clock = FakeClock(datetime(2026, 9, 27, 1, 0, tzinfo=UTC))
-    store = SubagentDraftStore(_migrated_db(tmp_path), hmac_key=b"m" * 32, clock=clock)
+    store = SubagentDraftStore(str(migrated_legacy_core_db), hmac_key=b"m" * 32, clock=clock)
     draft = await store.create_manual_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -187,9 +176,9 @@ async def test_canvas_generation_receipt_keeps_human_edits_and_applies_selected_
 
 
 @pytest.mark.asyncio
-async def test_manual_draft_is_space_bound_resumable_and_cas_saved(tmp_path) -> None:
+async def test_manual_draft_is_space_bound_resumable_and_cas_saved(migrated_legacy_core_db) -> None:
     clock = FakeClock(datetime(2026, 9, 27, 1, 0, tzinfo=UTC))
-    store = SubagentDraftStore(_migrated_db(tmp_path), hmac_key=b"m" * 32, clock=clock)
+    store = SubagentDraftStore(str(migrated_legacy_core_db), hmac_key=b"m" * 32, clock=clock)
     draft = await store.create_manual_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -293,10 +282,10 @@ async def test_manual_draft_is_space_bound_resumable_and_cas_saved(tmp_path) -> 
 
 
 @pytest.mark.asyncio
-async def test_request_claim_is_hashed_leased_and_replayable(tmp_path) -> None:
+async def test_request_claim_is_hashed_leased_and_replayable(migrated_legacy_core_db) -> None:
     clock = FakeClock(datetime(2026, 7, 31, 0, 0, tzinfo=UTC))
     store = SubagentDraftStore(
-        _migrated_db(tmp_path),
+        str(migrated_legacy_core_db),
         hmac_key=b"x" * 32,
         clock=clock,
     )
@@ -375,10 +364,10 @@ async def test_request_claim_is_hashed_leased_and_replayable(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ready_draft_is_owner_scoped_and_versioned(tmp_path) -> None:
+async def test_ready_draft_is_owner_scoped_and_versioned(migrated_legacy_core_db) -> None:
     clock = FakeClock(datetime(2026, 7, 31, 1, 0, tzinfo=UTC))
     store = SubagentDraftStore(
-        _migrated_db(tmp_path),
+        str(migrated_legacy_core_db),
         hmac_key=b"y" * 32,
         clock=clock,
     )
@@ -490,9 +479,9 @@ async def test_ready_draft_is_owner_scoped_and_versioned(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unknown_definition_envelope_fails_closed(tmp_path) -> None:
+async def test_unknown_definition_envelope_fails_closed(migrated_legacy_core_db) -> None:
     store = SubagentDraftStore(
-        _migrated_db(tmp_path),
+        str(migrated_legacy_core_db),
         hmac_key=b"z" * 32,
     )
     await store.initialize()
@@ -540,11 +529,11 @@ async def test_unknown_definition_envelope_fails_closed(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_maintenance_expires_scrubs_and_purges_in_bounded_batches(
-    tmp_path,
+    migrated_legacy_core_db,
 ) -> None:
     clock = FakeClock(datetime(2026, 7, 31, 2, 0, tzinfo=UTC))
     store = SubagentDraftStore(
-        _migrated_db(tmp_path),
+        str(migrated_legacy_core_db),
         hmac_key=b"m" * 32,
         clock=clock,
     )
@@ -602,9 +591,9 @@ async def test_maintenance_expires_scrubs_and_purges_in_bounded_batches(
 
 
 @pytest.mark.asyncio
-async def test_final_create_and_draft_consume_are_one_transaction(tmp_path) -> None:
+async def test_final_create_and_draft_consume_are_one_transaction(migrated_legacy_core_db) -> None:
     clock = FakeClock(datetime(2026, 7, 31, 3, 0, tzinfo=UTC))
-    db_path = _migrated_db(tmp_path)
+    db_path = str(migrated_legacy_core_db)
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "INSERT INTO teams(id,name,status,created_at) VALUES (?,?,?,?)",

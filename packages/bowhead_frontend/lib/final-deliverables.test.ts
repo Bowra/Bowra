@@ -60,3 +60,50 @@ describe("final file delivery from live and replayed steps", () => {
     expect(displayed([file("art_draft", "fibonacci.html", "text/plain"), file("art_final")])).toEqual(["art_draft", "art_final"]);
   });
 });
+
+function rewrite(id: string, helper: string, { state = "success", filename = "game.html", path = "" } = {}) {
+  dispatchToTurnStore("step_started", {
+    card_id: turnId, step_id: `step_${id}`, tool_name: "python_sandbox", step_type: "tool_run",
+    header_zh: "Run code", subagent_id: helper, started_at: "2026-11-17T03:30:00Z",
+    code_input: { language: "python", code: "write()", truncated: false, input_artifact_ids: [] },
+  });
+  dispatchToTurnStore("step_done", {
+    card_id: turnId, step_id: `step_${id}`, state,
+    result_meta: { output_artifacts: [{ artifact_id: id, filename, mime: "text/html", ...(path ? { path } : {}) }] },
+  });
+}
+
+describe("same-name files a helper rewrote in one Turn", () => {
+  const game = (id: string) => file(id, "game.html");
+
+  it("shows only the newest copy and keeps every copy in the execution process", () => {
+    // Observed case: one helper wrote the game six times and the answer listed six cards.
+    rewrite("art_1", "sub_compute");
+    rewrite("art_2", "sub_compute", { state: "failure" });
+    rewrite("art_3", "sub_compute");
+    expect(displayed([game("art_3"), game("art_2"), game("art_1")])).toEqual(["art_3"]);
+    expect(getTurnSnapshot(turnId)?.steps.flatMap((step) => step.outputArtifacts?.map((item) => item.artifactId) ?? []))
+      .toEqual(["art_1", "art_2", "art_3"]);
+  });
+
+  it("keeps same-name files of different helpers and files no step reports", () => {
+    rewrite("art_east", "sub_east");
+    rewrite("art_west", "sub_west");
+    expect(displayed([game("art_west"), game("art_east"), game("art_upload")])).toEqual(["art_west", "art_east", "art_upload"]);
+  });
+
+  it("keeps same-name files of different declared folders and hides a rewrite of one path", () => {
+    const page = (id: string) => file(id, "index.html");
+    rewrite("art_home", "sub_compute", { filename: "index.html", path: "site/index.html" });
+    rewrite("art_blog", "sub_compute", { filename: "index.html", path: "site/blog/index.html" });
+    rewrite("art_home_2", "sub_compute", { filename: "index.html", path: "site/index.html" });
+    expect(displayed([page("art_home_2"), page("art_blog"), page("art_home")])).toEqual(["art_home_2", "art_blog"]);
+  });
+
+  it("keeps a copy whose reported name differs from the delivered file", () => {
+    rewrite("art_1", "sub_compute");
+    rewrite("art_2", "sub_compute", { filename: "other.html" });
+    expect(displayed([game("art_2"), game("art_1")])).toEqual(["art_2", "art_1"]);
+  });
+});
+

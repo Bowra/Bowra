@@ -569,7 +569,14 @@ async def test_existing_session_retains_original_context_through_question(
             else:
                 with sqlite3.connect(case.path) as db:
                     if boundary in {"confirmation", "confirmation_race"}:
+                        # The receipt no longer names this file. A file that never had
+                        # a receipt is bound to its stored bytes instead, so revocation
+                        # is a mismatched receipt, not a missing one.
+                        db.execute("CREATE TEMP TABLE receipt AS SELECT * FROM artifact_upload_confirmations WHERE artifact_id=?", (old_upload_id,))
                         db.execute("DELETE FROM artifact_upload_confirmations WHERE artifact_id=?", (old_upload_id,))
+                        db.execute("UPDATE receipt SET check_profile='office-outer-opc-v0'")
+                        db.execute("INSERT INTO artifact_upload_confirmations SELECT * FROM receipt")
+                        db.execute("DROP TABLE receipt")
                     elif boundary in {"membership", "membership_race"}:
                         db.execute("DELETE FROM session_attachments WHERE session_id=? AND artifact_id=?", (session_id, old_upload_id))
                         db.execute(

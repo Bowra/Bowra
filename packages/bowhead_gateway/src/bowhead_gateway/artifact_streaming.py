@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from bowhead_core.artifact_store import SVG_MIME
+from bowhead_core.artifact_store import INERT_SOURCE_MIMES, SVG_MIME
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
@@ -129,7 +129,12 @@ async def artifact_streaming_response(
                 team_id = await user_store.get_workspace_team_id(workspace_id)
         limits = await load_team_limits(getattr(request.app.state, "team_settings_store", None), team_id)
         headers[HTML_PREVIEW_LIMIT_HEADER] = str(limits.html_max_bytes)
-    if normalized_mime in {"text/html", "application/xhtml+xml", SVG_MIME}:
+    media_type = art.mime or "application/octet-stream"
+    if normalized_mime in INERT_SOURCE_MIMES:
+        # A page on this origin could load stored JavaScript or CSS as a script or stylesheet;
+        # as text/plain with nosniff the browser refuses to run or apply it.
+        media_type = "text/plain; charset=utf-8"
+    if normalized_mime in {"text/html", "application/xhtml+xml", SVG_MIME, *INERT_SOURCE_MIMES}:
         headers["Cache-Control"] = "private, no-store"
         # Fetching bytes into the trusted preview does not inherit this policy.
         # If navigation ever renders this response, it must have no app origin
@@ -149,6 +154,6 @@ async def artifact_streaming_response(
             end=selected.end,
         ),
         status_code=status_code,
-        media_type=art.mime or "application/octet-stream",
+        media_type=media_type,
         headers=headers,
     )

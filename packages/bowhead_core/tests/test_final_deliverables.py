@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from bowhead_core.final_deliverables import superseded_deliverable_ids
-from bowhead_core.subagent import _extract_step_code_input
+from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
+from bowhead_core.subagent import _extract_step_code_input, _output_artifact_meta
 
 
 def revision_events(*, inputs: list[str], output: str = "art_final", state: str = "success", historical: bool = False) -> list[tuple[str, dict]]:
@@ -69,3 +69,81 @@ def test_native_code_metadata_retains_exact_inputs_without_inspecting_source() -
     projected = _extract_step_code_input("python_sandbox", {"input": {"code": "print('art_fake')", "inputs": {"src": {"artifact_id": "art_draft"}}}})
     assert projected is not None
     assert projected["input_artifact_ids"] == ["art_draft"]
+
+
+def rewrite_events(
+    *writes: tuple[str, str], state: str = "success", filename: str = "game.html", paths: tuple[str, ...] = ()
+) -> list[tuple[str, dict]]:
+    """One sandbox step per (helper, artifact) write, in order, each without inputs."""
+    events: list[tuple[str, dict]] = []
+    for index, (helper, artifact_id) in enumerate(writes):
+        step_id = f"step_{index}"
+        events.append(("step_started", {"step_id": step_id, "tool_name": "python_sandbox", "subagent_id": helper}))
+        output = {"artifact_id": artifact_id, "filename": filename, "mime": "text/html"}
+        if paths:
+            output["path"] = paths[index]
+        events.append(("step_done", {"step_id": step_id, "state": state, "result_meta": {"output_artifacts": [output]}}))
+    return events
+
+
+def test_a_helper_rewriting_one_file_keeps_only_its_newest_copy() -> None:
+    # Observed case: one compute helper wrote dragonball_kinto_un.html six times, and the answer showed six cards.
+    identities = dict.fromkeys(("art_1", "art_2", "art_3"), ("game.html", "text/html"))
+    events = rewrite_events(("sub_compute", "art_1"), ("sub_compute", "art_2"), ("sub_compute", "art_3"))
+    assert rewritten_deliverable_ids(identities, events) == {"art_1", "art_2"}
+
+
+@pytest.mark.parametrize("state", ["failure", "partial"])
+def test_the_newest_copy_counts_whatever_its_call_reported(state: str) -> None:
+    # Observed case: every call that wrote pomodoro/index.html reported failure for another file.
+    identities = dict.fromkeys(("art_1", "art_2"), ("game.html", "text/html"))
+    assert rewritten_deliverable_ids(identities, rewrite_events(("sub_compute", "art_1"), ("sub_compute", "art_2"), state=state)) == {"art_1"}
+
+
+def test_same_name_files_of_different_declared_folders_stay() -> None:
+    # A nested delivery: one helper writes site/index.html, then site/blog/index.html in a later call.
+    identities = dict.fromkeys(("art_home", "art_blog", "art_home_2"), ("index.html", "text/html"))
+    events = rewrite_events(
+        ("sub_compute", "art_home"),
+        ("sub_compute", "art_blog"),
+        ("sub_compute", "art_home_2"),
+        filename="index.html",
+        paths=("site/index.html", "site/blog/index.html", "site/index.html"),
+    )
+    assert rewritten_deliverable_ids(identities, events) == {"art_home"}
+
+
+def test_step_metadata_keeps_the_declared_nested_path() -> None:
+    meta = _output_artifact_meta(
+        {"output_artifacts": [{"artifact_id": "art_1", "name": "index.html", "mime": "text/html", "path": "site/blog/index.html"}]}
+    )
+    assert meta == [{"artifact_id": "art_1", "filename": "index.html", "mime": "text/html", "path": "site/blog/index.html"}]
+
+
+def test_same_name_files_of_different_helpers_stay() -> None:
+    identities = dict.fromkeys(("art_east", "art_west"), ("game.html", "text/html"))
+    assert rewritten_deliverable_ids(identities, rewrite_events(("sub_east", "art_east"), ("sub_west", "art_west"))) == set()
+
+
+def test_files_without_a_reporting_step_or_with_another_identity_stay() -> None:
+    identities = {"art_upload": ("game.html", "text/html"), "art_1": ("game.html", "text/html"), "art_text": ("game.html", "text/plain")}
+    events = rewrite_events(("sub_compute", "art_1"))
+    events += [
+        ("step_started", {"step_id": "step_text", "tool_name": "python_sandbox", "subagent_id": "sub_compute"}),
+        (
+            "step_done",
+            {
+                "step_id": "step_text",
+                "state": "success",
+                "result_meta": {"output_artifacts": [{"artifact_id": "art_text", "filename": "game.html", "mime": "text/plain"}]},
+            },
+        ),
+    ]
+    assert rewritten_deliverable_ids(identities, events) == set()
+
+
+def test_a_reported_name_that_differs_from_the_stored_file_proves_nothing() -> None:
+    identities = dict.fromkeys(("art_1", "art_2"), ("game.html", "text/html"))
+    events = rewrite_events(("sub_compute", "art_1")) + rewrite_events(("sub_compute", "art_2"), filename="other.html")
+    events[2][1]["step_id"] = events[3][1]["step_id"] = "step_later"
+    assert rewritten_deliverable_ids(identities, events) == set()

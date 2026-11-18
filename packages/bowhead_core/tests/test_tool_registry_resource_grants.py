@@ -505,3 +505,56 @@ async def test_resource_grants_runtime_deny_records_admin_audit(tmp_path, monkey
     assert row[1] == "tool"
     assert row[2] == "web_search"
     assert "builtin_capability" in row[3]
+
+
+@pytest.mark.asyncio
+async def test_schema_filter_decides_every_tool_in_one_batch_with_the_single_check_answers(tmp_path, monkeypatch):
+    """Every Turn filters the whole tool view; deciding each tool on its own took two reads per target
+    (0.25-1.2 s per Turn on 116, 1.7.53). The batch hides exactly the tools the one-by-one path hides."""
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "1")
+    access = AccessControlStore(tmp_path / "access.db")
+    await access.initialize()
+    for resource_id, permission, effect in (("web_search", "use", "deny"), ("skill_invoke", "use", "allow")):
+        await access.create_or_update_resource_grant(
+            team_id="team_acme",
+            resource_kind="builtin_capability",
+            resource_id=resource_id,
+            principal_type="user",
+            principal_id="u_alice",
+            permission=permission,
+            effect=effect,
+            created_by="u_admin",
+        )
+
+    class _OneByOne:
+        """The same store without the batch method, so the filter decides tool by tool."""
+
+        def __init__(self, store):
+            self._store = store
+
+        def __getattr__(self, name):
+            if name == "explain_decisions":
+                raise AttributeError(name)
+            return getattr(self._store, name)
+
+    single = await _registry().clone_filtered_by_resource_grants(_ctx(_OneByOne(access)))
+    calls = {"single": 0, "batch": 0}
+    one, many = access.explain_decision, access.explain_decisions
+
+    async def counted_one(*args, **kwargs):
+        calls["single"] += 1
+        return await one(*args, **kwargs)
+
+    async def counted_many(*args, **kwargs):
+        calls["batch"] += 1
+        return await many(*args, **kwargs)
+
+    monkeypatch.setattr(access, "explain_decision", counted_one)
+    monkeypatch.setattr(access, "explain_decisions", counted_many)
+    batched = await _registry().clone_filtered_by_resource_grants(_ctx(access))
+
+    names = sorted(schema.name for schema in batched.to_schemas())
+    assert names == sorted(schema.name for schema in single.to_schemas())
+    assert "web_search" not in names and "skill_save_generated" not in names and "skill_invoke" in names
+    # One batch per resource kind and permission, not per tool.
+    assert calls["single"] == 0 and 0 < calls["batch"] < len(_registry().to_schemas())

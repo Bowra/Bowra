@@ -17,7 +17,8 @@ def administrator(resources):
         db.execute("UPDATE team_members SET role='team_admin' WHERE team_id=? AND user_id=?", (resources.user.team_id, resources.user.id))
 
 
-def exact_method(resources, name="agent-authoring"):
+def exact_method(resources, name="doc-coauthoring"):
+    """The exact grant Coach offers for a built-in Skill; the default is a script-free method the pickers offer."""
     page = _run(resources.search(kind="skill", query=name, offset=0, limit=50))
     item = next(item for item in page["items"] if item["reference"]["id"] == f"builtin:{name}")
     return _run(resources.get(reference=item["reference"]))["resource"]["exact_read_grant"]
@@ -36,6 +37,24 @@ def create(resources, grant, *, key="one"):
             turn_id="t_original",
         )
     )
+
+
+def test_authoring_resolves_only_the_selected_skill(resources, monkeypatch):
+    from bowhead_core.agent_dependency_compiler import AgentDependencyCompiler
+    from bowhead_gateway.agent_authoring_dependencies import compile_authoring_resources
+
+    grant = exact_method(resources)
+    resolved = []
+    original = AgentDependencyCompiler.resolve_baseline_skill
+
+    async def track(self, selector, *, context):
+        resolved.append((selector.source_kind, selector.id))
+        return await original(self, selector, context=context)
+
+    monkeypatch.setattr(AgentDependencyCompiler, "resolve_baseline_skill", track)
+    result = _run(compile_authoring_resources(resources, {"skill_grants": [grant]}, audience_mode="teamwide"))
+    assert result["status"] == "ready"
+    assert resolved == [("builtin", grant["skill_ref"]["id"])]
 
 
 def test_real_compiler_rebases_grant_and_preserves_it_on_edit(resources):
@@ -161,3 +180,46 @@ def test_implied_wrapper_permissions_block_shared_save(resources):
     )
     assert not saved["ok"] and saved["error"] == "plugin_dependencies_blocked"
     assert saved["dependency_validation"]["reason_codes"] == ["plugin_tool_unavailable"]
+
+
+def test_platform_only_method_stays_readable_but_is_not_offered_for_a_shared_plugin(resources):
+    from bowhead_gateway.agent_authoring_dependencies import AuthoringDependencyError
+
+    administrator(resources)
+    page = _run(resources.search(kind="skill", query="agent-authoring", offset=0, limit=50))
+    item = next(item for item in page["items"] if item["reference"]["id"] == "builtin:agent-authoring")
+    assert item["can_select"] is False and item["restriction"] == "not_offered_for_selection"
+    detail = _run(resources.get(reference=item["reference"]))["resource"]
+    assert detail["content"] and detail["exact_read_grant"] is None
+    grant = {
+        "skill_ref": {"kind": "builtin", "id": "builtin:agent-authoring", "name": "agent-authoring"},
+        "revision": item["reference"]["revision"],
+        "permissions": ["read"],
+        "distribution": "reference",
+    }
+    with pytest.raises(AuthoringDependencyError, match="plugin_dependencies_unavailable") as raised:
+        create(resources, grant)
+    assert raised.value.details == {"rule": "skill_not_offered_for_selection", "skill_name": "agent-authoring"}
+
+
+def test_runnable_method_gets_the_picker_grant_and_the_original_editor_accepts_it(resources, saved_draft):
+    from bowhead_core.team_plugin_store import skill_grant_identity
+    from bowhead_gateway.routes import agents, team_plugins
+
+    administrator(resources)
+    # docx declares no kind, so it is a tool Skill, and it has scripts: the picker grants invoke as well as read.
+    grant = exact_method(resources, "docx")
+    assert grant["permissions"] == ["invoke", "read"]
+    client = saved_draft[-1]
+    client.app.include_router(agents.router, prefix="/api/v1/agents")
+    client.app.include_router(team_plugins.router, prefix="/api/v1/team-capabilities")
+    catalog = client.get("/api/v1/agents/authoring-catalog")
+    assert catalog.status_code == 200, catalog.text
+    picker = next(skill["grant"] for skill in catalog.json()["skills"] if skill["name"] == "docx")
+    assert skill_grant_identity(grant) == skill_grant_identity(picker)
+    saved = create(resources, grant)
+    assert saved["ok"], saved
+    plugin = _run(resources.plugins.call("agent_plugin_inspect", {"plugin_id": saved["result_target"]["id"]}, turn_id="t_later"))["plugin"]
+    body = {key: plugin[key] for key in ("name", "description", "tool_refs", "skill_grants", "row_version")}
+    changed = client.put(f"/api/v1/team-capabilities/{plugin['id']}", json={**body, "description": "Edited in the Plugin editor"})
+    assert changed.status_code == 200, changed.text

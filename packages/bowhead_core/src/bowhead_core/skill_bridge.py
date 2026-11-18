@@ -14,6 +14,7 @@ import copy
 import json
 import logging
 import os
+from collections import OrderedDict
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
@@ -279,6 +280,63 @@ async def _mark_sandbox_stdout_internal(result: Any, ctx: Any) -> None:
             await mark(artifact_id, SANDBOX_STDOUT_PRODUCER)
 
 
+#: Same-name rewrites (docs/sprints/same-name-results-versions-2026-11-17/tech-design.md §3.1): per
+#: Turn, the last copy each helper saved of each declared deliverable entry, ``(helper, entry) -> id``.
+#: Kept in memory only, so after a restart the next copy is a new file, as before. The newest Turns
+#: are kept; a Turn far older than these has finished.
+_HELPER_COPIES: OrderedDict[str, dict[tuple[str, str], str]] = OrderedDict()
+_HELPER_COPIES_TURNS = 512
+
+
+def _current_helper() -> str:
+    from bowhead_core.agents._lead_context import get_current_subagent_id
+
+    # Lead runs without a subagent id and counts as its own helper.
+    return get_current_subagent_id() or ""
+
+
+def _install_helper_copy_hooks(ctx: Any) -> None:
+    """Give the sandbox tool this Turn's lookup and record of each helper's last saved copy.
+
+    The tool package cannot import Core, and the calling helper is known only from Core's context
+    variable, which the hooks read at call time: parallel helpers can share one tool context.
+    """
+    turn_id = getattr(ctx, "turn_id", None)
+    if not isinstance(turn_id, str) or not turn_id:
+        return
+
+    def previous_copy(entry: str) -> str | None:
+        copies = _HELPER_COPIES.get(turn_id)
+        return copies.get((_current_helper(), entry)) if copies else None
+
+    def record_copy(entry: str, artifact_id: str) -> None:
+        copies = _HELPER_COPIES.get(turn_id)
+        if copies is None:
+            copies = _HELPER_COPIES[turn_id] = {}
+            while len(_HELPER_COPIES) > _HELPER_COPIES_TURNS:
+                _HELPER_COPIES.popitem(last=False)
+        else:
+            _HELPER_COPIES.move_to_end(turn_id)
+        copies[(_current_helper(), entry)] = artifact_id
+
+    ctx.same_helper_previous_copy = previous_copy
+    ctx.record_same_helper_copy = record_copy
+
+
+def _wrap_same_helper_copies(handler: Any) -> Any:
+    """Install the helper-copy hooks before the sandbox tool runs (they are set on the call's context)."""
+
+    @wraps(handler)
+    async def _wrapped(args: dict[str, Any], ctx: Any) -> Any:
+        try:
+            _install_helper_copy_hooks(ctx)
+        except Exception:  # noqa: BLE001 — without the hooks a rewrite is saved as a new file, as before
+            logger.warning("sandbox.helper_copy_hooks_failed", exc_info=True)
+        return await handler(args, ctx)
+
+    return _wrapped
+
+
 def _wrap_sandbox_stdout_marking(handler: Any) -> Any:
     """Mark persisted sandbox stdout as an internal dependency, hiding it from deliverables.
 
@@ -367,7 +425,8 @@ def register_skill_tools(
             from bowhead_core.pptx_result_view import attach_input_views, attach_result_views
 
             # Advisory facts about every presentation or HTML file this call wrote, work files included.
-            result = await attach_result_views(result, ctx)
+            # A declared presentation fix is checked against the version the model last saw (visual self-check D12).
+            result = await attach_result_views(result, ctx, presentation_fix=args.get("presentation_fix") if isinstance(args, dict) else None)
             # The structure of a presentation the call read, once per Agent run.
             result = await attach_input_views(result, ctx)
             try:
@@ -382,6 +441,8 @@ def register_skill_tools(
 
         return invoke
 
+    from bowhead_core.visual_self_check import with_presentation_fix
+
     registered: list[str] = []
     for d in defs:
         handler = d.handler
@@ -395,6 +456,7 @@ def register_skill_tools(
         # does not import bowhead_core, and runner is a separate process without ctx).
         if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL):
             handler = _wrap_skill_execution_gate(d.name, handler, catalog)
+            handler = _wrap_same_helper_copies(handler)
             # Mark sandbox stdout as an internal dependency (only if results actually have data_role=stdout,
             # so attaching to skill_invoke does not affect other skills).
             #
@@ -416,7 +478,7 @@ def register_skill_tools(
                         if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL)
                         else ""
                     ),
-                    input_schema=d.input_schema,
+                    input_schema=with_presentation_fix(d.input_schema) if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL) else d.input_schema,
                 ),
                 handler=handler,
                 risk_level=d.risk_level,

@@ -20,7 +20,7 @@ export function sandboxInputArtifactIds(codeInput: Record<string, unknown>, prev
   }
 }
 
-/** Final answer selection only; trace steps and retained files keep every original output. */
+/** Final answer selection only; trace steps, Results and Files keep every original output. */
 export function selectFinalInlineArtifacts(raw: unknown[], steps: readonly Step[]): unknown[] {
   const identities = new Map<string, string>();
   for (const entry of raw) {
@@ -46,5 +46,30 @@ export function selectFinalInlineArtifacts(raw: unknown[], steps: readonly Step[
       }
     }
   }
+  for (const id of rewrittenArtifactIds(identities, steps)) superseded.add(id);
   return raw.filter((entry) => !entry || typeof entry !== "object" || !superseded.has((entry as { id: string }).id));
+}
+
+/**
+ * A helper that writes a file with the same name, type and folder path again in one Turn rewrote it; only
+ * its newest copy stays in the answer. Copies from different helpers, same-name files of different declared
+ * folders, and files no step reports as its output, stay.
+ * Mirrors `rewritten_deliverable_ids` in bowhead_core/final_deliverables.py.
+ */
+function rewrittenArtifactIds(identities: Map<string, string>, steps: readonly Step[]): Set<string> {
+  const copies = new Map<string, string[]>();
+  for (const step of steps) {
+    for (const output of step.outputArtifacts ?? []) {
+      if (output.dataRole === "stdout") continue;
+      const identity = identities.get(output.artifactId);
+      if (!identity || identity !== JSON.stringify([output.filename, output.mime])) continue;
+      const key = JSON.stringify([step.subagentId ?? "", identity, output.path ?? ""]);
+      const written = copies.get(key) ?? [];
+      if (!written.includes(output.artifactId)) written.push(output.artifactId);
+      copies.set(key, written);
+    }
+  }
+  const hidden = new Set<string>();
+  for (const written of copies.values()) for (const id of written.slice(0, -1)) hidden.add(id);
+  return hidden;
 }

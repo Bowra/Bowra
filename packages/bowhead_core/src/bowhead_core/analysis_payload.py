@@ -465,14 +465,16 @@ def validate_payload(p: dict[str, Any] | AnalysisPayload, *, revision: bool = Fa
 
     # report-consistency-gate v3: lightweight structural validation of optional ground_facts; presence is not required.
     # When present, each entry needs a dict + nonempty key. Formula recalculation / units / cross-surface reconciliation belong to phased reconcile-layer work.
+    # No count limit: the prompt asks for every number the report cites, and a four-dimension analysis cites more than
+    # the old cap of 64. That cap refused whole returns after the report was written (Observed case: a helper
+    # sent 80, 80, 80, 68, 66 entries and stopped partial). The payload is bounded by the model's output, the Lead's
+    # result view omits the ledger, and its other readers take a fixed prefix.
     gf = d.get("ground_facts")
     if gf is not None:
         if not isinstance(gf, list):
             errs.append("ground_facts must be a list")
         else:
-            if len(gf) > 64:
-                errs.append(f"ground_facts too many ({len(gf)} > 64)")
-            for i, g in enumerate(gf[:64]):
+            for i, g in enumerate(gf):
                 if not isinstance(g, dict):
                     errs.append(f"ground_facts[{i}] must be an object")
             # Missing key is nonfatal (payload_from_dict falls back to label); a convenience ledger must not hard-fail

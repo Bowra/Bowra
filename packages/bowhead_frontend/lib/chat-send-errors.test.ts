@@ -74,6 +74,19 @@ describe("chat send HTTP error mapping", () => {
     expect(getChatSendErrorMessage("future_code")).toBe("发送失败，请检查网络后重试。");
   });
 
+  it.each([
+    ["skill_selection_unavailable", /can’t be used right now.*send without it/],
+    ["selected_skill_unavailable", /no longer available.*choose another Skill from \//],
+    ["selected_skill_changed", /updated after you selected it.*Select it again from \/ and send/],
+    ["selected_skill_too_large", /too large to send.*Remove that Skill/],
+  ] as const)("explains the selected-Skill refusal %s with its next step", (code, wording) => {
+    document.documentElement.lang = "en-US";
+    expect(resolveChatSendErrorReason(code, 409)).toBe(code);
+    const message = getChatSendErrorMessage(code);
+    expect(message).toMatch(wording);
+    expect(message).toContain("Your draft is preserved.");
+  });
+
   it("uses a localized network fallback without showing the thrown text", () => {
     document.documentElement.lang = "en-US";
 

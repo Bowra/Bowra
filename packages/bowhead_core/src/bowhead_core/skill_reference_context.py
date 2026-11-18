@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
+from bowhead_core._db import execute_and_close
 from bowhead_core.session_store import _requires_reference_execution_in_tx
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path
@@ -135,7 +136,7 @@ async def reference_turn_requires_context(db_path: str | Path, *, turn_id: str, 
             raise ValueError()
         uri = Path(db_path).resolve().as_uri() + "?mode=ro"
         async with diagnostic_connect(uri, uri=True) as db:
-            await db.execute("PRAGMA busy_timeout=5000")
+            await execute_and_close(db, "PRAGMA busy_timeout=5000")
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")
             try:

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from time import monotonic
@@ -39,6 +39,7 @@ from bowhead_router.model_clock import model_now
 from bowhead_router.retry import DEFAULT_MAX_RETRIES, RetryNotice, adapter_timeout, admit_retry, attempt_fits
 from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse
 from bowhead_router.usage import record_usage
+from bowhead_router.visual_input import visual_self_check_enabled, withhold_images
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -234,10 +235,44 @@ class Router:
         self.model_provider_types: dict[str, str] = {}
         # The model configuration's single retry setting (retries after the first attempt).
         self.max_retries = DEFAULT_MAX_RETRIES
+        # Catalog targets that read images (visual self-check). None = not provided by the
+        # factory, so nothing is withheld and no target is reported as reading images.
+        self._image_input_targets: frozenset[tuple[str, str]] | None = None
 
     def bind(self, binding: AgentBinding) -> None:
         """注册 agent × profile → binding 映射。"""
         self._bindings[(binding.agent_type, binding.profile)] = binding
+
+    def set_image_input_targets(self, targets: Iterable[tuple[str, str]]) -> None:
+        """Register the catalog ``(provider, model)`` targets whose capabilities include ``vision``."""
+        self._image_input_targets = frozenset((str(provider), str(model)) for provider, model in targets)
+
+    def accepts_images_for(self, agent_type: str, profile: str | None = None, user_pref: UserModelPref | None = None) -> bool:
+        """Whether the primary target this agent reaches first reads images. Unknown is ``False``.
+
+        Visual self-check renders only when this is true; a fallback without image input
+        is handled per attempt by ``_withhold_unreadable_images``.
+        """
+        if self._image_input_targets is None:
+            return False
+        try:
+            binding = self.resolve(agent_type, profile, user_pref=user_pref)
+        except KeyError:
+            return False
+        return binding.primary in self._image_input_targets
+
+    def _withhold_unreadable_images(self, req: LLMRequest, target: tuple[str, str]) -> None:
+        """With visual self-check on, a target without image input gets a notice for each image.
+
+        Covers renders and user attachments alike (tech design §3.2). Without catalog
+        capabilities (``set_image_input_targets`` never called) requests are unchanged.
+        """
+        if self._image_input_targets is None or target in self._image_input_targets or not visual_self_check_enabled():
+            return
+        if not any(message.images for message in req.messages):
+            return
+        req.messages, req.images_withheld = withhold_images(req.messages)
+        _get_logger().info("router.images_withheld provider=%s model=%s count=%d", target[0], target[1], req.images_withheld)
 
     def set_context_windows(self, windows: Mapping[tuple[str, str], int]) -> None:
         """登记 (provider, model) → 上下文窗口。只收正整数，其余忽略。"""
@@ -339,6 +374,7 @@ class Router:
             policy = fallback_context_policy(model_context_policy(self._registry.definition_for(primary_provider), primary_model), policy)
         prepared = _clone_with_model(replace(_inject_runtime_context(req), invocation_agent_type=agent_type), model, binding)
         prepared.configuration_version = self.configuration_version
+        self._withhold_unreadable_images(prepared, selected)
         prepared.output_reservation = output_reservation(
             definition,
             model,
@@ -498,6 +534,7 @@ class Router:
             req_for_attempt = _clone_with_model(req, model, binding)
             req_for_attempt.credit_rates = self.model_credit_rates.get((provider_name, model))
             req_for_attempt.configuration_version = self.configuration_version
+            self._withhold_unreadable_images(req_for_attempt, (provider_name, model))
             from bowhead_router.output_budget import output_reservation
             from bowhead_router.runtime_parameters import family_for
 
@@ -537,6 +574,13 @@ class Router:
                         resp.diagnostics or LLMResponseDiagnostics(transport_mode="invoke"),
                         output_token_limit=observed.get("wire_allowance"),
                         output_budget=observed,
+                    )
+                if req_for_attempt.images_withheld:
+                    from bowhead_router.types import LLMResponseDiagnostics
+
+                    resp.diagnostics = replace(
+                        resp.diagnostics or LLMResponseDiagnostics(transport_mode="invoke"),
+                        images_withheld=req_for_attempt.images_withheld,
                     )
                 # Move a leading inline <think> reasoning block into thinking so all plain-text callers (session titles, etc.)
                 # benefit here without stripping it independently.
@@ -666,6 +710,7 @@ class Router:
             req_for_attempt = _clone_with_model(req, model, binding)
             req_for_attempt.credit_rates = self.model_credit_rates.get((provider_name, model))
             req_for_attempt.configuration_version = self.configuration_version
+            self._withhold_unreadable_images(req_for_attempt, (provider_name, model))
             from bowhead_router.output_budget import output_reservation
             from bowhead_router.runtime_parameters import family_for
 
@@ -746,6 +791,16 @@ class Router:
                                         chunk.diagnostics or LLMResponseDiagnostics(transport_mode="stream"),
                                         output_token_limit=req_for_attempt.output_budget.get("wire_allowance"),
                                         output_budget=req_for_attempt.output_budget,
+                                    ),
+                                )
+                            if chunk.finish_reason is not None and req_for_attempt.images_withheld:
+                                from bowhead_router.types import LLMResponseDiagnostics
+
+                                chunk = replace(
+                                    chunk,
+                                    diagnostics=replace(
+                                        chunk.diagnostics or LLMResponseDiagnostics(transport_mode="stream"),
+                                        images_withheld=req_for_attempt.images_withheld,
                                     ),
                                 )
                             yielded_since_restart = True

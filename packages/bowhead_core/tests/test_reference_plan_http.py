@@ -34,7 +34,18 @@ pytestmark = [
         ("admission_office_unused_invoke", "unsupported"),
         *[
             ("admission_office_unused_sop", scenario)
-            for scenario in ("edit", "revoked", "revoked_between", "purged", "unknown", "cancelled", "cancelled_running", "missing_access", "fences")
+            for scenario in (
+                "edit",
+                "revoked",
+                "revoked_between",
+                "purged",
+                "unknown",
+                "transport",
+                "cancelled",
+                "cancelled_running",
+                "missing_access",
+                "fences",
+            )
         ],
     ],
     indirect=["receiver_case"],
@@ -59,6 +70,9 @@ async def test_reference_plan_native_confirmation(http_start, monkeypatch, scena
     case.app.state.plan_store = store
     orchestrator.multi_agent_registry = AgentRegistry.bootstrap()
     selected = case.fixture.case.args["reference_start"].profile_name
+    if scenario == "transport":
+        # Exhaust at once: the retry loop itself is covered by the Router and Lead tests.
+        orchestrator.router.max_retries = 0
     from bowhead_gateway.routes import plans
 
     case.app.include_router(plans.router)
@@ -121,6 +135,9 @@ async def test_reference_plan_native_confirmation(http_start, monkeypatch, scena
                             tuple(context.values()),
                         )
                     await db.rollback()
+            if scenario == "transport" and len(primary_calls) == 1:
+                # Settled not applied; with retries exhausted the step keeps the model's reason.
+                raise httpx2.ReadTimeout("model reply timed out", request=request)
             if scenario == "unknown":
                 # A transport failure is settled not applied and retried (4a2f0ab7e); a
                 # reply without usage leaves the delivery outcome unknown.
@@ -353,6 +370,36 @@ async def test_reference_plan_native_confirmation(http_start, monkeypatch, scena
             assert retry.status_code == 200, retry.text
             await settled(retry.json()["turn_id"])
             assert len(primary_calls) == 1
+        if scenario == "transport":
+            failed_step = (await store.list_steps(plan["id"]))[0]
+            assert (failed_step.status, failed_step.error_kind) == ("failed", "llm_provider_timeout")
+            assert failed_step.error == "Timed out waiting for the model. Resume the plan to run this step again."
+            events = [
+                (row["event_type"], json.loads(row["payload_json"])) for row in rows(case, "turn_events") if row["turn_id"] == execution_turn_id
+            ]
+            assert [(p["error_kind"], p["reason"]) for kind, p in events if kind == "step_failed"] == [("llm_provider_timeout", failed_step.error)]
+            # The plan stays resumable: the Turn ends as plan_blocked, whose card offers Resume Plan.
+            assert next(row for row in rows(case, "turns") if row["id"] == execution_turn_id)["error"] == "plan_blocked"
+            blocked = await store.get_plan(plan["id"], user_id=plan["user_id"], workspace_id=plan["workspace_id"])
+            assert blocked.status == "blocked"
+            resumed = await case.client.post(
+                "/api/v1/chat/send",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "workspace_id": plan["workspace_id"],
+                    "session_id": plan["session_id"],
+                    "message": "Resume the plan.",
+                    "plan_execution_id": plan["id"],
+                    "expected_plan_revision": blocked.current_rev,
+                },
+            )
+            assert resumed.status_code == 200, resumed.text
+            await settled(resumed.json()["turn_id"])
+            # The not-applied attempt never blocks running the step again.
+            completed = await store.get_plan(plan["id"], user_id=plan["user_id"], workspace_id=plan["workspace_id"])
+            assert completed.status == "completed", [(r["status"], r["error_kind"]) for r in rows(case, "plan_steps")]
+            assert len(primary_calls) == 3
+            return
         if scenario in {"revoked", "purged", "missing_access", "unknown"}:
             failed = await store.get_plan(plan["id"], user_id=plan["user_id"], workspace_id=plan["workspace_id"])
             assert failed.status == "blocked"

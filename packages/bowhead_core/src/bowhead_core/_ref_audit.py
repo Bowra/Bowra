@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from bowhead_core._db import execute_and_close
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_layout_active, require_domain_schema
 from bowhead_core.types import utc_now_iso
@@ -48,8 +49,8 @@ async def init_ref_audit(db_path: Path | str) -> None:
         _INIT_DONE = True
         return
     async with diagnostic_connect(p) as db:
-        await db.execute("PRAGMA main.journal_mode=WAL")
-        await db.execute("PRAGMA busy_timeout=5000")
+        await execute_and_close(db, "PRAGMA main.journal_mode=WAL")
+        await execute_and_close(db, "PRAGMA busy_timeout=5000")
         await db.execute("PRAGMA main.synchronous=NORMAL")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ref_audit_log (

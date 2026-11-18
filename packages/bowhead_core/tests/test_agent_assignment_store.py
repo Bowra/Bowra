@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from bowhead_core.agent_assignment_store import (
@@ -23,7 +24,6 @@ from bowhead_core.team_subagent_store import (
     TeamSubagentStore,
 )
 from bowhead_core.user_store import TeamSubagent, UserStore
-from core_legacy_database import upgrade
 
 
 def _seed(db_path) -> None:
@@ -76,11 +76,9 @@ def _seed(db_path) -> None:
 
 
 @pytest.fixture
-def marketplace_db(tmp_path):
-    db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
-    _seed(db_path)
-    return db_path
+def marketplace_db(migrated_legacy_core_db: Path) -> Path:
+    _seed(migrated_legacy_core_db)
+    return migrated_legacy_core_db
 
 
 @pytest.mark.asyncio
@@ -414,14 +412,12 @@ async def test_assignment_schema_readiness_checks_all_m1_tables_and_columns(mark
 
 
 @pytest.mark.asyncio
-async def test_assignment_schema_readiness_rejects_missing_key_column(tmp_path) -> None:
-    db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
-    with sqlite3.connect(db_path) as connection:
+async def test_assignment_schema_readiness_rejects_missing_key_column(migrated_legacy_core_db: Path) -> None:
+    with sqlite3.connect(migrated_legacy_core_db) as connection:
         connection.execute("ALTER TABLE agent_catalog_projection DROP COLUMN projection_hash")
         connection.commit()
     with pytest.raises(AgentAssignmentUnavailableError, match="projection_hash"):
-        await AgentAssignmentStore(db_path).initialize()
+        await AgentAssignmentStore(migrated_legacy_core_db).initialize()
 
 
 @pytest.mark.asyncio

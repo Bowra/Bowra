@@ -223,7 +223,9 @@ def _operation_context() -> _OperationContext:
     ids = tuple(
         (key, value)
         for key, value in structlog.contextvars.get_contextvars().items()
-        if key in {"request_id", "trace_id", "turn_id"} and isinstance(value, str) and _SAFE_ID.fullmatch(value)
+        # ``http_request_id`` is what the gateway binds for each request (http_request_context.py), so a SQLite event can
+        # be matched with that request's ``gateway.http_request_completed`` line.
+        if key in {"request_id", "http_request_id", "trace_id", "turn_id"} and isinstance(value, str) and _SAFE_ID.fullmatch(value)
     )
     return _OperationContext(callsite, ids)
 

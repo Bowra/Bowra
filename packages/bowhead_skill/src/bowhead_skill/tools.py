@@ -46,7 +46,7 @@ from bowhead_skill.script_langs import (
 from bowhead_skill.skill_resolver import resolve_skill
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Collection
 
     from bowhead_skill.catalog import SkillCatalog
     from bowhead_skill.runtime import SkillRuntime
@@ -276,23 +276,78 @@ async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises
     return found
 
 
-def _same_name_version_facts(versions: dict[str, str], saved: list[dict[str, Any]]) -> dict[str, Any]:
-    """State which saved outputs became the next version of a revision target (only outputs that were saved)."""
+def _same_helper_revisions(ctx: Any, deliverable_outputs: list[str], revises: dict[str, str]) -> dict[str, str]:
+    """A helper's rewrite of a deliverable it already saved in this Turn is that file's next version.
+
+    docs/sprints/same-name-results-versions-2026-11-17/tech-design.md §3.2 (owner decision D1): the
+    entry (a nested ``path`` or the top-level file name) identifies the file, and only this helper's
+    own previous copy counts, so parallel helpers' files of one name stay separate. Entries the model
+    or a revision target already mapped, and targets already used, are left alone. Core supplies the
+    lookup (``same_helper_previous_copy``); without it nothing changes.
+    """
+    lookup = getattr(ctx, "same_helper_previous_copy", None)
+    if not callable(lookup):
+        return {}
+    used = set(revises.values())
+    found: dict[str, str] = {}
+    for entry in deliverable_outputs:
+        if entry in revises:
+            continue
+        try:
+            target = lookup(entry)
+        except Exception:  # noqa: BLE001 — without the lookup the output is saved as a new file, as before
+            logger.warning("python_sandbox.same_helper_lookup_failed entry=%s", entry, exc_info=True)
+            continue
+        if isinstance(target, str) and target and target not in used:
+            found[entry] = target
+            used.add(target)
+    return found
+
+
+def _record_same_helper_copies(ctx: Any, deliverable_outputs: list[str], saved: list[dict[str, Any]]) -> None:
+    """Remember this helper's newest saved copy of each declared deliverable entry for its later calls."""
+    record = getattr(ctx, "record_same_helper_copy", None)
+    if not callable(record):
+        return
+    declared = set(deliverable_outputs)
+    for item in saved:
+        entry = item.get("path") or item.get("name")
+        artifact_id = item.get("artifact_id")
+        if entry in declared and isinstance(artifact_id, str) and artifact_id and item.get("data_role") is None:
+            try:
+                record(entry, artifact_id)
+            except Exception:  # noqa: BLE001 — a missed record only means the next copy is a new file
+                logger.warning("python_sandbox.same_helper_record_failed entry=%s", entry, exc_info=True)
+
+
+def _same_name_version_facts(
+    versions: dict[str, str],
+    saved: list[dict[str, Any]],
+    helper_versions: dict[str, str] | None = None,
+    saved_as_new_file: Collection[str] = (),
+) -> dict[str, Any]:
+    """State which saved outputs became the next version of a file (only outputs that were saved as versions)."""
     # A nested output is keyed by its declared entry (`path`); a top-level one by its file name.
     saved_by_name = {item.get("path") or item.get("name"): item.get("artifact_id") for item in saved if item.get("path") or item.get("name")}
+    helper_versions = helper_versions or {}
     recorded = [
         {"filename": name, "artifact_id": saved_by_name[name], "previous_version": target}
-        for name, target in versions.items()
-        if name in saved_by_name
+        for name, target in {**versions, **helper_versions}.items()
+        if name in saved_by_name and name not in saved_as_new_file
     ]
     if not recorded:
         return {}
-    return {
-        "recorded_as_new_version": recorded,
-        "_version_note": (
-            "Each listed output has the name of a file you were asked to revise, so it was saved as that file's next version, not as a separate file."
-        ),
-    }
+    notes = []
+    if any(item["filename"] in versions for item in recorded):
+        notes.append(
+            "Each listed output with the name of a file you were asked to revise was saved as that file's next version, not as a separate file."
+        )
+    if any(item["filename"] in helper_versions and item["filename"] not in versions for item in recorded):
+        notes.append(
+            "Each listed output you had already saved earlier in this run, under the same name and folder, was saved as that "
+            "file's next version, not as a separate file. Refer to the newest artifact_id."
+        )
+    return {"recorded_as_new_version": recorded, "_version_note": " ".join(notes)}
 
 
 async def _written_by_this_turn(store: Any, artifact_id: str, ctx: Any) -> bool:
@@ -801,12 +856,14 @@ def build_skill_tools(
         input_data.pop("_deliverable_outputs", None)
         input_data.pop("_work_outputs", None)
         input_data.pop("_revises", None)
+        input_data.pop("_revises_implicit", None)
         _output_purpose = "analysis"
         _output_purpose_declared = False
         _deliverable_outputs: list[str] = []
         _work_outputs: list[str] = []
         _revises: dict[str, str] = {}
         _same_name_versions: dict[str, str] = {}
+        _helper_versions: dict[str, str] = {}
         _inputs_newer: list[dict[str, Any]] = []
         if _direct_python_sandbox:
             # Regression check N5: an explicit purpose='analysis' keeps the call's documents out of the result files.
@@ -884,6 +941,15 @@ def build_skill_tools(
                     else:
                         _same_name_versions = _same_name_checked["revises"]
                         _revises = {**_revises, **_same_name_versions}
+                # Then this helper's own earlier copy in this Turn (D1). Each target is checked alone: a
+                # refused one (another helper versioned it, another type) leaves that output a new file.
+                for _entry, _target in _same_helper_revisions(ctx, _deliverable_outputs, _revises).items():
+                    _helper_checked = await _validated_revises({_entry: _target}, _deliverable_outputs, ctx)
+                    if "error_kind" in _helper_checked:
+                        logger.info("python_sandbox.same_helper_revision_skipped reason=%s", _helper_checked.get("reason_code"))
+                        continue
+                    _helper_versions.update(_helper_checked["revises"])
+                _revises = {**_revises, **_helper_versions}
         # follow-up② model-driven command (argv array assembled by the model from commands documented in the skill's SKILL.md).
         _command = args.get("command")
         _orig_skill_name: str | None = None  # D7 attribution: rewrite changes name→python_sandbox.
@@ -1087,6 +1153,9 @@ def build_skill_tools(
                     input_data["_work_outputs"] = _work_outputs
                 if _revises:
                     input_data["_revises"] = _revises
+                if _helper_versions:
+                    # The model did not ask for these versions: a refused one is saved as a new file (D3).
+                    input_data["_revises_implicit"] = sorted(_helper_versions)
             # Fill filenames **after** resolving refs to actual IDs (simple-int IDs cannot be looked up).
             await _fill_input_filenames(input_data, ctx)
             _inputs_newer = await _input_newer_versions(input_data, ctx)
@@ -1267,6 +1336,15 @@ def build_skill_tools(
         # outputs returns only relative filenames. Other skills (consultant-deck, etc.) still have Lead-side host-path
         # consumers, so preserve their absolute paths.
         _is_sandbox = name == "python_sandbox"
+        _saved_outputs = _output_artifacts_from_result_json(result.result_json)
+        # A same-helper version the gateway refused (a parallel call saved a newer one) was saved as a new file (D3).
+        _saved_as_new_file = (
+            [str(entry) for entry in _env.get("saved_as_new_file") or () if isinstance(entry, str)]
+            if isinstance(_env, dict) and isinstance(_env.get("saved_as_new_file"), list)
+            else []
+        )
+        if _direct_python_sandbox and _output_purpose == "deliverable":
+            _record_same_helper_copies(ctx, _deliverable_outputs, _saved_outputs)
         # P2-a (dev 1.0.77 dogfood): the model sees only sandbox `output.docx`, so its answer says
         # "ready for download as output.docx", while the backend registers it using the report title. Users cannot find the file
         # in the download directory by the answer's name. Return the **actual download name** to the model here.
@@ -1310,7 +1388,7 @@ def build_skill_tools(
             ),
             "output_artifacts": _output_artifacts_from_result_json(result.result_json),
             **({"inputs_with_newer_version": _inputs_newer} if _inputs_newer else {}),
-            **_same_name_version_facts(_same_name_versions, _output_artifacts_from_result_json(result.result_json)),
+            **_same_name_version_facts(_same_name_versions, _saved_outputs, _helper_versions, _saved_as_new_file),
             "workdir": None if _is_sandbox else (str(result.workdir) if result.workdir else None),
             "duration_ms": result.duration_ms,
             **(

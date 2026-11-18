@@ -145,6 +145,7 @@ def _standard_wrapper_code() -> object:
         UserStore.update_member_role,
         UserStore.update_team_llm_config,
         UserStore.update_team_llm_config_if_version,
+        UserStore.update_team_tool_source_auth,
         UserStore._write_governed_workspace_metadata,
         apply_team_llm_v2,
         AgentRevisionStore.save_working_copy,

@@ -35,7 +35,7 @@ from uuid import uuid4
 
 from bowhead_router.errors import provider_failure_kind
 from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
-from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME
+from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import TokenUsage
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.sandbox_call_shape import FLAT_SANDBOX_TOOL, SANDBOX_SCRIPT, SANDBOX_SKILL_NAME, SKILL_INVOKE_TOOL, sandbox_entry_for
@@ -120,6 +120,7 @@ from bowhead_core.published_diagnostics import (
     build_chat_peer_failure,
     get_or_build_chat_llm_failure,
     get_or_build_chat_turn_failure,
+    peer_model_failure_code,
 )
 from bowhead_core.reference_read_question import ReferenceReadQuestion
 from bowhead_core.sandbox_inputs_normalize import settle_skill_invoke_calls
@@ -206,6 +207,10 @@ if TYPE_CHECKING:
     from bowhead_router import Router
 
 logger = logging.getLogger(__name__)
+
+# Per-request user messages a reused accepted request must not carry into a coordination round:
+# the retained-material supplement (result_material_history.SUPPLEMENT_NAME) and rendered views.
+_PER_REQUEST_NOTES = frozenset({"bowhead_material_supplement_v1", VISUAL_VIEW_NOTE_NAME})
 
 _VISION_MESSAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 
@@ -3776,6 +3781,34 @@ class SubagentRunner:
             profile = replace(profile, tool_whitelist=(*profile.tool_whitelist, review_spec.schema.name))
             effective_whitelist.add(review_spec.schema.name)
             filtered_schemas.append(review_spec.schema)
+        # Visual self-check: the run's primary model decides once whether renders are shown (FR1)
+        # and whether the run may look at files on request (FR20).
+        from bowhead_router.visual_input import visual_self_check_enabled
+
+        _accepts_images = getattr(self.router, "accepts_images_for", None)
+        _visual_accepts = (
+            visual_self_check_enabled()
+            and callable(_accepts_images)
+            and _accepts_images(
+                profile.llm_agent_type,
+                profile_name,
+                model_pref_for_agent_type(
+                    profile.llm_agent_type, getattr(parent_ctx, "preferred_provider", None), getattr(parent_ctx, "preferred_model", None)
+                ),
+            )
+            is True
+        )
+        if _visual_accepts and filtered_schemas:
+            from bowhead_core.visual_self_check import VIEW_FILE_TOOL, view_file_spec
+
+            if VIEW_FILE_TOOL not in _run_tool_deny:
+                view_spec = view_file_spec()
+                effective = effective.clone_with_spec_override(view_spec)
+                parent_ctx = copy.copy(parent_ctx)
+                parent_ctx.tool_view = effective
+                profile = replace(profile, tool_whitelist=(*profile.tool_whitelist, VIEW_FILE_TOOL))
+                effective_whitelist.add(VIEW_FILE_TOOL)
+                filtered_schemas.append(view_spec.schema)
         if not filtered_schemas:
             logger.warning("subagent.no_tools_whitelisted profile=%s", profile.name)
 
@@ -3887,6 +3920,11 @@ class SubagentRunner:
                 parent_agent_id=subagent_id,  # ρ Phase E — peer-scope
             )
         )
+        # Wall time of each setup step between agent_spawned and the first model step, logged as
+        # agent.prerun_ms. On 116 (1.7.50) a Lead in a 19-Turn conversation took 11.3 s here, with
+        # no log line in between; small conversations take under 1 s.
+        _prerun_t0 = time.perf_counter()
+        _prerun_marks: list[tuple[str, float]] = []
 
         if ordinary_checkpoint is not None:
             from bowhead_core.ordinary_lead_continuation import content_hash
@@ -4135,6 +4173,10 @@ class SubagentRunner:
         ]
         if resume_answers:
             messages.append(Message(role="user", content=resume_answers))
+        # The user's `/` Skill selection follows its request
+        # in Lead's canonical messages, so the conversation publishes it.
+        if profile.name == "lead":
+            messages.extend(getattr(parent_ctx, "_selected_skill_messages", None) or ())
         if _continued_messages is not None:
             messages = _continued_messages
         if ordinary_checkpoint is not None:
@@ -4152,9 +4194,11 @@ class SubagentRunner:
             if _continued_messages is not None or ordinary_checkpoint is not None or _resume_from is not None or switch_resolution is not None:
                 raise ValueError("datarc_resume_scope_changed")
             messages.extend(helper_switch_resolution.skipped_messages(parent_ctx))
+        _prerun_marks.append(("prompt", time.perf_counter()))
         from bowhead_core.knowledge_source_runtime import validate_source_messages
 
         await validate_source_messages(parent_ctx, messages)
+        _prerun_marks.append(("source_messages", time.perf_counter()))
         _bi_continuation = None
         invocations: list[ToolInvocation] = ordinary_checkpoint.invocations() if ordinary_checkpoint is not None else []
 
@@ -4249,6 +4293,7 @@ class SubagentRunner:
             from .agents._lead_context import replace_parent_kb_invocations
 
             replace_parent_kb_invocations(await filter_inherited_knowledge(parent_ctx, parent_kb_invocations()))
+        _prerun_marks.append(("inherited_knowledge", time.perf_counter()))
 
         retained_artifact_ids = None
         if ordinary_checkpoint is not None and ordinary_checkpoint.contract in {
@@ -4288,6 +4333,13 @@ class SubagentRunner:
             except Exception:  # noqa: S110
                 pass
 
+        # Visual self-check: registered on the first model request, dropped with the run.
+        from bowhead_core.visual_self_check import agent_key as _visual_agent_key
+
+        _visual_run = None
+        _visual_begun = False
+        _visual_key = _visual_agent_key(profile.name, subagent_id)
+
         def _ν_cleanup_ctx() -> None:
             """Sprint ν1.5 P0-A2 — restore prior ctx state on subagent exit.
 
@@ -4297,8 +4349,10 @@ class SubagentRunner:
             (lead_orchestrator) sweeps `key[0] == turn_id` entries.
             """
             from bowhead_core import turn_progress as _turn_progress_done
+            from bowhead_core.visual_self_check import end_run as _visual_end_run
 
             _turn_progress_done.finish(parent_turn_id, subagent_id)
+            _visual_end_run(parent_turn_id, _visual_key, _visual_run)
             for _a in ("_ν15_allowlist", "_current_subagent_invocations", "_ν_retry_count", "_ν_thin_retry_count", "_current_subagent_id"):
                 with contextlib.suppress(AttributeError, TypeError):
                     delattr(parent_ctx, _a)
@@ -4529,7 +4583,9 @@ class SubagentRunner:
         # mismatches with pair-wise fallback drop user/assistant(tool_calls) but leave orphan tool messages.
         from bowhead_core.context_assembly import turn_sizes_from_messages as _turn_sizes
 
+        _prerun_marks.append(("before_history_sizes", time.perf_counter()))
         _history_sizes: list[int] = _turn_sizes(_history_msgs)
+        _prerun_marks.append(("history_sizes", time.perf_counter()))
 
         # Preserve the native transcript for Tool receipts and original pause
         # capture. Only the outgoing model projection adopts a summary.
@@ -4542,6 +4598,8 @@ class SubagentRunner:
             lane="ordinary",
             runtime_control=runtime_control,
         )
+
+        _prerun_marks.append(("context_view", time.perf_counter()))
 
         def record_context_usage(response: LLMResponse) -> None:
             nonlocal tokens_in, tokens_out, tokens_cached
@@ -4797,6 +4855,7 @@ class SubagentRunner:
                 model_turn_limit=profile.max_iterations + 1,
             )
 
+        _prerun_marks.append(("setup", time.perf_counter()))
         _peer_iter_start_ts = _ct_time.monotonic()
         _peer_iter_last_emit_ts = 0.0
         _PEER_ITER_EMIT_DELTA_S = 2.0
@@ -4810,6 +4869,7 @@ class SubagentRunner:
         async def prepare_ordinary_question(inv: ToolInvocation, *, iteration: int, question_batch: Sequence[ToolCall]) -> None:
             if ordinary_state is None or not is_clarification_sentinel(inv.result):
                 return
+            from bowhead_core.documents.upload_confirmation import UploadReceiptMismatch
             from bowhead_core.ordinary_lead_continuation import CAPTURE_REFUSED_NOTE, OrdinaryQuestionUnavailable, OrdinaryWorkerUnavailable
             from bowhead_core.ordinary_lead_runtime import capture_failure_site, capture_ordinary_lead_loop
 
@@ -4861,6 +4921,27 @@ class SubagentRunner:
                 )
                 ordinary_state.captured = None
                 inv.result = {"ok": False, "error_kind": "clarification_capture_unavailable", "note": CAPTURE_REFUSED_NOTE}
+            except UploadReceiptMismatch as exc:
+                # An attached file's upload receipt no longer names its bytes, so the
+                # pause cannot be sealed. Refuse the optional question, as above.
+                logger.info(
+                    "ordinary_lead.question_capture_unavailable turn=%s condition=upload_receipt_mismatch failure_site=%s",
+                    parent_ctx.turn_id,
+                    capture_failure_site(exc),
+                )
+                ordinary_state.captured = None
+                inv.result = {"ok": False, "error_kind": "clarification_capture_unavailable", "note": CAPTURE_REFUSED_NOTE}
+
+        # Project the model schema without changing the schema fingerprint retained for resume.
+        model_schemas = filtered_schemas
+        if not (getattr(parent_ctx, "_selected_skills", None) or getattr(parent_ctx, "_history_skill_texts", None)):
+            model_schemas = []
+            for schema in filtered_schemas:
+                if schema.name == "subagent_spawn" and "skills" in schema.input_schema.get("properties", {}):
+                    properties = dict(schema.input_schema["properties"])
+                    del properties["skills"]
+                    schema = replace(schema, input_schema={**schema.input_schema, "properties": properties})
+                model_schemas.append(schema)
 
         # Agent run limits: a subagent stopped at a limit makes one tool-free wrap-up call and
         # returns its partial work (phase 2). These are read from the latest step at call time.
@@ -5008,6 +5089,15 @@ class SubagentRunner:
             if forced_tool_calls and ordinary_checkpoint is None
             else None
         )
+        with contextlib.suppress(Exception):  # Timing logs must never affect the run.
+            _prerun_marks.append(("loop", time.perf_counter()))
+            logger.info(
+                "agent.prerun_ms turn=%s profile=%s total=%.0f %s",
+                parent_turn_id,
+                profile.name,
+                (_prerun_marks[-1][1] - _prerun_t0) * 1000,
+                " ".join(f"{_name}={(_at - _prerun_t0) * 1000:.0f}" for _name, _at in _prerun_marks),
+            )
         for iteration in range(
             ordinary_checkpoint.next_iteration
             if ordinary_checkpoint is not None
@@ -5413,6 +5503,12 @@ class SubagentRunner:
                 getattr(parent_ctx, "preferred_provider", None),
                 getattr(parent_ctx, "preferred_model", None),
             )
+            if not _visual_begun:
+                # Decided at run start from the primary target (FR1); fallbacks get notices instead.
+                from bowhead_core.visual_self_check import begin_run as _visual_begin_run
+
+                _visual_begun = True
+                _visual_run = _visual_begin_run(parent_turn_id, _visual_key, accepts_images=_visual_accepts)
 
             if recovery_enabled() and getattr(parent_ctx, "report_read_access", None) is not None:
                 window_reader = getattr(self.router, "context_window_for", None)
@@ -5425,9 +5521,9 @@ class SubagentRunner:
                     )
 
             # Request projection is not the canonical schema fingerprint retained for resume.
-            _request_schemas = filtered_schemas
+            _request_schemas = model_schemas
             if document_state is not None:
-                _request_schemas = document_state.request_tools(filtered_schemas)
+                _request_schemas = document_state.request_tools(model_schemas)
             if _empty_peer_closeout_attempted:
                 _request_schemas = [schema for schema in _request_schemas if schema.name == _empty_peer_closeout_tool]
             if _shared_kb and _kb_search_budget.exhausted:
@@ -5712,6 +5808,21 @@ class SubagentRunner:
                             break
                     llm_req = prepared_context.request
                 _precall_marks.append(("context", time.perf_counter()))
+                _visual_sent: list[Any] = []
+                if _visual_run is not None and _visual_run.pending and _forced_first_response is None:
+                    # Renders of files saved by earlier calls ride this request only; never canonical history.
+                    from bowhead_core.visual_self_check import attach_pending_renders
+
+                    llm_req, _visual_sent = await attach_pending_renders(
+                        _visual_run,
+                        llm_req,
+                        router=self.router,
+                        agent_type=profile.llm_agent_type,
+                        profile=profile_name,
+                        user_pref=user_pref,
+                        target=_context_retry_target,
+                        stream=want_stream,
+                    )
                 if _material_supplement is not None:
                     from bowhead_core.result_material_history import authorize_material_supplement
 
@@ -5856,6 +5967,10 @@ class SubagentRunner:
                                 timeout=llm_timeout,
                             )
                     _llm_call_ok = True
+                    if _visual_sent:
+                        from bowhead_core.visual_self_check import settle_renders
+
+                        settle_renders(_visual_run, _visual_sent)
                     if resp.diagnostics is not None:
                         _llm_diagnostics.update(resp.diagnostics.trace_fields())
                         if resp.diagnostics.transport_mode == "invoke":
@@ -8484,13 +8599,11 @@ class SubagentRunner:
         This round can answer/dispose/correct; it cannot spawn or wait again.
         Required owner questions it leaves pending close as a limitation.
         """
-        from bowhead_core.result_material_history import SUPPLEMENT_NAME
-
-        # Optional pointer discovery belongs to the original base request.
+        # Optional pointer discovery and renders belong to the original base request.
         # Coordination must not reuse its earlier disclosure authorization.
         accepted_request = replace(
             accepted_request,
-            messages=[message for message in accepted_request.messages if message.role != "user" or message.name != SUPPLEMENT_NAME],
+            messages=[message for message in accepted_request.messages if message.role != "user" or message.name not in _PER_REQUEST_NOTES],
         )
         base = ctx.collaboration_execution
         frame = CollaborationExecution(base.runtime, base.execution_id, coordination=True, allow_wait=False)
@@ -8615,7 +8728,6 @@ class SubagentRunner:
         batch has settled, no model is called.
         """
         from bowhead_core.agent_collaboration_runtime import user_round_refusal
-        from bowhead_core.result_material_history import SUPPLEMENT_NAME
 
         base = ctx.collaboration_execution
         running = [
@@ -8627,7 +8739,7 @@ class SubagentRunner:
             return TokenUsage(), [], []
         accepted_request = replace(
             accepted_request,
-            messages=[message for message in accepted_request.messages if message.role != "user" or message.name != SUPPLEMENT_NAME],
+            messages=[message for message in accepted_request.messages if message.role != "user" or message.name not in _PER_REQUEST_NOTES],
         )
         frame = CollaborationExecution(base.runtime, base.execution_id, coordination=True, allow_wait=False, user_round=True)
         coordination_ctx = copy.copy(ctx)
@@ -11547,6 +11659,10 @@ def _output_artifact_meta(obj: dict[str, Any]) -> list[dict[str, Any]]:
         data_role = item.get("data_role")
         if data_role in {"stdout", "structured"}:
             ref["data_role"] = data_role
+        # A declared nested file keeps its entry path, so same-name files of different folders stay apart.
+        path = item.get("path")
+        if isinstance(path, str) and path:
+            ref["path"] = path[:_OUTPUT_ARTIFACT_TEXT_CAP]
         refs.append(ref)
         if len(refs) >= _OUTPUT_ARTIFACT_META_CAP:
             break
@@ -11857,6 +11973,13 @@ def _with_repeated_failure(content: str, tool_name: str, inv: ToolInvocation, se
     return f"{content}\n\n{note}"
 
 
+def _selected_skills_spawn_property() -> dict[str, Any]:
+    """`subagent_spawn.skills`: Skills the user selected with `/` for this request."""
+    from bowhead_core.selected_skill_input import DISPATCH_SKILLS_DESCRIPTION
+
+    return {"skills": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3, "description": DISPATCH_SKILLS_DESCRIPTION}}
+
+
 def _serialize(inv: ToolInvocation, *, ref_allowlist: Any = None) -> str:
     """工具结果 → 送进 LLM 上下文的那个字符串。
 
@@ -11877,9 +12000,6 @@ def _serialize(inv: ToolInvocation, *, ref_allowlist: Any = None) -> str:
         inv.result,
         figure_anchor_id=_figure_anchor_id(inv, ref_allowlist),
     )
-    if isinstance(projected, _mv.ModelText) and inv.material_refs is None:
-        # Already complete model text (a readable Skill); JSON would escape it.
-        return str(projected)
     from bowhead_core.result_materials import recovery_enabled
 
     if recovery_enabled() and isinstance(projected, dict):
@@ -12156,6 +12276,16 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         delegation_role = (args.get("delegation_role") or "").strip().lower() or None
         if delegation_role not in (None, "primary", "helper"):
             return invalid_argument("delegation_role", "Use primary or helper according to the assignment.")
+        # The user's `/` Skill selection: the dispatched run
+        # receives each named method verbatim through its required model input.
+        _skill_input = None
+        requested_skills = args.get("skills")
+        if requested_skills is not None and requested_skills != []:
+            from bowhead_core.selected_skill_input import dispatch_skill_input
+
+            _skill_input, _skill_refusal = dispatch_skill_input(ctx, requested_skills)
+            if _skill_refusal is not None:
+                return _skill_refusal
         # A helper that stopped at a run limit in this turn is not dispatched again in the
         # same turn: the same limits still apply. Lead answers with the partial work.
         if _pending_resume is None and profile and profile in (getattr(ctx, "_run_limit_partial_profiles", None) or ()):
@@ -12210,7 +12340,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             guarded_profiles = frozenset(
                 getattr(ctx, "_lead_behavior_candidate_profiles", ()) or (),
             )
-            structured_supplied = any(args.get(key) not in (None, "") for key in ("role_id", "candidate_id", "reason_code"))
+            structured_supplied = any(args.get(key) not in (None, "") for key in ("role_id", "candidate_id"))
             if profile in guarded_profiles or structured_supplied:
                 from bowhead_core.agent_behavior_contract import LEAD_ROLE_IDS
                 from bowhead_core.agent_execution_binding import (
@@ -12224,7 +12354,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
 
                 role_id = str(args.get("role_id") or "").strip()
                 candidate_id = str(args.get("candidate_id") or "").strip()
-                reason_code = str(args.get("reason_code") or "").strip()
+                reason_code = str(args.get("reason_code") or "unspecified").strip()
                 roster = getattr(ctx, "_lead_role_candidate_roster", None)
                 if roster is None or role_id not in LEAD_ROLE_IDS:
                     return {
@@ -12762,6 +12892,11 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             # A resumed run keeps its lineage id, also when it has to start fresh.
             _peer_pre_minted_subagent_id = _pending_resume.checkpoint.run_subagent_id
         _admit_binding = getattr(runner, "admit_execution_binding", None)
+        if _skill_input is not None and (_reference_primary or not callable(_admit_binding)):
+            # A method input needs an exact non-reference binding; refuse before admitting one.
+            return invalid_argument(
+                "skills", "This dispatch cannot carry a selected Skill. Dispatch without skills and keep the user's words in the task."
+            )
         if callable(_admit_binding) and not _reference_primary:
             try:
                 _exact_binding = await _admit_binding(
@@ -13120,6 +13255,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 _run_kwargs["tool_deny"] = _ft_canvas_tools
             if _exact_binding is not None:
                 _run_kwargs["exact_binding"] = _exact_binding
+            if _skill_input is not None:
+                _run_kwargs["required_model_input"] = _skill_input
             if _pending_resume is not None:
                 _run_kwargs["resume_grant"] = _pending_resume
             _helper_switch_resolution = getattr(ctx, "datarc_helper_switch_resolution", None)
@@ -13318,6 +13455,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         )
         if _peer_failure_reason is None and not result.ok:
             _peer_failure_reason = result.error or "subagent_failed"
+        if _peer_failure_reason == "subagent_internal_error":
+            # A model call that still failed after the Router's retries keeps its own
+            # classification (timeout, service unavailable) on the card, as it does for Lead.
+            _peer_failure_reason = peer_model_failure_code(result.llm_reason_code) or _peer_failure_reason
         # Peer result text remains available to Lead's in-process recovery
         # policy, but replayable events receive only a finite reason code and
         # typed diagnostics. Scrubbing arbitrary prose is not a publication
@@ -14532,6 +14673,32 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             return invalid_argument("arguments", "Send a complete JSON object with the required dispatch arguments.")
         if args.get("resume_checkpoint_id") is not None and not isinstance(args["resume_checkpoint_id"], str):
             return invalid_argument("resume_checkpoint_id", "Use the exact checkpoint ID string supplied by the server.")
+        args = dict(args)
+        ignored_arguments = []
+        role = args.get("delegation_role")
+        if getattr(ctx, "_reference_lead_runtime", None) is None and role is not None:
+            if not isinstance(role, str) or role.strip().lower() not in {"", "primary", "helper"}:
+                del args["delegation_role"]
+                ignored_arguments.append("delegation_role")
+        if not agent_behavior_m3_enabled():
+            for field in ("role_id", "candidate_id", "reason_code"):
+                if args.pop(field, None) not in (None, ""):
+                    ignored_arguments.append(field)
+        elif (reason := args.get("reason_code")) is not None:
+            from bowhead_core.agent_role_candidates import LEAD_CHOICE_REASON_PATTERN
+
+            if isinstance(reason, str) and LEAD_CHOICE_REASON_PATTERN.fullmatch(reason.strip()):
+                args["reason_code"] = reason.strip()
+            else:
+                del args["reason_code"]
+                ignored_arguments.append("reason_code")
+        skills = args.get("skills")
+        if skills not in (None, []):
+            if not (getattr(ctx, "_selected_skills", None) or getattr(ctx, "_history_skill_texts", None)):
+                del args["skills"]
+                ignored_arguments.append("skills")
+            elif isinstance(skills, str) and skills.strip():
+                args["skills"] = [skills]
         file_targets = args.get("revise_files")
         if isinstance(file_targets, str) and file_targets.strip():
             args = {**args, "revise_files": [file_targets.strip()]}
@@ -14544,8 +14711,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         if str(args.get("resume_checkpoint_id") or "").strip():
             if args.get("task") is not None and not isinstance(args["task"], str):
                 return invalid_argument("task", "Provide the remaining work as text, or omit it to continue the saved task.")
-            return await _resume_handler(args, ctx)
-        return await _handler(args, ctx)
+            result = await _resume_handler(args, ctx)
+        else:
+            result = await _handler(args, ctx)
+        if ignored_arguments and isinstance(result, dict):
+            result["ignored_arguments"] = ignored_arguments
+        return result
 
     tool_registry.register(
         ToolSpec(
@@ -14560,6 +14731,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "type": "object",
                     "properties": {
                         "profile": {"type": "string", "enum": list(PROFILES.keys())},
+                        **_selected_skills_spawn_property(),
                         "delegation_role": {
                             "type": "string",
                             "enum": ["primary", "helper"],

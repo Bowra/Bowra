@@ -15,6 +15,7 @@ from typing import Literal
 
 import aiosqlite
 
+from bowhead_core._db import execute_and_close
 from bowhead_core.chat_reference_retention import reference_material_available_in_connection
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceScope, _row, _transaction
@@ -165,7 +166,7 @@ async def read_reference_model_status(*, db_path: str | Path, scope: ReferenceRe
             raise ValueError()
         uri = Path(db_path).resolve().as_uri() + "?mode=ro"
         async with diagnostic_connect(uri, uri=True) as db:
-            await db.execute("PRAGMA busy_timeout=5000")
+            await execute_and_close(db, "PRAGMA busy_timeout=5000")
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")
             try:

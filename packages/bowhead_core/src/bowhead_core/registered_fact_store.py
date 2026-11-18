@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
+from bowhead_core._db import execute_and_close
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path
 
@@ -131,16 +132,16 @@ class RegisteredFactStore:
             # means the second concurrent BEGIN IMMEDIATE on the same workspace
             # raises "database is locked" instead of waiting. 5s is generous —
             # any wait longer indicates a deeper problem (caller times out).
-            await db.execute("PRAGMA busy_timeout=5000")
+            await execute_and_close(db, "PRAGMA busy_timeout=5000")
             await db.execute("BEGIN IMMEDIATE")
             try:
-                cur = await db.execute(
+                async with db.execute(
                     "SELECT * FROM registered_facts WHERE workspace_id=? AND "
                     "COALESCE(project_id,'')=COALESCE(?,'') AND "
                     "COALESCE(user_id,'')=COALESCE(?,'') AND fact_key=?",
                     (workspace_id, project_id, user_id, fact_key),
-                )
-                old_row = await cur.fetchone()
+                ) as cur:
+                    old_row = await cur.fetchone()
 
                 if old_row is not None:
                     # Archive to history
@@ -248,13 +249,13 @@ class RegisteredFactStore:
     ) -> RegisteredFact | None:
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM registered_facts WHERE workspace_id=? AND "
                 "COALESCE(project_id,'')=COALESCE(?,'') AND "
                 "COALESCE(user_id,'')=COALESCE(?,'') AND fact_key=?",
                 (workspace_id, project_id, user_id, fact_key),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
         return _row_to_fact(row) if row else None
 
     async def list_active(
@@ -278,8 +279,8 @@ class RegisteredFactStore:
             sql, params = self._scope_filter(workspace_id, project_id, user_id)
             sql += " ORDER BY updated_at DESC LIMIT ?"
             params.append(limit)
-            cur = await db.execute(sql, tuple(params))
-            rows = await cur.fetchall()
+            async with db.execute(sql, tuple(params)) as cur:
+                rows = await cur.fetchall()
         return [_row_to_fact(r) for r in rows]
 
     async def list_by_key_keywords(
@@ -311,8 +312,8 @@ class RegisteredFactStore:
                 params.append(f"%{kw}%")
             sql += " ORDER BY updated_at DESC LIMIT ?"
             params.append(limit)
-            cur = await db.execute(sql, tuple(params))
-            rows = await cur.fetchall()
+            async with db.execute(sql, tuple(params)) as cur:
+                rows = await cur.fetchall()
         return [_row_to_fact(r) for r in rows]
 
     @staticmethod
@@ -371,11 +372,11 @@ class RegisteredFactStore:
         """Return audit trail for given fact_key (oldest-first)."""
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM registered_facts_history WHERE workspace_id=? AND fact_key=? ORDER BY superseded_at ASC LIMIT ?",
                 (workspace_id, fact_key, limit),
-            )
-            rows = await cur.fetchall()
+            ) as cur:
+                rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
 

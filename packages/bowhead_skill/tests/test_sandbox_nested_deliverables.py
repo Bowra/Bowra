@@ -326,3 +326,46 @@ async def test_folder_entry_revises_an_archive_of_the_same_name() -> None:
     other = SimpleNamespace(artifact_store=_VersionStore("game.html"), user_id="u", session_id="s")
     refused = await _validated_revises({"site/": "art_previous0001"}, ["site/"], other)
     assert refused["reason_code"] == "version_target_format_changed"
+
+
+def test_refused_file_type_is_named_with_how_to_deliver_it(runner, tmp_path, monkeypatch) -> None:
+    # 116, 1.7.49: a website's css/js and a helper chk.js were refused with 415, and the model read only
+    # "Data artifact upload failed"; it never tried the folder, which arrives as a zip.
+    def upload(path, _gateway, *_args, **_kwargs):
+        name = Path(path).name
+        if name.endswith(".ts"):
+            return {"name": name, "type_error": "video/mp2t"}
+        return {"name": name, "artifact_id": "art_000000000001", "mime": "text/plain", "size": Path(path).stat().st_size}
+
+    monkeypatch.setattr(runner, "_upload_artifact", upload)
+    workdir = tmp_path / "wd"
+    code = "import os\nos.makedirs('site', exist_ok=True)\nopen('check.ts', 'w').write('x')\nopen('site/main.ts', 'w').write('y')\n"
+    payload = {"code": code, "_output_purpose": "deliverable", "_deliverable_outputs": ["check.ts", "site/main.ts"]}
+    (tmp_path / "in.json").write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("BOWHEAD_SANDBOX_BACKEND", "subprocess")
+    monkeypatch.setattr(sys, "argv", ["runner.py", "--input", str(tmp_path / "in.json"), "--workdir", str(workdir)])
+    assert runner.main() == 0
+    result = json.loads((workdir / "result.json").read_text(encoding="utf-8"))
+    # Which calls fail is unchanged; only the message names the file, its type and the way out.
+    assert result["ok"] is False
+    assert "sandbox file check.ts (video/mp2t) was not saved" in result["error"]
+    assert "write it into a folder and list the folder as 'folder/' in deliverable_outputs" in result["error"]
+    assert "sandbox file main.ts (video/mp2t) was not saved" in result["error"]
+    assert "list its folder as 'site/' in deliverable_outputs" in result["error"]
+    assert "Data artifact upload failed" not in result["error"]
+
+
+@pytest.mark.parametrize(("status", "code", "expected"), [(415, "file_type_unsupported", True), (415, "other", False), (500, None, False)])
+def test_upload_reports_a_refused_type_only_for_the_coded_refusal(runner, tmp_path, monkeypatch, status, code, expected) -> None:
+    import urllib.error
+
+    source = tmp_path / "chk.js"
+    source.write_text("console.log(1)", encoding="utf-8")
+    body = json.dumps({"detail": {"error": {"code": code}}} if code else {"detail": "boom"}).encode()
+
+    def refuse(*_args, **_kwargs):
+        raise urllib.error.HTTPError("http://gateway/api/v1/files/upload", status, "refused", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(runner.urllib.request, "urlopen", refuse)
+    record = runner._upload_artifact(source, "http://gateway")
+    assert record == ({"name": "chk.js", "type_error": runner._guess_upload_mime("chk.js")} if expected else None)

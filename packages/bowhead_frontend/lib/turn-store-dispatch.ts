@@ -1283,6 +1283,9 @@ function mapOutputArtifacts(
         ? { size: item.size }
         : {}),
       ...(dataRole ? { dataRole } : {}),
+      ...(typeof item.path === "string" && item.path
+        ? { path: item.path.slice(0, OUTPUT_ARTIFACT_TEXT_CAP) }
+        : {}),
     });
     if (refs.length >= OUTPUT_ARTIFACT_REF_CAP) break;
   }

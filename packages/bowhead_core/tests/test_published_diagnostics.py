@@ -364,6 +364,8 @@ def test_chat_llm_fallback_failure_uses_invoke_terminal_reason() -> None:
             True,
         ),
         ("subagent_execution_uncertain", "peer_execution_uncertain", "unknown", False),
+        ("peer_model_timeout", "peer_model_timeout", "timeout", True),
+        ("peer_model_unavailable", "peer_model_unavailable", "upstream", True),
     ],
 )
 def test_chat_peer_failure_builder_projects_only_finite_facts(
@@ -388,6 +390,21 @@ def test_chat_peer_failure_builder_projects_only_finite_facts(
         "safe_detail": f"phase=peer; failure_class={failure_class}",
         "retryable": retryable,
     }
+
+
+@pytest.mark.parametrize(
+    ("llm_reason_code", "peer_code"),
+    [
+        ("llm_provider_timeout", "peer_model_timeout"),
+        ("llm_provider_unavailable", "peer_model_unavailable"),
+        # Other model failures keep the helper's existing presentation.
+        ("llm_stream_interrupted", None),
+        ("llm_provider_rate_limited", None),
+        (None, None),
+    ],
+)
+def test_peer_model_failure_code_follows_the_model_failure(llm_reason_code: str | None, peer_code: str | None) -> None:
+    assert diagnostics.peer_model_failure_code(llm_reason_code) == peer_code
 
 
 @pytest.mark.parametrize(

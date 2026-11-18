@@ -5,7 +5,8 @@ run resumed after a clarification answer. The physical receipt became unknown,
 which only a fresh run converts to an uncertain helper result, so the whole Turn
 failed as ``lead_internal_error``. The failure is now settled as not applied and
 retried; once retries are exhausted the typed failure returns to Lead as an
-ordinary peer failure in fresh and resumed runs alike.
+ordinary peer failure in fresh and resumed runs alike. The helper card keeps the
+model failure's own classification instead of a generic system error.
 """
 
 import json
@@ -35,8 +36,18 @@ pytestmark = [
 ]
 
 
+# Transport failure -> (model failure Lead receives, helper card code).
+FAILURES = {
+    "read_timeout": (httpx2.ReadTimeout, "llm_provider_timeout", "peer_model_timeout", "timeout"),
+    "connect_error": (httpx2.ConnectError, "llm_provider_unavailable", "peer_model_unavailable", "upstream"),
+    "read_error": (httpx2.ReadError, "llm_provider_unavailable", "peer_model_unavailable", "upstream"),
+}
+
+
+@pytest.mark.parametrize("failure", sorted(FAILURES))
 @pytest.mark.parametrize("resumed", [False, True])
-async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch, resumed):
+async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch, resumed, failure):
+    error_type, llm_reason_code, peer_code, failure_class = FAILURES[failure]
     case = http_start
     case.client.headers["Content-Type"] = "application/json"
     enable_lead_writer(case, monkeypatch)
@@ -80,7 +91,7 @@ async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch,
             if resumed and len(helper_calls) == 1:
                 payload = {"delivery_surface": "chat", "exec_summary": "The request needs an audience first."}
                 return response(body, call("helper-return", "subagent_return", {"payload": payload}), "tool_calls")
-            raise httpx2.ReadError("connection reset by peer")
+            raise error_type("model transport failed", request=request)
         return response(body, {"role": "assistant", "content": "Helper request"}, "stop")
 
     with respx.mock(assert_all_called=False) as mock:
@@ -109,9 +120,16 @@ async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch,
     assert len(returned) == 1
     result = json.loads(returned[0]["content"])
     assert result["ok"] is False
-    assert result["llm_reason_code"] == "llm_provider_unavailable"
+    assert result["error"] == "subagent_internal_error"
+    assert result["llm_reason_code"] == llm_reason_code
     assert result.get("execution_outcome") != "unknown"
     persisted = [(row["event_type"], json.loads(row["payload_json"])) for row in rows(case, "turn_events") if row["turn_id"] == turn_id]
     failed = [payload for kind, payload in persisted if kind == "peer_dispatch_failed"]
     assert [payload["call_id"] for payload in failed] == [failing_call]
+    # The card states the model failure, with the same diagnostics on both peer events.
+    assert failed[0]["reason_code"] == peer_code
+    assert failed[0]["diagnostics"]["safe_detail"] == f"phase=peer; failure_class={failure_class}"
+    assert failed[0]["diagnostics"]["retryable"] is True
+    summary = next(payload for kind, payload in persisted if kind == "lead.subagent_summary" and payload["call_id"] == failing_call)
+    assert summary["failure_reason"] == peer_code and summary["diagnostics"] == failed[0]["diagnostics"]
     assert not [payload for kind, payload in persisted if kind == "turn_failed"]

@@ -95,16 +95,19 @@ async def seal_prepared_attachment_snapshot(ids: Sequence[str], ctx: ToolExecuti
         art = await store.get(artifact_id)
         if art is None or (art.filename, art.mime, art.size) != (item.filename, item.mime, item.size):
             raise ValueError("reference_attachment_material_changed")
+        digest = None
         if item.content_deferred:
-            from bowhead_core.documents.upload_confirmation import confirmed_content_hash
+            from bowhead_core.documents.upload_confirmation import receipt_content_hash
 
             if item.mime not in OFFICE_TEXT_MIMES:
                 raise ValueError("reference_attachment_material_unavailable")
-            digest = await confirmed_content_hash(store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
-        else:
+            # A receipt that no longer matches raises; a file without one is
+            # bound to its stored bytes, which every reopen reads again.
+            digest = await receipt_content_hash(store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
+        if digest is None:
             content = await store.backend.read_bounded(art.path, limit=item.size)
             digest = _digest(content)
-            if len(content) != item.size or digest != item.content_hash:
+            if len(content) != item.size or (not item.content_deferred and digest != item.content_hash):
                 raise ValueError("reference_attachment_material_changed")
         if item.mime.startswith("image/"):
             if not item.image_base64 or base64.b64decode(item.image_base64, validate=True) != content:
@@ -182,14 +185,16 @@ async def reopen_prepared_attachment_snapshot(
         if art is None or (art.filename, art.mime, art.size) != (item["filename"], item["mime"], item["size"]):
             raise ValueError("reference_attachment_material_changed")
         if item.get("content_deferred"):
-            from bowhead_core.documents.upload_confirmation import confirmed_content_hash
+            from bowhead_core.documents.upload_confirmation import receipt_content_hash
 
-            if (
-                item["mime"] not in OFFICE_TEXT_MIMES
-                or await confirmed_content_hash(store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id) != item["content_hash"]
-            ):
+            if item["mime"] not in OFFICE_TEXT_MIMES:
                 raise ValueError("reference_attachment_material_changed")
-            continue
+            confirmed = await receipt_content_hash(store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
+            if confirmed is not None:
+                if confirmed != item["content_hash"]:
+                    raise ValueError("reference_attachment_material_changed")
+                continue
+            # No receipt: the sealed digest is of the stored bytes; read them below.
         content = await store.backend.read_bounded(art.path, limit=item["size"])
         if len(content) != item["size"] or _digest(content) != item["content_hash"]:
             raise ValueError("reference_attachment_material_changed")

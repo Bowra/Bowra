@@ -25,7 +25,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.chart.expression import validate_stored_composition
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.terminal_llm_invocation import detached_auxiliary_scope
@@ -746,11 +746,11 @@ class CanvasStore:
         """Idempotent ADD COLUMN via PRAGMA sniff. r3.1 §2.12 — SQLite has no
         `ADD COLUMN IF NOT EXISTS`, so we check first then add. DEFAULT MUST be
         a constant literal (O(1) metadata-only); reject `DEFAULT <expr>`."""
-        cur = await db.execute(
+        async with db.execute(
             "SELECT 1 FROM pragma_table_info(?) WHERE name = ?",
             (table, col),
-        )
-        row = await cur.fetchone()
+        ) as cur:
+            row = await cur.fetchone()
         if row is None:
             await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
@@ -796,17 +796,24 @@ class CanvasStore:
         )
 
     async def _account_visibility_sql(self, alias: str = "canvases") -> str:
-        """Hide retired owners immediately, including reports shared before retirement."""
+        """Hide retired owners immediately, including reports shared before retirement.
+
+        A split layout always has ``account_deletions`` (in core), so only a single-file
+        database is asked; that saves every report read a second connection.
+        """
+        clause = f"NOT EXISTS(SELECT 1 FROM account_deletions retired WHERE retired.user_id={alias}.user_id)"
+        if domain_layout_active(self._path):
+            return clause
         async with (
-            open_shared_ctx(self._path) as db,
+            open_pooled_read_ctx(self._path) as db,
             db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_deletions'") as cur,
         ):
-            if await cur.fetchone() is None and not domain_layout_active(self._path):
+            if await cur.fetchone() is None:
                 return "1"
-        return f"NOT EXISTS(SELECT 1 FROM account_deletions retired WHERE retired.user_id={alias}.user_id)"
+        return clause
 
     async def get_canvas(self, canvas_id: str) -> Canvas | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_pooled_read_ctx(self._path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM canvases WHERE id=? AND {await self._account_visibility_sql()}",
@@ -834,7 +841,7 @@ class CanvasStore:
         return out
 
     async def get_canvas_by_session(self, session_id: str) -> Canvas | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_pooled_read_ctx(self._path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM canvases WHERE session_id=? AND {await self._account_visibility_sql()}",
@@ -848,7 +855,7 @@ class CanvasStore:
         canvas_id: str,
     ) -> tuple[Canvas, list[Section]] | None:
         """Read Canvas metadata and all lifecycle rows from one SQLite snapshot."""
-        async with open_shared_ctx(self._path) as db:
+        async with open_pooled_read_ctx(self._path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             async with db.execute(
@@ -2238,7 +2245,7 @@ class CanvasStore:
         sql_parts.append("LIMIT ?")
         params.append(limit)
         sql = " ".join(sql_parts)
-        async with open_shared_ctx(self._path) as db:
+        async with open_pooled_read_ctx(self._path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()

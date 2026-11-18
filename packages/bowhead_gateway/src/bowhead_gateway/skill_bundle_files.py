@@ -171,7 +171,7 @@ def _reject_oversize(size: int) -> None:
     """写侧与预览侧同一上限——编辑面存不下「打不开」的内容（细粒度上限仍由上传 gate 管）."""
     if size > MAX_PREVIEW_BYTES:
         raise skill_workflow_http_error(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             "skill_file_too_large",
         )
 

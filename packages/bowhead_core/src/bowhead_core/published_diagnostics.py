@@ -117,7 +117,18 @@ CHAT_PEER_FAILURE_CODES = frozenset(
         "peer_tool_failure_limit_exceeded",
         "peer_tool_call_limit_exceeded",
         "peer_model_call_limit_exceeded",
+        "peer_model_timeout",
+        "peer_model_unavailable",
         "peer_credit_exhausted",
+    }
+)
+
+# A helper whose model call still failed after the Router's retries keeps that
+# failure's own classification, the same one a Lead model failure publishes.
+_PEER_MODEL_FAILURE_CODE_BY_LLM_REASON = types.MappingProxyType(
+    {
+        "llm_provider_timeout": "peer_model_timeout",
+        "llm_provider_unavailable": "peer_model_unavailable",
     }
 )
 
@@ -133,6 +144,8 @@ _CHAT_PEER_FAILURE_FACTS_BY_PARENT = types.MappingProxyType(
         "peer_tool_failure_limit_exceeded": ("limit", True),
         "peer_tool_call_limit_exceeded": ("limit", False),
         "peer_model_call_limit_exceeded": ("limit", False),
+        "peer_model_timeout": ("timeout", True),
+        "peer_model_unavailable": ("upstream", True),
         "peer_credit_exhausted": ("limit", False),
     }
 )
@@ -1382,6 +1395,14 @@ def republish_chat_llm_diagnostics(
     return wire
 
 
+def peer_model_failure_code(llm_reason_code: object) -> str | None:
+    """The peer code for a helper model failure that has its own copy, else ``None``."""
+
+    if not isinstance(llm_reason_code, str):
+        return None
+    return _PEER_MODEL_FAILURE_CODE_BY_LLM_REASON.get(llm_reason_code)
+
+
 def normalize_chat_peer_failure_code(reason: object) -> str:
     """Project arbitrary peer errors onto the finite user-visible registry."""
 
@@ -1857,6 +1878,7 @@ __all__ = [
     "normalize_chat_canvas_failure_code",
     "normalize_chat_peer_failure_code",
     "normalize_scheduled_failure_code",
+    "peer_model_failure_code",
     "publish_chat_canvas_failure",
     "publish_chat_llm_failure",
     "publish_chat_peer_failure",

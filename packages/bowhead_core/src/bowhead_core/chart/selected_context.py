@@ -26,7 +26,7 @@ class SelectedWindow(BaseModel):
 class ChartSelectedContext(BaseModel):
     """Versioned selector inside the existing result-reference wire."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=True)
     version: Literal[1]
     section_id: str = Field(alias="sectionId", min_length=1, max_length=128)
     section_rev: int = Field(alias="sectionRev", strict=True, ge=1, le=2**53 - 1)

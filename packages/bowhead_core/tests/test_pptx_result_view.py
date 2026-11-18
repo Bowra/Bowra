@@ -94,9 +94,13 @@ def test_a_kept_chart_title_and_a_stored_percent_axis_are_reported():
 
 def test_template_comparison_reports_same_text_and_an_added_shape_over_a_chart():
     template = _deck()
-    unchanged = inspect_pptx(template, template)
-    assert _kinds(unchanged) == ["same_text_as_template"] and "Sample title" in _details(unchanged)
-    assert unchanged["template"] == {"compared": True, "matched_shapes": 2, "shapes": 2}
+    moved = Presentation(io.BytesIO(template))
+    moved.slides[0].shapes[1].left += 12700
+    buffer = io.BytesIO()
+    moved.save(buffer)
+    unchanged_text = inspect_pptx(buffer.getvalue(), template)
+    assert _kinds(unchanged_text) == ["same_text_as_template"] and "Sample title" in _details(unchanged_text)
+    assert unchanged_text["template"] == {"compared": True, "matched_shapes": 2, "shapes": 2}
 
     edited = Presentation(io.BytesIO(template))
     slide = edited.slides[0]
@@ -111,10 +115,95 @@ def test_template_comparison_reports_same_text_and_an_added_shape_over_a_chart()
 
 def test_each_kind_of_fact_has_its_own_cap():
     template = _deck(values=(1.23456789, 2.0), slides=12)
-    view = inspect_pptx(template, template)
+    # Every chart moved by a point: no slide is identical to the template, every label still is.
+    moved = Presentation(io.BytesIO(template))
+    for slide in moved.slides:
+        slide.shapes[1].left += 12700
+    buffer = io.BytesIO()
+    moved.save(buffer)
+    view = inspect_pptx(buffer.getvalue(), template)
     assert _kinds(view).count("chart") == 8 and _kinds(view).count("same_text_as_template") == 6
     assert view["facts_omitted"] == {"chart": 4, "same_text_as_template_slides": 6}
     assert all(len(fact["detail"]) <= 320 for fact in view["facts"])
+
+
+def _saved(presentation) -> bytes:
+    buffer = io.BytesIO()
+    presentation.save(buffer)
+    return buffer.getvalue()
+
+
+def test_slides_identical_to_the_template_are_listed_once_and_a_chart_data_change_counts():
+    """1.7.50 on 116 delivered slides 2-4 byte for byte as in the template; per-shape facts did not show it."""
+    template = _deck(slides=3)
+    filled = Presentation(io.BytesIO(template))
+    data = CategoryChartData()
+    data.categories = ["A", "B"]
+    data.add_series("Sales", (7.0, 9.0))
+    # Only the chart part changes; the slide XML stays the same.
+    filled.slides[1].shapes[1].chart.replace_data(data)
+    view = inspect_pptx(_saved(filled), template)
+    assert view["summary"] == "3 slides; 3 charts, 0 tables, 0 pictures; slides 1, 3 are identical to the template."
+    assert view["facts"][0] == {
+        "kind": "slides_same_as_template",
+        "detail": "slides 1, 3 are identical to the template (text, tables, chart data and pictures).",
+    }
+    # The per-shape listing stays for the changed slide only.
+    assert [fact["detail"][:8] for fact in view["facts"] if fact["kind"] == "same_text_as_template"] == ["slide 2:"]
+    slide_ids = [slide.slide_id for slide in filled.slides]
+    assert view["_slide_state"] == {"identical": [[1, slide_ids[0]], [3, slide_ids[2]]], "changed": [slide_ids[1]]}
+    assert "_slide_state" not in inspect_pptx(template)
+
+
+def test_slides_an_earlier_file_of_the_turn_had_changed_are_stated_when_they_return_to_the_template(monkeypatch):
+    monkeypatch.setattr(pptx_result_view, "_TURN_WRITES", {})
+    template = _deck(slides=3)
+    first = Presentation(io.BytesIO(template))
+    first.slides[1].shapes[0].text_frame.text = "Province review"
+    first_view = inspect_pptx(_saved(first), template)
+    pptx_result_view._note_slides_back_to_template(first_view, "t_fill", "q1.pptx")
+    assert "slides_back_to_template" not in _kinds(first_view) and "_slide_state" not in first_view
+
+    # The next file starts again from the template, so slide 2 is back to it.
+    second_view = inspect_pptx(template, template)
+    pptx_result_view._note_slides_back_to_template(second_view, "t_fill", "q2.pptx")
+    assert _kinds(second_view)[:2] == ["slides_same_as_template", "slides_back_to_template"]
+    assert second_view["facts"][1]["detail"] == (
+        "slide 2 differed from the template in 'q1.pptx', written earlier in this Turn, and is identical to it here."
+    )
+    assert "_slide_state" not in second_view
+
+    other_turn = inspect_pptx(template, template)
+    pptx_result_view._note_slides_back_to_template(other_turn, "t_other", "q2.pptx")
+    assert "slides_back_to_template" not in _kinds(other_turn)
+
+
+async def test_written_files_of_one_turn_carry_the_slide_facts_through_the_view(monkeypatch):
+    monkeypatch.setattr(pptx_result_view, "_TURN_WRITES", {})
+    template = _deck(slides=2)
+    edited = Presentation(io.BytesIO(template))
+    edited.slides[0].shapes[0].text_frame.text = "National review"
+    first, second = _saved(edited), template
+    store = _Store(
+        {
+            "art_q1": (_artifact("art_q1", "q1.pptx", PPTX_MIME, first, turn="t_fill"), first),
+            "art_q2": (_artifact("art_q2", "q2.pptx", PPTX_MIME, second, turn="t_fill"), second),
+        }
+    )
+    ctx = SimpleNamespace(artifact_store=store, user_id="u1", workspace_id="ws", turn_id="t_fill", session_store=None)
+
+    async def attached_template(_ctx, _artifact):
+        return template
+
+    async def no_render(_data):
+        return None, "renderer_unavailable"
+
+    monkeypatch.setattr(pptx_result_view, "_template_bytes", attached_template)
+    monkeypatch.setattr(pptx_result_view, "_render_pdf", no_render)
+    views = [await pptx_result_view.pptx_result_view(ctx, store.artifacts[key][0]) for key in ("art_q1", "art_q2")]
+    assert all("_slide_state" not in view for view in views)
+    assert views[0]["summary"].endswith("slide 2 is identical to the template.")
+    assert "slide 1 differed from the template in 'q1.pptx'" in _details(views[1])
 
 
 async def test_the_bounded_parse_child_builds_the_view_and_reports_an_unreadable_file():

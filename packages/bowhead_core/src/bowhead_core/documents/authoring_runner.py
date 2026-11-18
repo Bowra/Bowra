@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import PurePosixPath
 from typing import Literal
@@ -17,7 +19,7 @@ from bowhead_router.types import Message, ToolCall
 from bowhead_router.usage import detached_usage_context, usage_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, run_sqlite_authority_write
 from bowhead_core.agent_run_limits import AgentRunLimits, get_model_call_budget, get_tool_call_budget, model_call_budget_s
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef
 from bowhead_core.documents.authoring_context import context as authoring_context
@@ -151,9 +153,32 @@ def _decode_messages(items):
     return messages
 
 
-async def _observed(delivery, scope, worker, job_id, attempt_no, call_no):
-    async with open_shared_ctx(delivery.path) as db:
+@asynccontextmanager
+async def _read_snapshot(path) -> AsyncIterator:
+    """One consistent read of the execution file that takes no cross-file authority lease.
+
+    The startup check, the per-call recheck and the observation check only read. On a
+    write-capable connection their scope checks pin core's shared lease and fail at once beside
+    an authority writer (a Space save, say). Every write below rechecks the worker inside its
+    own repeatable transaction (census T6).
+    """
+    async with open_pooled_read_ctx(path) as db:
         await db.execute("BEGIN")
+        try:
+            yield db
+        finally:
+            await db.rollback()
+
+
+async def _recheck_worker(delivery, scope, job_id, worker) -> None:
+    """Recheck the live worker and its exact private copies before a native side effect."""
+    async with _read_snapshot(delivery.path) as db:
+        await _fence(db, scope, job_id, worker.owner_id)
+        await validate_document_worker_in_tx(db, worker=worker, job_id=job_id)
+
+
+async def _observed(delivery, scope, worker, job_id, attempt_no, call_no):
+    async with _read_snapshot(delivery.path) as db:
         await _fence(db, scope, job_id, worker.owner_id)
         await _known_observations_in_tx(db, job_id)
         call = await _one(db, "SELECT state FROM document_model_calls WHERE job_id=? AND attempt_no=? AND call_no=?", (job_id, attempt_no, call_no))
@@ -174,8 +199,7 @@ async def run_authoring_turn(
     try:
         if authorize_inputs is not None:
             await authorize_inputs()
-        async with open_shared_ctx(delivery.path) as db:
-            await db.execute("BEGIN")
+        async with _read_snapshot(delivery.path) as db:
             await validate_document_worker_in_tx(db, worker=worker, job_id=job_id)
             dispatch = await _one(db, "SELECT * FROM document_turn_dispatches WHERE job_id=?", (job_id,))
             creation = worker.model_copy(update={"generation": dispatch["creation_generation"], "owner_id": dispatch["owner_id"]})
@@ -239,12 +263,15 @@ async def run_authoring_turn(
             if prepare_inputs is not None:
                 await prepare_inputs()
             await DocumentInputStore(delivery.artifacts).freeze(scope=scope, job_id=job_id)
-            async with open_shared_ctx(delivery.path) as db:
-                await db.execute("BEGIN IMMEDIATE")
+
+            # These execution writes are fenced, so each runs as one repeatable authority write
+            # (census T6); every helper below rechecks the worker inside its transaction.
+            async def begin_planning(db) -> None:
                 if await _execution(db, job_id) is not None:
                     raise DocumentRequestError("document_execution_interrupted")
                 await begin_document_planning_in_tx(db, worker=worker, job_id=job_id, instruction=instruction.text)
-                await db.commit()
+
+            await run_sqlite_authority_write(delivery.path, begin_planning)
         inputs = await _read_inputs(delivery, scope, job_id)
         if any(item.role == "canvas" for item in inputs) and authorize_inputs is None:
             raise DocumentRequestError("document_canvas_access_unavailable")
@@ -274,10 +301,11 @@ async def run_authoring_turn(
                     profile=runtime.planner_profile,
                 )
             )
-            async with open_shared_ctx(delivery.path) as db:
-                await db.execute("BEGIN IMMEDIATE")
+
+            async def retain_context(db) -> None:
                 await retain_document_context_in_tx(db, worker=worker, job_id=job_id, attempt_no=1, context=context)
-                await db.commit()
+
+            await run_sqlite_authority_write(delivery.path, retain_context)
             await delivery.transition(
                 scope=scope, job_id=job_id, owner=worker.owner_id, state="planning", image_id=runtime.image_id, context_json=_json(context)
             )
@@ -335,10 +363,7 @@ async def run_authoring_turn(
                 used_tools += 1
                 # Every native side effect rechecks the original live worker and
                 # exact private copies; model arguments cannot grant file access.
-                async with open_shared_ctx(delivery.path) as db:
-                    await db.execute("BEGIN")
-                    await _fence(db, scope, job_id, worker.owner_id)
-                    await validate_document_worker_in_tx(db, worker=worker, job_id=job_id)
+                await _recheck_worker(delivery, scope, job_id, worker)
                 run_id = digest(f"{job_id}:authoring:{attempt_no}:{call_no}:{index}".encode())
                 try:
                     if call.name == "document_read":
@@ -533,13 +558,14 @@ async def run_authoring_turn(
                         if len(response.encode()) > 512_000:
                             raise OfficePackageError("document_worker_output_limit")
                         await delivery.transition(scope=scope, job_id=job_id, owner=worker.owner_id, state="rendering", response=response)
-                        async with open_shared_ctx(delivery.path) as db:
-                            await db.execute("BEGIN IMMEDIATE")
-                            ref = await retain_document_question_in_tx(db, worker=worker, job_id=job_id, question=question, last_call_no=call_no)
-                            from bowhead_core.document_clarification_lifecycle import prepare_document_pause_in_tx
+                        from bowhead_core.document_clarification_lifecycle import prepare_document_pause_in_tx
 
+                        async def pause(db, question=question, call_no=call_no, questions=questions):
+                            ref = await retain_document_question_in_tx(db, worker=worker, job_id=job_id, question=question, last_call_no=call_no)
                             await prepare_document_pause_in_tx(db, store=clarification_store, worker=worker, checkpoint=ref, questions=questions)
-                            await db.commit()
+                            return ref
+
+                        ref = await run_sqlite_authority_write(delivery.path, pause)
                         return DocumentPlanningPause(job_id, ref, question)
                     else:
                         value = {"error": "document_tool_unavailable"}

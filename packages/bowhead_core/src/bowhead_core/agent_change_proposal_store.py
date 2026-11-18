@@ -1890,14 +1890,14 @@ async def _case_target_suite_conn(db: aiosqlite.Connection, proposal: AgentChang
         return None
     # Only this proposal's prior accepted append can advance its original target.
     # The suite writer independently rejects any intervening external revision.
-    cursor = await db.execute(
+    async with db.execute(
         """SELECT r.id FROM agent_change_proposal_decision d
            JOIN agent_eval_suite_revision r ON r.id=d.result_suite_revision_id
            WHERE d.proposal_id=? AND d.decision_kind='cases_accept'
            ORDER BY r.sequence DESC LIMIT 1""",
         (proposal.id,),
-    )
-    row = await cursor.fetchone()
+    ) as cursor:
+        row = await cursor.fetchone()
     return str(row["id"]) if row else proposal.base_suite_revision_id
 
 

@@ -25,9 +25,14 @@ _ORDINARY_INSERTS = frozenset(
         "team_capability_revision",
     }
 )
+# Columns whose change can never revoke access, reassign scope, delete, or race a retention pin or
+# purge claim. ``workspaces.revision`` is the Space metadata edit counter (optimistic concurrency and
+# same-file scope snapshots; no cross-file predicate reads it) and ``builtin_tool_user_grant.last_used_at``
+# a usage timestamp; revision ``0230_unfence_routine_metadata`` applies both to deployed databases.
 _UNPROTECTED_UPDATES = {
     "users": {"display_name", "avatar_url", "preferences_json", "locale", "timezone", "active_team_id"},
-    "workspaces": {"name", "name_key", "description", "last_synced_at", "updated_at"},
+    "workspaces": {"name", "name_key", "description", "last_synced_at", "updated_at", "revision"},
+    "builtin_tool_user_grant": {"last_used_at"},
     "workspace_members": {"last_active_at", "cached_name"},
     "teams": {"name", "report_timezone"},
     "sessions": {"origin"},

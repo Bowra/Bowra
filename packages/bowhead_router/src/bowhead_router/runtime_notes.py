@@ -23,6 +23,11 @@ RUNTIME_CORRECTION_PREFIX = (
     "any question or choice you asked them is still unanswered.]\n"
 )
 
+# Visual self-check: renders of saved files for the next request only (never persisted).
+# The framing keeps a user-role render from reading as a user instruction.
+VISUAL_VIEW_NOTE_NAME = "bowhead_visual_view_v1"
+RUNTIME_NOTE_PREFIX = "[Bowhead runtime note — not a message from the user.]\n"
+
 
 def model_messages(messages: list[Message]) -> list[Message]:
     result = []
@@ -31,6 +36,8 @@ def model_messages(messages: list[Message]) -> list[Message]:
             result.append(replace(message, name=None, content=REJECTED_TOOL_SYNTAX_INSTRUCTION))
         elif message.role == "user" and message.name == RUNTIME_CORRECTION_NOTE_NAME:
             result.append(replace(message, name=None, content=RUNTIME_CORRECTION_PREFIX + message.content))
+        elif message.role == "user" and message.name == VISUAL_VIEW_NOTE_NAME:
+            result.append(replace(message, name=None, content=RUNTIME_NOTE_PREFIX + message.content))
         elif message.role == "user" and message.name == OUTPUT_RECOVERY_STATE_NAME:
             instruction = json.loads(message.content)["instruction"]
             if not isinstance(instruction, str):

@@ -135,13 +135,10 @@ def test_builtin_editor_keeps_exact_source_and_is_read_only(resources):
 def test_plugin_editor_preserves_exact_identity_current_role_and_original_writer(resources, saved_draft):
     from bowhead_core.team_plugin_store import TeamPluginStore
     from bowhead_gateway.routes import team_plugins
-    from test_agent_coach_plugins import administrator, create
+    from test_agent_coach_plugins import administrator, create, exact_method
 
     administrator(resources)
-    # The original Plugin editor accepts only Skills its picker offers, with the permissions the
-    # picker derives. Coach's own agent-authoring method is kept out of pickers (e6dce8a3a), so
-    # use a script-free picker method whose read grant matches.
-    result = create(resources, method="doc-coauthoring")
+    result = create(resources, exact_method(resources))
     reference = {"kind": "capability", "id": result["result_target"]["id"], "revision": "1"}
     parent = {"kind": "agent_draft", "id": saved_draft[3].id, "version": saved_draft[3].row_version}
     view = _run(resources.editors.read(reference, parent, exact=True))

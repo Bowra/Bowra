@@ -255,15 +255,14 @@ class TeamLlmBatchStore:
     ) -> VerificationPlan | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_plans
                     WHERE team_id = ? AND id = ?
                     """,
-                    (team_id, plan_id),
-                )
-            ).fetchone()
+                (team_id, plan_id),
+            ) as cursor:
+                row = await cursor.fetchone()
         if row is None:
             return None
         raw_items = json.loads(str(row["items_json"]))
@@ -300,31 +299,29 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            existing = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_batches
                     WHERE team_id = ? AND actor_user_id = ?
                       AND idempotency_key = ?
                     """,
-                    (team_id, actor_user_id, idempotency_key),
-                )
-            ).fetchone()
+                (team_id, actor_user_id, idempotency_key),
+            ) as cursor_2:
+                existing = await cursor_2.fetchone()
             if existing is not None:
                 await db.commit()
                 if str(existing["request_hash"]) != request_hash:
                     raise IdempotencyConflict("Idempotency-Key was reused with a different request")
                 return _batch_from_row(existing, replayed=True)
 
-            plan_row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_plans
                     WHERE team_id = ? AND actor_user_id = ? AND id = ?
                     """,
-                    (team_id, actor_user_id, plan_id),
-                )
-            ).fetchone()
+                (team_id, actor_user_id, plan_id),
+            ) as cursor_3:
+                plan_row = await cursor_3.fetchone()
             if plan_row is None:
                 await db.rollback()
                 raise PlanNotFound("verification Plan was not found")
@@ -332,15 +329,14 @@ class TeamLlmBatchStore:
                 await db.rollback()
                 raise PlanExpired("verification Plan expired")
             if plan_row["consumed_batch_id"]:
-                consumed = await (
-                    await db.execute(
-                        """
+                async with db.execute(
+                    """
                         SELECT * FROM team_llm_verification_batches
                         WHERE team_id = ? AND id = ?
                         """,
-                        (team_id, str(plan_row["consumed_batch_id"])),
-                    )
-                ).fetchone()
+                    (team_id, str(plan_row["consumed_batch_id"])),
+                ) as cursor:
+                    consumed = await cursor.fetchone()
                 await db.commit()
                 if consumed is None:
                     raise PlanNotFound("consumed verification Batch is missing")
@@ -430,17 +426,18 @@ class TeamLlmBatchStore:
         team_id: str,
         batch_id: str,
     ) -> dict[str, Any]:
-        async with open_shared_ctx(self.db_path) as db:
-            row = await (
-                await db.execute(
-                    """
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute(
+                """
                     SELECT probe_context_ciphertext
                     FROM team_llm_verification_batches
                     WHERE team_id = ? AND id = ?
                     """,
-                    (team_id, batch_id),
-                )
-            ).fetchone()
+                (team_id, batch_id),
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
         if row is None or not row[0]:
             raise PlanNotFound("verification Batch context is unavailable")
         return decrypt_llm_config(str(row[0]))
@@ -492,31 +489,29 @@ class TeamLlmBatchStore:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             await self._interrupt_expired_items(db, team_id, timestamp)
-            active = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT COUNT(*) FROM team_llm_verification_items
                     WHERE team_id = ? AND state = 'verifying'
                       AND lease_until >= ?
                     """,
-                    (team_id, _iso(timestamp)),
-                )
-            ).fetchone()
+                (team_id, _iso(timestamp)),
+            ) as cursor_2:
+                active = await cursor_2.fetchone()
             if int(active[0]) >= team_concurrency:
                 await db.commit()
                 return None
-            row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_items
                     WHERE team_id = ? AND batch_id = ? AND runner_id = ?
                       AND state = 'queued' AND lease_until >= ?
                     ORDER BY ordinal
                     LIMIT 1
                     """,
-                    (team_id, batch_id, runner_id, _iso(timestamp)),
-                )
-            ).fetchone()
+                (team_id, batch_id, runner_id, _iso(timestamp)),
+            ) as cursor_3:
+                row = await cursor_3.fetchone()
             if row is None:
                 await self._refresh_batch_state(db, batch_id, timestamp)
                 await db.commit()
@@ -578,16 +573,15 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            current = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT state, runner_id, lease_until, cancel_requested_at
                     FROM team_llm_verification_items
                     WHERE team_id = ? AND batch_id = ? AND id = ?
                     """,
-                    (item.team_id, item.batch_id, item.item_id),
-                )
-            ).fetchone()
+                (item.team_id, item.batch_id, item.item_id),
+            ) as cursor:
+                current = await cursor.fetchone()
             if (
                 current is None
                 or str(current["state"]) != "verifying"
@@ -684,15 +678,14 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            batch = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_batches
                     WHERE team_id = ? AND id = ?
                     """,
-                    (team_id, batch_id),
-                )
-            ).fetchone()
+                (team_id, batch_id),
+            ) as cursor:
+                batch = await cursor.fetchone()
             if batch is None:
                 await db.rollback()
                 raise PlanNotFound("verification Batch was not found")
@@ -730,12 +723,11 @@ class TeamLlmBatchStore:
                 (_iso(timestamp), batch_id),
             )
             await self._refresh_batch_state(db, batch_id, timestamp)
-            refreshed = await (
-                await db.execute(
-                    "SELECT * FROM team_llm_verification_batches WHERE id = ?",
-                    (batch_id,),
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT * FROM team_llm_verification_batches WHERE id = ?",
+                (batch_id,),
+            ) as cursor_2:
+                refreshed = await cursor_2.fetchone()
             await db.commit()
         assert refreshed is not None
         return _batch_from_row(refreshed)
@@ -754,17 +746,16 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT id, cancel_requested_at
                     FROM team_llm_verification_items
                     WHERE team_id = ? AND batch_id = ? AND runner_id = ?
                       AND state IN ('queued', 'verifying')
                     """,
-                    (team_id, batch_id, runner_id),
-                )
-            ).fetchall()
+                (team_id, batch_id, runner_id),
+            ) as cursor:
+                rows = await cursor.fetchall()
             if rows:
                 revision = await self._next_revision(db, batch_id)
                 for row in rows:
@@ -798,17 +789,16 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            teams = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT DISTINCT team_id
                     FROM team_llm_verification_items
                     WHERE state IN ('queued', 'verifying')
                       AND lease_until < ?
                     """,
-                    (_iso(timestamp),),
-                )
-            ).fetchall()
+                (_iso(timestamp),),
+            ) as cursor:
+                teams = await cursor.fetchall()
             for row in teams:
                 await self._interrupt_expired_items(
                     db,
@@ -833,9 +823,8 @@ class TeamLlmBatchStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            snapshot_rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT snapshot.decision_json
                     FROM team_llm_apply_snapshots AS snapshot
                     JOIN (
@@ -846,8 +835,8 @@ class TeamLlmBatchStore:
                       ON latest.team_id = snapshot.team_id
                      AND latest.version = snapshot.config_version
                     """
-                )
-            ).fetchall()
+            ) as cursor:
+                snapshot_rows = await cursor.fetchall()
             retained_evidence_ids: set[str] = set()
             for row in snapshot_rows:
                 try:
@@ -941,9 +930,8 @@ class TeamLlmBatchStore:
         bounded_limit = min(max(limit, 1), 10)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT id, plan_id, state, revision, base_config_version,
                            actor_user_id, created_at, started_at
                     FROM team_llm_verification_batches
@@ -952,9 +940,9 @@ class TeamLlmBatchStore:
                     ORDER BY created_at DESC, id DESC
                     LIMIT ?
                     """,
-                    (team_id, bounded_limit),
-                )
-            ).fetchall()
+                (team_id, bounded_limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
         return [
             {
                 "batch_id": str(row["id"]),
@@ -997,9 +985,8 @@ class TeamLlmBatchStore:
         params.append(bounded_limit)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    f"""
+            async with db.execute(
+                f"""
                     SELECT id, provider_id, provider_display_name_snapshot,
                            model_id, capability, outcome, safe_code,
                            safe_http_status, safe_summary_code,
@@ -1010,9 +997,9 @@ class TeamLlmBatchStore:
                     ORDER BY observed_at DESC, id DESC
                     LIMIT ?
                     """,
-                    params,
-                )
-            ).fetchall()
+                params,
+            ) as cursor:
+                rows = await cursor.fetchall()
         return [
             {
                 "evidence_id": str(row["id"]),
@@ -1081,15 +1068,14 @@ class TeamLlmBatchStore:
     ) -> dict[str, Any] | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            batch = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_verification_batches
                     WHERE team_id = ? AND id = ?
                     """,
-                    (team_id, batch_id),
-                )
-            ).fetchone()
+                (team_id, batch_id),
+            ) as cursor:
+                batch = await cursor.fetchone()
             if batch is None:
                 return None
             query = """
@@ -1105,18 +1091,18 @@ class TeamLlmBatchStore:
                 query += " AND revision > ?"
                 params.append(after_revision)
             query += " ORDER BY ordinal LIMIT 100"
-            items = await (await db.execute(query, params)).fetchall()
-            count_rows = await (
-                await db.execute(
-                    """
+            async with db.execute(query, params) as cursor_2:
+                items = await cursor_2.fetchall()
+            async with db.execute(
+                """
                     SELECT state, COUNT(*) AS count
                     FROM team_llm_verification_items
                     WHERE team_id = ? AND batch_id = ?
                     GROUP BY state
                     """,
-                    (team_id, batch_id),
-                )
-            ).fetchall()
+                (team_id, batch_id),
+            ) as cursor_3:
+                count_rows = await cursor_3.fetchall()
         counts = {str(row["state"]): int(row["count"]) for row in count_rows}
         return {
             "batch_id": str(batch["id"]),
@@ -1155,17 +1141,16 @@ class TeamLlmBatchStore:
         team_id: str,
         now: datetime,
     ) -> None:
-        rows = await (
-            await db.execute(
-                """
+        async with db.execute(
+            """
                 SELECT DISTINCT batch_id
                 FROM team_llm_verification_items
                 WHERE team_id = ? AND state IN ('queued', 'verifying')
                   AND lease_until < ?
                 """,
-                (team_id, _iso(now)),
-            )
-        ).fetchall()
+            (team_id, _iso(now)),
+        ) as cursor:
+            rows = await cursor.fetchall()
         for row in rows:
             batch_id = str(row[0])
             revision = await self._next_revision(db, batch_id)
@@ -1200,12 +1185,11 @@ class TeamLlmBatchStore:
             """,
             (batch_id,),
         )
-        row = await (
-            await db.execute(
-                "SELECT revision FROM team_llm_verification_batches WHERE id = ?",
-                (batch_id,),
-            )
-        ).fetchone()
+        async with db.execute(
+            "SELECT revision FROM team_llm_verification_batches WHERE id = ?",
+            (batch_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             raise PlanNotFound("verification Batch was not found")
         return int(row[0])
@@ -1216,30 +1200,28 @@ class TeamLlmBatchStore:
         batch_id: str,
         now: datetime,
     ) -> None:
-        rows = await (
-            await db.execute(
-                """
+        async with db.execute(
+            """
                 SELECT state, COUNT(*) AS count
                 FROM team_llm_verification_items
                 WHERE batch_id = ?
                 GROUP BY state
                 """,
-                (batch_id,),
-            )
-        ).fetchall()
+            (batch_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
         states = {str(row[0]): int(row[1]) for row in rows}
         if not states:
             return
-        batch = await (
-            await db.execute(
-                """
+        async with db.execute(
+            """
                 SELECT cancel_requested_at
                 FROM team_llm_verification_batches
                 WHERE id = ?
                 """,
-                (batch_id,),
-            )
-        ).fetchone()
+            (batch_id,),
+        ) as cursor_2:
+            batch = await cursor_2.fetchone()
         cancelling = bool(batch and batch[0])
         active = sum(count for state, count in states.items() if state not in _TERMINAL_ITEM_STATES)
         if active:

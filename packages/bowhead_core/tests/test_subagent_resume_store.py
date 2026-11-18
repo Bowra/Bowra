@@ -3,11 +3,11 @@
 import base64
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 from bowhead_core.session_store import SessionStore
 from bowhead_router.types import Message, ToolCall
-from core_legacy_database import upgrade
 
 from bowhead_core import subagent_resume as sr
 
@@ -25,9 +25,8 @@ def _fernet(monkeypatch):
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", base64.urlsafe_b64encode(b"k" * 32).decode())
 
 
-async def _db(tmp_path) -> str:
-    assert upgrade(f"sqlite+aiosqlite:///{(tmp_path / 'requested.db').with_name('bowhead.db')}", target="core") == ("core",)
-    store = SessionStore(str(tmp_path / "bowhead.db"))
+async def _db(path: Path) -> str:
+    store = SessionStore(str(path))
     await store.initialize()
     for session_id, turns in {"s_1": ("t_1", "t_2", "t_3"), "s_2": ("t_9",)}.items():
         await store.ensure_session(session_id=session_id, workspace_id="ws_1", user_id="u_1")
@@ -71,8 +70,8 @@ def _end(db_path: str, turn_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_partial_run_round_trips_and_ends_with_where_it_stopped(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_a_partial_run_round_trips_and_ends_with_where_it_stopped(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
 
     [listed] = await sr.list_resumable(db_path, session_id="s_1", user_id="u_1", exclude_turn_id="t_2")
@@ -88,8 +87,8 @@ async def test_a_partial_run_round_trips_and_ends_with_where_it_stopped(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_claims_refuse_other_users_the_capturing_turn_and_a_second_turn(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_claims_refuse_other_users_the_capturing_turn_and_a_second_turn(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
 
     for kwargs, code in (
@@ -113,8 +112,8 @@ async def test_claims_refuse_other_users_the_capturing_turn_and_a_second_turn(tm
 
 
 @pytest.mark.asyncio
-async def test_a_resumed_run_supersedes_its_lineage(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_a_resumed_run_supersedes_its_lineage(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     first = await _capture(db_path)
     await sr.claim(db_path, checkpoint_id=first, session_id="s_1", user_id="u_1", turn_id="t_2")
     second = await _capture(db_path, turn_id="t_2", completion="complete", stop_reason=None, partial_done=None, partial_remaining=None)
@@ -130,8 +129,8 @@ async def test_a_resumed_run_supersedes_its_lineage(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_release_returns_a_claim(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_release_returns_a_claim(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     await sr.claim(db_path, checkpoint_id=checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
     await sr.release(db_path, checkpoint_id=checkpoint_id, turn_id="t_2")
@@ -139,8 +138,8 @@ async def test_release_returns_a_claim(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_expiry_and_session_deletion_drop_the_transcript(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_expiry_and_session_deletion_drop_the_transcript(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     expired = await _capture(db_path)
     kept = await _capture(db_path, session_id="s_2", turn_id="t_9", run_subagent_id="sub_b")
     with sqlite3.connect(db_path) as db:
@@ -153,8 +152,8 @@ async def test_expiry_and_session_deletion_drop_the_transcript(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_requests_keep_their_order_and_limit(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_requests_keep_their_order_and_limit(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     await sr.record_requests(db_path, turn_id="t_2", checkpoint_ids=["rsc_b", "rsc_a", "rsc_b", "rsc_c", "rsc_d", "rsc_e"])
     await sr.record_requests(db_path, turn_id="t_2", checkpoint_ids=["rsc_b", "rsc_a"])
     assert await sr.requested_checkpoint_ids(db_path, turn_id="t_2") == ["rsc_b", "rsc_a", "rsc_c", "rsc_d"]
@@ -188,8 +187,8 @@ def test_agent_or_tool_changes_refuse_the_transcript():
 
 
 @pytest.mark.asyncio
-async def test_a_deleted_session_lists_and_saves_nothing(tmp_path):
-    db_path = await _db(tmp_path)
+async def test_a_deleted_session_lists_and_saves_nothing(migrated_legacy_core_db):
+    db_path = await _db(migrated_legacy_core_db)
     with sqlite3.connect(db_path) as db:
         db.execute("UPDATE sessions SET deleted_at='2026-10-21T09:00:00+00:00' WHERE id='s_1'")
     await _capture(db_path)
@@ -198,11 +197,11 @@ async def test_a_deleted_session_lists_and_saves_nothing(tmp_path):
     assert await sr.list_resumable(db_path, session_id="s_1", user_id="u_1") == []
 
 
-async def test_navigation_checkpoint_round_trips_in_its_own_version_without_changing_legacy_payloads(tmp_path):
+async def test_navigation_checkpoint_round_trips_in_its_own_version_without_changing_legacy_payloads(migrated_legacy_core_db):
     from bowhead_core.kb.source_navigation import NavigationDependency
 
     proof = NavigationDependency(file_id="file-a", generation_id="generation-a", membership_revision=1, view_token="a" * 64).model_dump()
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     identity = await _capture(db_path, knowledge_navigation={"file-a": proof})
     checkpoint = await sr.claim(db_path, checkpoint_id=identity, user_id="u_1", session_id="s_1", turn_id="t_2")
     material = sr.open_material(checkpoint, db_path=db_path)

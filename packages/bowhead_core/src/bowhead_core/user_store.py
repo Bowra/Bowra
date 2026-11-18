@@ -2020,10 +2020,10 @@ class UserStore:
         db: aiosqlite.Connection,
     ) -> None:
         """Canonicalize the pre-team credit event enum without losing rows."""
-        cur = await db.execute(
+        async with db.execute(
             "SELECT sql FROM sqlite_schema WHERE type='table' AND name='credit_exhaustion_events'",
-        )
-        row = await cur.fetchone()
+        ) as cur:
+            row = await cur.fetchone()
         if row is None:
             return
         existing_sql = row[0] or ""
@@ -2620,6 +2620,7 @@ class UserStore:
             await db.commit()
             return updated_at if cursor.rowcount == 1 else None
 
+    @_repeat_when_authority_busy
     async def update_team_tool_source_auth(
         self,
         team_id: str,
@@ -3200,7 +3201,8 @@ class UserStore:
             # Databases created before migration 0064 (including all initialize()-created test dbs) lack this column; bare UPDATE
             # raises OperationalError. Reader `_row_opt` tolerates absence; writes likewise return False to tell callers
             # no write occurred (extra provenance must not block promotion), with a log rather than silent failure.
-            cols = {str(r[1]) for r in await (await db.execute("PRAGMA table_info(team_skill)")).fetchall()}
+            async with db.execute("PRAGMA table_info(team_skill)") as column_cursor:
+                cols = {str(r[1]) for r in await column_cursor.fetchall()}
             if "import_provenance_json" not in cols:
                 logger.warning("team_skill.import_provenance_json missing (migration 0064 not applied); provenance not recorded")
                 return False

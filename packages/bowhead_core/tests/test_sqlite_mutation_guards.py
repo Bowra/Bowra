@@ -249,3 +249,42 @@ def test_sandbox_producer_classification_does_not_fence_foreign_snapshot(mutatio
             content.execute("UPDATE artifacts SET deleted_at='now' WHERE id='stdout'").close()
         content.rollback()
         execution.rollback()
+
+
+def test_space_metadata_and_grant_usage_skip_the_core_fence(mutation_files):
+    # 116, 1.7.49: a Space metadata save bumps only workspaces.revision among fenced columns and failed at
+    # once while a running Turn held the shared core lease. Status and credential changes stay fenced.
+    core_path = mutation_files.with_name(DOMAIN_TARGET_FILES["core"])
+    with closing(sqlite3.connect(core_path)) as db:
+        columns = ",".join(f'"{column}" TEXT' for column in _AUTHORITY["core"]["builtin_tool_user_grant"])
+        db.execute(f"CREATE TABLE builtin_tool_user_grant({columns})")
+        for statement in mutation_triggers("core"):
+            if ' ON "builtin_tool_user_grant"' in statement:
+                db.execute(statement)
+        db.commit()
+    with managed(mutation_files, "core") as core:
+        core.execute("INSERT INTO workspaces(id,team_id,status,revision,name) VALUES('w','team','active',1,'Old')").close()
+        core.execute("INSERT INTO builtin_tool_user_grant(id,tool_id,user_id,status) VALUES('g','tool','u','active')").close()
+        core.commit()
+    with managed(mutation_files, "execution") as execution, managed(mutation_files, "core") as core:
+        execution.execute("BEGIN").close()
+        with execution.execute("SELECT status FROM workspaces WHERE id='w'") as cursor:
+            assert cursor.fetchone() == ("active",)
+        assert execution._leases
+
+        core.execute("BEGIN IMMEDIATE").close()
+        core.execute("UPDATE workspaces SET name='New',revision=revision+1 WHERE id='w'").close()
+        core.execute("UPDATE builtin_tool_user_grant SET last_used_at='2026-11-18T00:00:00Z' WHERE id='g'").close()
+        core.commit()
+        with core.execute("SELECT name,CAST(revision AS INTEGER) FROM workspaces WHERE id='w'") as cursor:
+            assert cursor.fetchone() == ("New", 2)
+
+        for sql in (
+            "UPDATE workspaces SET status='archived',revision=revision+1 WHERE id='w'",
+            "UPDATE builtin_tool_user_grant SET status='needs_reauth' WHERE id='g'",
+        ):
+            core.execute("BEGIN IMMEDIATE").close()
+            with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+                core.execute(sql).close()
+            core.rollback()
+        execution.rollback()

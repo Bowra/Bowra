@@ -334,6 +334,25 @@ async def test_same_run_drafts_are_pruned_before_counting_the_three(store: Artif
     assert await store.prune_version_candidates([v[0].id]) == [v[1].id]
 
 
+async def test_a_file_started_in_the_turn_keeps_its_rewrites_as_versions(store: ArtifactStore) -> None:
+    """Owner decision D2 (same-name-results-versions-2026-11-17): a helper's rewrites of a file it created in
+    this Turn stay as earlier versions within the newest three; only older ones are pruned."""
+    v = await _chain(store, ["t1", "t1", "t1", "t1"])
+    assert await store.prune_version_candidates([v[0].id]) == [v[0].id]
+    items, total, _ = await store.list_for_user(user_id="u")
+    assert total == 1 and (items[0].id, items[0].version_no, items[0].version_count) == (v[3].id, 4, 4)
+    assert [item.id for item in await store.list_session_deliverables(session_id="s1", user_id="u")] == [v[3].id]
+
+
+async def test_the_first_turn_counts_even_after_its_first_version_was_pruned(store: ArtifactStore) -> None:
+    """A file from t1 revised twice in t2: t2's superseded version is a draft, also once v1 is gone."""
+    v = await _chain(store, ["t1", "t2", "t2"])
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE artifacts SET deleted_at = '2026-11-17T00:00:00Z' WHERE id = ?", (v[0].id,))
+        await db.commit()
+    assert await store.prune_version_candidates([v[0].id]) == [v[1].id]
+
+
 @pytest.mark.parametrize("protection", ["canvas_mention", "canvas_attachment", "document", "citation", "snapshot", "share"])
 async def test_versions_in_use_are_never_pruned(store: ArtifactStore, protection: str) -> None:
     v = await _chain(store, ["t1", "t2", "t3", "t4"])

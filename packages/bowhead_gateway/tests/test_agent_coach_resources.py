@@ -2,6 +2,7 @@
 
 import sqlite3
 from dataclasses import replace
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +21,8 @@ from test_team_subagent_drafts_routes import _run
 
 pytestmark = pytest.mark.unit
 
+_builtin_skill_metadata = cache(build_builtin_skill_metadata)
+
 
 @pytest.fixture
 def resources(saved_draft):
@@ -27,7 +30,7 @@ def resources(saved_draft):
     request = adapter.editor.request
     request.app.state.skill_catalog = build_default_skill_stack()[0]
     request.app.state.skill_instance_store = SkillInstanceStore(users.db_path)
-    request.app.state.builtin_skill_reference_metadata = build_builtin_skill_metadata()
+    request.app.state.builtin_skill_reference_metadata = _builtin_skill_metadata()
     request.app.state.orchestrator = SimpleNamespace(tool_registry=build_default_registry())
     return AgentCoachResources(request, owner, "ws_a", "")
 

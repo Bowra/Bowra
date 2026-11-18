@@ -108,11 +108,13 @@ class AgentCoachCI:
         prepared = stopped["preparation"]
         if prepared is None:
             return
-        async with open_shared_ctx(self.store.db_path) as db:
-            cursor = await db.execute(
+        async with (
+            open_shared_ctx(self.store.db_path) as db,
+            db.execute(
                 "SELECT state,row_version FROM team_subagent_release_candidate WHERE team_id=? AND id=?",
                 (self.resources.user.team_id, prepared["candidate_id"]),
-            )
+            ) as cursor,
+        ):
             row = await cursor.fetchone()
         if row is None or row[0] != "prepared":
             return
@@ -257,12 +259,14 @@ class AgentCoachCI:
 
     async def _refuse_held_out(self, selection: list[str]) -> None:
         """Coach can't pick a held-out case for a diagnostic run (alignment loop A6); the release check runs all."""
-        async with open_shared_ctx(self.store.db_path) as db:
-            cursor = await db.execute(
+        async with (
+            open_shared_ctx(self.store.db_path) as db,
+            db.execute(
                 """SELECT 1 FROM agent_eval_case_revision WHERE id IN (SELECT value FROM json_each(?))
                    AND json_extract(expected_contract_json,'$.held_out')=1 LIMIT 1""",
                 (json.dumps(selection),),
-            )
+            ) as cursor,
+        ):
             if await cursor.fetchone() is not None:
                 raise CoachCIError("agent_eval_case_held_out")
 
@@ -273,10 +277,10 @@ class AgentCoachCI:
         async with open_shared_ctx(self.store.db_path) as db:
             db.row_factory = aiosqlite.Row
             for execution in delegation.get("executions") or []:
-                cursor = await db.execute(
+                async with db.execute(
                     "SELECT run_id FROM agent_eval_comparison_run WHERE execution_id=? AND subject_side='candidate'", (execution["id"],)
-                )
-                run_ids = [str(row[0]) for row in await cursor.fetchall()]
+                ) as cursor:
+                    run_ids = [str(row[0]) for row in await cursor.fetchall()]
                 execution["held_out"] = await _held_out_results(db, run_ids=run_ids) if run_ids else {"cases": 0, "attempts": 0, "passed_attempts": 0}
         return delegation
 

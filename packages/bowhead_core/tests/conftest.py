@@ -25,7 +25,9 @@ the full adapt-not-delete strategy.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -236,6 +238,15 @@ def system_agent_capabilities() -> dict[str, frozenset[str]]:
     return _system_agent_capabilities()
 
 
+@pytest.fixture
+def migrated_legacy_core_db(tmp_path: Path) -> Path:
+    from core_legacy_database import TARGET_FILES, copy_migrated_core
+
+    db_path = tmp_path / TARGET_FILES["core"]
+    copy_migrated_core(db_path)
+    return db_path
+
+
 @pytest.fixture(scope="session")
 def migrated_kb_files_snapshot(tmp_path_factory):
     """Pristine current ``files`` schema (Alembic head) for tests that build a KbFilesStore directly."""
@@ -249,7 +260,6 @@ def migrated_kb_files_snapshot(tmp_path_factory):
 @pytest.fixture
 def initialize_migrated_kb_files_database(migrated_kb_files_snapshot):
     """Copy the migrated kb_files baseline before a test's KbFilesStore initializes it."""
-    import sqlite3
 
     def initialize(path):
         with sqlite3.connect(migrated_kb_files_snapshot) as source, sqlite3.connect(path) as destination:

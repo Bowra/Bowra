@@ -82,12 +82,8 @@ def test_the_same_turn_is_parked_by_status(migrated_db) -> None:
     assert anyio.run(_run) == "clarification_pending"
 
 
-def test_unknown_turn_is_not_ready(migrated_db) -> None:
-    """查无此 turn → 未就绪。"""
+@pytest.mark.asyncio
+async def test_unknown_turn_is_not_ready(migrated_db) -> None:
+    """A Turn absent from an already migrated database is not ready."""
     store = SessionStore(str(migrated_db))
-
-    async def _run() -> bool:
-        await store.initialize()
-        return await store.is_turn_resume_ready("t_does_not_exist")
-
-    assert anyio.run(_run) is False
+    assert await store.is_turn_resume_ready("t_does_not_exist") is False

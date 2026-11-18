@@ -1679,7 +1679,7 @@ async def _patch_team_skill_user_toggle(
     rec, raw = target
     if body.description is not None:
         raise skill_workflow_http_error(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "team_skill_description_governed",
         )
     enabled = body.enabled if body.enabled is not None else (raw.enabled if raw else True)
@@ -1858,7 +1858,7 @@ async def upload_skill(
         )
     if len(data) > MAX_SKILL_SIZE:
         raise skill_workflow_http_error(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             "E_SKILL_TOO_LARGE",
             max_mb=MAX_SKILL_SIZE // 1024 // 1024,
         )
@@ -2047,7 +2047,7 @@ async def _promote_skill(
         )
     if NAME_PATTERN.fullmatch(body.name) is None:
         raise skill_workflow_http_error(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "E_SKILL_NAME_INVALID",
         )
 
@@ -2063,7 +2063,7 @@ async def _promote_skill(
     spec = _load_user_skill_spec(inst, _user_dir_for(uid))
     if spec is None:
         raise skill_workflow_http_error(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "skill_bundle_invalid",
         )
     # skill-import batch 1: pending imports cannot be shared; lifecycle prerequisite, not authorization (tech-design r3 §3.4).
@@ -2097,7 +2097,7 @@ async def _promote_skill(
             # Same name, different author → 422. The copy names no author: pending/rejected/creator-only ownership must not
             # leak (security review P2), and the actionable path is the same either way — rename in chat, save, resubmit
             # (there is no personal Skill rename endpoint).
-            raise team_routes._coded_http(request, status.HTTP_422_UNPROCESSABLE_ENTITY, "E_SKILL_NAME_TAKEN_BY_OTHER", name=name)
+            raise team_routes._coded_http(request, status.HTTP_422_UNPROCESSABLE_CONTENT, "E_SKILL_NAME_TAKEN_BY_OTHER", name=name)
         try:
             if rec is None:
                 # ── L1 first submission: write team/<name>/ + create row (absence proven inside lock; existing directories can only be
@@ -2213,9 +2213,9 @@ async def _promote_skill(
                 rec_id = rec.id
         except SkillUploadError as e:
             if e.code:
-                raise team_routes._coded_http(request, status.HTTP_422_UNPROCESSABLE_ENTITY, e.code, **e.params) from e
+                raise team_routes._coded_http(request, status.HTTP_422_UNPROCESSABLE_CONTENT, e.code, **e.params) from e
             raise skill_workflow_http_error(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "skill_bundle_invalid",
             ) from e
         # Refresh row description only for L1 submit/resubmit (admins review current content + routing copy; same for direct approval).

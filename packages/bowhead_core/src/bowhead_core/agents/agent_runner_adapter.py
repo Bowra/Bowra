@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from bowhead_core.agents.clarification_tool import is_clarification_sentinel
 from bowhead_core.planning_v2 import planning_v2_enabled
+from bowhead_core.published_diagnostics import peer_model_failure_code
 from bowhead_core.subagent import (
     PROFILES,
     SubagentProfile,
@@ -49,6 +50,7 @@ from .task_spec import (
     PlanStepAgentBindingError,
     PlanStepBailError,
     PlanStepEmptyOutputError,
+    PlanStepModelError,
     PlanStepNeedsUserError,
 )
 
@@ -806,6 +808,10 @@ def make_legacy_agent_runner_fn(
             # SubagentRunner failure → raise for LocalTaskRunner wrapping as TaskFailureError.
             err_msg = result.error or "unknown subagent failure"
             await _mark_exact_terminal("failed", "agent_peer_failed")
+            if err_msg == "subagent_internal_error" and peer_model_failure_code(result.llm_reason_code) is not None:
+                # The model call still failed after the Router's retries: keep its own
+                # classification instead of a generic internal error.
+                raise PlanStepModelError(result.llm_reason_code)
             raise RuntimeError(err_msg)
 
         # SubagentResult.payload → dict expected by orchestrate_v2.

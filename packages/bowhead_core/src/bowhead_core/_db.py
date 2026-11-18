@@ -54,7 +54,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import aiosqlite
 import anyio
@@ -63,6 +63,7 @@ from bowhead_core import sqlite_capacity
 from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
 from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_connection
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_request_deadline import remaining_ms, request_write_deadline
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -133,8 +134,8 @@ async def bootstrap_shared_db(path: str) -> None:
     async with diagnostic_connect(path) as conn:
         # WAL is persistent on the file — `_ref_audit.init_ref_audit` also
         # sets it. Setting twice is no-op.
-        await conn.execute("PRAGMA main.journal_mode=WAL")
-        await conn.execute("PRAGMA main.secure_delete=ON")
+        await execute_and_close(conn, "PRAGMA main.journal_mode=WAL")
+        await execute_and_close(conn, "PRAGMA main.secure_delete=ON")
         # _phase0_probe — pre-create so self-test INSERT doesn't raise
         # `no such table` (r3.1 P0 catch CTO+SRE+Eng triple).
         await conn.execute("CREATE TABLE IF NOT EXISTS _phase0_probe (k TEXT PRIMARY KEY, ts REAL NOT NULL)")
@@ -166,6 +167,11 @@ async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
     while a new connection is set up, it is closed before re-raising.
     """
     async with _borrow(str(path), _shared_pools, _SHARED_POOL_MAX_IDLE, _open_pooled_shared, _scrub_for_reuse) as conn:
+        left = remaining_ms()
+        if left is not None and left < WRITER_BUSY_TIMEOUT_MS:
+            # Inside a request write the writer wait ends with its deadline; the release scrub
+            # restores one minute for the next borrower.
+            await execute_and_close(conn, f"PRAGMA busy_timeout={left}")
         yield conn
 
 
@@ -176,7 +182,8 @@ async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
 # - ``wait_for_writer``: any SQLITE_BUSY (writer lock or authority lease), up to one minute;
 #   for background writes such as usage settlement. Turn event writes use the same rule.
 # - ``repeat_when_authority_busy``: a store method that owns its transaction and lost the
-#   authority lease; 30 seconds, then ``SQLiteStoreBusy`` (503 ``store_busy``) for a request.
+#   authority lease; 30 seconds in total for a request (writer waits included), then
+#   ``SQLiteStoreBusy`` (503 ``store_busy``); ``kind="turn"`` bounds only the lease repeats.
 # - ``run_sqlite_authority_write``: a database-only callback on a borrowed connection that lost
 #   the authority lease; the connection's own busy-timeout budget.
 
@@ -286,8 +293,10 @@ def is_authority_busy(error: BaseException) -> bool:
     return isinstance(error, sqlite3.OperationalError) and getattr(error, "bowhead_authority_busy", False) is True
 
 
-class SQLiteStoreBusy(RuntimeError):
+class SQLiteStoreBusy(Exception):
     """A write kept losing its lock for its whole wait; nothing was written.
+
+    Not a ``RuntimeError``: routes that map ``RuntimeError`` to their own 503 would drop the code.
 
     The gateway answers it with 503 ``store_busy`` and ``Retry-After``: the same request can
     succeed once running work releases the lock.
@@ -298,6 +307,8 @@ class SQLiteStoreBusy(RuntimeError):
 
 def repeat_when_authority_busy[**P, T](
     spent: Callable[[], BaseException] | None = SQLiteStoreBusy,
+    *,
+    kind: Literal["request", "turn"] = "request",
 ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
     """Repeat a complete write method that lost the cross-file authority lease.
 
@@ -321,6 +332,11 @@ def repeat_when_authority_busy[**P, T](
     ``store_busy``; ``None`` re-raises the last conflict for callers that already map it.
     A database-only callback that can take a borrowed connection uses
     ``run_sqlite_authority_write`` instead.
+
+    ``kind="request"`` (a save a person triggers) makes the ``AUTHORITY_BUSY_WAIT_SECONDS`` a
+    total from entry: every connection the method opens waits for the writer lock at most for
+    what is left (``sqlite_request_deadline``). ``kind="turn"`` (Turn-internal and background
+    writes) bounds only the lease repeats and keeps each connection's own writer wait.
     """
 
     def decorate(method: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
@@ -334,9 +350,7 @@ def repeat_when_authority_busy[**P, T](
             else:
                 _logger.warning("sqlite.authority_busy_wait_failed label=%s waited_ms=%d", label, waited * 1000)
 
-        @functools.wraps(method)
-        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            deadline = time.monotonic() + AUTHORITY_BUSY_WAIT_SECONDS
+        async def repeat(deadline: float, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return await repeat_while_busy(
                     lambda: method(*args, **kwargs),
@@ -348,13 +362,21 @@ def repeat_when_authority_busy[**P, T](
                     log=log,
                 )
             except sqlite3.OperationalError as error:
-                # The writer lock, not the lease: the attempt already waited its connection's whole
-                # busy timeout (5 s unpooled, 60 s pooled), so it is not repeated. It wrote nothing,
-                # so it gets the same answer as a spent lease wait instead of an unexplained 500.
+                # The writer lock, not the lease: the attempt already waited its connection's busy
+                # timeout (for a request write, what was left of its deadline), so it is not repeated.
+                # It wrote nothing, so it gets the same answer as a spent lease wait.
                 if spent is None or not writer_busy(error):
                     raise
-                _logger.warning("sqlite.authority_busy_wait_failed label=%s reason=writer_lock", label)
+                reason = "deadline" if kind == "request" and deadline - time.monotonic() < 0.5 else "writer_lock"
+                _logger.warning("sqlite.authority_busy_wait_failed label=%s reason=%s", label, reason)
                 raise spent() from error
+
+        @functools.wraps(method)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            if kind == "turn":
+                return await repeat(time.monotonic() + AUTHORITY_BUSY_WAIT_SECONDS, *args, **kwargs)
+            with request_write_deadline(AUTHORITY_BUSY_WAIT_SECONDS) as deadline:
+                return await repeat(deadline, *args, **kwargs)
 
         return wrapper
 
@@ -381,9 +403,7 @@ async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[a
                 deadline = time.monotonic() + timeout_ms / 1000
             else:
                 remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-                # The pragma returns a row; close its cursor so it does not count as an open read (f6d822c69).
-                async with db.execute(f"PRAGMA busy_timeout={remaining_ms}"):
-                    pass
+                await execute_and_close(db, f"PRAGMA busy_timeout={remaining_ms}")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 result = await operation(db)
@@ -462,8 +482,11 @@ def _daemonize(conn: aiosqlite.Connection) -> None:
         worker.daemon = True
 
 
-async def _run_setup(conn: aiosqlite.Connection, sql: str) -> None:
-    """Run one connection setup statement and close its cursor before the connection is handed out.
+async def execute_and_close(conn: aiosqlite.Connection, sql: str) -> None:
+    """Run one statement whose result is not read, such as a setter PRAGMA, and close its cursor at once.
+
+    ``busy_timeout=``, ``secure_delete=`` and ``journal_mode=`` each return a row; a bare
+    ``await conn.execute(...)`` drops that cursor without closing it.
 
     A cursor that is only dropped is closed later, by a task the event loop has not run yet when the
     borrower's first statement reaches the connection. Until then it counts as an open read, and a
@@ -481,8 +504,8 @@ async def _open_pooled_reader(path: str) -> aiosqlite.Connection:
     _daemonize(conn)
     await conn
     try:
-        await _run_setup(conn, "PRAGMA busy_timeout=5000")
-        await _run_setup(conn, "PRAGMA query_only=ON")
+        await execute_and_close(conn, "PRAGMA busy_timeout=5000")
+        await execute_and_close(conn, "PRAGMA query_only=ON")
     except BaseException:
         await conn.close()
         raise
@@ -590,10 +613,10 @@ async def _open_pooled_shared(path: str) -> aiosqlite.Connection:
     _daemonize(conn)
     await conn
     try:
-        await _run_setup(conn, f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS}")
-        await _run_setup(conn, "PRAGMA main.synchronous=NORMAL")
-        await _run_setup(conn, "PRAGMA foreign_keys=ON")
-        await _run_setup(conn, "PRAGMA main.secure_delete=ON")
+        await execute_and_close(conn, f"PRAGMA busy_timeout={WRITER_BUSY_TIMEOUT_MS}")
+        await execute_and_close(conn, "PRAGMA main.synchronous=NORMAL")
+        await execute_and_close(conn, "PRAGMA foreign_keys=ON")
+        await execute_and_close(conn, "PRAGMA main.secure_delete=ON")
     except BaseException:
         await conn.close()
         raise

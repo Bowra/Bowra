@@ -211,11 +211,11 @@ async def _atomic_insert_pending(
     async with _open_db(domain_database_path(db_path, "content")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE created_by = ? AND status IN ('pending_upload','confirming')",
                 (user_id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             count = row[0] if row else 0
             if count >= _PRESIGN_PENDING_CAP:
                 await db.execute("ROLLBACK")
@@ -356,7 +356,7 @@ async def files_presign(
     # Phase 1.4a review P1-2: hand-rolled 413 (Pydantic field has no `le=`
     # so we can return spec'd 413 instead of generic 422).
     if body.size_bytes > _MAX_UPLOAD_BYTES:
-        raise _file_error(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file_too_large")
+        raise _file_error(status.HTTP_413_CONTENT_TOO_LARGE, "file_too_large")
 
     # Normalize + whitelist MIME (mirrors /files/upload pipeline)
     try:
@@ -454,7 +454,7 @@ async def files_presign_confirm(
     # 1. Fetch row + creator check before CAS so we can return idempotent_replay
     async with _open_db(store.db_path) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
+        async with db.execute(
             "SELECT a.id, a.filename, a.mime, a.size, a.path, a.status, "
             "a.created_by, a.expires_at, a.deleted_at, "
             "b.workspace_id AS binding_workspace_id, "
@@ -464,8 +464,8 @@ async def files_presign_confirm(
             "LEFT JOIN artifact_upload_bindings b ON b.artifact_id = a.id "
             "WHERE a.id = ?",
             (file_id,),
-        )
-        row = await cur.fetchone()
+        ) as cur:
+            row = await cur.fetchone()
     if row is None or row["deleted_at"] is not None:
         raise _file_not_found()
     if row["created_by"] != user_id:
@@ -521,26 +521,26 @@ async def files_presign_confirm(
                 await db.execute("BEGIN IMMEDIATE")
                 if not await has_confirmation_schema(db):
                     raise _file_error(503, "file_service_unavailable")
-                cursor = await db.execute("SELECT status, path FROM artifacts WHERE id=? AND deleted_at IS NULL", (file_id,))
-                current = await cursor.fetchone()
+                async with db.execute("SELECT status, path FROM artifacts WHERE id=? AND deleted_at IS NULL", (file_id,)) as cursor:
+                    current = await cursor.fetchone()
                 if current is None or current[0] != "pending_upload" or current[1] != row["path"]:
                     raise _file_error(409, "file_confirm_in_progress")
-                cursor = await db.execute("SELECT 1 FROM artifact_upload_confirmations WHERE artifact_id=?", (file_id,))
-                if await cursor.fetchone() is None:
-                    await register_confirmation(
-                        db,
-                        backend,
-                        artifact_id=file_id,
-                        quarantine_path=row["path"],
-                        filename=row["filename"],
-                        mime=pending_mime,
-                        declared_size=row["size"],
-                        expected_sha256=body.checksum_sha256,
-                        user_id=user_id,
-                        workspace_id=binding_workspace_id,
-                        session_id=final_session_id,
-                        expires_at=datetime.fromisoformat(row["expires_at"]).timestamp(),
-                    )
+                async with db.execute("SELECT 1 FROM artifact_upload_confirmations WHERE artifact_id=?", (file_id,)) as cursor:
+                    if await cursor.fetchone() is None:
+                        await register_confirmation(
+                            db,
+                            backend,
+                            artifact_id=file_id,
+                            quarantine_path=row["path"],
+                            filename=row["filename"],
+                            mime=pending_mime,
+                            declared_size=row["size"],
+                            expected_sha256=body.checksum_sha256,
+                            user_id=user_id,
+                            workspace_id=binding_workspace_id,
+                            session_id=final_session_id,
+                            expires_at=datetime.fromisoformat(row["expires_at"]).timestamp(),
+                        )
                 await db.commit()
         try:
             receipt, replay = await confirm_upload(
@@ -616,11 +616,11 @@ async def files_presign_confirm(
         # Lost the race — re-fetch and return idempotent_replay if now ready
         async with _open_db(store.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT id, filename, mime, size, status FROM artifacts WHERE id = ? AND deleted_at IS NULL",
                 (file_id,),
-            )
-            r2 = await cur.fetchone()
+            ) as cur:
+                r2 = await cur.fetchone()
         if r2 and r2["status"] == "ready":
             return FilesConfirmResponse(
                 file_id=r2["id"],

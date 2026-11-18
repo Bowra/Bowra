@@ -40,6 +40,7 @@ PPTX_RESULT_VIEW_GUIDANCE = (
     "A .pptx written by a sandbox call comes back with result_view: one summary line and facts read from the saved file "
     "(charts without values, General or percent number formats that do not fit the values, series of very different size, "
     "text and chart titles equal to the attached template, "
+    "slides identical to the template, including slides that an earlier file of this Turn had changed, "
     "added shapes that cover others) and, when the sandbox could render the file, layout facts measured in that render "
     "(text drawn outside the page, beyond its frame, over other text, or smaller than in the template), "
     "or the fact that the renderer produced no pages from the file. "
@@ -265,6 +266,41 @@ def inspect_pptx(data: bytes, template: bytes | None = None, pdf: bytes | None =
     return view
 
 
+_UNPRINTED_RELATIONS = ("slideLayout", "slideMaster", "notesSlide", "theme")
+_SLIDE_STATE_KEY = "_slide_state"
+
+
+def _slide_prints(presentation: Any) -> dict[int, str]:
+    """One digest per slide id over the slide and the parts it refers to: charts, their workbooks, pictures."""
+    import hashlib
+
+    prints: dict[int, str] = {}
+    for slide in presentation.slides:
+        digest = hashlib.sha256(slide.part.blob)
+        pending, seen = [slide.part], {id(slide.part)}
+        while pending:
+            part = pending.pop()
+            for relation in sorted(part.rels.values(), key=lambda item: item.rId):
+                if relation.is_external or relation.reltype.rsplit("/", 1)[-1] in _UNPRINTED_RELATIONS:
+                    continue
+                target = relation.target_part
+                if id(target) in seen:
+                    continue
+                seen.add(id(target))
+                digest.update(relation.reltype.encode())
+                digest.update(target.blob)
+                pending.append(target)
+        prints[slide.slide_id] = digest.hexdigest()
+    return prints
+
+
+def _slide_words(numbers: list[int]) -> tuple[str, str]:
+    """('slide 2', 'is') or ('slides 2, 3, 4', 'are')."""
+    if len(numbers) == 1:
+        return f"slide {numbers[0]}", "is"
+    return "slides " + ", ".join(str(number) for number in numbers), "are"
+
+
 def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     from pptx import Presentation
 
@@ -318,7 +354,27 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
                     break
         if same:
             unchanged.append((number, same))
-    facts = [{"kind": "chart", "detail": detail} for detail in chart_facts[:_MAX_CHART_FACTS]]
+    # Whole slides equal to the template, compared by slide id with their charts, workbooks and pictures.
+    identical: list[tuple[int, int]] = []
+    changed: list[int] = []
+    if template is not None:
+        before, after = _slide_prints(Presentation(io.BytesIO(template))), _slide_prints(presentation)
+        for number, slide in enumerate(slides, 1):
+            if slide.slide_id not in before:
+                continue
+            if before[slide.slide_id] == after[slide.slide_id]:
+                identical.append((number, slide.slide_id))
+            else:
+                changed.append(slide.slide_id)
+    identical_numbers = [number for number, _ in identical]
+    unchanged = [(number, names) for number, names in unchanged if number not in identical_numbers]
+    facts = []
+    if identical_numbers:
+        words, verb = _slide_words(identical_numbers)
+        facts.append(
+            {"kind": "slides_same_as_template", "detail": f"{words} {verb} identical to the template (text, tables, chart data and pictures)."}
+        )
+    facts += [{"kind": "chart", "detail": detail} for detail in chart_facts[:_MAX_CHART_FACTS]]
     facts += [{"kind": "overlap", "detail": detail} for detail in overlap_facts[:_MAX_OVERLAP_FACTS]]
     for number, names in unchanged[:_MAX_UNCHANGED_SLIDES]:
         rest = len(names) - _MAX_UNCHANGED_NAMES
@@ -329,9 +385,12 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
         "overlap": max(0, len(overlap_facts) - _MAX_OVERLAP_FACTS),
         "same_text_as_template_slides": max(0, len(unchanged) - _MAX_UNCHANGED_SLIDES),
     }
-    return {
+    summary = f"{len(slides)} slides; {counts['charts']} charts, {counts['tables']} tables, {counts['pictures']} pictures"
+    if identical_numbers:
+        summary += "; {} {} identical to the template".format(*_slide_words(identical_numbers))
+    view: dict[str, Any] = {
         "status": "checked",
-        "summary": f"{len(slides)} slides; {counts['charts']} charts, {counts['tables']} tables, {counts['pictures']} pictures.",
+        "summary": summary + ".",
         "facts": facts,
         "facts_omitted": {kind: count for kind, count in omitted.items() if count},
         "template": (
@@ -342,6 +401,10 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
         "not_checked": list(NOT_CHECKED),
         "quoted_text": "Quoted names and text come from the file, not from the server.",
     }
+    if template is not None:
+        # For the server only: which slides this file left at or moved away from the template. Removed before the model sees the view.
+        view[_SLIDE_STATE_KEY] = {"identical": [list(item) for item in identical], "changed": changed}
+    return view
 
 
 _EMU_PER_POINT = 12700
@@ -705,6 +768,11 @@ async def _render_pdf(data: bytes) -> tuple[bytes | None, str]:
         } else "renderer_unavailable"
 
 
+async def render_presentation_pdf(data: bytes) -> tuple[bytes | None, str]:
+    """The executor's PDF of a presentation and the outcome, as the layout facts obtain it."""
+    return await _render_pdf(data)
+
+
 async def _template_render(template: bytes) -> bytes | None:
     """One render of a template serves every file written from it; kept in memory by content hash."""
     import hashlib
@@ -720,18 +788,66 @@ async def _template_render(template: bytes) -> bytes | None:
     return pdf
 
 
-async def pptx_result_view(ctx: Any, artifact: Artifact) -> dict[str, Any]:
-    """Advisory: a view that cannot be built never undoes or questions the saved file."""
+_MAX_TURNS_TRACKED = 256
+_MAX_WRITES_PER_TURN = 64
+# Per Turn, in write order: (file name, ids of the slides that file had changed from the template). Bounded, oldest dropped
+# first; after a restart it starts empty and the fact below is simply not stated.
+_TURN_WRITES: dict[str, list[tuple[str, frozenset[int]]]] = {}
+
+
+def _note_slides_back_to_template(view: dict[str, Any], turn: str | None, name: str) -> None:
+    """State slides this file leaves identical to the template that an earlier file of the same Turn had changed."""
+    state = view.pop(_SLIDE_STATE_KEY, None)
+    if not isinstance(state, dict) or not turn:
+        return
+    earlier = _TURN_WRITES.get(turn, [])
+    back: dict[str, list[int]] = {}
+    for number, slide_id in state.get("identical") or []:
+        for earlier_name, changed in reversed(earlier):
+            if slide_id in changed:
+                back.setdefault(earlier_name, []).append(number)
+                break
+    facts = []
+    for earlier_name, numbers in back.items():
+        words, verb = _slide_words(numbers)
+        facts.append(
+            {
+                "kind": "slides_back_to_template",
+                "detail": _cut(
+                    f"{words} differed from the template in '{earlier_name}', written earlier in this Turn, and {verb} identical to it here."
+                ),
+            }
+        )
+    if facts:
+        # Right after the fact that lists the identical slides, which is always first when there are any.
+        current = view.get("facts", [])
+        view["facts"] = current[:1] + facts + current[1:]
+    writes = _TURN_WRITES.pop(turn, [])
+    writes.append((name, frozenset(state.get("changed") or [])))
+    _TURN_WRITES[turn] = writes[-_MAX_WRITES_PER_TURN:]
+    while len(_TURN_WRITES) > _MAX_TURNS_TRACKED:
+        _TURN_WRITES.pop(next(iter(_TURN_WRITES)))
+
+
+async def pptx_result_view(ctx: Any, artifact: Artifact, *, rendered: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Advisory: a view that cannot be built never undoes or questions the saved file.
+
+    ``rendered``, when given, receives the file bytes, the executor PDF and the render
+    outcome, so the visual self-check reuses this render instead of asking again.
+    """
     from bowhead_core.untrusted_parse import run_worker_json
 
+    rendered = rendered if rendered is not None else {}
     try:
         if not 0 < artifact.size <= MAX_VIEW_BYTES:
+            rendered["outcome"] = "file_size_limit"
             return _not_available("file_size_limit")
         data = await ctx.artifact_store.backend.read_bounded(artifact.path, limit=MAX_VIEW_BYTES)
         if len(data) != artifact.size:
             return _not_available("content_changed")
         template = await _template_bytes(ctx, artifact)
         pdf, render_outcome = await _render_pdf(data)
+        rendered.update(data=data, pdf=pdf, outcome=render_outcome)
         template_pdf = await _template_render(template) if pdf is not None and template is not None else None
         extra = {"template": template, "pdf": pdf, "template_pdf": template_pdf}
         result, outcome = await run_worker_json(
@@ -739,6 +855,7 @@ async def pptx_result_view(ctx: Any, artifact: Artifact) -> dict[str, Any]:
         )
         if outcome != "ok" or not isinstance(result, dict):
             return _not_available({"timeout": "time_limit", "oom": "memory_limit"}.get(outcome, "file_not_readable"))
+        _note_slides_back_to_template(result, getattr(ctx, "turn_id", None), artifact.filename)
         if pdf is None and render_outcome == "file_not_rendered":
             result["layout"] = {"status": "not_rendered", "detail": FILE_NOT_RENDERED}
         elif pdf is None:
@@ -838,29 +955,46 @@ async def attach_input_views(result: Any, ctx: Any) -> Any:
     return {**result, "input_views": views} if views else result
 
 
-async def attach_result_views(result: Any, ctx: Any) -> Any:
-    """Add a view to every PPTX or HTML file this call wrote, work files included."""
+async def attach_result_views(result: Any, ctx: Any, *, presentation_fix: Any = None) -> Any:
+    """Add a view to every PPTX or HTML file this call wrote, work files included.
+
+    With the visual self-check on, PPTX, image and PDF files also get ``visual_view``.
+    """
     from bowhead_core.html_static_check import inspect_retained_html
+    from bowhead_core.visual_self_check import attach_visual_view, deliverable_kind, run_for
 
     outputs = result.get("output_artifacts") if isinstance(result, dict) else None
     store = getattr(ctx, "artifact_store", None)
     if not isinstance(outputs, list) or store is None or not getattr(ctx, "user_id", None):
         return result
+    nested = result.get("result_json") if isinstance(result.get("result_json"), dict) else {}
+    read = result.get("input_artifacts") or nested.get("input_artifacts")
+    read_ids = (
+        [item["artifact_id"] for item in read if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)]
+        if isinstance(read, list)
+        else []
+    )
     for output in outputs:
         if not isinstance(output, dict) or not isinstance(output.get("artifact_id"), str) or output.get("data_role") == "stdout":
             continue
         pptx = is_pptx(output.get("mime"), output.get("name"))
         html = str(output.get("mime") or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml"}
-        if not pptx and not html:
+        kind = deliverable_kind(output.get("mime"), output.get("name"))
+        if not pptx and not html and (kind is None or run_for(ctx) is None):
             continue
         try:
             artifact = await store.get(output["artifact_id"], check_created_by=ctx.user_id, reject_null_owner=True)
             if artifact is None or artifact.created_by_turn != getattr(ctx, "turn_id", None) or artifact.filename != output.get("name"):
                 continue
             if pptx:
-                output["result_view"] = await pptx_result_view(ctx, artifact)
-            elif "html_static_check" not in output and (inspection := await inspect_retained_html(store, artifact)) is not None:
-                output["html_static_check"] = inspection
+                rendered: dict[str, Any] = {}
+                output["result_view"] = await pptx_result_view(ctx, artifact, rendered=rendered)
+                await attach_visual_view(output, ctx, artifact, kind="pptx", rendered=rendered, presentation_fix=presentation_fix, inputs=read_ids)
+            elif html:
+                if "html_static_check" not in output and (inspection := await inspect_retained_html(store, artifact)) is not None:
+                    output["html_static_check"] = inspection
+            elif kind is not None:
+                await attach_visual_view(output, ctx, artifact, kind=kind, presentation_fix=presentation_fix, inputs=read_ids)
         except Exception as exc:
             _LOG.warning("result_view.attach_failed artifact_id=%s error_type=%s", output.get("artifact_id"), type(exc).__name__)
     return result

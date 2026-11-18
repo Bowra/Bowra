@@ -22,6 +22,7 @@ import { inputDocumentFromText, validateInputDocumentTask, type InputDocument } 
 import { copyComposerReferenceSnapshot, type ComposerReferenceSnapshot } from "./composer-reference-transfer";
 import { canonicalizeComposerAttachmentRefs } from "./composer-attachment-refs";
 import { parseCoachCanvasBinding, type CoachCanvasBinding } from "./coach-canvas-target";
+import { selectedSkillsMatchDocument, type SelectedSkillRef } from "./composer-selected-skills";
 import type { WorkspaceSettingsCanvasBinding } from "./workspace-settings-canvas-bridge";
 
 export { ComposerRecoveryUnavailableError } from "./composer-local-persistence-db";
@@ -46,6 +47,12 @@ export interface ComposerSubmissionWireSnapshot {
   documentRevisionTarget?: DocumentRevisionTarget;
   /** Original input-owner revision, retained only for exact revision recovery. */
   sourceDraftRevision?: string;
+  /**
+   * Exact Skills of a Skill-only `/` start sent as an ordinary Lead Turn. Frozen with
+   * the reference source so a recovered retry resends the same selection; absent on
+   * records written before this field and on every other submission.
+   */
+  selectedSkills?: SelectedSkillRef[];
 }
 
 export interface SubmissionRecoveryDraft {
@@ -126,9 +133,33 @@ export class ComposerSubmissionFenceUnresolvedError extends Error {
   }
 }
 
+/** A Skill selection travels only with the reference source it was derived from. */
+function assertSelectedSkillsWithSource(
+  wire: object,
+  document: InputDocument | null,
+  submissionKind: string | undefined,
+): void {
+  if (!Object.hasOwn(wire, "selectedSkills")) return;
+  const record = wire as Record<string, unknown>;
+  if (
+    !document
+    || (submissionKind ?? "start") !== "start"
+    || record.planningMode === "planning"
+    || record.draftChatBinding != null
+    || !selectedSkillsMatchDocument(record.selectedSkills, document)
+  ) {
+    throw new ComposerRecoveryUnavailableError(
+      "composer selected Skills do not match their source",
+    );
+  }
+}
+
 function encodeDraft(draft: SubmissionRecoveryDraft): Uint8Array {
   assertComposerTextDraftFormat(draft);
-  if (draft.wireSnapshot) assertComposerTextDraftFormat(draft.wireSnapshot);
+  if (draft.wireSnapshot) {
+    assertComposerTextDraftFormat(draft.wireSnapshot);
+    assertSelectedSkillsWithSource(draft.wireSnapshot, null, draft.submissionKind);
+  }
   return new TextEncoder().encode(JSON.stringify({
     schemaVersion: 1,
     message: draft.message,
@@ -339,13 +370,14 @@ export function captureReferenceSubmissionDraft(
     "preferredModel",
     "planningMode",
     "draftChatBinding",
+    "selectedSkills",
   ];
   if (
     !wire ||
     typeof wire !== "object" ||
     Array.isArray(wire) ||
     Object.keys(wire).some((key) => !wireFields.includes(key)) ||
-    wireFields.filter((key) => key !== "draftChatBinding").some((key) => !Object.hasOwn(wire, key)) ||
+    wireFields.filter((key) => key !== "draftChatBinding" && key !== "selectedSkills").some((key) => !Object.hasOwn(wire, key)) ||
     wire.composerSurface !==
       (scope.requestedSessionId === null ? "home" : "workbench") ||
     [wire.preferredProvider, wire.preferredModel].some(
@@ -379,6 +411,7 @@ export function captureReferenceSubmissionDraft(
       "composer reference wire invalid",
     );
   }
+  assertSelectedSkillsWithSource(wire, snapshot.input_document, submissionKind);
   return {
     ...snapshot,
     submissionKind,
@@ -667,6 +700,7 @@ async function readPendingSubmissionRecord(
           throw new ComposerRecoveryUnavailableError("composer recovery document mismatch");
         }
       } else assertComposerTextDraftFormat(snapshot);
+      assertSelectedSkillsWithSource(snapshot, document, decoded.submissionKind);
     }
     const attachments = document ? canonicalizeComposerAttachmentRefs(decoded.attachments) : decoded.attachments;
     if (!attachments) throw new ComposerRecoveryUnavailableError("composer recovery attachments invalid");

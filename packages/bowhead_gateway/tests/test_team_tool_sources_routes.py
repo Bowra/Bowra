@@ -113,6 +113,53 @@ def test_crud_roundtrip_and_team_scoping(tmp_path, monkeypatch):
     assert client.get(f"/api/v1/team-tool-sources/{src_id}").status_code == 404
 
 
+def _fail_auth_writes(monkeypatch, times: int) -> list[int]:
+    """Fail the next ``times`` writes of tool source credentials with the runtime's lease conflict."""
+    from bowhead_core.sqlite_diagnostics import DiagnosticCursor
+
+    from bowhead_core import sqlite_domain_runtime
+
+    attempts: list[int] = []
+    original = DiagnosticCursor.execute
+
+    def execute(self, sql, parameters=(), /):
+        if sql.lstrip().upper().startswith("UPDATE TEAM_TOOL_SOURCE SET AUTH_TYPE"):
+            attempts.append(len(attempts) + 1)
+            if len(attempts) <= times:
+                raise sqlite_domain_runtime._busy()
+        return original(self, sql, parameters)
+
+    monkeypatch.setattr(DiagnosticCursor, "execute", execute)
+    return attempts
+
+
+def test_create_repeats_the_credential_write_and_a_spent_wait_leaves_no_half_created_source(tmp_path, monkeypatch):
+    from bowhead_core.error_catalog import default_error_catalog_dir, load_error_catalog
+    from bowhead_gateway.error_handler import register_error_handlers
+
+    from bowhead_core import _db
+
+    store = UserStore(str(tmp_path / "u.db"))
+    _run(store.initialize())
+    client = _client(store, User(id="u_a", team_id="team_a", email="a@x.com"))
+    register_error_handlers(client.app)
+    client.app.state.error_catalog = load_error_catalog(default_error_catalog_dir())
+    body = {"name": "datarc", "base_url": _PUB, "openapi_spec_json": _SPEC, "auth_type": "bearer", "auth": {"token": "tok"}}
+
+    attempts = _fail_auth_writes(monkeypatch, 1)
+    created = client.post("/api/v1/team-tool-sources", json=body)
+    assert created.status_code == 200, created.text
+    assert attempts == [1, 2] and created.json()["has_auth"] is True
+
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    _fail_auth_writes(monkeypatch, 10_000)
+    busy = client.post("/api/v1/team-tool-sources", json=body | {"name": "datarc-2"})
+    assert busy.status_code == 503
+    assert busy.json()["detail"]["code"] == "store_busy"
+    names = {item["name"] for item in client.get("/api/v1/team-tool-sources").json()["items"]}
+    assert names == {"datarc"}
+
+
 def test_impact_guard_requires_preview_and_replays_delete_receipt(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())

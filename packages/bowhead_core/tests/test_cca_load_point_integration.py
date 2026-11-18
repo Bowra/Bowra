@@ -232,3 +232,93 @@ async def test_load_point_stamps_source_labels_on_ctx(tmp_path, monkeypatch) -> 
         labels = ctx.team_tool_source_labels
         assert labels, "load point 应盖上标签映射"
         assert labels[op_tool_name(src_id, "ping")] == "datarc"  # TeamToolSource.name from _seed.
+
+
+@pytest.mark.asyncio
+async def test_team_tool_grants_hide_the_denied_operation_with_one_batch(tmp_path, monkeypatch) -> None:
+    """Every Turn decided each Team tool's two grant targets on their own. The batch hides exactly the
+    operation the one-by-one path hides, without single decisions."""
+    import contextlib
+
+    from bowhead_core.access_control import AccessContext, AccessControlStore
+    from bowhead_core.capability_resolver import CapabilityPrincipal, CapabilityResolver
+    from bowhead_core.tool_registry import ToolRegistry
+
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "1")
+    store = UserStore(str(tmp_path / "u.db"))
+    await store.initialize()
+    spec = {
+        **_SPEC,
+        "paths": {
+            "/ping": {"get": {"operationId": "ping", "summary": "ping", "responses": {"200": {"description": "ok"}}}},
+            "/pong": {"get": {"operationId": "pong", "summary": "pong", "responses": {"200": {"description": "ok"}}}},
+        },
+    }
+    src = TeamToolSource(
+        id=_id("ots"),
+        team_id="team_a",
+        name="datarc",
+        base_url="https://api-a.example",
+        openapi_spec_json=json.dumps(spec),
+        selected_op_ids=["ping", "pong"],
+        auth_type="none",
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    await store.create_team_tool_source(src)
+    access = AccessControlStore(tmp_path / "access.db")
+    await access.initialize()
+    await access.create_or_update_resource_grant(
+        team_id="team_a",
+        resource_kind="team_tool_op",
+        resource_id=op_tool_name(src.id, "pong"),
+        principal_type="user",
+        principal_id="u",
+        permission="use",
+        effect="deny",
+        created_by="admin",
+    )
+
+    class _OneByOne:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "explain_decisions":
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    async def overlay(access_store) -> frozenset[str]:
+        ctx = _ctx("team_a")
+        ctx.access_control_store = access_store
+        ctx.access_context = AccessContext(
+            user_id="u",
+            team_id="team_a",
+            workspace_id="w",
+            workspace_role="member",
+            team_role=None,
+            group_ids=(),
+            policy_epoch=1,
+            is_team_admin=False,
+        ).__dict__
+        resolver = CapabilityResolver(
+            base_registry=ToolRegistry(), user_store=store, tool_auth_registry=ToolAuthRegistry(store), access_control_store=access_store
+        )
+        async with contextlib.AsyncExitStack() as stack:
+            resolved = await resolver.resolve(stack, CapabilityPrincipal(user_id="u", team_id="team_a", workspace_id="w", role=None), ctx)
+        return resolved.tool_view.overlay_names if resolved.tool_view is not None else frozenset()
+
+    single = await overlay(_OneByOne(access))
+    calls = {"single": 0}
+    one = access.explain_decision
+
+    async def counted_one(*args, **kwargs):
+        calls["single"] += 1
+        return await one(*args, **kwargs)
+
+    monkeypatch.setattr(access, "explain_decision", counted_one)
+    batched = await overlay(access)
+
+    assert single == batched == frozenset({op_tool_name(src.id, "ping")})
+    assert calls["single"] == 0

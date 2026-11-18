@@ -51,8 +51,8 @@ from bowhead_core.team_subagent_store import (
     effective_agent_name_key,
 )
 from bowhead_core.user_store import TeamSubagent
+from core_legacy_database import copy_migrated_core, migrated_core_template
 from legacy_agent_release_fixture import seed_legacy_publication
-from test_agent_execution_binding import _migrated_core_template
 
 _TIME = "2026-09-03T08:00:00+00:00"
 
@@ -376,9 +376,7 @@ def _canonical(value) -> str:
 
 def _db(tmp_path):
     db_path = tmp_path / "bowhead.db"
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_migrated_core_template()) as source, sqlite3.connect(db_path) as destination:
-        source.backup(destination)
+    copy_migrated_core(db_path)
     return db_path
 
 
@@ -394,7 +392,7 @@ def test_business_database_copies_preserve_schema_and_isolate_writes(tmp_path, b
         _upgrade(first)
         _upgrade(second)
     with (
-        sqlite3.connect(_migrated_core_template()) as source,
+        sqlite3.connect(f"{migrated_core_template().as_uri()}?mode=ro", uri=True) as source,
         sqlite3.connect(first) as first_db,
         sqlite3.connect(second) as second_db,
     ):

@@ -34,10 +34,10 @@ async def validate_resource_binding(resources: AgentCoachResources, *, target: d
         elif kind == "capability":
             selected = reference["id"] in definition.get("capability_ids", [])
         else:
-            grant = detail["exact_read_grant"]
+            # A Skill not offered for selection has no exact grant to copy, but a candidate may still keep it.
+            skill_ref = {"kind": reference["source_kind"], "id": reference["id"], "name": detail["skill_name"]}
             selected = any(
-                value.get("skill_ref") == grant["skill_ref"] and value.get("revision") == grant["revision"]
-                for value in definition.get("skill_grants", [])
+                value.get("skill_ref") == skill_ref and value.get("revision") == reference["revision"] for value in definition.get("skill_grants", [])
             )
         if not selected:
             raise ValueError("resource_binding_not_in_candidate")

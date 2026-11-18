@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import re
+import sqlite3
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -33,7 +34,7 @@ from cryptography.fernet import Fernet
 from jsonschema import Draft202012Validator
 from mcp.types import PaginatedRequestParams
 
-from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core._db import is_authority_busy, open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
 from bowhead_core.openapi_tool_source import connect_remote_mcp
 from bowhead_core.scrub import scrub
@@ -360,7 +361,8 @@ class PersonalMcpStore:
 
     async def recover(self) -> None:
         async with open_shared_ctx(self.db_path) as db:
-            present = await (await db.execute("SELECT 1 FROM sqlite_schema WHERE name='personal_mcp_invocation'")).fetchone()
+            async with db.execute("SELECT 1 FROM sqlite_schema WHERE name='personal_mcp_invocation'") as cursor:
+                present = await cursor.fetchone()
             if not present:
                 return
             await db.execute("UPDATE personal_mcp_invocation SET status='unknown',args_cipher=NULL WHERE status='dispatching'")
@@ -438,7 +440,8 @@ class PersonalMcpStore:
                 # Removed tools remain as unselected tombstones for audit IDs;
                 # the discovery response identifies the current tool set.
                 present = {tool["remote_name"] for tool in tools}
-                existing = await (await db.execute("SELECT id,remote_name FROM personal_mcp_tool WHERE connection_id=?", (identity,))).fetchall()
+                async with db.execute("SELECT id,remote_name FROM personal_mcp_tool WHERE connection_id=?", (identity,)) as cursor:
+                    existing = await cursor.fetchall()
                 for tool_id, remote_name in existing:
                     if remote_name not in present:
                         await db.execute(
@@ -466,12 +469,8 @@ class PersonalMcpStore:
                 )
                 if updated.rowcount != 1:
                     raise PersonalMcpError("personal_mcp_version_conflict")
-                valid = {
-                    row[0]
-                    for row in await (
-                        await db.execute("SELECT id FROM personal_mcp_tool WHERE connection_id=? AND schema_digest<>''", (identity,))
-                    ).fetchall()
-                }
+                async with db.execute("SELECT id FROM personal_mcp_tool WHERE connection_id=? AND schema_digest<>''", (identity,)) as tool_cursor:
+                    valid = {row[0] for row in await tool_cursor.fetchall()}
                 if not set(selected) <= valid:
                     raise PersonalMcpError("personal_mcp_invalid_selection")
                 await db.execute("UPDATE personal_mcp_tool SET selected=0 WHERE connection_id=?", (identity,))
@@ -506,32 +505,28 @@ class PersonalMcpStore:
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
-                agent = await (
-                    await db.execute(
-                        """SELECT 1 FROM team_subagent WHERE id=? AND team_id=?
+                async with db.execute(
+                    """SELECT 1 FROM team_subagent WHERE id=? AND team_id=?
                   AND COALESCE(owner_user_id,created_by)=?
                   AND status='enabled' AND live_revision_id=?""",
-                        (agent_id, team, owner, revision),
-                    )
-                ).fetchone()
+                    (agent_id, team, owner, revision),
+                ) as cursor:
+                    agent = await cursor.fetchone()
                 if not agent:
                     raise PersonalMcpError("personal_mcp_not_found")
-                valid = {
-                    row[0]
-                    for row in await (
-                        await db.execute(
-                            """SELECT t.id FROM personal_mcp_tool t
+                async with db.execute(
+                    """SELECT t.id FROM personal_mcp_tool t
                   JOIN personal_mcp_connection c ON c.id=t.connection_id
                   WHERE c.owner_user_id=? AND c.status='ready' AND t.selected=1""",
-                            (owner,),
-                        )
-                    ).fetchall()
-                }
+                    (owner,),
+                ) as tool_cursor:
+                    valid = {row[0] for row in await tool_cursor.fetchall()}
                 if not set(tool_ids) <= valid or len(tool_ids) > 20:
                     raise PersonalMcpError("personal_mcp_invalid_selection")
-                old = await (
-                    await db.execute("SELECT version FROM personal_mcp_binding WHERE agent_id=? AND revision_id=?", (agent_id, revision))
-                ).fetchone()
+                async with db.execute(
+                    "SELECT version FROM personal_mcp_binding WHERE agent_id=? AND revision_id=?", (agent_id, revision)
+                ) as cursor_2:
+                    old = await cursor_2.fetchone()
                 if (old[0] if old else 0) != expected_version:
                     raise PersonalMcpError("personal_mcp_version_conflict")
                 await db.execute("DELETE FROM personal_mcp_binding WHERE agent_id=? AND revision_id<>?", (agent_id, revision))
@@ -549,51 +544,52 @@ class PersonalMcpStore:
                 await db.rollback()
                 raise
 
+    @repeat_when_authority_busy(spent=None, kind="turn")
     async def manifest(self, owner: str, binding: Any) -> dict[str, Any] | None:
-        """Freeze only cached metadata; no network access in task assembly."""
+        """Freeze only cached metadata; no network access in task assembly.
+
+        A helper start writes this manifest, a fenced table, so it repeats when a running Turn holds
+        the core lease (census T1). Each attempt rechecks the existing (turn, execution) row first.
+        """
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
-                existing = await (
-                    await db.execute(
-                        "SELECT * FROM personal_mcp_manifest WHERE turn_id=? AND execution_id=?", (binding.turn_id, binding.execution_id)
-                    )
-                ).fetchone()
+                async with db.execute(
+                    "SELECT * FROM personal_mcp_manifest WHERE turn_id=? AND execution_id=?", (binding.turn_id, binding.execution_id)
+                ) as cursor_2:
+                    existing = await cursor_2.fetchone()
                 if existing:
                     if existing["owner_user_id"] != owner:
                         raise PersonalMcpError("personal_mcp_scope_denied")
                     await db.commit()
                     return dict(existing)
-                private = await (
-                    await db.execute(
-                        """SELECT 1 FROM team_subagent WHERE id=? AND team_id=?
+                async with db.execute(
+                    """SELECT 1 FROM team_subagent WHERE id=? AND team_id=?
                   AND COALESCE(owner_user_id,created_by)=? AND status='enabled'""",
-                        (binding.agent_id, binding.team_id, owner),
-                    )
-                ).fetchone()
+                    (binding.agent_id, binding.team_id, owner),
+                ) as cursor_3:
+                    private = await cursor_3.fetchone()
                 if not private:
                     await db.commit()
                     return None
-                row = await (
-                    await db.execute(
-                        """SELECT b.* FROM personal_mcp_binding b JOIN team_subagent a ON a.id=b.agent_id
+                async with db.execute(
+                    """SELECT b.* FROM personal_mcp_binding b JOIN team_subagent a ON a.id=b.agent_id
                   WHERE b.agent_id=? AND b.revision_id=? AND b.owner_user_id=? AND b.tool_ids_json<>'[]'
                     AND COALESCE(a.owner_user_id,a.created_by)=? AND a.team_id=?
                     AND a.status='enabled'""",
-                        (binding.agent_id, binding.revision_ref, owner, owner, binding.team_id),
-                    )
-                ).fetchone()
+                    (binding.agent_id, binding.revision_ref, owner, owner, binding.team_id),
+                ) as cursor_4:
+                    row = await cursor_4.fetchone()
                 tools = []
                 for tool_id in json.loads(row["tool_ids_json"]) if row else []:
-                    tool = await (
-                        await db.execute(
-                            """SELECT t.*,c.name AS connection_name,c.version AS connection_version
+                    async with db.execute(
+                        """SELECT t.*,c.name AS connection_name,c.version AS connection_version
                       FROM personal_mcp_tool t JOIN personal_mcp_connection c ON c.id=t.connection_id
                       WHERE t.id=? AND t.selected=1 AND c.owner_user_id=? AND c.status='ready'""",
-                            (tool_id, owner),
-                        )
-                    ).fetchone()
+                        (tool_id, owner),
+                    ) as cursor:
+                        tool = await cursor.fetchone()
                     if tool is None:
                         raise PersonalMcpError("personal_mcp_binding_unavailable")
                     tools.append(dict(tool))
@@ -723,14 +719,13 @@ class PersonalMcpStore:
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
-                invocation = await (
-                    await db.execute(
-                        """SELECT i.connection_id,i.tool_id,s.id FROM personal_mcp_invocation i
+                async with db.execute(
+                    """SELECT i.connection_id,i.tool_id,s.id FROM personal_mcp_invocation i
                           JOIN turns t ON t.id=i.turn_id JOIN sessions s ON s.id=t.session_id
                           WHERE i.id=? AND i.owner_user_id=? AND i.status='pending' AND i.expires_at>?""",
-                        (identity, owner, _now()),
-                    )
-                ).fetchone()
+                    (identity, owner, _now()),
+                ) as cursor:
+                    invocation = await cursor.fetchone()
                 if not invocation or invocation[2] != session_id:
                     await db.rollback()
                     return False
@@ -772,7 +767,9 @@ class PersonalMcpStore:
             )
             await db.commit()
 
+    @repeat_when_authority_busy(spent=None, kind="turn")
     async def connection_failure(self, owner: str, identity: str, version: int, status: str) -> None:
+        """Mark a connection that failed a dispatched call; the version fence makes a repeat a no-op (census T2)."""
         async with open_shared_ctx(self.db_path) as db:
             await db.execute(
                 "UPDATE personal_mcp_connection SET status=?,version=version+1,updated_at=? WHERE id=? AND owner_user_id=? AND version=? AND status='ready'",
@@ -946,9 +943,18 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
 
                 if dispatched and isinstance(exc, Exception) and not isinstance(exc, PersonalMcpError):
                     with anyio.CancelScope(shield=True):
-                        await store.connection_failure(
-                            owner, tool["connection_id"], tool["connection_version"], "needs_reauth" if is_upstream_auth_error(exc) else "unreachable"
-                        )
+                        try:
+                            await store.connection_failure(
+                                owner,
+                                tool["connection_id"],
+                                tool["connection_version"],
+                                "needs_reauth" if is_upstream_auth_error(exc) else "unreachable",
+                            )
+                        except sqlite3.OperationalError as busy:
+                            # A spent lease wait must not replace the call's own outcome.
+                            if not is_authority_busy(busy):
+                                raise
+                            log.warning("personal_mcp.connection_failure_unrecorded", connection_id=tool["connection_id"])
                 if identity:
                     with anyio.CancelScope(shield=True):
                         await self_finish(identity, dispatched, started)

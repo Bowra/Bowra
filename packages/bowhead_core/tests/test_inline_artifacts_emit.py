@@ -406,6 +406,35 @@ async def test_final_files_exclude_a_revised_input_but_keep_its_execution_record
     assert len(await log.list_events("t_revision")) == 2
 
 
+async def test_final_files_show_only_the_newest_copy_a_helper_rewrote(store: CanvasStore, art_store: ArtifactStore) -> None:
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    await store.ensure_canvas(session_id="s_deck", workspace_id="w", user_id="u")
+    copies = [
+        await _put_deliverable(art_store, turn="t_rewrite", filename="game.html", mime="text/html", content=f"copy {n}".encode()) for n in range(3)
+    ]
+    other_helper = await _put_deliverable(art_store, turn="t_rewrite", filename="game.html", mime="text/html", content=b"other helper")
+    log = TurnLogStore(str(art_store.db_path))
+    await log.initialize()
+    writes = [("sub_compute", copy) for copy in copies] + [("sub_other", other_helper)]
+    for index, (helper, artifact) in enumerate(writes):
+        step = {"step_id": f"step_{index}", "tool_name": "python_sandbox", "subagent_id": helper}
+        done = {
+            "step_id": f"step_{index}",
+            "state": "failure" if index == 1 else "success",
+            "result_meta": {"output_artifacts": [{"artifact_id": artifact.id, "filename": artifact.filename, "mime": artifact.mime}]},
+        }
+        assert await log.record(turn_id="t_rewrite", event_type="step_started", payload=step) is not None
+        assert await log.record(turn_id="t_rewrite", event_type="step_done", payload=done) is not None
+    ctx = SimpleNamespace(canvas_store=store, artifact_store=art_store)
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, ctx, "t_rewrite")
+    assert {item["id"] for item in payload["inline_artifacts"]} == {copies[-1].id, other_helper.id}
+    for copy in copies:
+        assert await art_store.get(copy.id) is not None
+    assert len(await log.list_events("t_rewrite")) == 8
+
+
 async def test_pptx_deliverable_emits_chip_when_report_worthy(
     store: CanvasStore,
     art_store: ArtifactStore,

@@ -2851,6 +2851,10 @@ function computeNarrativeDedupSegIds(
     // Final citation cleanup removes bare Artifact labels; compare their streamed form equally.
     // Keep knowledge membership and operation IDs, which carry the actual receipt identity.
     .replace(/\s*[(（\[【]?\s*(?:artifact(?:_id)?\s*[=:：]\s*|artifact\s+)?art_[a-f0-9]{8,}\s*[)）\]】]?/gi, "")
+    // The final cleanup keeps a bracket that holds more than the removed ID and drops the
+    // separator next to it ("（art_…，约32小时前）" → "（约32小时前）"); compare without brackets
+    // and list separators so the streamed form still matches (Observed case showed both).
+    .replace(/[()（）[\]【】，,、；;：:]/g, "")
     .replace(/\s+/g, "")
     .trim();
   const a = norm(answerText);

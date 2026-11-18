@@ -25,7 +25,6 @@ from bowhead_core.export_snapshot import (
     ExportSnapshotStore,
 )
 from bowhead_core.session_store import SessionStore
-from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import export_assets as export_assets_module
 
@@ -59,18 +58,8 @@ def _request(*, requested_by: str = "u_owner") -> ExportSnapshotRequest:
 
 
 @pytest.fixture
-async def stores(tmp_path: Path) -> Stores:
-    path = tmp_path / "assets.db"
-    from alembic import command
-    from alembic.config import Config
-
-    from bowhead_core import migrations
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
-    config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, SOURCE_REVISION)
+async def stores(tmp_path: Path, migrated_legacy_core_db: Path) -> Stores:
+    path = migrated_legacy_core_db
     sessions = SessionStore(path)
     canvases = CanvasStore(path)
     snapshots = ExportSnapshotStore(path)

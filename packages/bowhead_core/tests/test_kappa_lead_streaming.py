@@ -460,13 +460,26 @@ async def test_stream_invoke_lead_does_not_double_emit_partial_answer() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_runner_calls_the_boundary_callback_after_prose_that_ends_in_tool_calls() -> None:
+async def test_runner_calls_the_boundary_callback_after_prose_that_ends_in_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Real SubagentRunner: a call that streams prose and then tool calls reaches
     `stream_on_tool_call` before the next LLM call, so the Lead's marker filter can
     release its held tail in narrative order (the Lead wires `flush` into this callback).
     """
     from bowhead_core.agents.response_kind_scanner import feed, flush, init_per_turn_scanner_state
     from bowhead_core.events import TurnEventBus
+    from bowhead_core.subagent import PROFILES, SubagentProfile
+    from bowhead_core.tool_registry import ToolSpec
+    from bowhead_router.types import ToolSchema
+
+    tool_name = "inspect_value"
+    monkeypatch.setitem(
+        PROFILES,
+        "lead",
+        SubagentProfile(name="lead", llm_agent_type="lead", tool_whitelist=(tool_name,), system_prompt="Run the inspection.", max_iterations=8),
+    )
+
+    async def inspect_value(args, ctx):
+        return {"value": 42}
 
     class _TwoCallRouter(_FakeRouter):
         def stream(self, agent_type: str, req: LLMRequest, **kw: Any) -> AsyncIterator[LLMChunk]:
@@ -475,7 +488,7 @@ async def test_runner_calls_the_boundary_callback_after_prose_that_ends_in_tool_
                 return _aiter(
                     [
                         LLMChunk(delta="<response_kind>chat</response_kind>check if a <"),
-                        LLMChunk(tool_call_delta=ToolCall(id="t1", name="bi_query", arguments={"q": "GMV"})),
+                        LLMChunk(tool_call_delta=ToolCall(id="t1", name=tool_name, arguments={})),
                         LLMChunk(finish_reason="tool_use"),
                     ]
                 )
@@ -483,6 +496,9 @@ async def test_runner_calls_the_boundary_callback_after_prose_that_ends_in_tool_
 
     router = _TwoCallRouter()
     runner = _make_runner(router)
+    runner.tool_registry.register(
+        ToolSpec(schema=ToolSchema(name=tool_name, description="Inspect a value.", input_schema={"type": "object"}), handler=inspect_value)
+    )
     timeline: list[str] = []
     state = init_per_turn_scanner_state()
 
@@ -497,17 +513,19 @@ async def test_runner_calls_the_boundary_callback_after_prose_that_ends_in_tool_
         tail, state = flush(state)
         timeline.append(f"|{tail}|")
 
-    with contextlib.suppress(Exception):
-        await runner.run(
-            profile_name="lead",
-            task="比较一下",
-            parent_turn_id="t",
-            parent_bus=TurnEventBus(),
-            parent_ctx=_stream_ctx(),
-            stream_callback=_cb,
-            stream_on_tool_call=_boundary,
-        )
+    result = await runner.run(
+        profile_name="lead",
+        task="Inspect the value.",
+        parent_turn_id="t",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_stream_ctx(),
+        stream_callback=_cb,
+        stream_on_tool_call=_boundary,
+    )
 
+    assert result.ok
+    assert len(result.tool_invocations) == 1
+    assert result.tool_invocations[0].error is None
     # The runner's own condition (`resp.tool_calls and resp.content`) fired the callback once,
     # after the first call's prose and before the second call's text.
     assert timeline == ["check if a ", "|<|", "done"], timeline

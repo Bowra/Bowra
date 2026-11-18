@@ -13,6 +13,7 @@ import aiosqlite
 import anyio
 import structlog
 
+from bowhead_core._db import execute_and_close
 from bowhead_core.account_artifact_lock import account_artifact_lock
 from bowhead_core.account_deletion import (
     AccountDeletion,
@@ -319,7 +320,7 @@ class AccountDeletionService:
             for domain in ("observability", "notifications", "content", "execution"):
                 async with diagnostic_connect(domain_database_path(self.users.db_path, domain)) as domain_db:
                     await domain_db.execute("PRAGMA foreign_keys=ON")
-                    await domain_db.execute("PRAGMA main.secure_delete=ON")
+                    await execute_and_close(domain_db, "PRAGMA main.secure_delete=ON")
                     await domain_db.execute("BEGIN IMMEDIATE")
                     try:
                         await self._check_lease(domain_db, deletion, epoch)
@@ -334,7 +335,7 @@ class AccountDeletionService:
         # creator FKs. All personal attributes, credentials and settings vanish.
         async with diagnostic_connect(self.users.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await execute_and_close(db, "PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await self._assert_lease(db, deletion, epoch)

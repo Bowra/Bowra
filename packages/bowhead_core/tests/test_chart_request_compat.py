@@ -219,3 +219,49 @@ async def test_a_refused_request_reports_no_adjustments() -> None:
     result = await _add_chart(args(force_kind="hbar", axes={"x": "区域", "y": ["营业额_亿"]}, group_by=[]), ctx)
     assert "Requested fields are absent: ['区域']" in result["error"]
     assert "presentation_fallbacks" not in result
+
+
+@pytest.mark.parametrize("kind", ["hbar", "bar"])
+async def test_values_on_x_and_categories_on_y_are_exchanged(kind: str) -> None:
+    """Observed case: a synthesis helper sent hbar with x=营业额_亿元, y=[种类大类] and
+    x_scale=linear seven times; each reply said only that the category field needs numeric values."""
+    ctx, canvas = context(STORES)
+    request = args(force_kind=kind, axes={"x": "营业额_亿", "y": ["门店"], "x_scale": "linear"}, group_by=[], column_units=AMOUNTS)
+    result = await _add_chart(request, ctx)
+    assert "error" not in result, result
+    spec = canvas.appended_payload["spec"]
+    assert spec["kind"] == kind
+    assert spec["explicit_presentation"]["axes"] == {"x": "门店", "y": ["营业额_亿"], "x_scale": "category"}
+    assert [row["门店"] for row in spec["rows"]] == ["一店", "二店", "三店"]
+    swapped = next(entry for entry in result["presentation_fallbacks"] if entry["code"] == "axes_swapped")
+    assert swapped["detail"] == f"{kind} takes its categories in x and its values in y; drew '门店' as the categories and '营业额_亿' as the values."
+
+
+@pytest.mark.parametrize(
+    "axes",
+    [
+        {"x": "营业额_亿", "y": ["同比%"], "x_scale": "category"},
+        {"x": "营业额_亿", "y": ["门店", "同比%"], "x_scale": "category"},
+    ],
+    ids=["both-numeric", "two-y-fields"],
+)
+async def test_axes_stay_as_written_without_one_reading(axes: dict) -> None:
+    ctx, canvas = context(STORES)
+    result = await _add_chart(args(force_kind="hbar", axes=axes, group_by=[], column_units=AMOUNTS, column_types=TYPES), ctx)
+    assert "axes_swapped" not in [entry["code"] for entry in result.get("presentation_fallbacks", [])]
+    if "error" not in result:
+        assert canvas.appended_payload["spec"]["explicit_presentation"]["axes"]["x"] == "营业额_亿"
+
+
+async def test_a_line_keeps_its_axes() -> None:
+    ctx, canvas = context(STORES)
+    result = await _add_chart(args(force_kind="line", axes={"x": "营业额_亿", "y": ["门店"], "x_scale": "category"}, group_by=[]), ctx)
+    assert "requires finite, safely representable numeric values" in result["error"]
+    assert canvas.appended_payload is None
+
+
+async def test_a_grouped_bar_keeps_its_axes() -> None:
+    regions = "月份,区域,营业额_亿\n2025-01,华东,1\n2025-01,华北,2\n2025-02,华东,3\n2025-02,华北,4\n".encode()
+    ctx, canvas = context(regions)
+    result = await _add_chart(args(force_kind="bar", axes={"x": "营业额_亿", "y": ["区域"], "x_scale": "category"}, group_by=["月份"]), ctx)
+    assert "axes_swapped" not in [entry["code"] for entry in result.get("presentation_fallbacks", [])]

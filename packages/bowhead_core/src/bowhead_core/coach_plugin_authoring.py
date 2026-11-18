@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, run_sqlite_authority_write
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.team_plugin_store import TeamPluginStore, _validate_contents, rebase_skill_grants
 
@@ -41,6 +42,22 @@ def _rebase_to_validation(candidate: dict, validation: dict) -> dict:
     return {**candidate, "skill_grants": rebase_skill_grants(candidate["skill_grants"], current)}
 
 
+@asynccontextmanager
+async def _read_transaction(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
+    """One consistent read snapshot that takes no cross-file authority lease.
+
+    Inspect, validate, the receipt read and the save's first check only read. On a write-capable
+    connection their scope check pins the execution file's shared lease and fails at once beside
+    an authority writer. The save's write re-authorizes and rechecks inside its own transaction.
+    """
+    async with open_pooled_read_ctx(db_path) as db:
+        await db.execute("BEGIN")
+        try:
+            yield db
+        finally:
+            await db.rollback()
+
+
 class CoachPluginAuthoring:
     def __init__(self, db_path: str, scope: ReferenceRequestScope, authorize: Authorize, validate: Validate) -> None:
         self.db_path, self.scope, self.authorize, self.validate_resources = db_path, scope, authorize, validate
@@ -48,14 +65,14 @@ class CoachPluginAuthoring:
 
     async def _current(self, db: aiosqlite.Connection, identity: str) -> dict:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM team_capability WHERE team_id=? AND id=? AND status='active'", (self.scope.team_id, identity))
-        row = await cursor.fetchone()
+        async with db.execute("SELECT * FROM team_capability WHERE team_id=? AND id=? AND status='active'", (self.scope.team_id, identity)) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             raise ValueError("plugin_unavailable")
         return await self.plugins._read_conn(db, row)
 
     async def _impact(self, db: aiosqlite.Connection, identity: str | None) -> dict:
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT 'release' AS kind,a.id,a.live_revision_id AS version FROM team_subagent a
                JOIN team_subagent_capability_binding b ON b.team_id=a.team_id AND b.subagent_id=a.id AND b.revision_id=a.live_revision_id
                WHERE a.team_id=? AND b.capability_id=? AND a.lifecycle_state='active'
@@ -65,8 +82,8 @@ class CoachPluginAuthoring:
                json_each(d.definition_json,'$.value.capability_ids') j WHERE d.team_id=? AND j.value=? AND d.status IN ('editing','ready','blocked')
                ORDER BY kind,id,version""",
             (self.scope.team_id, identity, self.scope.team_id, identity, self.scope.team_id, identity),
-        )
-        consumers = [tuple(row) for row in await cursor.fetchall()]
+        ) as cursor:
+            consumers = [tuple(row) for row in await cursor.fetchall()]
         return {
             "fingerprint": "sha256:" + _hash(consumers),
             "affected_agent_count": len({row[1] for row in consumers if row[0] != "creation"}),
@@ -76,8 +93,7 @@ class CoachPluginAuthoring:
         }
 
     async def inspect(self, *, plugin_id: str) -> dict:
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("BEGIN")
+        async with _read_transaction(self.db_path) as db:
             can_save = await self.authorize(db, False)
             item = await self._current(db, plugin_id)
             validation = await self.validate_resources(item, None)
@@ -122,8 +138,7 @@ class CoachPluginAuthoring:
     async def validate(self, *, target: dict | None, patch: dict, expected_impact: str | None) -> dict:
         from bowhead_core.coach_validation import authoring_validation_report, candidate_digest
 
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("BEGIN")
+        async with _read_transaction(self.db_path) as db:
             can_save = await self.authorize(db, False)
             candidate, impact, _ = await self._candidate(db, target, patch, expected_impact)
             validation = await self.validate_resources(candidate, patch.get("tools"))
@@ -148,32 +163,50 @@ class CoachPluginAuthoring:
 
     async def _receipt(self, db: aiosqlite.Connection, operation_id: str) -> aiosqlite.Row | None:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM coach_plugin_operation WHERE id=? AND team_id=? AND user_id=? AND workspace_id=?",
             (operation_id, self.scope.team_id, self.scope.user_id, self.scope.workspace_id),
-        )
-        return await cursor.fetchone()
+        ) as cursor:
+            return await cursor.fetchone()
 
     async def save(self, *, target: dict | None, patch: dict, expected_impact: str | None, request_id: str, turn_id: str) -> dict:
         operation_id = "cpw_" + _hash([self.scope.team_id, self.scope.user_id, turn_id, request_id])
         request_hash = _hash([self.scope.workspace_id, target, patch, expected_impact])
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("BEGIN IMMEDIATE")
-            await self.authorize(db, True)
+
+        async def recorded(db: aiosqlite.Connection) -> dict | None:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM coach_plugin_operation WHERE id=?", (operation_id,))
-            existing = await cursor.fetchone()
-            if existing is not None:
-                if existing["request_hash"] != request_hash:
-                    raise ValueError("plugin_idempotency_conflict")
-                return json.loads(existing["result_json"])
-            candidate, impact, current = await self._candidate(db, target, patch, expected_impact)
-            validation = await self.validate_resources(candidate, patch.get("tools"))
-            candidate = _rebase_to_validation(candidate, validation)
-            if validation["status"] == "blocked":
-                return {"ok": False, "error": "plugin_dependencies_blocked", "dependency_validation": validation, "persisted": False}
+            async with db.execute("SELECT * FROM coach_plugin_operation WHERE id=?", (operation_id,)) as cursor:
+                existing = await cursor.fetchone()
+            if existing is None:
+                return None
+            if existing["request_hash"] != request_hash:
+                raise ValueError("plugin_idempotency_conflict")
+            return json.loads(existing["result_json"])
+
+        # Dependency validation may do I/O, so it runs before the write transaction instead of
+        # holding the writer and the authority lease (census T7).
+        async with _read_transaction(self.db_path) as db:
             await self.authorize(db, True)
-            unchanged = current is not None and all(current[key] == value for key, value in candidate.items())
+            previous = await recorded(db)
+            if previous is not None:
+                return previous
+            candidate, _, _ = await self._candidate(db, target, patch, expected_impact)
+        validation = await self.validate_resources(candidate, patch.get("tools"))
+        validated = _rebase_to_validation(candidate, validation)
+        if validation["status"] == "blocked":
+            return {"ok": False, "error": "plugin_dependencies_blocked", "dependency_validation": validation, "persisted": False}
+
+        # The Plugin row is fenced, so the write repeats as a whole when a running Turn holds the
+        # lease. Each attempt rechecks access, the receipt, the target version and the impact.
+        async def write(db: aiosqlite.Connection) -> dict:
+            await self.authorize(db, True)
+            previous = await recorded(db)
+            if previous is not None:
+                return previous
+            current_candidate, impact, current = await self._candidate(db, target, patch, expected_impact)
+            if current_candidate != candidate:
+                raise ValueError("plugin_version_conflict")
+            unchanged = current is not None and all(current[key] == value for key, value in validated.items())
             item = (
                 current
                 if unchanged
@@ -183,7 +216,7 @@ class CoachPluginAuthoring:
                     actor_user_id=self.scope.user_id,
                     plugin_id=target["id"] if target else None,
                     expected_row_version=target["version"] if target else None,
-                    **candidate,
+                    **validated,
                 )
             )
             result = {
@@ -213,21 +246,21 @@ class CoachPluginAuthoring:
                     datetime.now(UTC).isoformat(),
                 ),
             )
-            await db.commit()
             return result
 
+        return await run_sqlite_authority_write(self.db_path, write)
+
     async def get(self, *, operation_id: str) -> dict:
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("BEGIN")
+        async with _read_transaction(self.db_path) as db:
             await self.authorize(db, False)
             receipt = await self._receipt(db, operation_id)
             if receipt is None:
                 raise ValueError("plugin_operation_unavailable")
             result = json.loads(receipt["result_json"])
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT row_version,status FROM team_capability WHERE team_id=? AND id=?", (self.scope.team_id, result["result_target"]["id"])
-            )
-            current = await cursor.fetchone()
+            ) as cursor:
+                current = await cursor.fetchone()
             result["current_result_matches"] = bool(current and current[0] == result["result_target"]["version"] and current[1] == "active")
             result["validation_scope"] = "original_save_only_revalidate_before_binding"
             return result

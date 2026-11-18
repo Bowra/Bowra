@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.subagent_authoring_catalog import (
     AuthoringTool,
     SubagentAuthoringCatalogSnapshot,
@@ -34,7 +34,6 @@ from bowhead_core.subagent_draft_store import (
     SubagentDraftVersionConflictError,
 )
 from bowhead_core.user_store import UserStore
-from core_legacy_database import upgrade
 
 
 class FakeCatalogService:
@@ -154,12 +153,7 @@ class FakeAccountant:
         self.releases += 1
 
 
-async def _service(tmp_path, generator: FakeGenerator):
-    db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+async def _service(db_path: Path, generator: FakeGenerator):
     users = UserStore(str(db_path))
     await users.initialize()
     drafts = SubagentDraftStore(str(db_path), hmac_key=b"s" * 32)
@@ -176,9 +170,9 @@ async def _service(tmp_path, generator: FakeGenerator):
 
 
 @pytest.mark.asyncio
-async def test_canvas_generation_uses_existing_draft_and_replays_one_suggestion(tmp_path) -> None:
+async def test_canvas_generation_uses_existing_draft_and_replays_one_suggestion(migrated_legacy_core_db: Path) -> None:
     generator = FakeGenerator()
-    service, drafts, accountant = await _service(tmp_path, generator)
+    service, drafts, accountant = await _service(migrated_legacy_core_db, generator)
     draft = await drafts.create_manual_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -215,9 +209,9 @@ async def test_canvas_generation_uses_existing_draft_and_replays_one_suggestion(
 
 
 @pytest.mark.asyncio
-async def test_absent_purpose_does_not_claim_or_call_model(tmp_path) -> None:
+async def test_absent_purpose_does_not_claim_or_call_model(migrated_legacy_core_db: Path) -> None:
     generator = FakeGenerator()
-    service, drafts, accountant = await _service(tmp_path, generator)
+    service, drafts, accountant = await _service(migrated_legacy_core_db, generator)
     result = await service.create_intent_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -240,7 +234,7 @@ async def test_absent_purpose_does_not_claim_or_call_model(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_generation_settles_usage_already_consumed(tmp_path) -> None:
+async def test_failed_generation_settles_usage_already_consumed(migrated_legacy_core_db: Path) -> None:
     class FailingGenerator(FakeGenerator):
         async def generate(self, **kwargs) -> SubagentDraftGenerationResult:
             self.calls += 1
@@ -252,7 +246,7 @@ async def test_failed_generation_settles_usage_already_consumed(tmp_path) -> Non
             )
 
     generator = FailingGenerator()
-    service, _drafts, accountant = await _service(tmp_path, generator)
+    service, _drafts, accountant = await _service(migrated_legacy_core_db, generator)
 
     with pytest.raises(DraftServiceError) as raised:
         await service.create_intent_draft(
@@ -277,10 +271,10 @@ async def test_failed_generation_settles_usage_already_consumed(tmp_path) -> Non
 
 @pytest.mark.asyncio
 async def test_materialization_rejects_high_entropy_secret_in_model_output(
-    tmp_path,
+    migrated_legacy_core_db: Path,
 ) -> None:
     generator = FakeGenerator()
-    service, _drafts, _accountant = await _service(tmp_path, generator)
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, generator)
     blueprint = _blueprint().model_copy(
         update={
             "assumptions": [
@@ -303,9 +297,9 @@ async def test_materialization_rejects_high_entropy_secret_in_model_output(
 
 @pytest.mark.asyncio
 async def test_materialization_allows_security_boundary_without_secret_value(
-    tmp_path,
+    migrated_legacy_core_db: Path,
 ) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _blueprint()
     blueprint.system_prompt.boundaries.append("Never ask users for passwords, API keys, access tokens, or MCP headers.")
     blueprint.system_prompt.boundaries.append("Authorization: none is required for public pages.")
@@ -322,8 +316,8 @@ async def test_materialization_allows_security_boundary_without_secret_value(
 
 
 @pytest.mark.asyncio
-async def test_materialization_allows_long_descriptive_slug(tmp_path) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_materialization_allows_long_descriptive_slug(migrated_legacy_core_db: Path) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _blueprint()
     blueprint.slug_seed = "public-product-announcement-checker-2026"
 
@@ -339,8 +333,8 @@ async def test_materialization_allows_long_descriptive_slug(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_known_url_draft_selects_fetch_without_search(tmp_path) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_known_url_draft_selects_fetch_without_search(migrated_legacy_core_db: Path) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _blueprint()
     blueprint.capability_intents[0] = CapabilityIntent(
         intent_id="ci_url",
@@ -407,8 +401,8 @@ def _team_data_blueprint() -> DraftBlueprint:
 
 
 @pytest.mark.asyncio
-async def test_team_labelled_data_need_materializes_with_native_query(tmp_path) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_team_labelled_data_need_materializes_with_native_query(migrated_legacy_core_db: Path) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
 
     review = await service.materialize_blueprint(
         team_id="team_a",
@@ -426,8 +420,8 @@ async def test_team_labelled_data_need_materializes_with_native_query(tmp_path) 
 
 
 @pytest.mark.asyncio
-async def test_unmet_required_need_blocks_draft_with_actionable_issue(tmp_path) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_unmet_required_need_blocks_draft_with_actionable_issue(migrated_legacy_core_db: Path) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _team_data_blueprint()
     blueprint.capability_intents.append(
         CapabilityIntent(
@@ -490,8 +484,8 @@ def test_unmet_requirement_stays_open_until_a_covering_tool_is_selected() -> Non
         "Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
     ],
 )
-async def test_materialization_rejects_explicit_secret_value(tmp_path, boundary: str) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_materialization_rejects_explicit_secret_value(migrated_legacy_core_db: Path, boundary: str) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _blueprint()
     blueprint.system_prompt.boundaries.append(boundary)
 
@@ -508,9 +502,9 @@ async def test_materialization_rejects_explicit_secret_value(tmp_path, boundary:
 
 
 @pytest.mark.asyncio
-async def test_clear_purpose_creates_private_ready_draft_once(tmp_path) -> None:
+async def test_clear_purpose_creates_private_ready_draft_once(migrated_legacy_core_db: Path) -> None:
     generator = FakeGenerator("clear")
-    service, _drafts, accountant = await _service(tmp_path, generator)
+    service, _drafts, accountant = await _service(migrated_legacy_core_db, generator)
     kwargs = {
         "team_id": "team_a",
         "owner_user_id": "user_a",
@@ -543,9 +537,9 @@ async def test_clear_purpose_creates_private_ready_draft_once(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_purpose_creates_one_clarification_draft(tmp_path) -> None:
+async def test_ambiguous_purpose_creates_one_clarification_draft(migrated_legacy_core_db: Path) -> None:
     generator = FakeGenerator("ambiguous")
-    service, _drafts, _accountant = await _service(tmp_path, generator)
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, generator)
     result = await service.create_intent_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -565,10 +559,10 @@ async def test_ambiguous_purpose_creates_one_clarification_draft(tmp_path) -> No
 
 @pytest.mark.asyncio
 async def test_clarification_is_claimed_once_and_materializes_draft(
-    tmp_path,
+    migrated_legacy_core_db: Path,
 ) -> None:
     generator = FakeGenerator("ambiguous")
-    service, _drafts, accountant = await _service(tmp_path, generator)
+    service, _drafts, accountant = await _service(migrated_legacy_core_db, generator)
     initial = await service.create_intent_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -618,10 +612,10 @@ async def test_clarification_is_claimed_once_and_materializes_draft(
 
 @pytest.mark.asyncio
 async def test_second_ambiguous_assessment_blocks_without_reasking(
-    tmp_path,
+    migrated_legacy_core_db: Path,
 ) -> None:
     generator = FakeGenerator("ambiguous")
-    service, _drafts, _accountant = await _service(tmp_path, generator)
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, generator)
     initial = await service.create_intent_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -653,7 +647,7 @@ async def test_second_ambiguous_assessment_blocks_without_reasking(
 
 
 @pytest.mark.asyncio
-async def test_failed_clarification_returns_latest_blocked_draft(tmp_path) -> None:
+async def test_failed_clarification_returns_latest_blocked_draft(migrated_legacy_core_db: Path) -> None:
     class SecretAfterClarification(FakeGenerator):
         async def generate(self, **kwargs) -> SubagentDraftGenerationResult:
             result = await super().generate(**kwargs)
@@ -664,7 +658,7 @@ async def test_failed_clarification_returns_latest_blocked_draft(tmp_path) -> No
             return result
 
     generator = SecretAfterClarification("ambiguous")
-    service, _drafts, _accountant = await _service(tmp_path, generator)
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, generator)
     initial = await service.create_intent_draft(
         team_id="team_a",
         owner_user_id="user_a",
@@ -706,10 +700,10 @@ async def test_failed_clarification_returns_latest_blocked_draft(tmp_path) -> No
         ("tools", True, True, "invalid"),
     ],
 )
-async def test_text_only_draft_needs_explicit_mode_and_rollout(tmp_path, monkeypatch, mode, has_intents, enabled, expected):
+async def test_text_only_draft_needs_explicit_mode_and_rollout(migrated_legacy_core_db: Path, monkeypatch, mode, has_intents, enabled, expected):
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY", "1" if enabled else "0")
     monkeypatch.setenv("FEATURE_SUBAGENT_TEXT_ONLY_TEAM_IDS", "team_a")
-    service, _, _ = await _service(tmp_path, FakeGenerator())
+    service, _, _ = await _service(migrated_legacy_core_db, FakeGenerator())
     payload = _blueprint().model_dump()
     payload["resource_mode"] = mode
     payload["capability_intents"] = payload["capability_intents"] if has_intents else []
@@ -748,9 +742,9 @@ async def test_text_only_draft_needs_explicit_mode_and_rollout(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_chat_canvas_task_retains_origin_and_one_generation_after_edits(tmp_path, monkeypatch) -> None:
+async def test_chat_canvas_task_retains_origin_and_one_generation_after_edits(migrated_legacy_core_db: Path, monkeypatch) -> None:
     generator = FakeGenerator()
-    service, drafts, accountant = await _service(tmp_path, generator)
+    service, drafts, accountant = await _service(migrated_legacy_core_db, generator)
     creation = {
         "team_id": "team_a",
         "owner_user_id": "user_a",
@@ -794,9 +788,9 @@ async def test_chat_canvas_task_retains_origin_and_one_generation_after_edits(tm
 
 
 @pytest.mark.asyncio
-async def test_materialization_writes_prompt_headings_in_the_review_language(tmp_path) -> None:
+async def test_materialization_writes_prompt_headings_in_the_review_language(migrated_legacy_core_db: Path) -> None:
     """Novice walkthrough: a zh-CN draft showed English "Role:/Goals:" headings."""
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     review = await service.materialize_blueprint(
         team_id="team_a", owner_user_id="user_a", purpose="每周分析门店销售异常", blueprint=_blueprint(), mcp_entitled=True, locale="zh-CN"
     )
@@ -806,8 +800,8 @@ async def test_materialization_writes_prompt_headings_in_the_review_language(tmp
 
 
 @pytest.mark.asyncio
-async def test_materialization_recommends_the_email_plugin_for_an_email_need(tmp_path) -> None:
-    service, _drafts, _accountant = await _service(tmp_path, FakeGenerator())
+async def test_materialization_recommends_the_email_plugin_for_an_email_need(migrated_legacy_core_db: Path) -> None:
+    service, _drafts, _accountant = await _service(migrated_legacy_core_db, FakeGenerator())
     blueprint = _blueprint()
     blueprint.capability_intents.append(
         CapabilityIntent(

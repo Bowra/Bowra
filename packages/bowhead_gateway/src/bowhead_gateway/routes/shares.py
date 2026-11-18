@@ -66,7 +66,7 @@ def _skill_approval_422(request: Request) -> HTTPException:
             from bowhead_core.error_catalog import DEFAULT_LANGUAGE
 
             msg = catalog.render(code, DEFAULT_LANGUAGE)
-    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"error": {"code": code, "message": msg}})
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, {"error": {"code": code, "message": msg}})
 
 
 def _reject_obsolete_team_subagent_write(resource_kind: str) -> None:
@@ -148,7 +148,7 @@ async def _resolve_shareable(
     kind = (kind or "").strip()
     rid = (rid or "").strip()
     if kind not in SHAREABLE_KINDS or not rid:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported kind")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "unsupported kind")
     if kind != "report" and not share_service.content_sharing_enabled():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     canvas_store = getattr(request.app.state, "canvas_store", None)
@@ -518,11 +518,11 @@ async def create_share_grant(
     if body.principal_type == "user":
         target = await store.get_user(pid)
         if target is None or target.team_id != user.team_id or target.status != "active":
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "user not found in your team")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "user not found in your team")
     else:
         group = await access_store.get_group(user.team_id, pid)
         if group is None or group.status != "active":
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "group not found in your team")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "group not found in your team")
     try:
         grant = await share_service.add_grant(
             access_store,

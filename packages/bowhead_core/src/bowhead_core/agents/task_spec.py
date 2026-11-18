@@ -180,6 +180,27 @@ class PlanStepAgentBindingError(PlanStepError):
         )
 
 
+# Stored step reason for clients without localized copy; the plan card localizes by kind.
+_PLAN_STEP_MODEL_FAILURE_MESSAGES = {
+    "llm_provider_timeout": "Timed out waiting for the model. Resume the plan to run this step again.",
+    "llm_provider_unavailable": "The model service is temporarily unavailable. Resume the plan to run this step again.",
+}
+
+
+class PlanStepModelError(PlanStepError):
+    """The step's model call still failed after the Router's retries.
+
+    ``error_kind`` is the model failure's own reason code (``llm_provider_timeout``
+    or ``llm_provider_unavailable``), the classification the Turn publishes for the
+    same failure; the plan card shows its localized copy. The failure was settled
+    not applied, so resuming the plan runs the step again.
+    """
+
+    def __init__(self, reason_code: str) -> None:
+        self.error_kind = reason_code
+        super().__init__(_PLAN_STEP_MODEL_FAILURE_MESSAGES.get(reason_code, reason_code))
+
+
 @dataclass
 class TaskResult:
     """单 task 的执行结果.

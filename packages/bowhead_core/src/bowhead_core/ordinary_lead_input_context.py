@@ -207,15 +207,15 @@ async def validate_context(
         else:
             # Confirmation identity can be revoked independently of artifact
             # metadata. Repeat its read-only check inside final consumption.
-            from bowhead_core.documents.upload_confirmation import confirmed_content_hash
+            # A file without a receipt was sealed by its stored bytes, which
+            # the preceding read pass already compared.
+            from bowhead_core.documents.upload_confirmation import receipt_content_hash
 
             for item in snapshot["files"]:
                 if item.get("content_deferred"):
                     art, _ = await session_input_artifact(ctx, db, item["artifact_id"])
-                    if (
-                        await confirmed_content_hash(ctx.artifact_store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
-                        != item["content_hash"]
-                    ):
+                    confirmed = await receipt_content_hash(ctx.artifact_store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
+                    if confirmed is not None and confirmed != item["content_hash"]:
                         raise OrdinaryContinuationUnavailable()
 
 

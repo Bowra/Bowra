@@ -1874,28 +1874,37 @@ class ToolRegistry:
                 return _empty_view()
             from contextlib import aclosing
 
-            from bowhead_core.grant_evaluation import iter_grant_verdicts
+            from bowhead_core.grant_evaluation import grant_verdicts_batch, iter_grant_verdicts
 
             denied_names: set[str] = set()
-            for name in list(self._specs):
-                grant_targets = _resource_grant_targets_for_tool(
-                    name,
-                    {},
-                    include_argument_targets=False,
-                )
-                async with aclosing(iter_grant_verdicts(ctx, access_store, access_ctx, grant_targets)) as verdicts:
-                    async for verdict in verdicts:
-                        if not verdict.allowed:
-                            denied_names.add(name)
-                            logger.info(
-                                "resource_grant.tool_schema_hidden tool=%s resource=%s:%s permission=%s reason=%s",
-                                name,
-                                verdict.resource_kind,
-                                verdict.resource_id,
-                                verdict.permission,
-                                verdict.reason,
-                            )
-                            break
+            names = list(self._specs)
+            targets = [_resource_grant_targets_for_tool(name, {}, include_argument_targets=False) for name in names]
+            if callable(getattr(access_store, "explain_decisions", None)):
+                # One decision batch per resource kind for every tool of the turn: deciding each tool
+                # on its own made two reads per target, every Turn (0.25-1.2 s on 116, 1.7.53).
+                verdict_lists = await grant_verdicts_batch(ctx, access_store, access_ctx, targets)
+            else:
+                verdict_lists = []
+                for grant_targets in targets:
+                    decided = []
+                    async with aclosing(iter_grant_verdicts(ctx, access_store, access_ctx, grant_targets)) as verdicts:
+                        async for verdict in verdicts:
+                            decided.append(verdict)
+                            if not verdict.allowed:
+                                break
+                    verdict_lists.append(decided)
+            for name, verdicts in zip(names, verdict_lists, strict=True):
+                verdict = next((verdict for verdict in verdicts if not verdict.allowed), None)
+                if verdict is not None:
+                    denied_names.add(name)
+                    logger.info(
+                        "resource_grant.tool_schema_hidden tool=%s resource=%s:%s permission=%s reason=%s",
+                        name,
+                        verdict.resource_kind,
+                        verdict.resource_id,
+                        verdict.permission,
+                        verdict.reason,
+                    )
             if not denied_names:
                 return self
             view = ToolRegistry()

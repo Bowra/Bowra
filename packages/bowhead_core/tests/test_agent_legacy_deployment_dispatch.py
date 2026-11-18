@@ -32,7 +32,6 @@ from bowhead_core.agents.plan_admission import list_visible_team_subagents
 from bowhead_core.session_store import SessionStore
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.user_store import TeamSubagent, UserStore
-from core_legacy_database import upgrade
 
 _NOW = "2026-09-06T00:00:00+00:00"
 
@@ -47,9 +46,7 @@ class _Fixture:
     turn_id: str
 
 
-async def _setup(tmp_path: Path) -> _Fixture:
-    db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+async def _setup(db_path: Path) -> _Fixture:
     users = UserStore(db_path)
     sessions = SessionStore(db_path)
     await users.initialize()
@@ -206,7 +203,7 @@ async def _admit(fixture: _Fixture, *, name: str, dispatch_key: str, agent_id: s
 @pytest.mark.parametrize("agent_id", [None, "system:compute", "compute"])
 @pytest.mark.anyio
 async def test_a_builtin_dispatches_however_the_lead_spells_its_identity(
-    tmp_path: Path,
+    migrated_legacy_core_db: Path,
     agent_id: str | None,
 ) -> None:
     """Builtin dispatch accepts its display name, canonical ID, or an omitted ID.
@@ -214,7 +211,7 @@ async def test_a_builtin_dispatches_however_the_lead_spells_its_identity(
     The roster may expose a name without its stable ID; normalization must stay
     restricted to actual builtin profiles.
     """
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
 
     binding = await _admit(fixture, name="compute", dispatch_key=f"call:builtin:{agent_id}", agent_id=agent_id)
 
@@ -222,7 +219,7 @@ async def test_a_builtin_dispatches_however_the_lead_spells_its_identity(
 
 
 @pytest.mark.anyio
-async def test_partial_import_still_binds_a_revisioned_agent_exactly(tmp_path: Path) -> None:
+async def test_partial_import_still_binds_a_revisioned_agent_exactly(migrated_legacy_core_db: Path) -> None:
     """An Agent already imported must not fall back to its mutable row.
 
     ``apply`` sets ``definition_mode='revisioned'`` per batch and only writes
@@ -231,7 +228,7 @@ async def test_partial_import_still_binds_a_revisioned_agent_exactly(tmp_path: P
     fallback would execute the mutable ``team_subagent`` row instead of the frozen
     revision -- the "cutover is silently reversible" hazard the design rules out.
     """
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_pub", name="published-agent", display_name="Published Agent")
     await _publish_release(fixture, agent_id="osa_pub", name="published-agent", display_name="Published Agent")
     # deliberately NOT calling _complete_release_cutover: the marker is still NULL
@@ -244,9 +241,9 @@ async def test_partial_import_still_binds_a_revisioned_agent_exactly(tmp_path: P
 
 
 @pytest.mark.anyio
-async def test_archived_agent_does_not_reach_the_compatibility_path(tmp_path: Path) -> None:
+async def test_archived_agent_does_not_reach_the_compatibility_path(migrated_legacy_core_db: Path) -> None:
     """The routing-name lookup filters only ``status``; lifecycle must still hold."""
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_arch", name="archived-agent", display_name="Archived Agent")
     async with aiosqlite.connect(fixture.db_path) as db:
         await db.execute(
@@ -260,14 +257,14 @@ async def test_archived_agent_does_not_reach_the_compatibility_path(tmp_path: Pa
 
 
 @pytest.mark.anyio
-async def test_judgement_6_roster_never_names_an_agent_admission_refuses(tmp_path: Path) -> None:
+async def test_judgement_6_roster_never_names_an_agent_admission_refuses(migrated_legacy_core_db: Path) -> None:
     """Advertising surface ⊆ what admission accepts, in both cutover states.
 
     Sibling criterion to §5.6.1's "0 mentions": a name may only reach the Lead if
     the Lead can actually dispatch it.  Before this held, a team could watch the
     Lead pick its own Agent and be silently answered by a built-in one instead.
     """
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_legacy", name="legacy-agent", display_name="Legacy Agent")
     await _create_agent(fixture, agent_id="osa_pub", name="published-agent", display_name="Published Agent")
     await _publish_release(fixture, agent_id="osa_pub", name="published-agent", display_name="Published Agent")
@@ -293,8 +290,8 @@ async def test_judgement_6_roster_never_names_an_agent_admission_refuses(tmp_pat
 
 
 @pytest.mark.anyio
-async def test_dispatchable_gate_requires_a_live_release_before_cutover(tmp_path: Path) -> None:
-    fixture = await _setup(tmp_path)
+async def test_dispatchable_gate_requires_a_live_release_before_cutover(migrated_legacy_core_db: Path) -> None:
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_legacy", name="legacy-agent", display_name="Legacy Agent")
 
     assert await dispatchable_team_agent_ids(fixture.db_path, team_id=fixture.team_id) == frozenset()
@@ -304,7 +301,7 @@ async def test_dispatchable_gate_requires_a_live_release_before_cutover(tmp_path
 
 
 @pytest.mark.anyio
-async def test_release_manager_reports_cutover_not_missing_agent(tmp_path: Path) -> None:
+async def test_release_manager_reports_cutover_not_missing_agent(migrated_legacy_core_db: Path) -> None:
     """An Agent the owner can see in the catalog must never be reported as absent."""
     from bowhead_core.agent_release_read_store import AgentReleaseReadStore
     from bowhead_core.agent_revision_store import (
@@ -312,7 +309,7 @@ async def test_release_manager_reports_cutover_not_missing_agent(tmp_path: Path)
         AgentRevisionForbiddenError,
     )
 
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_legacy", name="legacy-agent", display_name="Legacy Agent")
     store = AgentReleaseReadStore(str(fixture.db_path))
 
@@ -326,7 +323,7 @@ async def test_release_manager_reports_cutover_not_missing_agent(tmp_path: Path)
 
 
 @pytest.mark.anyio
-async def test_m4_panels_report_cutover_not_a_missing_agent(tmp_path: Path) -> None:
+async def test_m4_panels_report_cutover_not_a_missing_agent(migrated_legacy_core_db: Path) -> None:
     """Localization and taxonomy used to answer "not found" for un-migrated Agents.
 
     Same shape as the release manager: an Agent the Owner just saw in the catalog
@@ -338,7 +335,7 @@ async def test_m4_panels_report_cutover_not_a_missing_agent(tmp_path: Path) -> N
         CatalogLocalizationStore,
     )
 
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_legacy", name="legacy-agent", display_name="Legacy Agent")
 
     with pytest.raises(CatalogLocalizationForbiddenError) as loc:
@@ -368,7 +365,7 @@ async def test_m4_panels_report_cutover_not_a_missing_agent(tmp_path: Path) -> N
 
 
 @pytest.mark.anyio
-async def test_localization_and_taxonomy_agree_on_archived_agents(tmp_path: Path) -> None:
+async def test_localization_and_taxonomy_agree_on_archived_agents(migrated_legacy_core_db: Path) -> None:
     """The two working-copy lookups had drifted: one filtered lifecycle, one did not.
 
     An archived Agent could have its localizations edited but not its taxonomy.
@@ -376,8 +373,7 @@ async def test_localization_and_taxonomy_agree_on_archived_agents(tmp_path: Path
     from bowhead_core._db import open_shared_ctx
     from bowhead_core.agent_revision_store import owned_agent_working_copy_conn
 
-    fixture = await _setup(fixture_path := tmp_path)
-    assert fixture_path is not None
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_arch", name="archived-agent", display_name="Archived Agent")
     await _publish_release(fixture, agent_id="osa_arch", name="archived-agent", display_name="Archived Agent")
     async with aiosqlite.connect(fixture.db_path) as db:
@@ -414,7 +410,7 @@ async def test_localization_and_taxonomy_agree_on_archived_agents(tmp_path: Path
 
 
 @pytest.mark.anyio
-async def test_baseline_import_produces_a_dispatchable_agent(tmp_path: Path) -> None:
+async def test_baseline_import_produces_a_dispatchable_agent(migrated_legacy_core_db: Path) -> None:
     """The migration must leave Agents runnable -- nobody had ever checked end to end.
 
     Every admission test hand-seeds a release whose safety report satisfies the
@@ -434,7 +430,7 @@ async def test_baseline_import_produces_a_dispatchable_agent(tmp_path: Path) -> 
     """
     from bowhead_core.agent_release_baseline import AgentReleaseBaselineStore
 
-    fixture = await _setup(tmp_path)
+    fixture = await _setup(migrated_legacy_core_db)
     await _create_agent(fixture, agent_id="osa_legacy", name="legacy-agent", display_name="Legacy Agent")
 
     store = AgentReleaseBaselineStore(fixture.db_path)

@@ -39,7 +39,9 @@ class AgentCoachPlugins:
     async def validate_resources(self, candidate: dict, observed_tools: list[dict] | None) -> dict:
         from bowhead_gateway.agent_authoring_dependencies import compile_authoring_resources
 
-        result = await compile_authoring_resources(self.resources, candidate, audience_mode="teamwide", observed_tools=observed_tools)
+        result = await compile_authoring_resources(
+            self.resources, candidate, audience_mode="teamwide", observed_tools=observed_tools, offered_skills_only=True
+        )
         # ``skill_grants`` carries the resolved (latest approved) revisions; the
         # authoring service stores those and removes the key from its result.
         return {key: value for key, value in result.items() if key != "effective_tool_refs"}

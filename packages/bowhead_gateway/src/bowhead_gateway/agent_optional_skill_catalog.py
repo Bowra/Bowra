@@ -37,6 +37,7 @@ async def optional_skill_catalog(
     limit: int,
     include_source_identity: bool = False,
     baseline_selection: bool = False,
+    selected_identities: set[tuple[str, str]] | None = None,
 ) -> dict:
     access = AccessControlStore(store.db_path)
 
@@ -78,7 +79,12 @@ async def optional_skill_catalog(
             candidates.append(_Candidate("user", record.id, record.name, record.name, record.description or "", True, user.id))
     needle = query.strip().casefold()
     candidates = sorted(
-        (item for item in candidates if needle in (item.name + " " + item.label + " " + item.description).casefold()),
+        (
+            item
+            for item in candidates
+            if (selected_identities is None or (item.source, item.identity) in selected_identities)
+            and needle in (item.name + " " + item.label + " " + item.description).casefold()
+        ),
         key=lambda item: (item.source, item.name, item.identity),
     )
     items = []

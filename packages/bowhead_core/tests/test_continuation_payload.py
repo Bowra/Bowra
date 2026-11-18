@@ -16,8 +16,8 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("shape", ["large_tool", "many_messages"])
-async def test_segmented_resume_retains_complete_results_and_images(tmp_path, shape, _fernet):
-    db_path = await _db(tmp_path)
+async def test_segmented_resume_retains_complete_results_and_images(migrated_legacy_core_db, shape, _fernet):
+    db_path = await _db(migrated_legacy_core_db)
     transcript = deepcopy(TRANSCRIPT)
     transcript[0].images = [ImageRef(base64="aW1hZ2U=", mime="image/png")]
     if shape == "large_tool":
@@ -37,8 +37,8 @@ async def test_segmented_resume_retains_complete_results_and_images(tmp_path, sh
         assert db.execute("SELECT count(*) FROM continuation_payload_segments WHERE owner_id=?", (identity,)).fetchone()[0] == 0
 
 
-async def test_missing_segment_fails_without_partial_or_cleared_transcript(tmp_path, _fernet):
-    db_path = await _db(tmp_path)
+async def test_missing_segment_fails_without_partial_or_cleared_transcript(migrated_legacy_core_db, _fernet):
+    db_path = await _db(migrated_legacy_core_db)
     identity = await _capture(db_path, segmented=True)
     checkpoint = await sr.claim(db_path, checkpoint_id=identity, session_id="s_1", user_id="u_1", turn_id="t_2")
     with sqlite3.connect(db_path) as db:
@@ -50,8 +50,8 @@ async def test_missing_segment_fails_without_partial_or_cleared_transcript(tmp_p
     assert error.value.code == "unreadable"
 
 
-async def test_payload_parts_cannot_commit_without_the_original_card(tmp_path, _fernet):
-    db_path = await _db(tmp_path)
+async def test_payload_parts_cannot_commit_without_the_original_card(migrated_legacy_core_db, _fernet):
+    db_path = await _db(migrated_legacy_core_db)
     with sqlite3.connect(db_path) as db:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("BEGIN")
@@ -68,12 +68,12 @@ async def test_payload_parts_cannot_commit_without_the_original_card(tmp_path, _
 
 
 @pytest.mark.parametrize("outcome", ["success", "missing_table", "missing_segment"])
-async def test_segmented_reader_closes_owned_connections_without_garbage_collection(tmp_path, _fernet, monkeypatch, outcome):
+async def test_segmented_reader_closes_owned_connections_without_garbage_collection(migrated_legacy_core_db, _fernet, monkeypatch, outcome):
     from contextlib import closing
 
     from bowhead_core import continuation_payload
 
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     identity = await _capture(db_path, segmented=True)
     checkpoint = await sr.claim(db_path, checkpoint_id=identity, session_id="s_1", user_id="u_1", turn_id="t_2")
     if outcome != "success":

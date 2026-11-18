@@ -107,6 +107,31 @@ async def test_missing_delegation_role_names_the_argument() -> None:
     assert _published_detail(result) == "field=delegation_role"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "ignored"),
+    [
+        ({"delegation_role": "assistant"}, ["delegation_role"]),
+        ({"delegation_role": []}, ["delegation_role"]),
+        ({"role_id": "image", "candidate_id": [], "reason_code": {}}, ["role_id", "candidate_id", "reason_code"]),
+        ({"skills": ["made-up-method"]}, ["skills"]),
+    ],
+)
+async def test_optional_dispatch_arguments_do_not_block_ordinary_work(
+    monkeypatch: pytest.MonkeyPatch, overrides: dict[str, Any], ignored: list[str]
+) -> None:
+    monkeypatch.setenv("FEATURE_AGENT_BEHAVIOR_M3", "0")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    runner = _Runner()
+
+    args = {"profile": "compute", "task": "Inspect sales.", "delivery": "chat", "required_source_urls": []}
+    result = await registry.execute("subagent_spawn", args | overrides, _context(runner))
+
+    assert runner.called and result.result["ok"]
+    assert result.result["ignored_arguments"] == ignored
+    assert "required_model_input" not in runner.kwargs
+
+
 async def test_incomplete_chat_lookup_dispatches_without_canvas_write_access(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
     registry = build_default_registry()

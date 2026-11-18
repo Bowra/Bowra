@@ -159,13 +159,13 @@ async def require_case_suite_conn(
 ) -> None:
     """Require the latest complete editable suite under current Owner authority."""
     await _require_owner_conn(db, team_id=team_id, agent_id=agent_id, actor_user_id=actor_user_id)
-    cursor = await db.execute("SELECT * FROM agent_eval_suite WHERE id=? AND team_id=? AND agent_id=?", (suite_id, team_id, agent_id))
-    suite = await cursor.fetchone()
+    async with db.execute("SELECT * FROM agent_eval_suite WHERE id=? AND team_id=? AND agent_id=?", (suite_id, team_id, agent_id)) as cursor:
+        suite = await cursor.fetchone()
     if suite is None or suite["suite_kind"] != "owner_quality" or suite["state"] == "archived":
         raise AgentChangeProposalError("agent_eval_suite_not_editable")
     await _require_suite_manager(db, row=suite, actor_user_id=actor_user_id)
-    cursor = await db.execute("SELECT * FROM agent_eval_suite_revision WHERE suite_id=? ORDER BY sequence DESC LIMIT 1", (suite_id,))
-    revision = await cursor.fetchone()
+    async with db.execute("SELECT * FROM agent_eval_suite_revision WHERE suite_id=? ORDER BY sequence DESC LIMIT 1", (suite_id,)) as cursor:
+        revision = await cursor.fetchone()
     if revision is None or revision["id"] != revision_id:
         raise AgentChangeProposalError("agent_eval_suite_version_conflict")
     if not await _revision_is_complete(db, revision):
@@ -176,12 +176,12 @@ async def require_case_suite_conn(
 async def require_initial_suite_conn(db: aiosqlite.Connection, *, team_id: str, agent_id: str, actor_user_id: str) -> None:
     """Recheck absence under the writer lock; never replace an existing suite."""
     await _require_owner_conn(db, team_id=team_id, agent_id=agent_id, actor_user_id=actor_user_id)
-    cursor = await db.execute(
+    async with db.execute(
         "SELECT 1 FROM agent_eval_suite WHERE team_id=? AND agent_id=? AND suite_kind='owner_quality' AND state!='archived' LIMIT 1",
         (team_id, agent_id),
-    )
-    if await cursor.fetchone():
-        raise AgentChangeProposalError("agent_eval_initial_suite_conflict")
+    ) as cursor:
+        if await cursor.fetchone():
+            raise AgentChangeProposalError("agent_eval_initial_suite_conflict")
 
 
 EDIT_FIELDS = frozenset({"task", "expected_contract", "scorer_config", "valid_until"})
@@ -210,10 +210,10 @@ async def materialize_case_edits_conn(
             key in changes and not isinstance(changes[key], dict) for key in ("expected_contract", "scorer_config")
         ):
             raise suggested_case_invalid("edit_values", "The question must be text and expected/scoring contracts must be objects.", case_index=index)
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM agent_eval_case_revision WHERE id=? AND suite_revision_id=?", (value["case_revision_id"], revision_id)
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None or row["case_hash"] != value["case_hash"]:
             raise AgentChangeProposalError(
                 "agent_eval_case_version_conflict",
@@ -334,11 +334,11 @@ class AgentEvalCaseProposals:
                     db, team_id=team_id, agent_id=agent_id, suite_id=suite_id, revision_id=revision_id, actor_user_id=actor_user_id
                 )
             if has_edits:
-                cursor = await db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_coach_case_edit_scope'")
-                if await cursor.fetchone() is None:
-                    raise AgentChangeProposalError(
-                        "agent_eval_case_edit_schema_required", details={"message": "Upgrade the database before proposing saved-case edits."}
-                    )
+                async with db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_coach_case_edit_scope'") as cursor:
+                    if await cursor.fetchone() is None:
+                        raise AgentChangeProposalError(
+                            "agent_eval_case_edit_schema_required", details={"message": "Upgrade the database before proposing saved-case edits."}
+                        )
                 expanded, originals, edits = await materialize_case_edits_conn(db, suggested_cases, revision_id)
                 cases = validate_case_suggestions(expanded, originals=originals)
                 if validate_product is not None:
@@ -372,5 +372,5 @@ class AgentEvalCaseProposals:
             )
             await authorize(db)
             await db.commit()
-            cursor = await db.execute("SELECT * FROM agent_change_proposal WHERE id=?", (proposal_id,))
-            return await _proposal_with_case_decisions_conn(db, await cursor.fetchone())
+            async with db.execute("SELECT * FROM agent_change_proposal WHERE id=?", (proposal_id,)) as cursor:
+                return await _proposal_with_case_decisions_conn(db, await cursor.fetchone())

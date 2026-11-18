@@ -23,7 +23,7 @@ from bowhead_memory.privacy_guard import (
     start_memory_mutation_context,
 )
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import execute_and_close, open_shared_ctx
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
@@ -188,8 +188,8 @@ class PrivacyDeletionLedger:
 
     async def _initialize_once(self) -> bool:
         async with diagnostic_connect(self._path) as db:
-            await db.execute("PRAGMA main.journal_mode=WAL")
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await execute_and_close(db, "PRAGMA main.journal_mode=WAL")
+            await execute_and_close(db, "PRAGMA main.secure_delete=ON")
             await db.executescript(_LEDGER_SCHEMA)
             key_fingerprint = hmac.new(
                 self._key,
@@ -261,7 +261,7 @@ class PrivacyDeletionLedger:
         retain_until = (datetime.now(tz=UTC) + timedelta(days=210)).isoformat(timespec="seconds")
         subject_hmac = self.subject_hmac(user_id)
         async with diagnostic_connect(self._path) as db:
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await execute_and_close(db, "PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await db.execute(
@@ -342,7 +342,7 @@ class PrivacyDeletionLedger:
             for item in manifest
         ]
         async with diagnostic_connect(self._path) as db:
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await execute_and_close(db, "PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 for receipt_id, item in zip(
@@ -415,7 +415,7 @@ class PrivacyDeletionLedger:
     ) -> list[str]:
         now = _now()
         async with diagnostic_connect(self._path) as db:
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await execute_and_close(db, "PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(

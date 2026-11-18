@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 
 from bowhead_core.agent_draft_send_target import AgentDraftSendTarget, agent_draft_target_from_client_info
 from bowhead_core.chart.selected_context import ChartSelectedContext
-from bowhead_core.chat_references import InputDocument
+from bowhead_core.chat_references import InputDocument, SkillResourceRef
 from bowhead_core.document_revision_target import DOCUMENT_REVISION_ADMISSION_ERRORS, DocumentRevisionTarget
 from bowhead_core.i18n_flag import (
     is_i18n_enabled_for_workspace,
@@ -166,6 +166,7 @@ async def _persist_turn_row_for_stream(
         parts=tuple(source_parts) if source_parts is not None else None,
         document_revision_target=req.document_revision_target,
         context_maintenance=req.context_maintenance,
+        selected_skills=req.selected_skills,
     )
     await session_store.ensure_session(
         session_id=req.session_id,
@@ -473,7 +474,7 @@ class UserProfileHint(BaseModel):
 class ChatAttachmentRef(BaseModel):
     """Lossless Composer attachment wire; runtime still consumes artifact IDs."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", validate_by_alias=True, validate_by_name=True)
 
     file_id: str = Field(alias="fileId", min_length=1, max_length=128)
     filename: str = Field(min_length=1, max_length=512)
@@ -533,6 +534,9 @@ class ChatSendRequest(BaseModel):
     input_document: InputDocument | None = None
     document_revision_target: DocumentRevisionTarget | None = None
     context_maintenance: ContextMaintenanceAction | None = None
+    # A Skill-only `/` send admitted as an ordinary Lead Turn;
+    # the exact selections, the `/name` labels stay in `message`.
+    selected_skills: list[SkillResourceRef] | None = Field(default=None, min_length=1, max_length=3)
     attachments: list[str] = Field(default_factory=list, max_length=100)
     attachment_refs: list[ChatAttachmentRef] | None = Field(default=None, max_length=32)
     client_info: dict[str, str] = Field(default_factory=dict)
@@ -571,6 +575,19 @@ class ChatSendRequest(BaseModel):
             session_id=self.session_id,
         )
         draft_id = self.client_info.get("agent_draft_id")
+        if self.selected_skills is not None and (
+            len({(skill.source_kind, skill.id) for skill in self.selected_skills}) != len(self.selected_skills)
+            or self.model_control_batch == "references"
+            or "input_document" in self.model_fields_set
+            or self.document_revision_target is not None
+            or self.context_maintenance is not None
+            or self.plan_execution_id
+            or self.submission_kind == "steer"
+            or self.client_submission_id is None
+            or action_identity is not None
+            or draft_id
+        ):
+            raise ValueError("selected Skills require an ordinary durable start without other structured input")
         from bowhead_core.configuration_settings_target import SETTINGS_TARGET_CLIENT_KEY, WorkspaceSettingsSendTarget
 
         settings_target = self.client_info.get(SETTINGS_TARGET_CLIENT_KEY)
@@ -905,6 +922,8 @@ def _submission_fingerprint(
         projection["content"]["document_revision_target"] = body.document_revision_target.model_dump(mode="json")
     if body.context_maintenance is not None:
         projection["content"]["context_maintenance"] = body.context_maintenance.model_dump()
+    if body.selected_skills is not None:
+        projection["content"]["selected_skills"] = [skill.model_dump(mode="json") for skill in body.selected_skills]
     if body.expected_plan_revision is not None:
         projection["content"]["expected_plan_revision"] = body.expected_plan_revision
     domain = b"bowhead/chat-submission-fingerprint/semantic-wire-v1\0"
@@ -3062,6 +3081,21 @@ async def _send_impl(
                 detail={"error": {"code": "team_model_unconfigured"}},
             )
 
+    admitted_selected_skills = None
+    if body.selected_skills is not None:
+        from bowhead_gateway.selected_skills import admit_selected_skills
+
+        # Same position as reference preparation: after identity, Space and
+        # model gates, before any Turn, receipt or dispatch is written.
+        admitted_selected_skills = await admit_selected_skills(
+            request,
+            body.selected_skills,
+            team_id=resolved_team_id or "",
+            user_id=resolved_user_id,
+            workspace_id=body.workspace_id,
+            session_id=body.session_id,
+        )
+
     if reference_mode:
         from bowhead_gateway.chat_reference_start import prepare_reference_http_start
 
@@ -3297,6 +3331,7 @@ async def _send_impl(
     turn_req = TurnRequest(
         report_read_access=ReportReadAccess(request, session_id, body.workspace_id, resolved_team_id or "", resolved_user_id),
         context_maintenance=body.context_maintenance,
+        selected_skills=admitted_selected_skills,
         chart_authoring_projection=_chart_authoring_projection,
         document_revision_target=body.document_revision_target,
         session_id=session_id,
@@ -3939,6 +3974,7 @@ async def _send_impl(
                 reference_start=reference_start,
                 document_revision_target=body.document_revision_target,
                 context_maintenance=body.context_maintenance,
+                selected_skills=admitted_selected_skills,
             )
         else:
             await _persist_turn_row_for_stream(

@@ -460,6 +460,7 @@ APPENDED_TABLES: dict[str, tuple[str, str]] = {
 # single-file schema stays frozen at the reviewed split revision.
 APPENDED_COLUMNS: dict[str, tuple[tuple[str, ...], str]] = {
     "artifacts": (("version_of", "lineage_id", "version_no"), "0228_artifact_versions"),
+    "chat_turn_user_sources": (("selected_skills_json",), "0229_turn_selected_skills"),
 }
 
 

@@ -7,7 +7,7 @@ import pytest
 from bowhead_core.coach_operation_reference import OperationReadInput, with_operation_reference
 from pydantic import ValidationError
 from test_agent_coach_draft_adapter import saved_draft as saved_draft
-from test_agent_coach_plugins import administrator
+from test_agent_coach_plugins import administrator, exact_method
 from test_agent_coach_plugins import create as create_plugin
 from test_agent_coach_resources import resources as resources
 from test_agent_coach_skills import BODY
@@ -34,7 +34,7 @@ def later_chat(resources):
 
 def test_original_resource_receipts_compose_across_a_later_chat(resources, saved_draft, skill_adapter):
     administrator(resources)
-    plugin = create_plugin(resources)
+    plugin = create_plugin(resources, exact_method(resources))
     target = skill_call(skill_adapter, "agent_skill_inspect", {"name": "coached-method"})["target"]
     skill = skill_call(
         skill_adapter, "agent_skill_save", {"target": target, "changes": [{"path": "SKILL.md", "content": BODY}], "request_id": "save"}

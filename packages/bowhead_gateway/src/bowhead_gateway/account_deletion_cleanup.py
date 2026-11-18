@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from bowhead_core._db import execute_and_close
 from bowhead_core.account_deletion import AccountDeletionError
 from bowhead_core.account_erasure import _POLICY, _q
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
@@ -108,7 +109,7 @@ class AccountExternalCleanup:
                 continue
             async with diagnostic_connect(path) as db:
                 await db.execute("PRAGMA foreign_keys=ON")
-                await db.execute("PRAGMA main.secure_delete=ON")
+                await execute_and_close(db, "PRAGMA main.secure_delete=ON")
                 await db.execute("BEGIN IMMEDIATE")
                 async with db.execute(
                     "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('alembic_version','_phase0_probe')"

@@ -190,26 +190,29 @@ const STATEFUL = /:(hover|active|focus|focus-visible|focus-within|disabled|check
 const overlaps = (x: string, y: string) => x === y || x.startsWith(`${y}-`) || y.startsWith(`${x}-`);
 
 /** Same subject/property: later specificity (:is() takes maximum) must ≥ earlier specificity or override fails. */
-export function cascadeProblems(rules: Rule[]): string[] {
+export function cascadeProblems(rules: Rule[], stateful = STATEFUL): string[] {
   const problems: string[] = [];
-  rules.forEach((later, j) => {
-    const laterProps = Object.keys(decls(later.body));
-    for (const lsel of splitSelectors(later.selector)) {
-      if (STATEFUL.test(lsel)) continue;
-      const lsub = subjects(lsel);
-      const lspec = specificity(lsel);
-      rules.slice(0, j).forEach((earlier) => {
-        const shared = Object.keys(decls(earlier.body)).filter((prop) => laterProps.some((lp) => overlaps(lp, prop)));
-        if (!shared.length) return;
-        for (const esel of splitSelectors(earlier.selector)) {
-          if (STATEFUL.test(esel)) continue;
-          if (!subjects(esel).some((x) => lsub.includes(x))) continue;
-          const espec = specificity(esel);
-          if (cmpSpec(lspec, espec) < 0) {
-            problems.push(`${lsel} (${lspec.join(",")}) 覆盖不了 ${esel.slice(0, 80)}… (${espec.join(",")}) 的 ${shared.join(" / ")}`);
+  const parsed = rules.map((rule) => ({
+    props: Object.keys(decls(rule.body)),
+    selectors: splitSelectors(rule.selector)
+      .filter((selector) => !stateful.test(selector))
+      .map((selector) => ({ selector, subjects: subjects(selector), spec: specificity(selector) })),
+  }));
+  parsed.forEach((later, index) => {
+    for (const next of later.selectors) {
+      for (let earlierIndex = 0; earlierIndex < index; earlierIndex += 1) {
+        const earlier = parsed[earlierIndex];
+        for (const previous of earlier.selectors) {
+          if (cmpSpec(next.spec, previous.spec) >= 0) continue;
+          if (!previous.subjects.some((subject) => next.subjects.includes(subject))) continue;
+          const shared = earlier.props.filter((prop) => later.props.some((laterProp) => overlaps(laterProp, prop)));
+          if (shared.length) {
+            problems.push(
+              `${next.selector} (${next.spec.join(",")}) cannot override ${previous.selector.slice(0, 80)}… (${previous.spec.join(",")}) for ${shared.join(" / ")}`,
+            );
           }
         }
-      });
+      }
     }
   });
   return problems;

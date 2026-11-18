@@ -7317,9 +7317,18 @@ async def _lead_loop(
                 postdispatch_resume=reference_postdispatch_resume,
             )
         else:
+            from bowhead_core.selected_skill_input import history_skill_texts, load_selected_skills, selected_skill_messages
             from bowhead_core.steer_inbox import attach_steer_inbox
 
             await attach_steer_inbox(runtime.parent_ctx, bus=runtime.parent_bus, turn_id=sctx.turn_id)
+            # A Skill-only `/` send admitted as an ordinary Lead Turn: prepare the
+            # persisted selection again (also on resume, where the paused messages
+            # already hold it) and place it after the request.
+            _selected_skills = await load_selected_skills(runtime.parent_ctx, turn_id=sctx.turn_id)
+            runtime.parent_ctx._selected_skills = _selected_skills
+            runtime.parent_ctx._selected_skill_messages = selected_skill_messages(_selected_skills, history=_history_msgs or ())
+            # Skills selected in earlier Turns stay dispatchable by name from Lead's own history.
+            runtime.parent_ctx._history_skill_texts = history_skill_texts(_history_msgs or ())
             result = await runner.run(
                 profile_name="lead",
                 **({"exact_binding": _context_lead_binding} if _context_lead_binding is not None else {}),
@@ -7458,11 +7467,16 @@ async def _lead_loop(
             _stash_streamed_lead_section_ids(runtime.parent_bus, sd)
         raise  # Propagate to run_turn for turn_aborted emission
     except Exception as exc:
+        from bowhead_core.selected_skill_input import SelectedSkillUnavailable
+
         reason_code = (
             "clarification_resume_unavailable"
             if isinstance(exc, OrdinaryContinuationUnavailable)
             else "knowledge_source_changed"
             if isinstance(exc, KnowledgeAccessError) and exc.code == "knowledge_source_changed"
+            # A selected Skill's access or version changed after send: the card asks to select it again.
+            else "reference_policy_changed"
+            if isinstance(exc, SelectedSkillUnavailable)
             else "lead_internal_error"
         )
         error_kind = "access" if reason_code == "knowledge_source_changed" else chat_failure_error_kind(reason_code)
@@ -9938,7 +9952,7 @@ async def _collect_inline_artifacts(
             try:
                 _delivs = await _art_store.list_deliverables_for_turn(turn_id)
                 _has_deliverable = bool(_delivs)
-                from bowhead_core.final_deliverables import superseded_deliverable_ids
+                from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
                 from bowhead_core.turn_log_store import TurnLogStore
 
                 identities = {artifact.id: (artifact.filename, artifact.mime) for artifact in _delivs}
@@ -9946,7 +9960,9 @@ async def _collect_inline_artifacts(
                 if len(set(identities.values())) < len(identities):
                     try:
                         events = await TurnLogStore(str(_art_store.db_path)).list_events(turn_id, event_types=("step_started", "step_done"))
-                        superseded = superseded_deliverable_ids(identities, [(event.event_type, event.payload) for event in events])
+                        step_events = [(event.event_type, event.payload) for event in events]
+                        # A revised input, and every earlier copy a helper rewrote, leave the answer; the trace keeps them.
+                        superseded = superseded_deliverable_ids(identities, step_events) | rewritten_deliverable_ids(identities, step_events)
                     except Exception:
                         logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
                 # File versions (R3): a later version of the same file written in this Turn replaces its card.

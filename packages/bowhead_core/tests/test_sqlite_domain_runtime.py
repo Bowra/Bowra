@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,9 @@ def domain_files(tmp_path: Path) -> Path:
         "observability": ("CREATE TABLE llm_request_records(turn_id TEXT,session_id TEXT)", "CREATE TABLE llm_request_chunks(turn_id TEXT)"),
     }
     for domain, statements in definitions.items():
-        with sqlite3.connect(tmp_path / DOMAIN_TARGET_FILES[domain]) as db:
+        # Closed here: a connection left to garbage collection checkpoints its WAL file whenever it is
+        # collected, and a test connection opened with timeout=0 meanwhile fails with SQLITE_BUSY.
+        with closing(sqlite3.connect(tmp_path / DOMAIN_TARGET_FILES[domain])) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
             for sql in statements:
                 db.execute(sql)
@@ -1097,3 +1100,56 @@ async def test_deferred_cursor_close_failure_preserves_authority_fence(domain_fi
             execution.commit()
     finally:
         execution.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_protocol_connection_first_read_waits_for_a_busy_authority_lease(domain_files: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session soft-delete and revive read through this connection. Its setup dropped the cursors of
+    ``busy_timeout=`` and ``secure_delete=``, which return a row, so the first read counted an open
+    read and failed at once instead of waiting while another writer held the core lease."""
+    import time
+
+    from bowhead_core.terminal_protocol_store import open_terminal_protocol_connection
+
+    from bowhead_core import sqlite_domains
+
+    monkeypatch.setattr(sqlite_domains, "domain_layout_active", lambda _path: True)
+    core = managed(domain_files, "core")
+    core.execute("INSERT INTO users(id,status,balance) VALUES('u1','active',0)").close()
+    core.execute("INSERT INTO workspaces(id,team_id) VALUES('w1','t1')").close()
+    core.commit()
+    core.close()
+    execution = managed(domain_files, "execution")
+    execution.execute("INSERT INTO sessions(id,user_id,workspace_id) VALUES('s1','u1','w1')").close()
+    execution.commit()
+    execution.close()
+    held, errors = threading.Event(), []
+
+    def hold_core_authority() -> None:
+        writer = managed(domain_files, "core")
+        try:
+            writer.execute("UPDATE users SET status='changed' WHERE id='u1'").close()
+            held.set()
+            time.sleep(0.3)
+            writer.commit()
+        except BaseException as error:
+            errors.append(error)
+            held.set()
+        finally:
+            writer.close()
+
+    worker = threading.Thread(target=hold_core_authority)
+    worker.start()
+    try:
+        assert await asyncio.to_thread(held.wait, 5)
+        started = time.monotonic()
+        path = str(domain_files.with_name(DOMAIN_TARGET_FILES["execution"]))
+        async with (
+            open_terminal_protocol_connection(path) as connection,
+            connection.execute("SELECT w.team_id FROM sessions s LEFT JOIN workspaces w ON w.id=s.workspace_id WHERE s.id='s1'") as cursor,
+        ):
+            assert [tuple(row) for row in await cursor.fetchall()] == [("t1",)]
+        assert time.monotonic() - started >= 0.2, "The read must have waited for the lease, not skipped it"
+    finally:
+        await asyncio.to_thread(worker.join, 5)
+    assert not errors

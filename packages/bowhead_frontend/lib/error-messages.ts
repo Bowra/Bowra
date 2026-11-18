@@ -134,6 +134,8 @@ export type PeerFailureReasonCode =
   | "peer_tool_failure_limit_exceeded"
   | "peer_tool_call_limit_exceeded"
   | "peer_model_call_limit_exceeded"
+  | "peer_model_timeout"
+  | "peer_model_unavailable"
   | "peer_credit_exhausted";
 
 const PEER_FAILURE_CODES = new Set<PeerFailureReasonCode>([
@@ -147,6 +149,8 @@ const PEER_FAILURE_CODES = new Set<PeerFailureReasonCode>([
   "peer_tool_failure_limit_exceeded",
   "peer_tool_call_limit_exceeded",
   "peer_model_call_limit_exceeded",
+  "peer_model_timeout",
+  "peer_model_unavailable",
   "peer_credit_exhausted",
 ]);
 

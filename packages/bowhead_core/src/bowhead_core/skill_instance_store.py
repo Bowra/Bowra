@@ -106,8 +106,8 @@ class SkillInstanceStore:
             # workflow-solidify S3 (§4.3): incremental verdict-column migration. This store originally had **no** migration block;
             # CREATE IF NOT EXISTS does not add columns to existing tables, so PRAGMA-guarded ALTER is required
             # (otherwise missing columns make set_verdict writes fail).
-            cur = await db.execute("PRAGMA table_info(skill_instances)")
-            cols = {row[1] for row in await cur.fetchall()}
+            async with db.execute("PRAGMA table_info(skill_instances)") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
             if "verdict" not in cols:
                 await db.execute("ALTER TABLE skill_instances ADD COLUMN verdict TEXT")
             if "verdict_json" not in cols:

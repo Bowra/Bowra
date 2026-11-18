@@ -159,6 +159,18 @@ def is_platform_only_skill(name: str) -> bool:
     return name in _PLATFORM_ONLY_SKILLS or name.startswith("settings-")
 
 
+def builtin_skill_offered_for_selection(name: str) -> bool:
+    """Whether the Agent and Plugin Skill pickers offer this built-in Skill for a new selection.
+
+    Platform-only Skills are never offered, and a Skill written for a built-in connection is offered only
+    while that connection can be enabled. Coach discovery applies the same rule; existing grants keep
+    resolving through the dependency compiler either way.
+    """
+    from bowhead_core.builtin_tool_providers import builtin_skill_available
+
+    return not is_platform_only_skill(name) and builtin_skill_available(name)
+
+
 # Tools combined into one authoring row are also combined during reference-based catalog lookup.
 AUTHORING_LOOKUP_ALIASES: dict[str, str] = {"python_exec": "python_sandbox"}
 
@@ -602,6 +614,7 @@ __all__ = [
     "COMPILER_DERIVED_SKILL_TOOLS",
     "CatalogAccessDenied",
     "NATIVE_ALLOWLIST",
+    "builtin_skill_offered_for_selection",
     "is_platform_only_skill",
     "RISK_REGISTRY_VERSION",
     "SubagentAuthoringCatalogService",

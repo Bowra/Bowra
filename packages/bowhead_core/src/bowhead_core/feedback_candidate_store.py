@@ -500,11 +500,11 @@ class FeedbackCandidateStore:
                     # Cooldown counts ALL original endorsers (three cosigners retargeting must not be blocked by a one-person rejection cooldown).
                     await self._check_suppression(db, row.team_id, new_sig, now, row.proposer_id, extra_contributors=involved)
                     # Retargeting has net-zero open count (the original is immediately superseded); exclude it so reaching the cap does not reject this.
-                    cursor = await db.execute(
+                    async with db.execute(
                         "SELECT COUNT(*) FROM feedback_candidates WHERE team_id=? AND state=? AND expires_at>? AND id<>?",
                         (row.team_id, _OPEN, now_iso, row.id),
-                    )
-                    (open_total,) = await cursor.fetchone()
+                    ) as cursor:
+                        (open_total,) = await cursor.fetchone()
                     if int(open_total) >= self.team_open_cap:
                         await db.rollback()
                         raise QuotaExceeded("team_open")
@@ -621,14 +621,14 @@ class FeedbackCandidateStore:
             except BaseException:
                 await db.rollback()
                 raise
-            cursor = await db.execute(
+            async with db.execute(
                 """
                 SELECT * FROM feedback_candidates
                 WHERE team_id=? AND state=? ORDER BY updated_at DESC
                 """,
                 (team_id, _OPEN),
-            )
-            rows = await cursor.fetchall()
+            ) as cursor:
+                rows = await cursor.fetchall()
             return [FeedbackCandidate.from_row(r) for r in rows]
 
     async def list_decided(self, team_id: str, *, limit: int = 50) -> list[FeedbackCandidate]:
@@ -643,14 +643,14 @@ class FeedbackCandidateStore:
             except BaseException:
                 await db.rollback()
                 raise
-            cursor = await db.execute(
+            async with db.execute(
                 """
                 SELECT * FROM feedback_candidates
                 WHERE team_id=? AND state<>? ORDER BY COALESCE(decided_at, updated_at) DESC, id LIMIT ?
                 """,
                 (team_id, _OPEN, limit),
-            )
-            rows = await cursor.fetchall()
+            ) as cursor:
+                rows = await cursor.fetchall()
             return [FeedbackCandidate.from_row(r) for r in rows]
 
     # ── Internals ───────────────────────────────────────────────────────────
@@ -672,7 +672,7 @@ class FeedbackCandidateStore:
             except BaseException:
                 await db.rollback()
                 raise
-            cursor = await db.execute(
+            async with db.execute(
                 """
                 SELECT c.* FROM feedback_candidates c
                 LEFT JOIN feedback_casework w ON w.candidate_id=c.id
@@ -680,16 +680,16 @@ class FeedbackCandidateStore:
                 ORDER BY c.updated_at
                 """,
                 (_EXPIRED,),
-            )
-            return [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
+            ) as cursor:
+                return [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
 
     async def mark_receipt(self, candidate_id: str, when: datetime | None = None) -> None:
         """记「终态回执已发」——落 sidecar 行（无行则建，trigger=explicit 占位）。"""
 
         stamp = _iso(when or _utcnow())
         async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute("SELECT team_id FROM feedback_candidates WHERE id=?", (candidate_id,))
-            row = await cursor.fetchone()
+            async with db.execute("SELECT team_id FROM feedback_candidates WHERE id=?", (candidate_id,)) as cursor:
+                row = await cursor.fetchone()
             if row is None:
                 return
             await db.execute(
@@ -730,15 +730,15 @@ class FeedbackCandidateStore:
         placeholders = ",".join("?" for _ in sigs)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
+            async with db.execute(
                 f"""
                 SELECT * FROM feedback_candidates
                 WHERE team_id=? AND state=? AND decided_at>=? AND semantic_sig IN ({placeholders})
                 ORDER BY decided_at DESC
                 """,  # noqa: S608 -- placeholders only
                 (team_id, _ACCEPTED, cutoff, *sigs),
-            )
-            rows = [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
+            ) as cursor:
+                rows = [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
         by_sig: dict[str, FeedbackCandidate] = {}
         for row in rows:  # Already ordered by decided_at DESC; first is newest
             by_sig.setdefault(row.semantic_sig, row)
@@ -753,22 +753,22 @@ class FeedbackCandidateStore:
         """跨团队 open 且创建早于 older_than 的候选（教练办案候补池）；不惰性翻转，不判 flag。"""
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT * FROM feedback_candidates WHERE state=? AND created_at<=? ORDER BY created_at",
                 (_OPEN, _iso(older_than)),
-            )
-            return [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
+            ) as cursor:
+                return [FeedbackCandidate.from_row(r) for r in await cursor.fetchall()]
 
     async def _get(
         self,
         db: aiosqlite.Connection,
         candidate_id: str,
     ) -> FeedbackCandidate | None:
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM feedback_candidates WHERE id=?",
             (candidate_id,),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         return FeedbackCandidate.from_row(row) if row else None
 
     async def _fetch_open(
@@ -777,14 +777,14 @@ class FeedbackCandidateStore:
         team_id: str,
         sig: str,
     ) -> FeedbackCandidate | None:
-        cursor = await db.execute(
+        async with db.execute(
             """
             SELECT * FROM feedback_candidates
             WHERE team_id=? AND semantic_sig=? AND state=?
             """,
             (team_id, sig, _OPEN),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         return FeedbackCandidate.from_row(row) if row else None
 
     async def _merge(
@@ -828,15 +828,15 @@ class FeedbackCandidateStore:
     ) -> None:
         """冷却判定：pending contributors **去重**，不同人数 > 上次 evidence_count
         才解除——同一个人反复重试不构成「证据显著增长」。"""
-        cursor = await db.execute(
+        async with db.execute(
             """
             SELECT last_evidence_count, pending_contributors, suppressed_until
             FROM feedback_candidate_suppressions
             WHERE team_id=? AND semantic_sig=?
             """,
             (team_id, sig),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             return
         if str(row["suppressed_until"]) <= _iso(now):
@@ -879,26 +879,26 @@ class FeedbackCandidateStore:
         now: datetime,
     ) -> None:
         day_start = now.date().isoformat()
-        cursor = await db.execute(
+        async with db.execute(
             """
             SELECT COUNT(*) FROM feedback_candidates
             WHERE team_id=? AND proposer_id=? AND created_at>=?
             """,
             (team_id, proposer_id, day_start),
-        )
-        (daily,) = await cursor.fetchone()
+        ) as cursor:
+            (daily,) = await cursor.fetchone()
         if int(daily) >= self.proposer_daily_cap:
             raise QuotaExceeded("proposer_daily")
         # The open count excludes overdue rows not yet flipped on read; nobody calls list_open during a dark batch,
         # and zombie open rows must not consume quota.
-        cursor = await db.execute(
+        async with db.execute(
             """
             SELECT COUNT(*) FROM feedback_candidates
             WHERE team_id=? AND state=? AND expires_at>?
             """,
             (team_id, _OPEN, _iso(now)),
-        )
-        (open_total,) = await cursor.fetchone()
+        ) as cursor:
+            (open_total,) = await cursor.fetchone()
         if int(open_total) >= self.team_open_cap:
             raise QuotaExceeded("team_open")
 
@@ -917,14 +917,14 @@ class FeedbackCandidateStore:
         if semantic_sig is not None:
             clause += " AND semantic_sig=?"
             params.append(semantic_sig)
-        cursor = await db.execute(
+        async with db.execute(
             f"""
             SELECT id, team_id, semantic_sig, target_kind, target_ref, evidence_count
             FROM feedback_candidates WHERE {clause}
             """,
             params,
-        )
-        due = await cursor.fetchall()
+        ) as cursor:
+            due = await cursor.fetchall()
         for row in due:
             await db.execute(
                 "UPDATE feedback_candidates SET state=?, updated_at=? WHERE id=?",

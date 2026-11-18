@@ -12170,6 +12170,8 @@
       "tool_failure_limit_exceeded": "Cet Agent d’analyse s’est arrêté après des échecs répétés d’outils. Réessayez plus tard.",
       "tool_call_limit_exceeded": "Cet Agent d’analyse s’est arrêté car ce tour a atteint la limite d’appels d’outils de l’équipe. Poursuivez la tâche ou demandez à un administrateur de l’équipe d’augmenter la limite.",
       "model_call_limit_exceeded": "Cet Agent d’analyse s’est arrêté car ce tour a atteint la limite d’appels au modèle de l’équipe. Poursuivez la tâche ou demandez à un administrateur de l’équipe d’augmenter la limite.",
+      "model_timeout": "Cet Agent d’analyse a dépassé le délai d’attente de la réponse du modèle. Réessayez plus tard.",
+      "model_unavailable": "Cet Agent d’analyse n’a pas pu terminer sa tâche car le service de modèle est temporairement indisponible. Réessayez plus tard.",
       "credit_exhausted": "Cet Agent d’analyse s’est arrêté car le crédit disponible est épuisé. Ajoutez du crédit, puis poursuivez la tâche."
     },
     "collab_errors": {
@@ -12502,6 +12504,8 @@
     "mode_hint_auto": "Détecte automatiquement quand un plan est nécessaire",
     "mode_hint_plan": "Les grandes tâches proposent d’abord un plan à approuver",
     "blocked_needs_context": "Sélectionnez d’abord un espace de travail Datarc dans la carte ci-dessus — le plan reprend automatiquement après votre choix",
+    "failed_model_timeout": "Délai d’attente du modèle dépassé. Cliquez plus tard sur « Reprendre le plan » pour relancer cette étape.",
+    "failed_model_unavailable": "Le service de modèle est temporairement indisponible. Cliquez plus tard sur « Reprendre le plan » pour relancer cette étape.",
     "feas_web": "Recherche sur le web",
     "feas_needs_context": "Espace de travail Datarc nécessaire",
     "feas_no_corpus": "Base de connaissances vide",
@@ -14133,6 +14137,10 @@
       "configuration_mention_unavailable": "Ce déploiement ne permet pas de mentionner l’Agent de configuration. Retirez sa référence et demandez la modification des paramètres dans la conversation ordinaire.",
       "resource_unavailable": "Une ou plusieurs ressources sélectionnées sont indisponibles. Conservez le brouillon et sélectionnez-les à nouveau.",
       "reference_receiver_selection_failed": "La sélection automatique de l’Agent n’a pas abouti. Votre brouillon est conservé. Sélectionnez un Agent avec @, puis renvoyez votre demande.",
+      "skill_selection_unavailable": "Les Skills ne peuvent pas être utilisés pour le moment. Votre brouillon est conservé. Réessayez dans un instant, ou retirez le Skill et envoyez sans lui.",
+      "selected_skill_unavailable": "Un Skill sélectionné ne vous est plus disponible : il a été désactivé ou votre accès a été retiré. Votre brouillon est conservé. Retirez-le ou choisissez un autre Skill avec /, puis renvoyez votre demande.",
+      "selected_skill_changed": "Un Skill sélectionné a été mis à jour après votre sélection. Votre brouillon est conservé. Sélectionnez-le à nouveau avec /, puis envoyez.",
+      "selected_skill_too_large": "Les instructions d’un Skill sélectionné sont trop volumineuses pour être envoyées. Votre brouillon est conservé. Retirez ce Skill ou demandez à son responsable de le raccourcir, puis renvoyez votre demande.",
       "plan_execution_claim_lost": "L’état du plan a changé. Vérifiez à nouveau le plan avant de l’exécuter.",
       "attachment_bundle_mismatch": "Ce lot de pièces jointes a changé. Importez-le à nouveau avant l’envoi.",
       "attachment_metadata_stale": "Cette pièce jointe a changé. Sélectionnez-la à nouveau avant l’envoi.",

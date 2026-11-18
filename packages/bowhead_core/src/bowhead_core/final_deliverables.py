@@ -1,4 +1,14 @@
-"""Select revised final files from exact native sandbox input/output references."""
+"""Select the final files a Turn's answer shows.
+
+Two rules hide an earlier file from the answer; the run trace, Results and Files keep every file:
+
+- A successful sandbox call that read exactly one same-name file and wrote one replaces that input.
+- A helper that writes a file with the same name, type and folder path again in one Turn rewrote it: a
+  sandbox call starts in an empty directory, so a rewrite is a new file of that name. Only its newest
+  copy is shown. Copies from different helpers stay, because parallel helpers may deliver independent
+  files, and so do same-name files of different declared folders (``site/a/index.html``,
+  ``site/b/index.html``).
+"""
 
 from __future__ import annotations
 
@@ -72,3 +82,42 @@ def superseded_deliverable_ids(
                 if len(parents) == 1 and len(siblings) == 1:
                     superseded.update(parents)
     return superseded
+
+
+def rewritten_deliverable_ids(
+    identities: dict[str, tuple[str, str]],
+    events: list[tuple[str, dict[str, Any]]],
+) -> set[str]:
+    """Hide all but the newest copy a helper wrote of one file name, type and path in this Turn.
+
+    ``identities`` maps the Turn's delivered files to ``(filename, mime)``; ``events`` are the Turn's
+    ``step_started``/``step_done`` events in order. A file no step reports as its output, or whose
+    reported name or type differs from the stored file, is never hidden. The reported ``path`` of a
+    declared nested file is part of the key; steps recorded before it was kept have none.
+    """
+    helper_of: dict[str, str] = {}
+    copies: dict[tuple[str, tuple[str, str], str], list[str]] = {}
+    for event_type, payload in events:
+        step_id = payload.get("step_id")
+        if not isinstance(step_id, str):
+            continue
+        if event_type == "step_started":
+            helper = payload.get("subagent_id")
+            helper_of[step_id] = helper if isinstance(helper, str) else ""
+            continue
+        meta = payload.get("result_meta")
+        outputs = meta.get("output_artifacts") if isinstance(meta, dict) else None
+        if event_type != "step_done" or step_id not in helper_of or not isinstance(outputs, list):
+            continue
+        for output in outputs:
+            if not isinstance(output, dict) or output.get("data_role") == "stdout":
+                continue
+            artifact_id = output.get("artifact_id")
+            identity = identities.get(artifact_id) if isinstance(artifact_id, str) else None
+            if identity is None or identity != (output.get("filename"), output.get("mime")):
+                continue
+            path = output.get("path")
+            written = copies.setdefault((helper_of[step_id], identity, path if isinstance(path, str) else ""), [])
+            if artifact_id not in written:
+                written.append(artifact_id)
+    return {artifact_id for written in copies.values() for artifact_id in written[:-1]}

@@ -20,7 +20,7 @@ from uuid import uuid4
 from bowhead_core.agent_behavior_contract import LEAD_ROLE_IDS, LeadRoleId
 from bowhead_core.agent_behavior_flags import agent_behavior_m3_enabled
 
-_REASON_CODE = re.compile(r"^[a-z][a-z0-9_.:@/-]{0,255}$")
+LEAD_CHOICE_REASON_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@/-]{0,255}$")
 _CANDIDATE_ID = re.compile(r"^lrc_[0-9a-f]{32}$")
 _SHA256_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class ExactAgentRoleChoice:
         if (
             self.role_id not in LEAD_ROLE_IDS
             or _CANDIDATE_ID.fullmatch(self.candidate_id) is None
-            or _REASON_CODE.fullmatch(self.reason_code) is None
+            or LEAD_CHOICE_REASON_PATTERN.fullmatch(self.reason_code) is None
             or not self.agent_id
             or len(self.agent_id) > 200
             or not self.runtime_profile_name
@@ -428,7 +428,7 @@ def validate_structured_choice(
     """Return the exact candidate or fail without an order/name fallback."""
     if not agent_behavior_m3_enabled():
         raise LeadRoleCandidateError("behavior_reader_disabled")
-    if _REASON_CODE.fullmatch(choice.reason_code) is None:
+    if LEAD_CHOICE_REASON_PATTERN.fullmatch(choice.reason_code) is None:
         raise LeadRoleCandidateError("candidate_choice_invalid")
     candidates = roster.by_role.get(choice.role_id, ())
     matches = tuple(item for item in candidates if item.candidate_id == choice.candidate_id)
@@ -443,6 +443,7 @@ def validate_structured_choice(
 
 __all__ = [
     "BEHAVIOR_CUTOVER_LEAD_ROLES",
+    "LEAD_CHOICE_REASON_PATTERN",
     "LeadRoleCandidate",
     "LeadRoleCandidateError",
     "LeadRoleCandidateRoster",

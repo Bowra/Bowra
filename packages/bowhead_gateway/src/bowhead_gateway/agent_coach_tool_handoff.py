@@ -45,11 +45,11 @@ class AgentCoachToolHandoff:
         db.row_factory = aiosqlite.Row
         available, binding_authorized, audience = True, True, None
         if target["kind"] == "agent_draft":
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT * FROM team_subagent_draft WHERE id=? AND team_id=? AND owner_user_id=? AND workspace_id=? AND entry_mode='canvas'",
                 (target["id"], resource.user.team_id, resource.user.id, resource.workspace_id),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             if row is None:
                 raise ValueError("tool_requirement_parent_unavailable")
             current = {"kind": "agent_draft", "id": row["id"], "version": row["row_version"]}

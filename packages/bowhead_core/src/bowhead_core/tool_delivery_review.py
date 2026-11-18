@@ -111,10 +111,19 @@ def failed_calls(invocations: Sequence[Any]) -> dict[str, Any]:
     }
 
 
+def visual_disclosures(invocations: Sequence[Any]) -> dict[str, dict[str, Any]]:
+    """Save calls with unresolved content changes or an incomplete visual check (visual self-check, FR11/FR19)."""
+    from bowhead_core.visual_self_check import visual_disclosure_calls
+
+    return visual_disclosure_calls(invocations)
+
+
 def requires_delivery_review(invocations: Sequence[Any]) -> bool:
     """Include reviewed child failures without making a successful delegation fail."""
-    return bool(failed_calls(invocations)) or any(
-        inv.tool_name == "subagent_spawn" and isinstance(invocation_result(inv), ReviewedDeliveryResult) for inv in invocations
+    return (
+        bool(failed_calls(invocations))
+        or any(inv.tool_name == "subagent_spawn" and isinstance(invocation_result(inv), ReviewedDeliveryResult) for inv in invocations)
+        or bool(visual_disclosures(invocations))
     )
 
 
@@ -186,7 +195,10 @@ def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
         and inv.tool_name != LeadDeliveryReview.name
         and classify_tool_outcome(invocation_result(inv), inv.error).state == "success"
     ]
-    return {"failed_calls": failures, "successful_calls": successes, "truncated": len(invocations) > _MAX_REVIEW_CALLS}
+    context: dict[str, Any] = {"failed_calls": failures, "successful_calls": successes, "truncated": len(invocations) > _MAX_REVIEW_CALLS}
+    if visual := visual_disclosures(calls):
+        context["visual_disclosures"] = list(visual.values())
+    return context
 
 
 def _review_work_guidance(*, closeout_only: bool, ask_tool: str | None) -> str:
@@ -237,6 +249,7 @@ def review_guidance(
         "Use review_context.successful_calls for successful delivery evidence and review_context.failed_calls "
         "for failed attempts or explicitly requested negative tests. "
         + (_CITABLE_DELEGATION_GUIDANCE if any(is_citable_delegation(inv) for inv in invocations) else "")
+        + (_visual_review_guidance() if visual_disclosures(invocations) else "")
         + "Artifact reference numbers, artifact IDs "
         "and section IDs are not call IDs. "
         "These call IDs are only for delivery_review, never artifact inputs. Coverage is your assessment, "
@@ -248,6 +261,12 @@ def review_guidance(
     if include_call_context:
         guidance += "review_context (JSON data): " + json.dumps(_review_call_context(invocations), ensure_ascii=False)
     return guidance
+
+
+def _visual_review_guidance() -> str:
+    from bowhead_core.visual_self_check import VISUAL_REVIEW_GUIDANCE
+
+    return VISUAL_REVIEW_GUIDANCE
 
 
 def repeated_review_guidance(review_tool: str | None) -> str:
@@ -300,6 +319,9 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
     problems: list[str] = []
     invalid_evidence_fields: list[str] = []
     expected_failures: set[str] = set()
+    # Calls that are also failed or partial follow the failure rules; their issue accounts for them.
+    visual = {cid: item for cid, item in visual_disclosures(invocations).items() if cid not in failures}
+    seen_visual: set[str] = set()
 
     def evidence(item: dict[str, Any], *, field: str, failed_id: str | None = None, delegated: bool = False) -> None:
         ids = item.get("evidence_call_ids")
@@ -361,6 +383,14 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
             problems.append("each issue must be an object")
             continue
         cid = item.get("call_id")
+        if isinstance(cid, str) and cid in visual and cid not in seen_visual:
+            from bowhead_core.visual_self_check import visual_issue_problem
+
+            seen_visual.add(cid)
+            if (problem := visual_issue_problem(cid, visual[cid], item)) is not None:
+                problems.append(problem)
+                invalid_evidence_fields.append(f"issues[{index}].resolution")
+            continue
         if not isinstance(cid, str) or cid not in failures or cid in seen:
             problems.append(
                 "issues must identify each actual failed call exactly once; keep unmet work without a failed call in requirements, not an invented issue"
@@ -387,6 +417,8 @@ def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> Deliver
             problems.append(f"{cid}: unknown resolution")
     if seen != set(failures):
         problems.append("every failed call must be accounted for")
+    if seen_visual != set(visual):
+        problems.append("every call in review_context.visual_disclosures must be accounted for with one disclosed issue")
     resolutions = {item["call_id"]: item.get("resolution") for item in issues if isinstance(item, dict) and isinstance(item.get("call_id"), str)}
     for cid in sorted(cited_delegations):
         if resolutions.get(cid) != "unfulfilled":
@@ -440,7 +472,8 @@ def review_terminal_payload(
         # Requested negative observations are deliverables. Coverage explanations are internal evidence.
         caveats = list(payload.get("caveats") or []) if isinstance(payload.get("caveats"), list) else []
         for issue in payload["delivery_review"]["issues"]:
-            if issue.get("resolution") == "expected" and issue["explanation"].strip() not in caveats:
+            # Visual disclosures (content changed after a visual check, check not completed) reach the user too.
+            if issue.get("resolution") in {"expected", "disclosed"} and issue["explanation"].strip() not in caveats:
                 caveats.append(issue["explanation"].strip())
         if caveats:
             payload["caveats"] = caveats
@@ -468,6 +501,8 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
     """Advertise the common review field on a trusted native payload schema."""
     import copy
     from dataclasses import replace
+
+    from bowhead_router.visual_input import visual_self_check_enabled
 
     if not delivery_review_enabled():
         return schema
@@ -502,8 +537,9 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
             "call_id": {"type": "string"},
             "resolution": {
                 "type": "string",
-                "enum": ["recovered", "covered", "expected", "unfulfilled"],
-                "description": "Recovered requires the same Tool and identical arguments; use covered for a changed alternative with successful evidence and an explanation.",
+                "enum": ["recovered", "covered", "expected", "unfulfilled", *(["disclosed"] if visual_self_check_enabled() else [])],
+                "description": "Recovered requires the same Tool and identical arguments; use covered for a changed alternative with successful evidence and an explanation."
+                + (" Disclosed only for a call in review_context.visual_disclosures, explained for the user." if visual_self_check_enabled() else ""),
             },
             "evidence_call_ids": {
                 "type": "array",

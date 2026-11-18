@@ -18,10 +18,8 @@ MIGRATION = import_module("bowhead_core.migrations.versions.0205_datarc_context"
 
 
 @pytest.fixture
-async def store(tmp_path):
-    path = tmp_path / "memory.db"
-    _upgrade(path)
-    return UserMemoryStore(path)
+async def store(migrated_legacy_core_db):
+    return UserMemoryStore(migrated_legacy_core_db)
 
 
 async def choose(store, identifier, *, user="usr_actor", session="s_one", remember=False, scope=SCOPE):

@@ -368,7 +368,7 @@ async def test_schema_cache_isolates_member_and_connection_with_overlapping_work
     assert cache.stats()["size"] == 2
 
 
-async def test_original_helper_capture_claim_and_continue_restore_its_source(tmp_path, monkeypatch):
+async def test_original_helper_capture_claim_and_continue_restore_its_source(migrated_legacy_core_db, monkeypatch):
     from bowhead_core.session_store import SessionStore
     from bowhead_core.subagent_return_tool import register_subagent_return_tool
     from test_subagent_resume_store import _db
@@ -376,7 +376,7 @@ async def test_original_helper_capture_claim_and_continue_restore_its_source(tmp
     from bowhead_core import subagent_resume as sr
 
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=")
-    path = await _db(tmp_path)
+    path = await _db(migrated_legacy_core_db)
     ctx = context()
     ctx.team_id, ctx.user_id, ctx.workspace_id, ctx.session_id, ctx.turn_id = "team_1", "u_1", "ws_1", "s_1", "t_1"
     ctx.datarc_binding = replace(ctx.datarc_binding, team_id="team_1")

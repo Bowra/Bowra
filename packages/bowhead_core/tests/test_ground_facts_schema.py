@@ -65,7 +65,10 @@ def test_validate_structural():
     # Non-dict entries still trigger structural errors.
     assert any("must be an object" in e for e in _gf_errors({**base, "ground_facts": [{"key": "a", "value": 1}, "junk"]}))
     assert any("must be a list" in e for e in _gf_errors({**base, "ground_facts": {"key": "a"}}))
-    assert any("too many" in e for e in _gf_errors({**base, "ground_facts": [{"key": f"k{i}", "value": 1} for i in range(65)]}))
+    # No count limit (Observed case: 80 entries for one store dimension), but every entry is still checked.
+    many = [{"key": f"k{i}", "value": 1} for i in range(80)]
+    assert _gf_errors({**base, "ground_facts": many}) == []
+    assert _gf_errors({**base, "ground_facts": [*many, "junk"]}) == ["ground_facts[80] must be an object"]
     # Valid → no gf errors
     assert _gf_errors({**base, "ground_facts": [{"key": "a", "label": "x", "value": 1.0, "source": "given"}]}) == []
 

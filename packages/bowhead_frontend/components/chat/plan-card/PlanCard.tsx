@@ -583,6 +583,16 @@ export function blockedKindLabel(kind: string, t: T): string {
   return key ? t(key) : kind;
 }
 
+/* Kinds whose stored reason is not the card copy: the card shows this sentence and no kind suffix.
+   A model call that still failed after its retries keeps the model failure's own classification;
+   resuming the plan runs the step again. */
+const _REASON_COPY_KEYS = new Map<string, string>([
+  ["needs_user_input", "blocked_needs_context"],
+  ["llm_provider_timeout", "failed_model_timeout"],
+  ["llm_provider_unavailable", "failed_model_unavailable"],
+]);
+const _MODEL_FAILURE_KINDS = new Set(["llm_provider_timeout", "llm_provider_unavailable"]);
+
 /* ── blocked/failed detail (under a blocked|failed step) + B recovery actions ── */
 function BlockedDetail({
   step,
@@ -600,7 +610,10 @@ function BlockedDetail({
   // Batch 3 (review R2-F8): order failed-step CTAs by cause; criteria_unmet/execution failure →
   // revise and retry is primary; "补充材料" only makes sense for blocked needs_corpus steps.
   const showSupply = !failed && step.needsCorpus;
-  const revisePrimary = failed && !!recovery?.onRevise;
+  const reasonCopyKey = step.errorKind ? _REASON_COPY_KEYS.get(step.errorKind) : undefined;
+  // Nothing in the step needs revising after a model failure: running it again is the way forward.
+  const resumePrimary = failed && !!step.errorKind && _MODEL_FAILURE_KINDS.has(step.errorKind);
+  const revisePrimary = failed && !!recovery?.onRevise && !resumePrimary;
   const showRevisePanel = revise && revise.stepId === step.id;
   return (
     <div className={"pblock" + (failed ? " is-failed" : "")}>
@@ -615,8 +628,8 @@ function BlockedDetail({
           <b>{failed ? t(criteriaUnmet ? "failed_criteria_prefix" : "failed_prefix") : t("blocked_prefix")}</b>
           {/* planning-mode-audit WP-2: Datarc workspace preflight blocked → point to the picker card above,
               rather than a raw kind string (users do not know what needs_user_input means). */}
-          {step.errorKind === "needs_user_input" ? t("blocked_needs_context") : (step.reason || "")}
-          {step.errorKind && step.errorKind !== "needs_user_input" && !criteriaUnmet ? (
+          {reasonCopyKey ? t(reasonCopyKey) : (step.reason || "")}
+          {step.errorKind && !reasonCopyKey && !criteriaUnmet ? (
             <span className="why">{t("blocked_why", { kind: blockedKindLabel(step.errorKind, t) })}</span>
           ) : null}
           {step.verify && step.verify.unmet.length ? (
@@ -644,7 +657,7 @@ function BlockedDetail({
                 {t("recover_revise")}
               </button>
             ) : null}
-            <button type="button" className="bact" disabled={recovery.busy} onClick={recovery.onRetry}>
+            <button type="button" className={`bact${resumePrimary ? " primary" : ""}`} disabled={recovery.busy} onClick={recovery.onRetry}>
               <PlanIcon name="rotateCw" size={13} />
               {t("recover_continue")}
             </button>

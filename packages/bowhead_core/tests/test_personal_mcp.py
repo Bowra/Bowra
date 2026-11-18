@@ -690,3 +690,71 @@ def test_deployment_address_policy(monkeypatch):
     monkeypatch.setenv("BOWHEAD_DEPLOYMENT_MODE", "saas")
     with pytest.raises(PersonalMcpError, match="address_blocked"):
         normalize_endpoint("http://127.0.0.1:9000/mcp")
+
+
+# ---------------------------------------------------------------- lost authority lease (census T1/T2)
+
+
+def _lose_lease(monkeypatch, table, times):
+    """Fail the next ``times`` writes to ``table`` with the runtime's marked lease conflict."""
+    import re
+
+    from bowhead_core.sqlite_diagnostics import DiagnosticCursor
+
+    from bowhead_core import sqlite_domain_runtime
+
+    write = re.compile(rf"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b.*\b{table}\b", re.IGNORECASE | re.DOTALL)
+    attempts = []
+    original = DiagnosticCursor.execute
+
+    def execute(self, sql, parameters=(), /):
+        if write.search(sql):
+            attempts.append(len(attempts) + 1)
+            if len(attempts) <= times:
+                raise sqlite_domain_runtime._busy()
+        return original(self, sql, parameters)
+
+    monkeypatch.setattr(DiagnosticCursor, "execute", execute)
+    return attempts
+
+
+async def test_helper_start_manifest_repeats_after_a_lost_lease(personal, monkeypatch):
+    attempts = _lose_lease(monkeypatch, "personal_mcp_manifest", 1)
+
+    specs = await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx)
+
+    assert len(specs) == 1 and attempts == [1, 2]
+    with sqlite3.connect(personal.fixture.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM personal_mcp_manifest").fetchone() == (1,)
+
+
+async def _failed_dispatch(personal, monkeypatch):
+    _remote(monkeypatch, failure=True)
+    spec = (await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx))[0]
+    task = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
+    pending = await _wait_pending(personal, task)
+    async with await _client(personal) as client:
+        assert (await client.post(f"{_CONFIRMATIONS}/{pending['id']}/decision", json={"decision": "approve"})).status_code == 200
+    return task
+
+
+async def test_connection_failure_mark_repeats_after_a_lost_lease(personal, monkeypatch):
+    task = await _failed_dispatch(personal, monkeypatch)
+    attempts = _lose_lease(monkeypatch, "personal_mcp_connection", 1)
+
+    assert (await task)["error_kind"] == "personal_mcp_outcome_unknown"
+    assert attempts == [1, 2]
+    with sqlite3.connect(personal.fixture.db_path) as db:
+        assert db.execute("SELECT status FROM personal_mcp_connection WHERE id=?", (personal.connection_id,)).fetchone() == ("unreachable",)
+
+
+async def test_a_spent_lease_wait_keeps_the_call_outcome(personal, monkeypatch):
+    from bowhead_core import _db
+
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    task = await _failed_dispatch(personal, monkeypatch)
+    _lose_lease(monkeypatch, "personal_mcp_connection", 10_000)
+
+    assert (await task)["error_kind"] == "personal_mcp_outcome_unknown"
+    with sqlite3.connect(personal.fixture.db_path) as db:
+        assert db.execute("SELECT status FROM personal_mcp_connection WHERE id=?", (personal.connection_id,)).fetchone() == ("ready",)

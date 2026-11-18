@@ -23,9 +23,19 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 import structlog
 
+from bowhead_core import sqlite_lease_wait
 from bowhead_core.sqlite_capacity import ConnectionSlot
-from bowhead_core.sqlite_diagnostics import DiagnosticAsyncConnection, DiagnosticConnection, DiagnosticCursor, _kind
+from bowhead_core.sqlite_diagnostics import (
+    _CONTEXT,
+    DiagnosticAsyncConnection,
+    DiagnosticConnection,
+    DiagnosticCursor,
+    _kind,
+    _operation_context,
+    summarize_statement,
+)
 from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES, TABLE_DOMAINS
+from bowhead_core.sqlite_request_deadline import remaining_ms
 
 _REGISTRY = json.loads(Path(__file__).with_name("sqlite_domain_guards.json").read_text(encoding="utf-8"))
 _TRIGGERS: dict[str, dict[str, Any]] = _REGISTRY["triggers"]
@@ -97,6 +107,12 @@ def domain_additional_triggers(domain: str) -> tuple[str, ...]:
     )
 
 
+def _lease_callsite() -> str:
+    """The caller of the statement taking a lease: from the async context, else from the frames."""
+    context = _CONTEXT.get()
+    return (context or _operation_context()).callsite
+
+
 def _busy() -> sqlite3.OperationalError:
     error = sqlite3.OperationalError("database is locked: SQLite authority lease is busy; retry the complete transaction")
     error.sqlite_errorcode = sqlite3.SQLITE_BUSY
@@ -130,6 +146,8 @@ class DomainConnection(DiagnosticConnection):
         self._mutation_guards = False
         self._query_only = False
         self._unprotected_snapshot = False
+        # The lease the last refused acquisition asked for, read only when a statement starts to wait.
+        self._lease_blocked: tuple[str, int] | None = None
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         if not args:
@@ -171,11 +189,23 @@ class DomainConnection(DiagnosticConnection):
                     # snapshot; rollback/close remain available to the caller.
                     self._leases.pop(domain, None)
                     self._lost_lease = True
+            self._lease_blocked = (domain, mode)
             raise _busy() from None
         self._leases[domain] = mode
+        if mode == 2:
+            # Exclusive holds are rare (authority writes); remember who holds so a waiting read can name it.
+            # This runs inside SQLite callbacks (the authorizer and the guard UDF), where an exception would
+            # fail the statement, so recording never raises.
+            with contextlib.suppress(Exception):
+                sqlite_lease_wait.note_exclusive(domain, self.bowhead_connection_id, _lease_callsite())
 
     def _release(self) -> None:
         for domain in list(self._leases):
+            if self._leases[domain] == 2:
+                # Before unlocking, so the next exclusive holder cannot be forgotten in its place; a failure
+                # here must never skip the unlock.
+                with contextlib.suppress(Exception):
+                    sqlite_lease_wait.clear_exclusive(domain, self.bowhead_connection_id)
             fcntl.flock(self._gates[domain].fileno(), fcntl.LOCK_UN)
         self._leases.clear()
         self._lost_lease = False
@@ -244,8 +274,13 @@ class DomainConnection(DiagnosticConnection):
         try:
 
             def guarded() -> Any:
+                # Set only once the statement starts to wait, so a statement that never waits does no more work.
+                wait: tuple[float, tuple[str, int] | None, sqlite_lease_wait.LeaseHolder | None] | None = None
+                attempts = 0
                 while True:
                     preparing = True
+                    # Each attempt names only the lease it was refused, never one an earlier statement was refused.
+                    self._lease_blocked = None
                     try:
                         if self._lost_lease and phase != "rollback":
                             raise _busy()
@@ -254,7 +289,7 @@ class DomainConnection(DiagnosticConnection):
                             self._protect_statement(domain, mode)
                         preparing = False
                         try:
-                            return function()
+                            result = function()
                         except sqlite3.DatabaseError:
                             if self._callback_busy is not None:
                                 error, self._callback_busy = self._callback_busy, None
@@ -264,10 +299,20 @@ class DomainConnection(DiagnosticConnection):
                                 preparing = True
                                 raise _busy() from None
                             raise
+                        if wait is not None:
+                            self._report_lease_wait(wait, attempts, "proceeded", sql)
+                        return result
                     except sqlite3.OperationalError:
                         delay = min(0.01, deadline - time.monotonic())
                         if not retry_preparation or not preparing or delay <= 0:
+                            if wait is not None:
+                                timed_out = retry_preparation and preparing and delay <= 0
+                                self._report_lease_wait(wait, attempts, "timed_out" if timed_out else "failed", sql)
                             raise
+                        if wait is None:
+                            blocked = self._lease_blocked
+                            wait = (time.monotonic(), blocked, sqlite_lease_wait.holder_of(blocked[0]) if blocked else None)
+                        attempts += 1
                         # Only preparation can restart; release every lease before waiting.
                         self._release()
                         time.sleep(delay)
@@ -291,6 +336,43 @@ class DomainConnection(DiagnosticConnection):
                 self._preparing.pop()
             self._operation_depth -= 1
             self._settle()
+
+    def _report_lease_wait(
+        self,
+        wait: tuple[float, tuple[str, int] | None, sqlite_lease_wait.LeaseHolder | None],
+        attempts: int,
+        outcome: str,
+        sql: str | None,
+    ) -> None:
+        """Hand one waited statement to ``sqlite_lease_wait``; never raises."""
+        try:
+            started, blocked, holder = wait
+            context = _CONTEXT.get() or _operation_context()
+            try:
+                summary = summarize_statement(sql)
+            except Exception:
+                summary = None
+            sqlite_lease_wait.record_wait(
+                lease_domain=blocked[0] if blocked else "unavailable",
+                lease_mode=blocked[1] if blocked else 0,
+                waited_ms=(time.monotonic() - started) * 1000,
+                attempts=attempts,
+                outcome=outcome,
+                fields={
+                    "database": self.bowhead_database,
+                    "connection_id": self.bowhead_connection_id,
+                    "busy_timeout_ms": self.bowhead_busy_timeout_ms,
+                    "operation": _kind(sql or ""),
+                    "sql_fingerprint": summary.fingerprint if summary else None,
+                    "tables": summary.tables if summary else (),
+                    "callsite": context.callsite,
+                    **dict(context.request_ids),
+                },
+                holder=holder,
+                holder_seen_at=started,
+            )
+        except Exception:  # noqa: S110 -- Recording a wait must never replace the statement's own result or error.
+            pass
 
     def _request_scope(self, turn_id: str, session_id: str, user_id: str, workspace_id: str, team_id: str) -> int:
         if self._domain != "observability":
@@ -720,6 +802,10 @@ def connect_sync(database: str | Path, **kwargs: Any) -> sqlite3.Connection:
 def connect(database: str | Path, *, iter_chunk_size: int = 64, **kwargs: Any) -> DiagnosticAsyncConnection:
     """Async factory with legacy compatibility and ready-state domain admission."""
     slot = ConnectionSlot()
+    left = remaining_ms()
+    if left is not None:
+        # Inside a request write the writer wait ends with its 30-second deadline.
+        kwargs["timeout"] = min(float(kwargs.get("timeout", 5.0)), left / 1000)
     path, connector = _connection_connector(database, kwargs, slot)
     connection = DomainAsyncConnection(connector, iter_chunk_size, database=path.name if path.name in DOMAIN_TARGET_FILES.values() else "unavailable")
     connection.open_slot = slot

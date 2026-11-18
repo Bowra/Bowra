@@ -167,11 +167,12 @@ ON canvas_export_jobs(status, phase, created_at)
 
 
 async def _ensure_export_job_column(db: Any, column: str, declaration: str) -> None:
-    cur = await db.execute(
+    async with db.execute(
         "SELECT 1 FROM pragma_table_info('canvas_export_jobs') WHERE name = ?",
         (column,),
-    )
-    if await cur.fetchone() is None:
+    ) as cur:
+        missing = await cur.fetchone() is None
+    if missing:
         await db.execute(f"ALTER TABLE canvas_export_jobs ADD COLUMN {column} {declaration}")
 
 
@@ -351,11 +352,13 @@ async def get_job(job_id: str) -> ExportJob | None:
     if job is not None or _db_path is None:
         return job
 
-    async with diagnostic_connect(domain_database_path(_db_path, "content")) as db:
-        cur = await db.execute(
+    async with (
+        diagnostic_connect(domain_database_path(_db_path, "content")) as db,
+        db.execute(
             f"SELECT {_JOB_COLS_SQL} FROM canvas_export_jobs WHERE id=?",
             (job_id,),
-        )
+        ) as cur,
+    ):
         row = await cur.fetchone()
     return _row_to_job(row) if row else None
 
@@ -367,11 +370,13 @@ async def list_jobs_for_canvas(canvas_id: str, limit: int = 20) -> list[ExportJo
         items.sort(key=lambda j: j.created_at, reverse=True)
         return items[:limit]
 
-    async with diagnostic_connect(domain_database_path(_db_path, "content")) as db:
-        cur = await db.execute(
+    async with (
+        diagnostic_connect(domain_database_path(_db_path, "content")) as db,
+        db.execute(
             f"SELECT {_JOB_COLS_SQL} FROM canvas_export_jobs WHERE canvas_id=? ORDER BY created_at DESC, id DESC LIMIT ?",
             (canvas_id, limit),
-        )
+        ) as cur,
+    ):
         rows = await cur.fetchall()
     out = [_row_to_job(r) for r in rows]
     # Override matching IDs with in-memory jobs still in flight but not yet mirrored (the theoretical window is tiny).

@@ -810,6 +810,23 @@ class AgentDependencyCompiler:
         """
         return await self._resolve_skill_reference(selector, context=context, read_only_entry=False)
 
+    async def selection_grant(
+        self, resource: SkillResourceRef, *, name: str, context: AgentDependencyContext | SkillReadContext
+    ) -> ExactSkillGrant | None:
+        """The exact grant a Skill picker gives when this Skill is selected, or None when it does not resolve.
+
+        Same permissions as ``exact_grants_for_legacy_names``: read, plus invoke for a runnable Skill
+        (``kind: tool``, which a bundle without a declared kind also is, with scripts). Coach selections use
+        it so the original Agent and Plugin editors accept what Coach saved.
+        """
+        key = ExactSkillGrant(
+            kind=resource.source_kind, id=resource.id, name=name, permissions=("read",), revision=resource.version, distribution="reference"
+        )
+        resolved = await self._resolve_skill(key, context=context)
+        if not resolved.available:
+            return None
+        return replace(resolved.grant, permissions=_permissions_for(runnable=resolved.kind == "tool" and resolved.has_scripts))
+
     async def _resolve_skill_reference(
         self, selector: SkillExtensionSelector, *, context: AgentDependencyContext | SkillReadContext, read_only_entry: bool
     ) -> SkillResourceRef | None:

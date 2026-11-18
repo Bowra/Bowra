@@ -47,11 +47,13 @@ class KbMaintenanceStore:
     async def scan_page(self, *, limit: int = 20):
         async with diagnostic_connect(self.path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (await db.execute("SELECT value FROM kb_maintenance_state WHERE key='source_scan'")).fetchone()
+            async with db.execute("SELECT value FROM kb_maintenance_state WHERE key='source_scan'") as cursor:
+                row = await cursor.fetchone()
             after = row[0] if row else ""
-            rows = await (
-                await db.execute("SELECT * FROM kb_files WHERE soft_deleted_at IS NULL AND file_id>? ORDER BY file_id LIMIT ?", (after, limit))
-            ).fetchall()
+            async with db.execute(
+                "SELECT * FROM kb_files WHERE soft_deleted_at IS NULL AND file_id>? ORDER BY file_id LIMIT ?", (after, limit)
+            ) as cursor_2:
+                rows = await cursor_2.fetchall()
             return [_row_to_dto(row) for row in rows]
 
     async def checkpoint(self, after: str):
@@ -94,9 +96,8 @@ class KbMaintenanceStore:
         stamp = now_iso()
         async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            count = await (
-                await db.execute("SELECT count(*) FROM kb_rebuild_jobs WHERE team_id=? AND state IN ('running','cancelling')", (team_id,))
-            ).fetchone()
+            async with db.execute("SELECT count(*) FROM kb_rebuild_jobs WHERE team_id=? AND state IN ('running','cancelling')", (team_id,)) as cursor:
+                count = await cursor.fetchone()
             if count[0] >= 1:
                 raise ValueError("kb_rebuild_busy")
             await db.execute(
@@ -108,18 +109,18 @@ class KbMaintenanceStore:
 
     async def latest_job_id(self, *, team_id: str, workspace_id: str, user_id: str) -> str | None:
         async with diagnostic_connect(self.path) as db:
-            row = await (
-                await db.execute(
-                    "SELECT job_id FROM kb_rebuild_jobs WHERE team_id=? AND workspace_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
-                    (team_id, workspace_id, user_id),
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT job_id FROM kb_rebuild_jobs WHERE team_id=? AND workspace_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
+                (team_id, workspace_id, user_id),
+            ) as cursor:
+                row = await cursor.fetchone()
             return row[0] if row else None
 
     async def get_job(self, job_id: str):
         async with diagnostic_connect(self.path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (await db.execute("SELECT * FROM kb_rebuild_jobs WHERE job_id=?", (job_id,))).fetchone()
+            async with db.execute("SELECT * FROM kb_rebuild_jobs WHERE job_id=?", (job_id,)) as cursor:
+                row = await cursor.fetchone()
         if not row:
             return None
         item = dict(row)
@@ -147,7 +148,8 @@ class KbMaintenanceStore:
         """Queue and persist the exact claimed version in the same transaction."""
         async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            row = await (await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=? AND state='running'", (job_id,))).fetchone()
+            async with db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=? AND state='running'", (job_id,)) as cursor:
+                row = await cursor.fetchone()
             if not row or row[1] != position:
                 return False
             items = json.loads(row[0])
@@ -172,7 +174,8 @@ class KbMaintenanceStore:
     async def interrupt_file(self, job_id: str):
         async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            row = await (await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=?", (job_id,))).fetchone()
+            async with db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=?", (job_id,)) as cursor:
+                row = await cursor.fetchone()
             if row:
                 await self._interrupt_claim(db, *row)
             await db.commit()
@@ -190,9 +193,10 @@ class KbMaintenanceStore:
     async def pause_interrupted(self):
         async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            rows = await (
-                await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE state IN ('running','paused','cancelled','cancelling')")
-            ).fetchall()
+            async with db.execute(
+                "SELECT items_json,cursor FROM kb_rebuild_jobs WHERE state IN ('running','paused','cancelled','cancelling')"
+            ) as cursor:
+                rows = await cursor.fetchall()
             for row in rows:
                 await self._interrupt_claim(db, *row)
             await db.execute("UPDATE kb_rebuild_jobs SET state='paused',updated_at=? WHERE state='running'", (now_iso(),))

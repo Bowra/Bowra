@@ -39,7 +39,8 @@ class KbGenerationStore:
         async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             db.row_factory = aiosqlite.Row
-            row = await (await db.execute("SELECT * FROM kb_file_generations WHERE generation_id=?", (generation_id,))).fetchone()
+            async with db.execute("SELECT * FROM kb_file_generations WHERE generation_id=?", (generation_id,)) as cursor:
+                row = await cursor.fetchone()
             return dict(row) if row else None
 
     async def begin(self, file: KbFileDTO, sha256: str, count: int, index_version: str) -> str:
@@ -68,12 +69,11 @@ class KbGenerationStore:
         async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("BEGIN IMMEDIATE")
-            generation = await (
-                await db.execute(
-                    "SELECT expected_chunk_count FROM kb_file_generations WHERE generation_id=? AND file_id=? AND artifact_id=? AND state='writing'",
-                    (generation_id, file.file_id, file.artifact_id),
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT expected_chunk_count FROM kb_file_generations WHERE generation_id=? AND file_id=? AND artifact_id=? AND state='writing'",
+                (generation_id, file.file_id, file.artifact_id),
+            ) as cursor_3:
+                generation = await cursor_3.fetchone()
             if not generation:
                 return False
             stamp = now_iso()
@@ -112,14 +112,14 @@ class KbGenerationStore:
                 description_action.require(user_id=description_action.actor_user_id, team_id=file.team_id)
                 admission = (description_action.actor_user_id, description_action.workspace_id)
             elif description_fingerprint and file.ingestion_action_id:
-                admission = await (
-                    await db.execute(
-                        "SELECT actor_user_id,workspace_id FROM kb_membership_operations WHERE id=? AND file_id=? AND team_id=? AND membership_revision=? AND state='applied'",
-                        (file.ingestion_action_id, file.file_id, file.team_id, file.membership_revision),
-                    )
-                ).fetchone()
+                async with db.execute(
+                    "SELECT actor_user_id,workspace_id FROM kb_membership_operations WHERE id=? AND file_id=? AND team_id=? AND membership_revision=? AND state='applied'",
+                    (file.ingestion_action_id, file.file_id, file.team_id, file.membership_revision),
+                ) as cursor:
+                    admission = await cursor.fetchone()
             if admission:
-                navigation = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,))).fetchone()
+                async with db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,)) as cursor_2:
+                    navigation = await cursor_2.fetchone()
                 await SourceNavigationStore.enqueue_in(
                     db,
                     file,
@@ -181,15 +181,14 @@ class KbGenerationStore:
         """Only unpublished writes older than the maximum parse lifetime; bounded and retryable."""
         async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
-            rows = await (
-                await db.execute(
-                    "UPDATE kb_file_generations SET state='abandoned' WHERE generation_id IN ("
-                    "SELECT g.generation_id FROM kb_file_generations g JOIN kb_files f ON f.file_id=g.file_id "
-                    "WHERE g.file_id=? AND g.index_version=? AND g.state IN ('writing','abandoned') "
-                    "AND g.created_at<? AND g.generation_id IS NOT f.active_generation_id ORDER BY g.created_at LIMIT 20) RETURNING generation_id",
-                    (file.file_id, index_version, before),
-                )
-            ).fetchall()
+            async with db.execute(
+                "UPDATE kb_file_generations SET state='abandoned' WHERE generation_id IN ("
+                "SELECT g.generation_id FROM kb_file_generations g JOIN kb_files f ON f.file_id=g.file_id "
+                "WHERE g.file_id=? AND g.index_version=? AND g.state IN ('writing','abandoned') "
+                "AND g.created_at<? AND g.generation_id IS NOT f.active_generation_id ORDER BY g.created_at LIMIT 20) RETURNING generation_id",
+                (file.file_id, index_version, before),
+            ) as cursor:
+                rows = await cursor.fetchall()
             await db.commit()
             return [row[0] for row in rows]
 

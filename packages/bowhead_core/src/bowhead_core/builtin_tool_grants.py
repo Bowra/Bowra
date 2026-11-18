@@ -15,8 +15,10 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,8 +28,10 @@ from uuid import uuid4
 import aiosqlite
 from cryptography.fernet import Fernet, InvalidToken
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import is_authority_busy, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.sqlite_domains import domain_database_path
+
+logger = logging.getLogger(__name__)
 
 _KEY_CONTEXT = "builtin-tool-grant.v1"
 STATE_TTL_SECONDS = 600
@@ -156,7 +160,8 @@ class BuiltinToolGrantStore:
             return None
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (await db.execute("DELETE FROM builtin_tool_oauth_state WHERE state_hash=? RETURNING *", (_hash_state(state),))).fetchone()
+            async with db.execute("DELETE FROM builtin_tool_oauth_state WHERE state_hash=? RETURNING *", (_hash_state(state),)) as cursor:
+                row = await cursor.fetchone()
             await db.commit()
         if row is None or row["expires_at"] < _iso(_now()):
             return None
@@ -176,20 +181,25 @@ class BuiltinToolGrantStore:
     async def get(self, tool_id: str, user_id: str) -> BuiltinToolGrant | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (await db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id))).fetchone()
+            async with db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id)) as cursor:
+                row = await cursor.fetchone()
         return _grant(row) if row else None
 
     async def list_for_user(self, user_id: str, team_id: str) -> list[BuiltinToolGrant]:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute("SELECT * FROM builtin_tool_user_grant WHERE user_id=? AND team_id=? ORDER BY created_at", (user_id, team_id))
-            ).fetchall()
+            async with db.execute(
+                "SELECT * FROM builtin_tool_user_grant WHERE user_id=? AND team_id=? ORDER BY created_at", (user_id, team_id)
+            ) as cursor:
+                rows = await cursor.fetchall()
         return [_grant(row) for row in rows]
 
     async def count_active(self, tool_id: str) -> int:
-        async with open_shared_ctx(self.db_path) as db:
-            row = await (await db.execute("SELECT COUNT(*) FROM builtin_tool_user_grant WHERE tool_id=? AND status='active'", (tool_id,))).fetchone()
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute("SELECT COUNT(*) FROM builtin_tool_user_grant WHERE tool_id=? AND status='active'", (tool_id,)) as cursor,
+        ):
+            row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
     async def save(
@@ -212,7 +222,8 @@ class BuiltinToolGrantStore:
         scopes = json.dumps(sorted(set(granted_scopes)))
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            existing = await (await db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id))).fetchone()
+            async with db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id)) as cursor:
+                existing = await cursor.fetchone()
             superseded: str | None = None
             if existing is None:
                 if not refresh_token:
@@ -254,7 +265,8 @@ class BuiltinToolGrantStore:
                     (provider_subject, provider_email, scopes, cipher, now, tool_id, user_id),
                 )
             await db.commit()
-            row = await (await db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id))).fetchone()
+            async with db.execute("SELECT * FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=?", (tool_id, user_id)) as cursor_2:
+                row = await cursor_2.fetchone()
         return _grant(row), superseded
 
     async def refresh_token(self, grant: BuiltinToolGrant) -> str:
@@ -262,17 +274,22 @@ class BuiltinToolGrantStore:
 
     async def refresh_token_versioned(self, grant: BuiltinToolGrant) -> tuple[str, str]:
         """(refresh token, stored ciphertext); the ciphertext identifies this token version."""
-        async with open_shared_ctx(self.db_path) as db:
-            row = await (
-                await db.execute("SELECT refresh_cipher FROM builtin_tool_user_grant WHERE id=? AND user_id=?", (grant.id, grant.user_id))
-            ).fetchone()
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute("SELECT refresh_cipher FROM builtin_tool_user_grant WHERE id=? AND user_id=?", (grant.id, grant.user_id)) as cursor,
+        ):
+            row = await cursor.fetchone()
         if row is None:
             raise BuiltinToolGrantError("builtin_tool_grant_missing")
         return self._unseal(grant.user_id, grant.tool_id, "refresh", row[0]), str(row[0])
 
+    @repeat_when_authority_busy(spent=None, kind="turn")
     async def mark_needs_reauth(self, tool_id: str, user_id: str, *, expected_cipher: str | None = None) -> None:
         """Mark the grant stale. With ``expected_cipher``, only if it still holds that token version:
-        a refresh that failed with an old token must not break a grant the member just renewed."""
+        a refresh that failed with an old token must not break a grant the member just renewed.
+
+        The grant row is fenced, so this repeats when a running Turn holds the core lease (census T4);
+        the update is idempotent."""
         sql = "UPDATE builtin_tool_user_grant SET status='needs_reauth',updated_at=? WHERE tool_id=? AND user_id=?"
         params: tuple[str, ...] = (_iso(_now()), tool_id, user_id)
         if expected_cipher is not None:
@@ -283,17 +300,29 @@ class BuiltinToolGrantStore:
             await db.commit()
 
     async def touch(self, tool_id: str, user_id: str) -> None:
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("UPDATE builtin_tool_user_grant SET last_used_at=? WHERE tool_id=? AND user_id=?", (_iso(_now()), tool_id, user_id))
-            await db.commit()
+        """Record when the grant was last used, best effort.
+
+        Since revision ``0230_unfence_routine_metadata`` ``last_used_at`` is not fenced, so the update takes
+        no core lease. A usage timestamp must still never fail a tool call after a successful token refresh,
+        so a lost lease is logged and skipped (census T3); other errors propagate.
+        """
+        try:
+            async with open_shared_ctx(self.db_path) as db:
+                await db.execute("UPDATE builtin_tool_user_grant SET last_used_at=? WHERE tool_id=? AND user_id=?", (_iso(_now()), tool_id, user_id))
+                await db.commit()
+        except sqlite3.OperationalError as error:
+            if not is_authority_busy(error):
+                raise
+            logger.warning("builtin_tool_grant.touch_skipped tool_id=%s", tool_id)
 
     async def delete(self, tool_id: str, user_id: str) -> str | None:
         """Remove the member's grant; return its refresh token (for best-effort revoke)."""
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (
-                await db.execute("DELETE FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=? RETURNING refresh_cipher", (tool_id, user_id))
-            ).fetchone()
+            async with db.execute(
+                "DELETE FROM builtin_tool_user_grant WHERE tool_id=? AND user_id=? RETURNING refresh_cipher", (tool_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
             await db.commit()
         if row is None:
             return None
@@ -306,7 +335,8 @@ class BuiltinToolGrantStore:
         """Every readable refresh token on a connection (for revoke before deleting it)."""
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (await db.execute("SELECT user_id,refresh_cipher FROM builtin_tool_user_grant WHERE tool_id=?", (tool_id,))).fetchall()
+            async with db.execute("SELECT user_id,refresh_cipher FROM builtin_tool_user_grant WHERE tool_id=?", (tool_id,)) as cursor:
+                rows = await cursor.fetchall()
         tokens: list[str] = []
         for row in rows:
             try:

@@ -89,6 +89,18 @@ def _requires_continuation(result: SubagentResult) -> bool:
     return isinstance(error, dict) and error.get("kind") == "needs_user_input"
 
 
+def _failure_code(result: SubagentResult, default: str) -> str:
+    """The ledger code of a failed run.
+
+    A model call that still failed after the Router's retries keeps its own
+    classification, the reason the Turn publishes for the same run.
+    """
+    llm_failure = getattr(result, "llm_failure", None)
+    if llm_failure is not None:
+        return llm_failure.reason_code
+    return result.error or default
+
+
 def _effect_free_primary_question(result: SubagentResult) -> list[dict] | None:
     """Accept a sole return, or authorized reads with a bounded checkpoint."""
     from bowhead_core.agents.clarification_tool import normalize_clarification_questions
@@ -711,7 +723,11 @@ class ReferencePrimaryRuntime:
         else:
             result.ok = False
             result.error = result.error or "reference_continuation_failed"
-        failure_code = None if ok else result.error if re.fullmatch(r"[a-z0-9_]{1,128}", str(result.error)) else "reference_continuation_failed"
+        failure_code = None
+        if not ok:
+            failure_code = _failure_code(result, "reference_continuation_failed")
+            if not re.fullmatch(r"[a-z0-9_]{1,128}", failure_code):
+                failure_code = "reference_continuation_failed"
         try:
             async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                 db.row_factory = aiosqlite.Row
@@ -1623,7 +1639,7 @@ class ReferencePrimaryRuntime:
                     (
                         "completed" if ok else "failed",
                         datetime.now(UTC).isoformat(),
-                        None if ok else result.error or "reference_primary_failed",
+                        None if ok else _failure_code(result, "reference_primary_failed"),
                         primary.binding.execution_id,
                     ),
                 )

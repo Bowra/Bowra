@@ -294,13 +294,15 @@ class AgentCoachAuthoring:
         """The released version's number, so Coach can say "the draft, based on vN" (beginner experience §2)."""
         from bowhead_core._db import open_shared_ctx
 
-        async with open_shared_ctx(str(self.resources.store.db_path)) as db:
-            cursor = await db.execute(
+        async with (
+            open_shared_ctx(str(self.resources.store.db_path)) as db,
+            db.execute(
                 """SELECT rel.release_sequence FROM team_subagent agent
                    JOIN team_subagent_release rel ON rel.team_id=agent.team_id AND rel.id=agent.live_release_id
                    WHERE agent.team_id=? AND agent.id=?""",
                 (self.resources.user.team_id, agent_id),
-            )
+            ) as cursor,
+        ):
             row = await cursor.fetchone()
         return int(row[0]) if row is not None and row[0] is not None else None
 

@@ -108,18 +108,17 @@ async def _provider_ids(
 ) -> dict[str, str]:
     result: dict[str, str] = {}
     for runtime_key in config.get("providers") or {}:
-        row = await (
-            await db.execute(
-                """
+        async with db.execute(
+            """
                 SELECT provider_id
                 FROM team_llm_provider_identities
                 WHERE team_id = ? AND runtime_key = ?
                   AND state IN ('reserved', 'active')
                 LIMIT 1
                 """,
-                (team_id, str(runtime_key)),
-            )
-        ).fetchone()
+            (team_id, str(runtime_key)),
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None and create_legacy:
             provider_id = legacy_provider_id(
                 team_id,
@@ -162,9 +161,8 @@ async def _facts(
         ReadinessFact,
     ] = {}
     for assignment in assignments:
-        evidence_rows = await (
-            await db.execute(
-                """
+        async with db.execute(
+            """
                 SELECT id, config_signature, outcome, safe_code,
                        observed_at, fresh_until
                 FROM team_llm_capability_evidence
@@ -173,17 +171,16 @@ async def _facts(
                 ORDER BY observed_at DESC, id DESC
                 LIMIT 100
                 """,
-                (
-                    team_id,
-                    assignment.provider_id,
-                    assignment.model_id,
-                    assignment.capability,
-                ),
-            )
-        ).fetchall()
-        attempt_row = await (
-            await db.execute(
-                """
+            (
+                team_id,
+                assignment.provider_id,
+                assignment.model_id,
+                assignment.capability,
+            ),
+        ) as cursor:
+            evidence_rows = await cursor.fetchall()
+        async with db.execute(
+            """
                 SELECT state, safe_code, completed_at
                 FROM team_llm_verification_items
                 WHERE team_id = ? AND provider_id = ?
@@ -200,15 +197,15 @@ async def _facts(
                 ) DESC, id DESC
                 LIMIT 1
                 """,
-                (
-                    team_id,
-                    assignment.provider_id,
-                    assignment.model_id,
-                    assignment.capability,
-                    assignment.config_signature,
-                ),
-            )
-        ).fetchone()
+            (
+                team_id,
+                assignment.provider_id,
+                assignment.model_id,
+                assignment.capability,
+                assignment.config_signature,
+            ),
+        ) as cursor_2:
+            attempt_row = await cursor_2.fetchone()
         attempt = (
             AttemptRecord(
                 state=str(attempt_row["state"]),  # type: ignore[arg-type]
@@ -288,15 +285,14 @@ async def apply_team_llm_v2(
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN IMMEDIATE")
         try:
-            team = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT llm_config_encrypted, llm_config_version
                     FROM teams WHERE id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor_2:
+                team = await cursor_2.fetchone()
             if team is None or int(team["llm_config_version"]) != (expected_version):
                 raise ConfigVersionConflict("team LLM config version changed")
             stored_config = decrypt_llm_config(str(team["llm_config_encrypted"])) if team["llm_config_encrypted"] else {}
@@ -377,15 +373,14 @@ async def apply_team_llm_v2(
                         audit_ip,
                     ),
                 )
-            enrollment = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_v2_enrollments
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor_3:
+                enrollment = await cursor_3.fetchone()
             assert enrollment is not None
             enrollment_rows = json.loads(str(enrollment["assignments_json"]))
 
@@ -395,9 +390,8 @@ async def apply_team_llm_v2(
                 assignments=assignments,
                 now=timestamp,
             )
-            acceptance_rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT acceptance.*
                     FROM team_llm_risk_acceptances AS acceptance
                     LEFT JOIN team_llm_risk_acceptance_retirements AS retired
@@ -405,33 +399,31 @@ async def apply_team_llm_v2(
                     WHERE acceptance.team_id = ?
                       AND retired.risk_acceptance_id IS NULL
                     """,
-                    (team_id,),
-                )
-            ).fetchall()
+                (team_id,),
+            ) as cursor_4:
+                acceptance_rows = await cursor_4.fetchall()
             # ★ Use the same key construction as checks (7 elements including risk_code). Previously an inline
             # 6-tuple never matched acceptance_key_for's 7-tuple, hiding all existing acceptances during apply;
             # status reverted to required → semantic hashes necessarily differed → deterministic endless 409s
             # (reproduced on 116; second cause of the 08-24 customer's '加模型后应用 409' report).
             active_acceptances = frozenset(acceptance_key_from_row(row) for row in acceptance_rows)
-            baseline = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_v2_migration_baselines
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
-            invalidation = await (
-                await db.execute(
-                    """
+                (team_id,),
+            ) as cursor_5:
+                baseline = await cursor_5.fetchone()
+            async with db.execute(
+                """
                     SELECT * FROM
                         team_llm_v2_migration_baseline_invalidations
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor_6:
+                invalidation = await cursor_6.fetchone()
             active_grandfather = (
                 frozenset(_scope(row) for row in json.loads(str(baseline["assignments_json"])))
                 if baseline is not None and invalidation is None

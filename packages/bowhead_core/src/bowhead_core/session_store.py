@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from bowhead_core.chat_reference_admission import ReferenceStartAdmission
     from bowhead_core.chat_reference_scope import ReferenceRequestScope
     from bowhead_core.chat_reference_storage import ChatReferenceStore, QueuedReferenceInput, ReferenceScope
+    from bowhead_core.chat_references import SkillResourceRef
     from bowhead_core.coach_operation_history import CoachOperationHistory
     from bowhead_core.context_action import ContextMaintenanceAction
     from bowhead_core.document_chat_continuation import DocumentResumeReservation, DocumentTurnOwner
@@ -324,7 +325,7 @@ def _chat_turn_user_source_json(
 
 
 def _chat_turn_user_source_from_row(row: aiosqlite.Row) -> ChatTurnUserSource:
-    from bowhead_core.chat_references import decode_input_document
+    from bowhead_core.chat_references import SkillResourceRef, decode_input_document
     from bowhead_core.context_action import ContextMaintenanceAction
     from bowhead_core.document_revision_target import DocumentRevisionTarget
 
@@ -355,6 +356,12 @@ def _chat_turn_user_source_from_row(row: aiosqlite.Row) -> ChatTurnUserSource:
         context_maintenance=(
             ContextMaintenanceAction.model_validate_json(row["context_maintenance_json"])
             if "context_maintenance_json" in tuple(row.keys()) and row["context_maintenance_json"] is not None
+            else None
+        ),
+        # Appended by 0229; the frozen legacy single-file schema has no column.
+        selected_skills=(
+            tuple(SkillResourceRef.model_validate(item) for item in json.loads(str(row["selected_skills_json"])))
+            if "selected_skills_json" in tuple(row.keys()) and row["selected_skills_json"] is not None
             else None
         ),
     )
@@ -484,11 +491,18 @@ async def _insert_chat_turn_user_source_in_tx(
     from bowhead_core.context_action import validate_context_action_in_tx
 
     await validate_context_action_in_tx(connection, source=source_snapshot)
+    # `selected_skills_json` is appended by 0229 (absent from the frozen legacy
+    # single-file schema), so it is named only when the source carries Skills.
+    selected_skills_json = (
+        canonical_json_v1([item.model_dump(mode="json") for item in source_snapshot.selected_skills])
+        if source_snapshot.selected_skills is not None
+        else None
+    )
     cursor = await connection.execute(
         "INSERT OR IGNORE INTO chat_turn_user_sources("
         "turn_id,session_id,user_id,workspace_id,user_text,attachment_ids_json,"
         "attachment_refs_json,parts_json,created_at,input_document_json,document_revision_target_json,context_maintenance_json"
-        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        + (",selected_skills_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)" if selected_skills_json is not None else ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"),
         (
             source_snapshot.turn_id,
             source_snapshot.session_id,
@@ -502,6 +516,7 @@ async def _insert_chat_turn_user_source_in_tx(
             source_snapshot.input_document.model_dump_json(exclude_none=True) if source_snapshot.input_document is not None else None,
             source_snapshot.document_revision_target.model_dump_json() if source_snapshot.document_revision_target is not None else None,
             source_snapshot.context_maintenance.model_dump_json() if source_snapshot.context_maintenance is not None else None,
+            *((selected_skills_json,) if selected_skills_json is not None else ()),
         ),
     )
     if cursor.rowcount == 1:
@@ -1968,8 +1983,8 @@ class SessionStore:
             await db.execute("BEGIN IMMEDIATE")
             # Incremental migration: ALTER existing turns tables that lack digest_json to add the column.
             # SQLite ADD COLUMN has no IF NOT EXISTS; check with PRAGMA first.
-            cur = await db.execute("PRAGMA table_info(turns)")
-            cols = {row[1] for row in await cur.fetchall()}
+            async with db.execute("PRAGMA table_info(turns)") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
             if "digest_json" not in cols:
                 await db.execute("ALTER TABLE turns ADD COLUMN digest_json TEXT")
             # W11-6: incremental agent_type migration
@@ -2028,8 +2043,8 @@ class SessionStore:
             )
             await db.execute("CREATE INDEX IF NOT EXISTS idx_facts_history_key ON registered_facts_history(workspace_id, fact_key)")
             # W12-3 (#74): incremental sessions.skill_applied migration
-            cur2 = await db.execute("PRAGMA table_info(sessions)")
-            scols = {row[1] for row in await cur2.fetchall()}
+            async with db.execute("PRAGMA table_info(sessions)") as cur2:
+                scols = {row[1] for row in await cur2.fetchall()}
             if "skill_applied" not in scols:
                 await db.execute(
                     "ALTER TABLE sessions ADD COLUMN skill_applied INTEGER NOT NULL DEFAULT 0",
@@ -2070,8 +2085,8 @@ class SessionStore:
             # chat-hydrate-overhaul Round 5: incremental turn_trace_steps.subagent_id migration
             # (The schema lacked this column when Rounds 1–4 shipped; Round 5 needs it for flattened nested traces.)
             try:
-                cur3 = await db.execute("PRAGMA table_info(turn_trace_steps)")
-                tcols = {row[1] for row in await cur3.fetchall()}
+                async with db.execute("PRAGMA table_info(turn_trace_steps)") as cur3:
+                    tcols = {row[1] for row in await cur3.fetchall()}
                 if tcols and "subagent_id" not in tcols:
                     await db.execute(
                         "ALTER TABLE turn_trace_steps ADD COLUMN subagent_id TEXT",
@@ -5847,6 +5862,7 @@ class SessionStore:
         reference_start: ReferenceStartAdmission | None = None,
         document_revision_target: DocumentRevisionTarget | None = None,
         context_maintenance: ContextMaintenanceAction | None = None,
+        selected_skills: tuple[SkillResourceRef, ...] | None = None,
     ) -> ChatSubmissionReceipt:
         """Atomically persist a Turn/receipt and optional prepared Agent/Skill references.
 
@@ -5982,6 +5998,7 @@ class SessionStore:
                     parts=tuple(parts) if parts is not None else None,
                     document_revision_target=document_revision_target,
                     context_maintenance=context_maintenance,
+                    selected_skills=selected_skills,
                 )
 
                 if reference_start is not None and (expected_source.attachment_ids or expected_source.attachment_refs):
@@ -7802,7 +7819,8 @@ class SessionStore:
 
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            cur_seq_row = await (await db.execute("SELECT seq FROM turns WHERE id=?", (before_turn_id,))).fetchone()
+            async with db.execute("SELECT seq FROM turns WHERE id=?", (before_turn_id,)) as cursor:
+                cur_seq_row = await cursor.fetchone()
             cur_seq = int(cur_seq_row["seq"]) if cur_seq_row else None
             async with db.execute(
                 "SELECT id, seq, status, user_text FROM turns WHERE session_id=? AND operation_kind IS NULL AND status IN ('completed','failed','cancelled') AND id != ? "
@@ -8548,12 +8566,11 @@ class SessionStore:
             # Bounded SQL parameters for long reports.
             for offset in range(0, len(turn_ids), 200):
                 batch = turn_ids[offset : offset + 200]
-                rows = await (
-                    await db.execute(
-                        f"SELECT turn_id,seq,kb_generation_id,kb_source_check_state FROM turn_citations WHERE turn_id IN ({','.join('?' for _ in batch)}) AND kb_generation_id IS NOT NULL",
-                        batch,
-                    )
-                ).fetchall()
+                async with db.execute(
+                    f"SELECT turn_id,seq,kb_generation_id,kb_source_check_state FROM turn_citations WHERE turn_id IN ({','.join('?' for _ in batch)}) AND kb_generation_id IS NOT NULL",
+                    batch,
+                ) as cursor:
+                    rows = await cursor.fetchall()
                 for turn, seq, generation, state in rows:
                     result.setdefault(turn, {})[seq] = {"kb_generation_id": generation, "kb_source_check_state": state or "unverified"}
         return result

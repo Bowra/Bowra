@@ -171,13 +171,17 @@ async def test_async_worker_preserves_only_safe_request_correlation(tmp_path: Pa
     path = tmp_path / "bowhead.db"
     owner = database(path)
     owner.execute("BEGIN IMMEDIATE")
-    tokens = structlog.contextvars.bind_contextvars(request_id="request-safe", private_user_content="private-context")
+    tokens = structlog.contextvars.bind_contextvars(
+        request_id="request-safe", http_request_id="http-request-safe", private_user_content="private-context"
+    )
     try:
         async with diagnostics.connect(path, timeout=0.01) as contender:
             with pytest.raises(sqlite3.OperationalError):
                 await contender.execute("INSERT INTO users VALUES(?)", ("private-bind",))
         event = captured.events[-1]
         assert event["request_id"] == "request-safe"
+        # The gateway's own request id, so the event can be matched with gateway.http_request_completed.
+        assert event["http_request_id"] == "http-request-safe"
         assert "test_async_worker" in str(event["callsite"])
         assert "private-context" not in str(event)
         assert "private-bind" not in str(event)

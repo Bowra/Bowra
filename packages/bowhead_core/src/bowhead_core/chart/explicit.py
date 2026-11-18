@@ -20,6 +20,9 @@ PLOT_KINDS = frozenset(
 GROUP_KINDS = frozenset({"line", "bar", "hbar", "stacked_bar", "area_stacked", "heatmap", "sankey", "scatter"})
 #: Kinds whose y fields with exactly two declared units the add_chart Tool draws on a dual axis.
 UNIT_SPLIT_KINDS = frozenset({"combo", "bar", "line", "hbar"})
+#: Bar kinds the add_chart Tool redraws with x and y exchanged when values were bound to x and the one
+#: category field to y.
+AXIS_SWAP_KINDS = frozenset({"bar", "hbar"})
 
 
 def _declared_unit(column: ChartColumn) -> str | None:
@@ -218,6 +221,32 @@ def validate_request(args: dict[str, Any], *, analytical: bool = False) -> None:
     problems.raise_found()
 
 
+def _categories_on_x(
+    kind: str, axes: dict[str, Any], groups: list[str], by_key: dict[str, ChartColumn], fallbacks: list[dict[str, str]]
+) -> dict[str, Any]:
+    """A bar written as it looks, values along x and the categories in y, is drawn with the two exchanged.
+
+    Observed case: a helper sent hbar with x=营业额_亿元 and y=[种类大类] seven times and was
+    told only that 种类大类 needs numeric values. With one non-numeric y field and a numeric x there is one
+    drawable reading; anything else is left for the existing checks.
+    """
+    from bowhead_core.chart.compat import receipt
+
+    y = axes.get("y")
+    if groups or axes.get("y_right") or not isinstance(y, list) or len(y) != 1:
+        return axes
+    values, categories = by_key.get(axes.get("x")), by_key.get(y[0])
+    if values is None or categories is None or values.type != "numeric" or categories.type == "numeric":
+        return axes
+    receipt(
+        fallbacks,
+        "axes_swapped",
+        "/axes",
+        f"{kind} takes its categories in x and its values in y; drew {categories.key!r} as the categories and {values.key!r} as the values.",
+    )
+    return {**axes, "x": categories.key, "y": [values.key]}
+
+
 def _split_two_units(kind: str, axes: dict[str, Any], selected: list[ChartColumn], fallbacks: list[dict[str, str]]) -> str:
     """Draw y fields with exactly two declared units as dual_axis: the first y field's unit on the left.
 
@@ -293,6 +322,8 @@ def compile_view(
         contract = {"version": 1, "mode": "table", "columns": keys}
     else:
         axes, groups = args["axes"], args["group_by"]
+        if fallbacks is not None and kind in AXIS_SWAP_KINDS:
+            axes = _categories_on_x(kind, axes, groups, by_key, fallbacks)
         keys = ([axes["x"]] if "x" in axes else []) + list(groups) + axes["y"]
         contract = {"version": 1, "mode": "plot", "axes": copy.deepcopy(axes), "group_by": list(groups)}
     if contract["mode"] == "plot":

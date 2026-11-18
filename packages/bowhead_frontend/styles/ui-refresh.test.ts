@@ -15,67 +15,9 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-import { allStylesheets } from "./css-contract";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FRONTEND = join(HERE, "..");
-const PREFIX = ":root:root";
-
-function read(rel: string): string {
-  return readFileSync(join(FRONTEND, rel), "utf8");
-}
-
-function stripComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-type Rule = { selector: string; body: string };
-
-/** Extract ordinary stylesheet rules; recurse through `@media` / @supports and skip `@keyframes`. */
-function parseRules(css: string): Rule[] {
-  const rules: Rule[] = [];
-  let i = 0;
-  while (i < css.length) {
-    const open = css.indexOf("{", i);
-    if (open === -1) break;
-    const prelude = css.slice(i, open).trim();
-    let depth = 0;
-    let close = open;
-    for (; close < css.length; close += 1) {
-      if (css[close] === "{") depth += 1;
-      else if (css[close] === "}") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    const body = css.slice(open + 1, close);
-    if (/^@(media|supports)\b/.test(prelude)) rules.push(...parseRules(body));
-    else if (!prelude.startsWith("@")) rules.push({ selector: prelude, body });
-    i = close + 1;
-  }
-  return rules;
-}
-
-/** Split selectors at top-level commas, ignoring commas within :is() / :not(). */
-function splitSelectors(selector: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < selector.length; i += 1) {
-    const ch = selector[i];
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth -= 1;
-    else if (ch === "," && depth === 0) {
-      parts.push(selector.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(selector.slice(start));
-  return parts.map((part) => part.replace(/\s+/g, " ").trim()).filter(Boolean);
-}
+import { allStylesheets, FRONTEND, norm, parseRules, PREFIX, read, type Rule, splitSelectors, stripComments, tsxFiles } from "./css-contract";
 
 const REFRESH_CSS = read("styles/ui-refresh.css");
 const RULES = parseRules(stripComments(REFRESH_CSS));
@@ -241,9 +183,10 @@ function mediaBlocks(css: string): { prelude: string; rules: Rule[] }[] {
   return out;
 }
 
+const REFRESH_MEDIA_BLOCKS = mediaBlocks(stripComments(REFRESH_CSS));
+
 describe("第三批：浮层（菜单、弹窗、抽屉、Toast、Tooltip）", () => {
   const ITEM = ':is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"])';
-  const norm = (text: string) => text.replace(/\s+/g, " ").trim();
   const ruleFor = (selector: string) => {
     const rule = RULES.find((r) => splitSelectors(r.selector).includes(norm(selector)));
     expect(rule, selector).toBeDefined();
@@ -288,7 +231,7 @@ describe("第三批：浮层（菜单、弹窗、抽屉、Toast、Tooltip）", (
 
   it("菜单按规格稿的尺寸：行高 32（触屏 44）、容器内边距 6 圆角 12、最小宽 220、分组标题与分隔线", () => {
     expect(tokenRoot).toContain("--menu-item-h: 32px;");
-    const coarse = mediaBlocks(stripComments(REFRESH_CSS)).filter((m) => m.prelude.includes("pointer: coarse"));
+    const coarse = REFRESH_MEDIA_BLOCKS.filter((m) => m.prelude.includes("pointer: coarse"));
     expect(coarse.some((m) => m.rules.some((r) => /--menu-item-h:\s*var\(--control-h-touch\)/.test(r.body)))).toBe(true);
     const menu = ruleFor(`${PREFIX} .ui-menu`);
     has(menu, "padding", "6px");
@@ -383,13 +326,13 @@ describe("第三批：浮层（菜单、弹窗、抽屉、Toast、Tooltip）", (
       has(body, "backdrop-filter", "var(--ui-material-filter)");
       has(body, "-webkit-backdrop-filter", "var(--ui-material-filter)");
     }
-    const reduce = mediaBlocks(stripComments(REFRESH_CSS)).find((m) => m.prelude.includes("prefers-reduced-transparency: reduce"));
+    const reduce = REFRESH_MEDIA_BLOCKS.find((m) => m.prelude.includes("prefers-reduced-transparency: reduce"));
     expect(reduce, "reduced-transparency block").toBeDefined();
     expect(reduce!.prelude).toContain("prefers-contrast: more");
     const body = norm(reduce!.rules.map((r) => r.body).join(";"));
     expect(body).toContain("--ui-material-bg: var(--c-surface);");
     expect(body).toContain("--ui-material-filter: none;");
-    const unsupported = mediaBlocks(stripComments(REFRESH_CSS)).find((m) => /^@supports not/.test(m.prelude) && m.prelude.includes("backdrop-filter"));
+    const unsupported = REFRESH_MEDIA_BLOCKS.find((m) => /^@supports not/.test(m.prelude) && m.prelude.includes("backdrop-filter"));
     expect(unsupported, "@supports not (backdrop-filter) block").toBeDefined();
     const fallback = norm(unsupported!.rules.map((r) => r.body).join(";"));
     expect(fallback).toContain("--ui-material-bg: var(--c-surface);");
@@ -426,7 +369,7 @@ describe("第三批：浮层（菜单、弹窗、抽屉、Toast、Tooltip）", (
     const toast = ruleFor(`${PREFIX} .rho-toast`);
     has(toast, "border-radius", "var(--r-3)");
     has(toast, "font-size", "var(--fs-md)");
-    const phone = mediaBlocks(stripComments(REFRESH_CSS)).find((m) => m.prelude.includes("max-width: 639px"));
+    const phone = REFRESH_MEDIA_BLOCKS.find((m) => m.prelude.includes("max-width: 639px"));
     const container = phone?.rules.find((r) => r.selector.includes(".legacy-toast-container"));
     expect(norm(container?.body ?? "")).toMatch(/left: 10px;.*right: 10px;|right: 10px;.*left: 10px;/);
     const tip = norm(RULES.find((r) => r.selector.includes(".unified-sidebar-tooltip,") && r.selector.includes(".composer-v2__tooltip"))?.body ?? "");
@@ -467,14 +410,6 @@ describe("引入位置", () => {
     expect(layout).not.toMatch(/ui-refresh\.css|ui-refresh-surfaces\.css|ui-controls-legacy\.css/);
   });
 });
-
-function tsxFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name === "node_modules" ? [] : tsxFiles(path);
-    return name.endsWith(".tsx") && !name.endsWith(".test.tsx") ? [path] : [];
-  });
-}
 
 describe("base-layer classes moved from inline styles", () => {
   const legacyCss = stripComments(read("styles/ui-controls-legacy.css"));
@@ -521,8 +456,7 @@ describe("base-layer classes moved from inline styles", () => {
   });
 
   describe("危险按钮：只有弹窗底栏里的确认动作是实心红，其余是红字文字按钮（已定取舍第 3、23 条）", () => {
-    const rules = parseRules(stripComments(read("styles/ui-refresh.css")));
-    const danger = rules.filter((r) => r.selector.includes(".settings-button--danger"));
+    const danger = RULES.filter((r) => r.selector.includes(".settings-button--danger"));
     const textRule = danger.find((r) => !r.selector.includes('[role="dialog"]'));
     const solidRule = danger.find((r) => r.selector.includes('[role="dialog"]') && r.selector.includes('[role="alertdialog"]'));
 
@@ -608,7 +542,6 @@ describe("第四批：页面结构与数据表格", () => {
   // Inspect only batch 4 (split by its opening banner); contracts such as separators avoiding --c-line apply only to this batch.
   const BATCH4_CSS = stripComments(REFRESH_CSS.slice(REFRESH_CSS.lastIndexOf("/*", REFRESH_CSS.indexOf("第四批：页面结构与数据表格"))));
   const BATCH4 = parseRules(BATCH4_CSS);
-  const norm = (text: string) => text.replace(/\s+/g, " ").trim();
   const ruleFor = (selector: string) => {
     const rule = RULES.find((r) => splitSelectors(r.selector).includes(norm(selector)));
     expect(rule, selector).toBeDefined();
@@ -786,7 +719,6 @@ describe("第四批：页面结构与数据表格", () => {
 });
 
 describe("行为批 A：菜单的窄屏底部面板、子菜单、禁用项高亮、键盘提示条", () => {
-  const norm = (text: string) => text.replace(/\s+/g, " ").trim();
   const ruleFor = (selector: string) => {
     const rule = RULES.find((r) => splitSelectors(r.selector).includes(norm(selector)));
     expect(rule, selector).toBeDefined();
@@ -844,7 +776,7 @@ describe("行为批 A：菜单的窄屏底部面板、子菜单、禁用项高�
 
   it("键盘提示条默认不显示，只在桌面指针（hover: hover 且 pointer: fine）下显示", () => {
     has(ruleFor(`${PREFIX} .ui-menu-hints`), "display", "none");
-    const fine = mediaBlocks(stripComments(REFRESH_CSS)).filter((m) => /\(hover: hover\) and \(pointer: fine\)/.test(m.prelude));
+    const fine = REFRESH_MEDIA_BLOCKS.filter((m) => /\(hover: hover\) and \(pointer: fine\)/.test(m.prelude));
     expect(fine.some((m) => m.rules.some((r) => norm(r.selector) === `${PREFIX} .ui-menu-hints` && /display: flex/.test(r.body)))).toBe(true);
     // Bottom-stuck notices cover final rows; menus with notices reserve notice height during arrow-key scrolling (measured individually in e2e).
     expect(
@@ -856,7 +788,6 @@ describe("行为批 A：菜单的窄屏底部面板、子菜单、禁用项高�
 });
 
 describe("行为批 B：窄屏弹窗底部面板、撤销 Toast 与轻扫", () => {
-  const norm = (text: string) => text.replace(/\s+/g, " ").trim();
   const ruleFor = (selector: string) => {
     const rule = RULES.find((r) => splitSelectors(r.selector).includes(norm(selector)));
     expect(rule, selector).toBeDefined();

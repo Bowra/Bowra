@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.agent_execution_binding import ExactAgentExecutionBinding
 from bowhead_core.chat_turn_source import ChatTurnUserSource, chat_turn_user_source_projection
 from bowhead_core.documents.request import (
@@ -500,8 +500,13 @@ class DocumentStore:
             from bowhead_core.documents.canvas_inputs import prepare_canvas_input_artifact
 
             _canvas = await prepare_canvas_input_artifact(self._path, scope=scope, admission=_canvas, now=datetime.now(UTC).isoformat())
-        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
-            await db.execute("BEGIN IMMEDIATE")
+        canvas = _canvas
+
+        # The job, receipt and dispatch rows are fenced, so the whole admission runs as one
+        # repeatable authority write (census T6). Each attempt rechecks scope, the receipt and the
+        # live source, and draws its own job id and clock.
+        async def admit(db) -> DocumentReceipt:
+            _canvas = canvas
             await _authorize(db, scope, write=False)
             original = None
             if _task_source is not None:
@@ -648,8 +653,9 @@ class DocumentStore:
                 from bowhead_core.documents.canvas_inputs import commit_canvas_input_in_tx
 
                 await commit_canvas_input_in_tx(db, scope=scope, job_id=job_id, admission=_canvas, now=now)
-            await db.commit()
             return result
+
+        return await run_sqlite_authority_write(domain_database_path(self._path, "execution"), admit)
 
     async def submit_revision_from_turn(
         self, *, scope: DocumentScope, turn_id: str, command_id: str, evidence: UserQuote, runtime: DocumentRuntimeAdmission
@@ -721,7 +727,7 @@ class DocumentStore:
                 return [{"job_id": row[0], "question": row[1]} for row in await cursor.fetchall()]
 
     async def get(self, *, scope: DocumentScope, job_id: str) -> DocumentJob | None:
-        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=False)
             db.row_factory = aiosqlite.Row
@@ -743,7 +749,7 @@ class DocumentStore:
         """
         if not 1 <= limit <= 100:
             raise DocumentRequestError("document_page_invalid")
-        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=False)
             db.row_factory = aiosqlite.Row

@@ -234,6 +234,10 @@ async def test_auth_me_reference_input_requires_released_agent_and_local_runtime
     assert response.status_code == 200, response.text
     assert response.json()["capabilities"]["composer"]["reference_input"] is (boundary in {"ready", "flag_off"})
     assert response.json()["capabilities"]["composer"]["agent_start_use"] is (boundary == "ready")
+    # Skill-only `/` starts need only the reference menu: a reference input opens its own
+    # durable submission while the general submission protocol stays off (its default).
+    assert response.json()["capabilities"]["composer"]["submission_protocol"] is False
+    assert response.json()["capabilities"]["composer"]["skill_via_lead"] is (boundary in {"ready", "flag_off"})
 
 
 @pytest.mark.parametrize(("flag", "expected"), [(None, False), ("0", False), ("1", True)])

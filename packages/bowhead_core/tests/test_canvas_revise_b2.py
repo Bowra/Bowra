@@ -1396,8 +1396,7 @@ async def test_write_report_translates_simple_int_figure_anchors(store: CanvasSt
 
 
 async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    """两个 run 并行、共用同一个 parent_ctx：`parent_ctx._ν15_allowlist` 后写者赢，而写入口读到的必须是**各自**那份表，
-    run 结束后还原（不漏给 Lead）。钉的是 spawn 处的接线——只测 `_write_report` 的话，spawn 不挂表也全绿。"""
+    """Parallel runs must isolate their reference tables and restore the caller's context."""
     from typing import Any
 
     import anyio
@@ -1405,6 +1404,8 @@ async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.
     from bowhead_core.agents._lead_context import get_current_ref_allowlist
     from bowhead_core.events import TurnEventBus
     from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentRunner
+    from bowhead_core.tool_registry import ToolRegistry, ToolSpec
+    from bowhead_router.types import ToolSchema
 
     from bowhead_router import AgentBinding, LLMResponse, MockAdapter, ProviderConfig, ProviderRegistry, Router, TokenUsage, ToolCall
 
@@ -1432,8 +1433,14 @@ async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.
     both_inside = anyio.Event()
     inside: list[str] = []
 
+    async def unexpected_handler(_args: dict[str, Any], _ctx: ToolExecutionContext) -> None:
+        pytest.fail("The runner should use the test tool dispatch.")
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(ToolSchema("kb_search", "Search knowledge", {"type": "object"}), unexpected_handler))
+
     async def _one(name: str) -> None:
-        runner = SubagentRunner(router=_router(), tool_registry=build_default_registry(), backend="legacy")
+        runner = SubagentRunner(router=_router(), tool_registry=registry, backend="legacy")
 
         async def _exec(tc: Any, *args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
             inside.append(name)
@@ -1444,12 +1451,12 @@ async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.
             return subagent_mod.ToolInvocation(tool_name=tc.name, arguments=tc.arguments, result={"ok": True, "chunks": []}, error=None)
 
         runner._execute_tool = _exec  # type: ignore[method-assign]
-        await runner.run(profile_name="lead", task=name, parent_turn_id="t1", parent_bus=TurnEventBus(), parent_ctx=parent_ctx)
+        result = await runner.run(profile_name="lead", task=name, parent_turn_id="t1", parent_bus=TurnEventBus(), parent_ctx=parent_ctx)
+        assert name in seen, f"Run {name} exited before reaching tool dispatch: {result.error}"
 
-    with anyio.fail_after(20):
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_one, "a")
-            tg.start_soon(_one, "b")
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_one, "a")
+        tg.start_soon(_one, "b")
     (own_a, shared_a), (own_b, shared_b) = seen["a"], seen["b"]
     assert own_a is not None and own_b is not None and own_a is not own_b
     # Positive control: at least one shared-attr reader loses own table (last wins; first finisher clears it, leaving None for other).

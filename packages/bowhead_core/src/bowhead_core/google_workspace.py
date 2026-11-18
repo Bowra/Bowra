@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import secrets
+import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from urllib.parse import urlencode
 import anyio
 import httpx2
 
+from bowhead_core._db import is_authority_busy
 from bowhead_core.builtin_tool_grants import BuiltinToolGrant, BuiltinToolGrantError, BuiltinToolGrantStore
 from bowhead_core.ssrf_guard import build_guarded_async_client
 
@@ -301,6 +303,15 @@ class GoogleTokenBroker:
         self._cache.pop(grant_id, None)
         self._generation[grant_id] = self._generation.get(grant_id, 0) + 1
 
+    async def _mark_needs_reauth(self, tool_id: str, user_id: str, *, expected_cipher: str | None = None) -> None:
+        """Mark the grant stale; a spent lease wait must not replace the re-authorization error."""
+        try:
+            await self.grants.mark_needs_reauth(tool_id, user_id, expected_cipher=expected_cipher)
+        except sqlite3.OperationalError as error:
+            if not is_authority_busy(error):
+                raise
+            logger.warning("google_workspace.mark_needs_reauth_unrecorded tool_id=%s", tool_id)
+
     async def access_token(self, *, tool: Any, auth: dict[str, Any], user_id: str, required_bundles: frozenset[str]) -> tuple[str, BuiltinToolGrant]:
         grant = await self.grants.get(tool.id, user_id)
         if grant is None:
@@ -321,7 +332,7 @@ class GoogleTokenBroker:
             try:
                 refresh, version = await self.grants.refresh_token_versioned(grant)
             except BuiltinToolGrantError:
-                await self.grants.mark_needs_reauth(tool.id, user_id)
+                await self._mark_needs_reauth(tool.id, user_id)
                 raise GoogleWorkspaceError("google_reauth_required") from None
             try:
                 response = await refresh_access_token(
@@ -329,7 +340,7 @@ class GoogleTokenBroker:
                 )
             except GoogleWorkspaceError as exc:
                 if exc.code == "google_reauth_required":
-                    await self.grants.mark_needs_reauth(tool.id, user_id, expected_cipher=version)
+                    await self._mark_needs_reauth(tool.id, user_id, expected_cipher=version)
                     self.forget(grant.id)
                 raise
             if self._generation.get(grant.id, 0) == generation:

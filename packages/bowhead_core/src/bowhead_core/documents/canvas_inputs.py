@@ -13,7 +13,7 @@ import aiosqlite
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.artifact_store import ArtifactStore
 from bowhead_core.canvas_export_projection import build_canvas_content_projection, build_canvas_surface_projection
 from bowhead_core.documents.canvas_material import FILENAME, MAX_BYTES
@@ -324,8 +324,10 @@ class CanvasInputStore:
         if len(content) != manifest.size_bytes or digest(content) != manifest.sha256:
             raise DocumentRequestError("document_frozen_hash_mismatch")
         await authorize(manifest)
-        async with open_shared_ctx(self._execution_db_path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        # The input row is fenced, so the mark runs as one repeatable authority write (census T6);
+        # the bytes were verified above, and each attempt rechecks the row in its own transaction.
+        async def mark_verified(db: aiosqlite.Connection) -> None:
             current = await read_canvas_input_in_tx(db, scope=scope, job_id=job_id, write=True)
             if current is None:
                 raise DocumentRequestError("document_canvas_input_unavailable")
@@ -334,7 +336,8 @@ class CanvasInputStore:
             await db.execute("UPDATE document_canvas_inputs SET verified_at=? WHERE job_id=? AND verified_at IS NULL", (now, job_id))
             if not domain_layout_active(self.artifacts.db_path):
                 await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (row["artifact_id"],))
-            await db.commit()
+
+        await run_sqlite_authority_write(self._execution_db_path, mark_verified)
         if domain_layout_active(self.artifacts.db_path):
             async with open_shared_ctx(self.artifacts.db_path) as content_db:
                 await content_db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (row["artifact_id"],))

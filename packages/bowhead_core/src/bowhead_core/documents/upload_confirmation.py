@@ -53,16 +53,42 @@ async def get_confirmation(db_path: str, artifact_id: str) -> aiosqlite.Row | No
         if not await has_confirmation_schema(db):
             return None  # Legacy, feature-off stores have no trusted receipt.
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM artifact_upload_confirmations WHERE artifact_id=?", (artifact_id,))
-        return await cursor.fetchone()
+        async with db.execute("SELECT * FROM artifact_upload_confirmations WHERE artifact_id=?", (artifact_id,)) as cursor:
+            return await cursor.fetchone()
+
+
+class UploadReceiptMismatch(ValueError):
+    """An upload receipt exists but does not name this exact ready file."""
+
+    def __init__(self) -> None:
+        # Callers that predate this subtype match the same message.
+        super().__init__("attachment_read_unavailable")
 
 
 async def confirmed_content_hash(store: ArtifactStore, artifact, *, user_id: str, workspace_id: str) -> str:
     """Read an immutable Office upload identity without opening its contents."""
     row = await get_confirmation(store.db_path, artifact.id)
+    if row is None:
+        raise ValueError("attachment_read_unavailable")
+    return _confirmed_digest(row, artifact, user_id=user_id, workspace_id=workspace_id)
+
+
+async def receipt_content_hash(store: ArtifactStore, artifact, *, user_id: str, workspace_id: str) -> str | None:
+    """Return the confirmed digest, or None when this file has no upload receipt.
+
+    Knowledge base files, produced results and uploads made before receipts
+    existed have none. A receipt that exists but no longer matches the file
+    raises ``UploadReceiptMismatch``; it is never treated as absent.
+    """
+    row = await get_confirmation(store.db_path, artifact.id)
+    if row is None:
+        return None
+    return _confirmed_digest(row, artifact, user_id=user_id, workspace_id=workspace_id)
+
+
+def _confirmed_digest(row: aiosqlite.Row, artifact, *, user_id: str, workspace_id: str) -> str:
     if (
-        row is None
-        or row["phase"] != "ready"
+        row["phase"] != "ready"
         or row["check_profile"] != CHECK_PROFILE
         or (row["user_id"], row["workspace_id"]) != (user_id, workspace_id)
         or (artifact.created_by, artifact.workspace_id) != (user_id, workspace_id)
@@ -73,7 +99,7 @@ async def confirmed_content_hash(store: ArtifactStore, artifact, *, user_id: str
         or len(row["candidate_sha256"]) != 64
         or any(char not in "0123456789abcdef" for char in row["candidate_sha256"])
     ):
-        raise ValueError("attachment_read_unavailable")
+        raise UploadReceiptMismatch()
     return "sha256:" + row["candidate_sha256"]
 
 
@@ -116,23 +142,23 @@ async def register_confirmation(
 
 async def _fenced_row(db: aiosqlite.Connection, artifact_id: str, owner: str, epoch: int) -> aiosqlite.Row:
     db.row_factory = aiosqlite.Row
-    cursor = await db.execute(
+    async with db.execute(
         "SELECT c.* FROM artifact_upload_confirmations c JOIN artifacts a ON a.id=c.artifact_id "
         "WHERE c.artifact_id=? AND c.lease_owner=? AND c.epoch=? AND c.lease_until>? "
         "AND c.phase IN ('copying','validating') AND a.status='confirming' AND a.deleted_at IS NULL "
         "AND a.path=c.quarantine_path AND a.created_by=c.user_id AND a.filename=c.filename",
         (artifact_id, owner, epoch, time.time()),
-    )
-    row = await cursor.fetchone()
+    ) as cursor:
+        row = await cursor.fetchone()
     if row is None:
         raise UploadConfirmationError(409, "file_confirm_in_progress")
     if row["session_id"]:
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT 1 FROM sessions WHERE id=? AND user_id=? AND workspace_id=? AND deleted_at IS NULL",
             (row["session_id"], row["user_id"], row["workspace_id"]),
-        )
-        if await cursor.fetchone() is None:
-            raise UploadConfirmationError(403, "file_upload_session_denied")
+        ) as cursor:
+            if await cursor.fetchone() is None:
+                raise UploadConfirmationError(403, "file_upload_session_denied")
     return row
 
 
@@ -176,12 +202,12 @@ async def _confirm_upload(
         async with _open_db(store.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT c.*, a.status AS artifact_status, a.path AS artifact_path, a.size AS artifact_size, a.mime AS artifact_mime, a.deleted_at "
                 "FROM artifact_upload_confirmations c JOIN artifacts a ON a.id=c.artifact_id WHERE c.artifact_id=?",
                 (artifact_id,),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             if row is None or row["user_id"] != user_id or row["deleted_at"] is not None:
                 raise UploadConfirmationError(404, "file_not_found")
             if row["session_id"] != session_id:
@@ -314,18 +340,18 @@ async def cleanup_confirmations(store: ArtifactStore, *, now: float, limit: int 
         if not await has_confirmation_schema(db):
             return 0
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT artifact_id FROM artifact_upload_confirmations WHERE cleanup_after<=? ORDER BY cleanup_after, artifact_id LIMIT ?",
             (now, limit),
-        )
-        ids = [row[0] for row in await cursor.fetchall()]
+        ) as cursor:
+            ids = [row[0] for row in await cursor.fetchall()]
     cleaned = 0
     for artifact_id in ids:
         async with _open_db(store.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM artifact_upload_confirmations WHERE artifact_id=?", (artifact_id,))
-            row = await cursor.fetchone()
+            async with db.execute("SELECT * FROM artifact_upload_confirmations WHERE artifact_id=?", (artifact_id,)) as cursor:
+                row = await cursor.fetchone()
             if row["cleanup_after"] > now:
                 continue
             if row["lease_until"] > now or row["upload_expires_at"] + RECOVERY_SECONDS > now:
@@ -340,8 +366,8 @@ async def cleanup_confirmations(store: ArtifactStore, *, now: float, limit: int 
                     "UPDATE artifact_upload_confirmations SET phase='expired', epoch=epoch+1, lease_owner=NULL, lease_until=0 WHERE artifact_id=?",
                     (artifact_id,),
                 )
-            cursor = await db.execute("SELECT path FROM artifacts WHERE id=? AND status='ready'", (artifact_id,))
-            artifact = await cursor.fetchone()
+            async with db.execute("SELECT path FROM artifacts WHERE id=? AND status='ready'", (artifact_id,)) as cursor:
+                artifact = await cursor.fetchone()
             keep_candidate = artifact is not None and artifact["path"] == row["candidate_path"]
             if artifact is not None and not keep_candidate:
                 log.warning("documents.upload_cleanup_identity_mismatch", artifact_id=artifact_id)

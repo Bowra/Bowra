@@ -1303,11 +1303,11 @@ class PlanStore:
 
         cutoff = (datetime.now(tz=UTC) - timedelta(days=max(older_than_days, 1))).isoformat()
         async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT id FROM plans WHERE status = ? AND created_at < ?",
                 (PlanStatus.PROPOSED, cutoff),
-            )
-            ids = [r[0] for r in await cur.fetchall()]
+            ) as cur:
+                ids = [r[0] for r in await cur.fetchall()]
             for pid in ids:
                 await db.execute("DELETE FROM plan_steps WHERE plan_id = ?", (pid,))
                 await db.execute("DELETE FROM plans WHERE id = ?", (pid,))

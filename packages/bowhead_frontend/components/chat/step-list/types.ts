@@ -76,6 +76,8 @@ export interface StepOutputArtifact {
   mime?: string;
   size?: number;
   dataRole?: "stdout" | "structured";
+  /** Entry path of a declared nested sandbox file, e.g. `site/blog/index.html`. */
+  path?: string;
 }
 
 /** Bounded executable source captured on step_started for durable Code results.

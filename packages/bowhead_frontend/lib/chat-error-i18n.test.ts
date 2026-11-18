@@ -88,6 +88,8 @@ const PEER_REASON_TO_MESSAGE_KEY = {
   peer_tool_failure_limit_exceeded: "tool_failure_limit_exceeded",
   peer_tool_call_limit_exceeded: "tool_call_limit_exceeded",
   peer_model_call_limit_exceeded: "model_call_limit_exceeded",
+  peer_model_timeout: "model_timeout",
+  peer_model_unavailable: "model_unavailable",
   peer_credit_exhausted: "credit_exhausted",
 } as const;
 

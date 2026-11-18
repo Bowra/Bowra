@@ -318,19 +318,19 @@ class CapabilityResolver:
                 enforce_grants = resource_grants_enforce_enabled()
                 filtered_entries: list[Any] = []
                 shadow_denied = 0
-                from bowhead_core.grant_evaluation import grant_verdicts
+                from bowhead_core.grant_evaluation import grant_verdicts, grant_verdicts_batch
 
-                for entry in entries:
+                entry_targets = [[("team_tool_source", entry.source_id, "use"), ("team_tool_op", entry.advertised_name, "use")] for entry in entries]
+                if callable(getattr(self._access_control_store, "explain_decisions", None)):
+                    # One decision batch per resource kind for every Team tool, not two reads per target per tool.
+                    entry_verdicts = await grant_verdicts_batch(execution_context, self._access_control_store, access_ctx, entry_targets)
+                else:
+                    entry_verdicts = [
+                        await grant_verdicts(execution_context, self._access_control_store, access_ctx, targets) for targets in entry_targets
+                    ]
+                for entry, decided in zip(entries, entry_verdicts, strict=True):
                     tool_name = entry.advertised_name
-                    verdicts = {
-                        verdict.resource_kind: verdict
-                        for verdict in await grant_verdicts(
-                            execution_context,
-                            self._access_control_store,
-                            access_ctx,
-                            [("team_tool_source", entry.source_id, "use"), ("team_tool_op", tool_name, "use")],
-                        )
-                    }
+                    verdicts = {verdict.resource_kind: verdict for verdict in decided}
                     allowed = all(verdict.allowed for verdict in verdicts.values())
                     if not allowed:
                         shadow_denied += 1

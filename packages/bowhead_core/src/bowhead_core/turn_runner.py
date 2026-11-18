@@ -2547,6 +2547,11 @@ class TurnRunner:
                 (time.monotonic() - _pre_t0) * 1000,
                 " ".join(f"{_n}={_ms:.0f}" for _n, _ms in _pre_marks),
             )
+        # Wall time of each step between turn.prespawn_ms and the Lead run, logged as turn.prelead_ms.
+        # On 116 (1.7.50) this unlogged stretch took 5.1 s for a 19-Turn conversation and 4-15 s on a busy
+        # 1.7.49, against 0.3-1.2 s when quiet.
+        _prelead_t0 = time.monotonic()
+        _prelead_marks: list[tuple[str, float]] = []
         if _memory_pack is not None:
             # Persist same snapshot unchanged in memory_pack_snapshots (fire-and-forget, never blocks turn);
             # **First production _maybe_save_pack_snapshot call**: FR9 exact turn injection inspection
@@ -2721,6 +2726,7 @@ class TurnRunner:
         # two-place edit is the gate that catches forgot-to-wire.
         init_lead_transient(_peer_ctx, request)
         # Read selectors from the immutable user source, never from user prose.
+        _prelead_marks.append(("context", time.monotonic()))
         _chart_source_reader = getattr(orch.session_store, "get_chat_turn_user_source", None)
         if request.attachments and callable(_chart_source_reader):
             _chart_source = await _chart_source_reader(
@@ -2778,6 +2784,7 @@ class TurnRunner:
                 await orch.plan_store.release_execution_claim(request.plan_execution_id, request.turn_id)
                 raise
 
+        _prelead_marks.append(("plan", time.monotonic()))
         # Sprint ψ-F: fetch pinned attachments + inject metadata snapshot onto ctx.
         # Lead orchestrator (lead_orchestrator.py:716+) reads this and appends to
         # Lead system prompt. Snapshot at turn start; mid-turn pin doesn't reflect.
@@ -2817,6 +2824,7 @@ class TurnRunner:
         # turn becomes durable for the next turn, so a template uploaded in
         # turn 1 survives to turn 5 with NO re-upload (the s_a9b693829c3d fix).
         # Default-ON, best-effort (a pin failure must not break the turn).
+        _prelead_marks.append(("pinned", time.monotonic()))
         if orch.session_store is not None and request.session_id and request.attachments:
             try:
                 await orch.session_store.pin_session_attachments(
@@ -2831,6 +2839,7 @@ class TurnRunner:
                     _pin_e,
                 )
 
+        _prelead_marks.append(("autopin", time.monotonic()))
         _parsed_for_bundles: list[Any] = []
         # Scope = pinned_snapshot ∪ request.attachments (deduped by aid). The
         # request.attachments path covers fresh uploads that gateway didn't
@@ -2952,6 +2961,7 @@ class TurnRunner:
                 _ppe,
             )
 
+        _prelead_marks.append(("attachments", time.monotonic()))
         # skill-import batch 2 (FEATURE_BUNDLE_IMPORT_DRAFT off by default): bundle inventory to Lead.
         # Off: no DB lookup/prompt injection, exactly batch1 behavior. Own try: failure is not attachment parse failure.
         try:
@@ -2962,6 +2972,7 @@ class TurnRunner:
         except Exception as _bie:
             logger.warning("bundle_import.collect_failed turn=%s err=%s", request.turn_id, type(_bie).__name__)
 
+        _prelead_marks.append(("bundles", time.monotonic()))
         # byo-no-clone: reuse the SAME effective-router runner the Lead's tool ctx got, so the
         # planning path (PlanDeps.agent_runner_fn) and the tool path spawn identical, BYO-aware
         # peers. (Previously read orch.subagent_runner = global-router singleton.)
@@ -3007,6 +3018,14 @@ class TurnRunner:
                 team_subagent_store=_team_subagent_store(orch),  # cca P3: advertise team peers
                 plan_store=getattr(orch, "plan_store", None),  # planning-mode (M1 block 4)
             )
+            with contextlib.suppress(Exception):  # Timing logs must never affect turn.
+                _prelead_marks.append(("tool_view", time.monotonic()))
+                logger.info(
+                    "turn.prelead_ms turn=%s total=%.0f %s",
+                    request.turn_id,
+                    (_prelead_marks[-1][1] - _prelead_t0) * 1000,
+                    " ".join(f"{_n}={(_at - _prelead_t0) * 1000:.0f}" for _n, _at in _prelead_marks),
+                )
             _lead_result = await _lead_run_turn(_sctx, request.text, runtime=_runtime)
             self._check_cancel()
             raise_if_terminal_bus_failed(bus)

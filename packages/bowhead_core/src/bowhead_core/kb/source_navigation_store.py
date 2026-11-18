@@ -42,12 +42,11 @@ class SourceNavigationStore:
 
     @staticmethod
     async def _current(db: aiosqlite.Connection, file: KbFileDTO) -> None:
-        row = await (
-            await db.execute(
-                "SELECT version,membership_revision,active_generation_id,team_id,soft_deleted_at,source_absent FROM kb_files WHERE file_id=?",
-                (file.file_id,),
-            )
-        ).fetchone()
+        async with db.execute(
+            "SELECT version,membership_revision,active_generation_id,team_id,soft_deleted_at,source_absent FROM kb_files WHERE file_id=?",
+            (file.file_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row or tuple(row[:4]) != (file.version, file.membership_revision, file.active_generation_id, file.team_id) or row[4] or row[5]:
             raise NavigationConflict("knowledge_source_changed")
 
@@ -62,7 +61,8 @@ class SourceNavigationStore:
 
     async def revision(self, file_id: str) -> int:
         async with open_shared_ctx(self.path) as db:
-            row = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file_id,))).fetchone()
+            async with db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file_id,)) as cursor:
+                row = await cursor.fetchone()
             return int(row[0]) if row else 0
 
     @staticmethod
@@ -73,14 +73,13 @@ class SourceNavigationStore:
         generations = [file.active_generation_id for file in files if file.active_generation_id]
         if not generations:
             return set()
-        rows = await (
-            await db.execute(
-                "SELECT generation_id,file_id,artifact_id,expected_chunk_count FROM kb_file_generations WHERE state='published' AND published_at IS NOT NULL AND generation_id IN ("
-                + ",".join("?" for _ in generations)
-                + ")",
-                generations,
-            )
-        ).fetchall()
+        async with db.execute(
+            "SELECT generation_id,file_id,artifact_id,expected_chunk_count FROM kb_file_generations WHERE state='published' AND published_at IS NOT NULL AND generation_id IN ("
+            + ",".join("?" for _ in generations)
+            + ")",
+            generations,
+        ) as generation_cursor:
+            rows = await generation_cursor.fetchall()
         return {
             row[0]
             for row in rows
@@ -99,25 +98,23 @@ class SourceNavigationStore:
 
     async def manual_needs_review(self, file: KbFileDTO) -> bool:
         async with open_shared_ctx(self.path) as db:
-            row = await (
-                await db.execute(
-                    "SELECT 1 FROM kb_source_descriptions WHERE file_id=? AND team_id=? AND method='manual' AND length(text)>0 AND (generation_id IS NOT ? OR membership_revision<>? OR (generation_id IS NULL AND source_version<>?)) LIMIT 1",
-                    (file.file_id, file.team_id, file.active_generation_id, file.membership_revision, file.version),
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT 1 FROM kb_source_descriptions WHERE file_id=? AND team_id=? AND method='manual' AND length(text)>0 AND (generation_id IS NOT ? OR membership_revision<>? OR (generation_id IS NULL AND source_version<>?)) LIMIT 1",
+                (file.file_id, file.team_id, file.active_generation_id, file.membership_revision, file.version),
+            ) as cursor:
+                row = await cursor.fetchone()
             return row is not None
 
     async def file_wide_descriptions(self, file: KbFileDTO) -> list[dict[str, Any]]:
         async with open_shared_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    "SELECT * FROM kb_source_descriptions WHERE file_id=? AND team_id=? AND membership_revision=? AND generation_id IS ? "
-                    "AND (generation_id IS NOT NULL OR source_version=?) AND method IN ('manual','standalone') "
-                    "ORDER BY CASE method WHEN 'manual' THEN 0 WHEN 'standalone' THEN 1 ELSE 2 END,updated_at DESC,id LIMIT 16",
-                    (file.file_id, file.team_id, file.membership_revision, file.active_generation_id, file.version),
-                )
-            ).fetchall()
+            async with db.execute(
+                "SELECT * FROM kb_source_descriptions WHERE file_id=? AND team_id=? AND membership_revision=? AND generation_id IS ? "
+                "AND (generation_id IS NOT NULL OR source_version=?) AND method IN ('manual','standalone') "
+                "ORDER BY CASE method WHEN 'manual' THEN 0 WHEN 'standalone' THEN 1 ELSE 2 END,updated_at DESC,id LIMIT 16",
+                (file.file_id, file.team_id, file.membership_revision, file.active_generation_id, file.version),
+            ) as cursor:
+                rows = await cursor.fetchall()
         return [
             {
                 **dict(row),
@@ -130,12 +127,11 @@ class SourceNavigationStore:
 
     async def labels(self, file: KbFileDTO) -> list[str]:
         async with open_shared_ctx(self.path) as db:
-            rows = await (
-                await db.execute(
-                    "SELECT category_id FROM kb_source_category_files WHERE file_id=? AND generation_id IS ? AND membership_revision=? ORDER BY category_id",
-                    (file.file_id, file.active_generation_id, file.membership_revision),
-                )
-            ).fetchall()
+            async with db.execute(
+                "SELECT category_id FROM kb_source_category_files WHERE file_id=? AND generation_id IS ? AND membership_revision=? ORDER BY category_id",
+                (file.file_id, file.active_generation_id, file.membership_revision),
+            ) as cursor:
+                rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
     async def metadata(self, files: list[KbFileDTO], workspace_id: str) -> dict[str, dict[str, Any]]:
@@ -147,21 +143,22 @@ class SourceNavigationStore:
         result = {identity: {"revision": 0, "descriptions": [], "labels": [], "labels_override": False} for identity in ids}
         async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
-            for row in await (
-                await db.execute(f"SELECT file_id,revision,labels_override FROM kb_source_navigation WHERE file_id IN ({placeholders})", ids)
-            ).fetchall():
+            async with db.execute(
+                f"SELECT file_id,revision,labels_override FROM kb_source_navigation WHERE file_id IN ({placeholders})", ids
+            ) as cursor:
+                rows_2 = await cursor.fetchall()
+            for row in rows_2:
                 result[row["file_id"]]["revision"] = row["revision"]
                 result[row["file_id"]]["labels_override"] = bool(row["labels_override"])
-            rows = await (
-                await db.execute(
-                    "WITH candidates AS (SELECT id,file_id,team_id,membership_revision,generation_id,source_version,method,revision,coverage,provider,model,matrix_json,"
-                    "CASE WHEN method='matrix' THEN NULL ELSE text END AS text,CASE WHEN method='matrix' THEN NULL ELSE topics_json END AS topics_json,"
-                    "ROW_NUMBER() OVER(PARTITION BY file_id ORDER BY CASE method WHEN 'manual' THEN 0 WHEN 'standalone' THEN 1 ELSE 2 END,updated_at DESC,id) AS position "
-                    f"FROM kb_source_descriptions WHERE file_id IN ({placeholders}) AND (method<>'matrix' OR matrix_workspace_id=?)) "
-                    "SELECT * FROM candidates WHERE position<=16 ORDER BY file_id,position LIMIT 256",
-                    [*ids, workspace_id],
-                )
-            ).fetchall()
+            async with db.execute(
+                "WITH candidates AS (SELECT id,file_id,team_id,membership_revision,generation_id,source_version,method,revision,coverage,provider,model,matrix_json,"
+                "CASE WHEN method='matrix' THEN NULL ELSE text END AS text,CASE WHEN method='matrix' THEN NULL ELSE topics_json END AS topics_json,"
+                "ROW_NUMBER() OVER(PARTITION BY file_id ORDER BY CASE method WHEN 'manual' THEN 0 WHEN 'standalone' THEN 1 ELSE 2 END,updated_at DESC,id) AS position "
+                f"FROM kb_source_descriptions WHERE file_id IN ({placeholders}) AND (method<>'matrix' OR matrix_workspace_id=?)) "
+                "SELECT * FROM candidates WHERE position<=16 ORDER BY file_id,position LIMIT 256",
+                [*ids, workspace_id],
+            ) as cursor_2:
+                rows = await cursor_2.fetchall()
             current = {file.file_id: file for file in files}
             for row in rows:
                 file = current[row["file_id"]]
@@ -180,7 +177,9 @@ class SourceNavigationStore:
                         "topics": json.loads(row["topics_json"]) if row["topics_json"] else [],
                     }
                 )
-            for row in await (await db.execute(f"SELECT * FROM kb_source_category_files WHERE file_id IN ({placeholders})", ids)).fetchall():
+            async with db.execute(f"SELECT * FROM kb_source_category_files WHERE file_id IN ({placeholders})", ids) as cursor_3:
+                rows_3 = await cursor_3.fetchall()
+            for row in rows_3:
                 file = current[row["file_id"]]
                 if (row["generation_id"], row["membership_revision"]) == (file.active_generation_id, file.membership_revision):
                     result[file.file_id]["labels"].append(row["category_id"])
@@ -192,14 +191,13 @@ class SourceNavigationStore:
             return {}
         async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    "SELECT id,revision,text,topics_json FROM kb_source_descriptions WHERE method='matrix' AND id IN ("
-                    + ",".join("?" for _ in identities)
-                    + ")",
-                    identities,
-                )
-            ).fetchall()
+            async with db.execute(
+                "SELECT id,revision,text,topics_json FROM kb_source_descriptions WHERE method='matrix' AND id IN ("
+                + ",".join("?" for _ in identities)
+                + ")",
+                identities,
+            ) as description_cursor:
+                rows = await description_cursor.fetchall()
             return {row["id"]: {"revision": row["revision"], "text": row["text"], "topics": json.loads(row["topics_json"])} for row in rows}
 
     async def categories(
@@ -220,14 +218,13 @@ class SourceNavigationStore:
             params.extend([query, query])
         async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    "SELECT * FROM kb_source_categories WHERE team_id=? AND ((scope='team' AND scope_id=?) OR (scope='personal' AND scope_id=?) OR (scope='space' AND scope_id=?))"
-                    + predicate
-                    + " ORDER BY name,id LIMIT ?",
-                    (*params, len(ids) if identities is not None else 100),
-                )
-            ).fetchall()
+            async with db.execute(
+                "SELECT * FROM kb_source_categories WHERE team_id=? AND ((scope='team' AND scope_id=?) OR (scope='personal' AND scope_id=?) OR (scope='space' AND scope_id=?))"
+                + predicate
+                + " ORDER BY name,id LIMIT ?",
+                (*params, len(ids) if identities is not None else 100),
+            ) as cursor:
+                rows = await cursor.fetchall()
         return [{**dict(row), "aliases": json.loads(row["aliases_json"])} for row in rows]
 
     async def save_category(
@@ -246,25 +243,25 @@ class SourceNavigationStore:
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             if parent_id:
-                parent = await (
-                    await db.execute("SELECT team_id,scope,scope_id,parent_id FROM kb_source_categories WHERE id=?", (parent_id,))
-                ).fetchone()
+                async with db.execute("SELECT team_id,scope,scope_id,parent_id FROM kb_source_categories WHERE id=?", (parent_id,)) as cursor:
+                    parent = await cursor.fetchone()
                 if not parent or tuple(parent[:3]) != (team_id, scope, scope_id) or parent[3] or parent_id == category_id:
                     raise NavigationConflict("knowledge_category_parent_invalid")
-            if (
-                parent_id
-                and category_id
-                and await (await db.execute("SELECT 1 FROM kb_source_categories WHERE parent_id=? LIMIT 1", (category_id,))).fetchone()
-            ):
-                raise NavigationConflict("knowledge_category_parent_invalid")
+            if parent_id and category_id:
+                async with db.execute("SELECT 1 FROM kb_source_categories WHERE parent_id=? LIMIT 1", (category_id,)) as child_cursor:
+                    has_children = await child_cursor.fetchone() is not None
+                if has_children:
+                    raise NavigationConflict("knowledge_category_parent_invalid")
             if category_id:
-                row = await (
-                    await db.execute("SELECT team_id,scope,scope_id,revision FROM kb_source_categories WHERE id=?", (category_id,))
-                ).fetchone()
+                async with db.execute("SELECT team_id,scope,scope_id,revision FROM kb_source_categories WHERE id=?", (category_id,)) as cursor_2:
+                    row = await cursor_2.fetchone()
                 if not row or tuple(row) != (team_id, scope, scope_id, revision):
                     raise NavigationConflict("knowledge_category_changed")
-                if parent_id and await (await db.execute("SELECT 1 FROM kb_source_categories WHERE parent_id=? LIMIT 1", (category_id,))).fetchone():
-                    raise NavigationConflict("knowledge_category_parent_invalid")
+                if parent_id:
+                    async with db.execute("SELECT 1 FROM kb_source_categories WHERE parent_id=? LIMIT 1", (category_id,)) as child_cursor:
+                        has_children = await child_cursor.fetchone() is not None
+                    if has_children:
+                        raise NavigationConflict("knowledge_category_parent_invalid")
                 await db.execute(
                     "UPDATE kb_source_categories SET name=?,aliases_json=?,parent_id=?,revision=revision+1,actor_user_id=? WHERE id=?",
                     (name, _json(aliases), parent_id, actor_user_id, category_id),
@@ -337,7 +334,8 @@ class SourceNavigationStore:
             await db.execute("BEGIN IMMEDIATE")
             await self._current(db, file)
             await self.ensure_base(db, file)
-            current = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,))).fetchone()
+            async with db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,)) as cursor:
+                current = await cursor.fetchone()
             if current[0] != revision:
                 raise NavigationConflict("knowledge_navigation_changed")
             if edit_text:
@@ -374,11 +372,10 @@ class SourceNavigationStore:
             await db.execute("BEGIN IMMEDIATE")
             await self._current(db, file)
             origin = f"matrix:{matrix['matrix_id']}:{matrix['column_id']}"
-            previous = await (
-                await db.execute(
-                    "SELECT text,topics_json,matrix_json FROM kb_source_descriptions WHERE file_id=? AND origin_key=?", (file.file_id, origin)
-                )
-            ).fetchone()
+            async with db.execute(
+                "SELECT text,topics_json,matrix_json FROM kb_source_descriptions WHERE file_id=? AND origin_key=?", (file.file_id, origin)
+            ) as cursor:
+                previous = await cursor.fetchone()
             if previous and tuple(previous) == (text, _json(topics), _json(matrix)):
                 return
             await self._write_description(
@@ -432,12 +429,11 @@ class SourceNavigationStore:
                 stamp,
             ),
         )
-        row = await (
-            await db.execute(
-                "SELECT id,file_id,generation_id,actor_user_id,workspace_id,membership_revision,manual_revision,source_version,assignment_fingerprint FROM kb_source_description_jobs WHERE team_id=? AND admission_key=?",
-                (file.team_id, admission_key),
-            )
-        ).fetchone()
+        async with db.execute(
+            "SELECT id,file_id,generation_id,actor_user_id,workspace_id,membership_revision,manual_revision,source_version,assignment_fingerprint FROM kb_source_description_jobs WHERE team_id=? AND admission_key=?",
+            (file.team_id, admission_key),
+        ) as cursor:
+            row = await cursor.fetchone()
         if tuple(row[1:]) != (
             file.file_id,
             generation_id,
@@ -460,7 +456,8 @@ class SourceNavigationStore:
             if file.active_generation_id not in await self._published(db, [file]):
                 raise NavigationConflict("knowledge_generation_unverified")
             await self.ensure_base(db, file)
-            current = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,))).fetchone()
+            async with db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,)) as cursor:
+                current = await cursor.fetchone()
             if current[0] != revision:
                 raise NavigationConflict("knowledge_navigation_changed")
             identity = await self.enqueue_in(
@@ -479,9 +476,10 @@ class SourceNavigationStore:
     async def latest_job(self, file_id: str) -> dict[str, Any] | None:
         async with open_shared_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (
-                await db.execute("SELECT * FROM kb_source_description_jobs WHERE file_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (file_id,))
-            ).fetchone()
+            async with db.execute(
+                "SELECT * FROM kb_source_description_jobs WHERE file_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (file_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
             return dict(row) if row else None
 
     async def claim(self, owner: str) -> dict[str, Any] | None:
@@ -501,12 +499,11 @@ class SourceNavigationStore:
                 "UPDATE kb_source_description_jobs AS queued SET state='superseded',error_code='prior_outcome_unknown',updated_at=? WHERE queued.state='pending' AND EXISTS (SELECT 1 FROM kb_source_description_jobs AS prior WHERE prior.file_id=queued.file_id AND prior.generation_id=queued.generation_id AND prior.assignment_fingerprint=queued.assignment_fingerprint AND prior.error_code='outcome_unknown' AND prior.updated_at>=queued.created_at)",
                 (_now(),),
             )
-            row = await (
-                await db.execute(
-                    "UPDATE kb_source_description_jobs SET state='claimed',lease_owner=?,lease_until=?,updated_at=? WHERE id=(SELECT queued.id FROM kb_source_description_jobs AS queued WHERE queued.state='pending' AND NOT EXISTS (SELECT 1 FROM kb_source_description_jobs AS active WHERE active.file_id=queued.file_id AND active.generation_id=queued.generation_id AND active.membership_revision=queued.membership_revision AND active.assignment_fingerprint=queued.assignment_fingerprint AND active.state IN ('claimed','dispatching')) ORDER BY queued.created_at,queued.id LIMIT 1) RETURNING *",
-                    (owner, stamp + 300, _now()),
-                )
-            ).fetchone()
+            async with db.execute(
+                "UPDATE kb_source_description_jobs SET state='claimed',lease_owner=?,lease_until=?,updated_at=? WHERE id=(SELECT queued.id FROM kb_source_description_jobs AS queued WHERE queued.state='pending' AND NOT EXISTS (SELECT 1 FROM kb_source_description_jobs AS active WHERE active.file_id=queued.file_id AND active.generation_id=queued.generation_id AND active.membership_revision=queued.membership_revision AND active.assignment_fingerprint=queued.assignment_fingerprint AND active.state IN ('claimed','dispatching')) ORDER BY queued.created_at,queued.id LIMIT 1) RETURNING *",
+                (owner, stamp + 300, _now()),
+            ) as cursor:
+                row = await cursor.fetchone()
             await db.commit()
             return dict(row) if row else None
 
@@ -542,10 +539,12 @@ class SourceNavigationStore:
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             await self._current(db, file)
-            current = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,))).fetchone()
+            async with db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,)) as cursor:
+                current = await cursor.fetchone()
             if not current or current[0] != job["manual_revision"]:
                 raise NavigationConflict("knowledge_navigation_changed")
-            claim = await (await db.execute("SELECT state,lease_owner FROM kb_source_description_jobs WHERE id=?", (job["id"],))).fetchone()
+            async with db.execute("SELECT state,lease_owner FROM kb_source_description_jobs WHERE id=?", (job["id"],)) as cursor_2:
+                claim = await cursor_2.fetchone()
             if not claim or tuple(claim) != ("dispatching", job["lease_owner"]):
                 raise NavigationConflict("knowledge_generation_claim_changed")
             await self._write_description(

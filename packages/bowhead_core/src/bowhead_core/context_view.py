@@ -9,6 +9,7 @@ edit to its covered prefix.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from bowhead_router.reasoning import message_record
@@ -76,6 +77,35 @@ class ContextView:
         self._replacements.append(replacement)
 
 
+# A user-selected Skill keeps its newest full copy per
+# Skill verbatim across compaction, within these estimated-token budgets; older
+# or over-budget copies are summarized like other history and `skill_read`
+# can load the Skill again.
+SKILL_KEEP_TOKENS_EACH = 8000
+SKILL_KEEP_TOKENS_TOTAL = 24000
+_SKILL_COPY = re.compile(r'<skill_content name="([^"]*)"')
+
+
+def _kept_skill_positions(messages: list[Message], limit: int) -> list[int]:
+    kept: list[int] = []
+    seen: set[str] = set()
+    total = 0
+    for index in range(limit - 1, -1, -1):
+        message = messages[index]
+        if message.role != "user" or message.name != "skill_content" or not isinstance(message.content, str):
+            continue
+        match = _SKILL_COPY.search(message.content)
+        if match is None or match.group(1) in seen:
+            continue
+        seen.add(match.group(1))
+        tokens = estimate_tokens(message.content)
+        if tokens > SKILL_KEEP_TOKENS_EACH or total + tokens > SKILL_KEEP_TOKENS_TOTAL:
+            continue
+        total += tokens
+        kept.append(index)
+    return sorted(kept)
+
+
 def eligible_context_range(messages: list[Message], *, current_request: int, canonical_count: int) -> tuple[int, int]:
     """Protect active user input, newly returned Tools and volatile request data.
 
@@ -88,6 +118,10 @@ def eligible_context_range(messages: list[Message], *, current_request: int, can
             f"context_current_request_invalid: current={current_request}, canonical={canonical_count}, messages={len(messages)}"
         )
     start = current_request + 1
+    # A user-selected Skill follows its request and stays verbatim with it; the
+    # work after it remains eligible like any other completed transaction.
+    while start < canonical_count and messages[start].role == "user" and messages[start].name == "skill_content":
+        start += 1
     boundaries = balanced_boundaries(messages)
     # The last native transaction has just arrived and must be consumed intact.
     end = max((value for value in boundaries if start <= value < canonical_count), default=start)
@@ -101,6 +135,13 @@ def eligible_context_range(messages: list[Message], *, current_request: int, can
         def size(region: list[Message]) -> int:
             return estimate_tokens(json.dumps([message_record(message) for message in region], ensure_ascii=False, separators=(",", ":")))
 
-        if end <= start or size(messages[:current_request]) >= size(messages[start:end]):
-            return 0, current_request
+        # History splits around the kept Skill copies; the largest remaining
+        # stretch is the candidate (the whole history when none is kept).
+        cuts = _kept_skill_positions(messages, current_request)
+        stretches = [(low, high) for low, high in zip([0, *(cut + 1 for cut in cuts)], [*cuts, current_request], strict=True) if low < high]
+        history = max(stretches, key=lambda stretch: size(messages[stretch[0] : stretch[1]]), default=None)
+        if history is not None and (end <= start or size(messages[history[0] : history[1]]) >= size(messages[start:end])):
+            return history
+        if history is None and end <= start:
+            return 0, 0
     return start, end

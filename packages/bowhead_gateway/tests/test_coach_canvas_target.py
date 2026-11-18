@@ -115,10 +115,10 @@ def test_agent_selection_admits_absence_but_never_creates_or_absorbs_another_wor
 
 
 def test_plugin_selection_checks_original_row_version_and_current_admin_scope(original_scope):
-    from test_agent_coach_plugins import administrator, create
+    from test_agent_coach_plugins import administrator, create, exact_method
 
     administrator(original_scope)
-    result = create(original_scope)
+    result = create(original_scope, exact_method(original_scope))
     original = result["result_target"]
     selected = selection(original_scope, {**original, "kind": "plugin"})
     admitted = admit(original_scope, selected)

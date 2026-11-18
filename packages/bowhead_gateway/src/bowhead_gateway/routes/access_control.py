@@ -217,7 +217,7 @@ def _validate_expires_at(value: str | None) -> str | None:
     try:
         datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "expires_at must be ISO-8601") from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "expires_at must be ISO-8601") from exc
     return value
 
 
@@ -267,12 +267,12 @@ def _canonical_self_explain_resource(
     resource_kind = kind.strip()
     rid = resource_id.strip()
     if resource_kind not in _RESOURCE_KINDS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported resource_kind")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "unsupported resource_kind")
     if resource_kind in SHAREABLE_KINDS:
         # self-explain over shareable kinds: existence is owner/visibility-scoped
         # elsewhere; here only the kind label passes through (no resource probe).
         if not rid:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "resource_id required")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "resource_id required")
         return resource_kind, rid
     if resource_kind in {"kb_scope", "knowledge_base"}:
         if rid.startswith("team:"):
@@ -292,14 +292,14 @@ def _canonical_self_explain_resource(
         return "builtin_capability", capability_id
     if resource_kind == "mcp":
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "user MCP servers are personal/dev and are not M1 shared resources; use team_tool_source",
         )
     if resource_kind == "team_tool_op":
         parts = rid.split(".")
         if len(parts) < 3 or parts[0] != "teammcp":
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "team_tool_op must be teammcp.<source_id>.<operation_id>",
             )
     return resource_kind, rid
@@ -318,10 +318,10 @@ async def _validate_principal(
     principal_id: str,
 ) -> None:
     if principal_type not in _PRINCIPAL_TYPES:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid principal_type")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid principal_type")
     if principal_type == "team":
         if principal_id != user.team_id:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "principal team must be caller team")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "principal team must be caller team")
         return
     if principal_type == "workspace":
         await _assert_workspace_in_team(user_store, user.team_id, principal_id)
@@ -346,7 +346,7 @@ async def _canonical_resource(
     resource_kind = kind.strip()
     rid = resource_id.strip()
     if resource_kind not in _RESOURCE_KINDS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported resource_kind")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "unsupported resource_kind")
     if resource_kind in {"kb_scope", "knowledge_base"}:
         if rid.startswith("team:"):
             team_id = rid.split(":", 1)[1]
@@ -381,7 +381,7 @@ async def _canonical_resource(
             source_dir.relative_to(builtin_catalog_dir().resolve())
         except ValueError as exc:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "user-generated skill sharing requires published skill storage",
             ) from exc
         except Exception:  # noqa: S110
@@ -404,7 +404,7 @@ async def _canonical_resource(
         return "builtin_capability", capability_id
     if resource_kind == "mcp":
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "user MCP servers are personal/dev and are not M1 shared resources; use team_tool_source",
         )
     if resource_kind == "team_tool_source":
@@ -429,10 +429,10 @@ async def _canonical_resource(
             except Exception as exc:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "team tool op not found") from exc
         elif not rid:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "team_tool_op id required")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "team_tool_op id required")
         else:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "team_tool_op must be teammcp.<source_id>.<operation_id>",
             )
         return "team_tool_op", rid
@@ -485,7 +485,7 @@ async def create_group(
         code = str(exc)
         if code == "workspace_not_in_team":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "workspace not found") from exc
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, code or "invalid group") from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, code or "invalid group") from exc
     await _audit(
         request=request,
         store=user_store,
@@ -557,7 +557,7 @@ async def add_group_member(
     except KeyError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "group not found") from exc
     except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     await _audit(
         request=request,
         store=user_store,
@@ -620,7 +620,7 @@ async def upsert_resource_grant(
     _reject_obsolete_team_subagent_write(resource_kind)
     permission = canonical_permission(body.permission, resource_kind=resource_kind)
     if permission is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid permission")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid permission")
     await _validate_principal(
         user=user,
         user_store=user_store,
@@ -650,7 +650,7 @@ async def upsert_resource_grant(
             )
         except share_service.SkillApprovalRequiredError:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 {"error": {"code": share_service.SkillApprovalRequiredError.code, "message": "team skill not approved"}},
             ) from None
         grant = await access_store.get_resource_grant(user.team_id, result["team_grant_id"])
@@ -690,7 +690,7 @@ async def upsert_resource_grant(
             await share_service.ensure_team_skill_grantable(user_store, team_id=user.team_id, resource_id=resource_id)
         except share_service.SkillApprovalRequiredError:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 {"error": {"code": share_service.SkillApprovalRequiredError.code, "message": "team skill not approved"}},
             ) from None
     grant = await access_store.create_or_update_resource_grant(
@@ -831,7 +831,7 @@ async def explain_permission(
         )
     permission = canonical_permission(body.permission, resource_kind=resource_kind)
     if permission is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid permission")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid permission")
     ctx = await build_access_context_from_request(
         request,
         user=user,

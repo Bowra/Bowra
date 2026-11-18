@@ -270,7 +270,7 @@ async def create_setup_session(
     payload = body or CreateSetupSessionBody()
     if payload.app_type not in {"internal_guided", "internal_one_click_agent", "store"}:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="invalid Feishu setup app_type",
         )
     session = await _store(request).create_setup_session(
@@ -308,7 +308,7 @@ async def get_setup_session_qr(
         svg = render_setup_qr_svg(await _setup_session_url(request, session))
     except QrPayloadTooLongError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     return Response(

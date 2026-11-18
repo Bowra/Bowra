@@ -141,8 +141,8 @@ def _state(db_path: str, checkpoint_id: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_a_run_stopped_at_its_step_limit_continues_from_its_own_transcript(tmp_path, monkeypatch) -> None:
-    db_path = await _db(tmp_path)
+async def test_a_run_stopped_at_its_step_limit_continues_from_its_own_transcript(migrated_legacy_core_db, monkeypatch) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     first, _ = await _run(monkeypatch, _Router(reads=6), _ctx(db_path, "t_1"), step_limit=3, pre_minted_subagent_id="sub_a")
     assert (first.completion, first.stop_reason) == ("partial", "step_limit")
     assert first.resume_checkpoint_id is not None
@@ -168,8 +168,8 @@ async def test_a_run_stopped_at_its_step_limit_continues_from_its_own_transcript
 
 
 @pytest.mark.asyncio
-async def test_changed_tools_start_fresh_from_the_saved_task_and_say_why(tmp_path, monkeypatch) -> None:
-    db_path = await _db(tmp_path)
+async def test_changed_tools_start_fresh_from_the_saved_task_and_say_why(migrated_legacy_core_db, monkeypatch) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path, profile=PROFILE.name, agent_revision_id=None, tool_names=["read", "write", "subagent_return"])
     checkpoint = await sr.claim(db_path, checkpoint_id=checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
     grant = sr.ResumeGrant(checkpoint=checkpoint, material=sr.open_material(checkpoint, db_path=db_path), instruction="Go on.")
@@ -187,9 +187,9 @@ async def test_changed_tools_start_fresh_from_the_saved_task_and_say_why(tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("optional_tool", ["bi_query", "python_exec", "teammcp.calendar.read"])
 @pytest.mark.parametrize("before_available,after_available", [(True, False), (False, True), (False, False), (True, True)])
-async def test_resume_tracks_actual_advertised_tools(tmp_path, monkeypatch, optional_tool, before_available, after_available) -> None:
+async def test_resume_tracks_actual_advertised_tools(migrated_legacy_core_db, monkeypatch, optional_tool, before_available, after_available) -> None:
     monkeypatch.setenv("FEATURE_BI_VISIBILITY_GATE", "0")
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     profile = replace(PROFILE, tool_whitelist=(*PROFILE.tool_whitelist, optional_tool))
     registry = _registry()
 
@@ -227,8 +227,8 @@ async def test_resume_tracks_actual_advertised_tools(tmp_path, monkeypatch, opti
 
 
 @pytest.mark.asyncio
-async def test_a_completed_run_is_saved_for_follow_ups(tmp_path, monkeypatch) -> None:
-    db_path = await _db(tmp_path)
+async def test_a_completed_run_is_saved_for_follow_ups(migrated_legacy_core_db, monkeypatch) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     result, _ = await _run(monkeypatch, _Router(reads=1), _ctx(db_path, "t_1"), step_limit=None)
     assert result.ok and result.resume_checkpoint_id
     [listed] = await sr.list_resumable(db_path, session_id="s_1", user_id="u_1", exclude_turn_id="t_2")
@@ -236,9 +236,9 @@ async def test_a_completed_run_is_saved_for_follow_ups(tmp_path, monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_server_chosen_calls_run_before_the_first_model_call(tmp_path, monkeypatch) -> None:
+async def test_server_chosen_calls_run_before_the_first_model_call(migrated_legacy_core_db, monkeypatch) -> None:
     """The Continue path: the runner executes the given calls instead of asking the model first."""
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     router = _Router(reads=0)
     forced = [ToolCall(id="call_continue_0", name="read", arguments={"key": "forced"})]
     monkeypatch.setitem(PROFILES, PROFILE.name, PROFILE)
@@ -289,8 +289,8 @@ async def _spawn(db_path: str, turn_id: str, args: dict[str, Any]) -> tuple[Any,
 
 
 @pytest.mark.asyncio
-async def test_resume_dispatches_the_saved_helper_with_its_transcript(tmp_path) -> None:
-    db_path = await _db(tmp_path)
+async def test_resume_dispatches_the_saved_helper_with_its_transcript(migrated_legacy_core_db) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     invocation, runner, bus = await _spawn(db_path, "t_2", {"resume_checkpoint_id": checkpoint_id, "profile": "kb-analyst", "task": "Finish it."})
 
@@ -306,8 +306,8 @@ async def test_resume_dispatches_the_saved_helper_with_its_transcript(tmp_path) 
 
 
 @pytest.mark.asyncio
-async def test_a_failed_resume_offers_the_saved_work_again(tmp_path) -> None:
-    db_path = await _db(tmp_path)
+async def test_a_failed_resume_offers_the_saved_work_again(migrated_legacy_core_db) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     registry = build_default_registry()
     register_subagent_tool(registry)
@@ -324,9 +324,9 @@ async def test_a_failed_resume_offers_the_saved_work_again(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_second_stopped_helper_of_the_same_profile_still_resumes(tmp_path) -> None:
+async def test_a_second_stopped_helper_of_the_same_profile_still_resumes(migrated_legacy_core_db) -> None:
     """The same-turn partial guard is per lineage for resumes, not per profile."""
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     first = await _capture(db_path)
     second = await _capture(db_path, run_subagent_id="sub_b")
     registry = build_default_registry()
@@ -341,8 +341,8 @@ async def test_a_second_stopped_helper_of_the_same_profile_still_resumes(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_resume_in_the_capturing_turn_is_refused_without_dispatch(tmp_path) -> None:
-    db_path = await _db(tmp_path)
+async def test_resume_in_the_capturing_turn_is_refused_without_dispatch(migrated_legacy_core_db) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     invocation, runner, _ = await _spawn(db_path, "t_1", {"resume_checkpoint_id": checkpoint_id, "profile": "compute", "task": "again"})
     assert invocation.result["resume_refused"] == "same_turn"
@@ -350,8 +350,8 @@ async def test_resume_in_the_capturing_turn_is_refused_without_dispatch(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_expired_saved_work_hands_the_task_to_a_fresh_helper(tmp_path) -> None:
-    db_path = await _db(tmp_path)
+async def test_expired_saved_work_hands_the_task_to_a_fresh_helper(migrated_legacy_core_db) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     with sqlite3.connect(db_path) as db:
         db.execute("UPDATE subagent_resume_checkpoints SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (checkpoint_id,))
@@ -365,8 +365,8 @@ async def test_expired_saved_work_hands_the_task_to_a_fresh_helper(tmp_path) -> 
 
 
 @pytest.mark.asyncio
-async def test_a_continue_click_becomes_server_chosen_resume_calls(tmp_path) -> None:
-    db_path = await _db(tmp_path)
+async def test_a_continue_click_becomes_server_chosen_resume_calls(migrated_legacy_core_db) -> None:
+    db_path = await _db(migrated_legacy_core_db)
     clicked = await _capture(db_path)
     other = await _capture(db_path, run_subagent_id="sub_b", completion="complete", stop_reason=None, partial_done=None, partial_remaining=None)
     await sr.record_requests(db_path, turn_id="t_2", checkpoint_ids=[clicked])
@@ -401,14 +401,14 @@ class _EmptyCatalog:
 
 
 @pytest.mark.asyncio
-async def test_the_lead_loop_passes_the_click_to_its_runner(tmp_path, monkeypatch) -> None:
+async def test_the_lead_loop_passes_the_click_to_its_runner(migrated_legacy_core_db, monkeypatch) -> None:
     monkeypatch.setenv("BOWHEAD_PLANNING_MODE", "0")
     monkeypatch.setitem(
         PROFILES,
         "lead",
         SubagentProfile(name="lead", llm_agent_type="lead", tool_whitelist=("subagent_return",), system_prompt="(stub)", max_iterations=4),
     )
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     clicked = await _capture(db_path)
     await sr.record_requests(db_path, turn_id="t_2", checkpoint_ids=[clicked])
     runner = _LeadRunner()
@@ -442,10 +442,10 @@ async def test_the_lead_loop_passes_the_click_to_its_runner(tmp_path, monkeypatc
     assert [call.arguments["resume_checkpoint_id"] for call in forced] == [clicked]
 
 
-async def test_required_source_contract_survives_real_checkpoint_resume(tmp_path, monkeypatch):
+async def test_required_source_contract_survives_real_checkpoint_resume(migrated_legacy_core_db, monkeypatch):
     from bowhead_core.source_obligations import retained_sources
 
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     first, _ = await _run(
         monkeypatch,
         _Router(reads=6),
@@ -471,11 +471,11 @@ async def test_required_source_contract_survives_real_checkpoint_resume(tmp_path
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("current_review", [False, True])
-async def test_resume_metadata_keeps_only_the_current_review_witness(tmp_path, current_review):
+async def test_resume_metadata_keeps_only_the_current_review_witness(migrated_legacy_core_db, current_review):
     from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, requires_delivery_review
     from bowhead_core.types import ToolInvocation
 
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     checkpoint_id = await _capture(db_path)
     registry = build_default_registry()
     register_subagent_tool(registry)

@@ -97,6 +97,7 @@ def call(call_id, name, arguments):
         "no_tools",
         "unclassified_return",
         "capture_internal",
+        "receipt_mismatch",
         "worker_lost",
         "changed_return",
         "reused_child",
@@ -144,6 +145,16 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             raise RuntimeError("Internal capture implementation failed: password=raw-secret")
 
         monkeypatch.setattr(ordinary_lead_runtime, "capture_ordinary_lead_loop", fail_capture)
+    if mode == "receipt_mismatch":
+        from bowhead_core.documents import upload_confirmation
+
+        from bowhead_core import ordinary_lead_runtime
+
+        async def mismatched_receipt(**kwargs):
+            # Sealing an attached file whose upload receipt no longer names it.
+            upload_confirmation._confirmed_digest({"phase": "rejected"}, None, user_id="", workspace_id="")
+
+        monkeypatch.setattr(ordinary_lead_runtime, "capture_ordinary_lead_loop", mismatched_receipt)
     if mode == "worker_lost":
         from bowhead_core.ordinary_lead_continuation import OrdinaryWorkerUnavailable
 
@@ -165,7 +176,7 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
     rejection_count = 5 if mode == "narrative" else 1
     # A helper prefix this run cannot prove is refused as an optional question:
     # the live Lead keeps its results and completes without a card.
-    capture_fallback = mode in {"unclassified_return", "changed_return", "reused_child"}
+    capture_fallback = mode in {"unclassified_return", "changed_return", "reused_child", "receipt_mismatch"}
     capture_buses = []
     if capture_fallback:
         caplog.set_level("INFO", logger="bowhead_core.subagent")

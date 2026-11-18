@@ -93,9 +93,11 @@ describe("ToolConfirmationNotice", () => {
       summary("ttc_visible", "s_three", "Open here"),
     ]);
     act(() => setConfirmationCardVisible("ttc_visible", true));
-    render(<ToolConfirmationNotice />);
+    await act(async () => {
+      render(<ToolConfirmationNotice />);
+    });
 
-    expect(await screen.findByText('noticeSession {"title":"Quarterly review","count":2}')).toBeInTheDocument();
+    expect(screen.getByText('noticeSession {"title":"Quarterly review","count":2}')).toBeInTheDocument();
     expect(screen.getByText('noticeSession {"title":"untitled","count":1}')).toBeInTheDocument();
     expect(screen.queryByText(/Open here/)).toBeNull();
     expect(screen.getByRole("status")).toBeInTheDocument();

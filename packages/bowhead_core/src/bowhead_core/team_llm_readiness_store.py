@@ -160,15 +160,14 @@ class TeamLlmReadinessStore:
                         ),
                     ),
                 )
-            row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_v2_enrollments
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor_2:
+                row = await cursor_2.fetchone()
             await db.commit()
         assert row is not None
         return (
@@ -189,9 +188,8 @@ class TeamLlmReadinessStore:
     ) -> frozenset[tuple[str, str, Capability, str, str, str, str]]:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT acceptance.provider_id, acceptance.model_id,
                            acceptance.capability, acceptance.role_key,
                            acceptance.config_signature,
@@ -203,9 +201,9 @@ class TeamLlmReadinessStore:
                     WHERE acceptance.team_id = ?
                       AND retired.risk_acceptance_id IS NULL
                     """,
-                    (team_id,),
-                )
-            ).fetchall()
+                (team_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
         return frozenset(acceptance_key_from_row(row) for row in rows)
 
     async def active_grandfather_scopes(
@@ -215,26 +213,24 @@ class TeamLlmReadinessStore:
     ) -> frozenset[tuple[str, str, Capability, str]]:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            baseline = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT assignments_json
                     FROM team_llm_v2_migration_baselines
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
-            invalidation = await (
-                await db.execute(
-                    """
+                (team_id,),
+            ) as cursor:
+                baseline = await cursor.fetchone()
+            async with db.execute(
+                """
                     SELECT team_id
                     FROM team_llm_v2_migration_baseline_invalidations
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor_2:
+                invalidation = await cursor_2.fetchone()
         if baseline is None or invalidation is not None:
             return frozenset()
         rows = json.loads(str(baseline["assignments_json"]))
@@ -249,15 +245,16 @@ class TeamLlmReadinessStore:
         )
 
     async def has_migration_baseline(self, *, team_id: str) -> bool:
-        async with open_shared_ctx(self.db_path) as db:
-            row = await (
-                await db.execute(
-                    """
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute(
+                """
                     SELECT 1
                     FROM team_llm_v2_migration_baselines
                     WHERE team_id = ?
                     """,
-                    (team_id,),
-                )
-            ).fetchone()
+                (team_id,),
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
         return row is not None

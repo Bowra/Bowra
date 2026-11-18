@@ -175,15 +175,16 @@ async def _source_spaces(store: UserStore, cand: FeedbackCandidate) -> list[dict
     if not turn_ids:
         return []
     marks = ",".join("?" * len(turn_ids))
-    async with diagnostic_connect(store.db_path) as db:
-        rows = await (
-            await db.execute(
-                f"SELECT t.id, w.id, w.name, s.id FROM turns t JOIN sessions s ON s.id = t.session_id "
-                f"JOIN workspaces w ON w.id = s.workspace_id "
-                f"WHERE t.id IN ({marks}) AND w.team_id = ? AND w.status = 'active'",
-                (*turn_ids, cand.team_id),
-            )
-        ).fetchall()
+    async with (
+        diagnostic_connect(store.db_path) as db,
+        db.execute(
+            f"SELECT t.id, w.id, w.name, s.id FROM turns t JOIN sessions s ON s.id = t.session_id "
+            f"JOIN workspaces w ON w.id = s.workspace_id "
+            f"WHERE t.id IN ({marks}) AND w.team_id = ? AND w.status = 'active'",
+            (*turn_ids, cand.team_id),
+        ) as cursor,
+    ):
+        rows = await cursor.fetchall()
     by_turn = {turn_id: (workspace_id, name, session_id) for turn_id, workspace_id, name, session_id in rows}
     spaces: dict[str, dict[str, Any]] = {}
     sessions: dict[str, set[str]] = {}

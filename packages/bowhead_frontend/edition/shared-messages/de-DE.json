@@ -12170,6 +12170,8 @@
       "tool_failure_limit_exceeded": "Dieser Analyse-Agent wurde nach wiederholten Tool-Fehlern angehalten. Bitte versuchen Sie es später erneut.",
       "tool_call_limit_exceeded": "Dieser Analyse-Agent wurde angehalten, weil diese Runde das Tool-Aufruflimit des Teams erreicht hat. Setzen Sie die Aufgabe fort oder bitten Sie einen Team-Admin, das Limit zu erhöhen.",
       "model_call_limit_exceeded": "Dieser Analyse-Agent wurde angehalten, weil diese Runde das Modellaufruf-Limit des Teams erreicht hat. Setzen Sie die Aufgabe fort oder bitten Sie einen Team-Admin, das Limit zu erhöhen.",
+      "model_timeout": "Bei diesem Analyse-Agent ist beim Warten auf die Antwort des Modells eine Zeitüberschreitung aufgetreten. Bitte versuchen Sie es später erneut.",
+      "model_unavailable": "Dieser Analyse-Agent konnte die Aufgabe nicht abschließen, weil der Modelldienst vorübergehend nicht verfügbar ist. Bitte versuchen Sie es später erneut.",
       "credit_exhausted": "Dieser Analyse-Agent wurde angehalten, weil das verfügbare Guthaben aufgebraucht ist. Laden Sie Guthaben auf und setzen Sie die Aufgabe dann fort."
     },
     "collab_errors": {
@@ -12502,6 +12504,8 @@
     "mode_hint_auto": "Erkennt automatisch, wann ein Plan erforderlich ist",
     "mode_hint_plan": "Bei umfangreichen Aufgaben wird zuerst ein genehmigungsfähiger Plan vorgeschlagen",
     "blocked_needs_context": "Wählen Sie zuerst oben auf der Karte einen Datarc-Space aus – der Plan wird nach Ihrer Auswahl automatisch fortgesetzt",
+    "failed_model_timeout": "Zeitüberschreitung beim Warten auf das Modell. Klicken Sie später auf „Plan fortsetzen“, um diesen Schritt erneut auszuführen.",
+    "failed_model_unavailable": "Der Modelldienst ist vorübergehend nicht verfügbar. Klicken Sie später auf „Plan fortsetzen“, um diesen Schritt erneut auszuführen.",
     "feas_web": "Webrecherche",
     "feas_needs_context": "Datarc-Space erforderlich",
     "feas_no_corpus": "Wissensdatenbank ist leer",
@@ -14133,6 +14137,10 @@
       "configuration_mention_unavailable": "Diese Bereitstellung unterstützt das Erwähnen des Konfigurationsagenten nicht. Entfernen Sie seine Referenz und bitten Sie im normalen Chat um die Einstellungsänderung.",
       "resource_unavailable": "Eine oder mehrere ausgewählte Ressourcen sind nicht verfügbar. Behalten Sie den Entwurf und wählen Sie sie erneut.",
       "reference_receiver_selection_failed": "Die automatische Agent-Auswahl wurde nicht abgeschlossen. Ihr Entwurf bleibt erhalten. Wählen Sie mit @ einen Agent aus und senden Sie erneut.",
+      "skill_selection_unavailable": "Skills können gerade nicht verwendet werden. Ihr Entwurf bleibt erhalten. Versuchen Sie es gleich erneut oder entfernen Sie den Skill und senden Sie ohne ihn.",
+      "selected_skill_unavailable": "Ein ausgewählter Skill ist für Sie nicht mehr verfügbar: Er wurde deaktiviert oder Ihr Zugriff wurde entfernt. Ihr Entwurf bleibt erhalten. Entfernen Sie ihn oder wählen Sie mit / einen anderen Skill aus und senden Sie erneut.",
+      "selected_skill_changed": "Ein ausgewählter Skill wurde nach Ihrer Auswahl aktualisiert. Ihr Entwurf bleibt erhalten. Wählen Sie ihn mit / erneut aus und senden Sie.",
+      "selected_skill_too_large": "Die Anweisungen eines ausgewählten Skills sind zu umfangreich zum Senden. Ihr Entwurf bleibt erhalten. Entfernen Sie diesen Skill oder bitten Sie den Verantwortlichen, ihn zu kürzen, und senden Sie erneut.",
       "plan_execution_claim_lost": "Der Planstatus hat sich geändert. Prüfen Sie den Plan vor der Ausführung erneut.",
       "attachment_bundle_mismatch": "Dieses Anhangspaket hat sich geändert. Laden Sie es vor dem Senden erneut hoch.",
       "attachment_metadata_stale": "Dieser Anhang hat sich geändert. Wählen Sie ihn vor dem Senden erneut.",

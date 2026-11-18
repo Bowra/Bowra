@@ -43,6 +43,8 @@ def deck_target(ctx: ToolExecutionContext) -> tuple[str, str, str, str, str]:
 
 
 def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
+    from bowhead_core.visual_self_check import with_presentation_fix
+
     async def render(args, ctx):
         from bowhead_skill.loader import load_skill
 
@@ -220,47 +222,52 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
             }
             binding.receipts[digest] = receipt
             binding.pending.pop(digest, None)
-            return dict(receipt)
+            from bowhead_core.visual_self_check import attach_deck_view
+
+            # Visual self-check: the first receipt of a render carries its view; a repeated call returns the receipt alone.
+            return await attach_deck_view(dict(receipt), ctx, art, presentation_fix=args.get("presentation_fix"))
 
     registry.register(
         ToolSpec(
             schema=ToolSchema(
                 name="render_deck",
                 description="Render and register a new editable PPTX from confirmed content or verified analysis. Template and paths are server-owned. On success call subagent_return; do not inspect renderer scripts or use python_sandbox.",
-                input_schema={
-                    "type": "object",
-                    "required": ["sections"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "sections": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 100,
-                            "items": {
-                                "type": "object",
-                                "required": ["kind", "payload"],
-                                "properties": {
-                                    "kind": {"type": "string", "enum": ["eyebrow", "h1", "kpi_row", "insight_card", "chart", "recommendations"]},
-                                    "payload": {
-                                        "type": "object",
-                                        "description": "For insight_card lists use title+bullets, one item per requested point. For analytical prose use title+thesis+narrative instead.",
-                                        "properties": {"bullets": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}},
+                input_schema=with_presentation_fix(
+                    {
+                        "type": "object",
+                        "required": ["sections"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "sections": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 100,
+                                "items": {
+                                    "type": "object",
+                                    "required": ["kind", "payload"],
+                                    "properties": {
+                                        "kind": {"type": "string", "enum": ["eyebrow", "h1", "kpi_row", "insight_card", "chart", "recommendations"]},
+                                        "payload": {
+                                            "type": "object",
+                                            "description": "For insight_card lists use title+bullets, one item per requested point. For analytical prose use title+thesis+narrative instead.",
+                                            "properties": {"bullets": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}},
+                                        },
                                     },
                                 },
                             },
+                            "expected_slides": {"type": "integer", "minimum": 1, "maximum": 100},
+                            "revises": {
+                                "type": "string",
+                                "description": "Optional: the artifact_id of a deck delivered earlier in this conversation that this render revises. The new PPTX is recorded as its next version (latest version only).",
+                            },
+                            "style": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {key: {"type": "string", "pattern": "^[0-9A-Fa-f]{6}$"} for key in ["accent", "ink", "background"]},
+                            },
                         },
-                        "expected_slides": {"type": "integer", "minimum": 1, "maximum": 100},
-                        "revises": {
-                            "type": "string",
-                            "description": "Optional: the artifact_id of a deck delivered earlier in this conversation that this render revises. The new PPTX is recorded as its next version (latest version only).",
-                        },
-                        "style": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {key: {"type": "string", "pattern": "^[0-9A-Fa-f]{6}$"} for key in ["accent", "ink", "background"]},
-                        },
-                    },
-                },
+                    }
+                ),
             ),
             handler=render,
             allowed_for_roles=frozenset({"analyst"}),

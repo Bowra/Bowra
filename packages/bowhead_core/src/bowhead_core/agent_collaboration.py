@@ -19,7 +19,7 @@ from typing import Annotated, Literal
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field
 
-from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.agent_run_limits import MAX_MODEL_CALL_LIMIT, MAX_TOOL_CALL_LIMIT, MAX_TURN_TIME_LIMIT_S, AgentRunLimits
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
@@ -32,6 +32,14 @@ Identity = Annotated[str, Field(min_length=1, max_length=128)]
 # Adapters retain original caller/resource access and explicit result-sharing
 # restrictions. A recipient's Tool whitelist does not restrict result consumption.
 AuthorizeExchange = Callable[[aiosqlite.Connection, DocumentTurnOwner, str, str, dict], Awaitable[None]]
+
+#: A collaboration write pins the shared core lease at its first scope read, so it failed at once
+#: beside an authority writer, such as a Space save, and the helper or Lead step failed with it.
+#: Each write method is one database-only transaction that rechecks the live worker, scope,
+#: participants, duplicates and capacity, and stages its events for the publisher instead of
+#: sending them, so repeating it is safe. A spent wait re-raises the conflict, as before. These are
+#: Turn-internal writes, so only the lease repeats are bounded; each connection keeps its writer wait.
+_repeat_when_authority_busy = repeat_when_authority_busy(spent=None, kind="turn")
 
 
 async def authorize_result_exchange(db: aiosqlite.Connection, worker: DocumentTurnOwner, sender: str, recipient: str, content: dict) -> None:
@@ -270,6 +278,7 @@ class CollaborationStore:
         )
         return json.loads(raw)
 
+    @_repeat_when_authority_busy
     async def admit(self, worker: DocumentTurnOwner, *, owner_execution_id: str, policy: CollaborationPolicy) -> None:
         """Called by trusted admission, never by a communication Tool."""
         policy = CollaborationPolicy.model_validate(policy.model_dump())
@@ -315,6 +324,7 @@ class CollaborationStore:
             retained.append(operation)
         return {"operation_revision": rows[-1]["seq"] if rows else 0, "operation_hash": _hash(retained)}
 
+    @_repeat_when_authority_busy
     async def join(self, worker: DocumentTurnOwner, *, execution_id: str, assignment: str, expected_output: str, assistance_boundary: str) -> None:
         content = {"assignment": assignment, "expected_output": expected_output, "assistance_boundary": assistance_boundary}
         if any(not isinstance(value, str) or not value.strip() or len(value.encode()) > 4096 for value in content.values()):
@@ -335,6 +345,7 @@ class CollaborationStore:
                 (execution_id, worker.turn_id, self._seal(worker, execution_id, content), _hash(content)),
             )
 
+    @_repeat_when_authority_busy
     async def ask(
         self,
         worker: DocumentTurnOwner,
@@ -398,6 +409,7 @@ class CollaborationStore:
                 deadline=deadline,
             )
 
+    @_repeat_when_authority_busy
     async def reply(
         self,
         worker: DocumentTurnOwner,
@@ -438,6 +450,7 @@ class CollaborationStore:
             )
             return receipt
 
+    @_repeat_when_authority_busy
     async def resolve(
         self,
         worker: DocumentTurnOwner,
@@ -493,6 +506,7 @@ class CollaborationStore:
             )
             return receipt
 
+    @_repeat_when_authority_busy
     async def update(
         self,
         worker: DocumentTurnOwner,
@@ -582,6 +596,7 @@ class CollaborationStore:
                 await db.execute("UPDATE agent_collaboration_operation SET dependency_status='open' WHERE id=?", (question["id"],))
             return receipt
 
+    @_repeat_when_authority_busy
     async def reserve_attempt(
         self,
         worker: DocumentTurnOwner,
@@ -689,6 +704,7 @@ class CollaborationStore:
                 cursor.row_factory = aiosqlite.Row
                 return [dict(row) for row in await cursor.fetchall()]
 
+    @_repeat_when_authority_busy
     async def complete(self, worker: DocumentTurnOwner, *, execution_id: str) -> None:
         """Settle the existing execution before publishing successful completion.
 
@@ -711,6 +727,7 @@ class CollaborationStore:
             if updated.rowcount != 1:
                 raise CollaborationUnavailable("collaboration_execution_unavailable")
 
+    @_repeat_when_authority_busy
     async def next_deadline(self, worker: DocumentTurnOwner, *, execution_id: str) -> float:
         """Derive a wake deadline from the original task and pending questions."""
         async with self._transaction(worker) as db:
@@ -751,6 +768,7 @@ class CollaborationStore:
             )
         return {"revision": rows[-1]["seq"] if rows else after, "items": items}
 
+    @_repeat_when_authority_busy
     async def begin_wait(
         self,
         worker: DocumentTurnOwner,
@@ -801,6 +819,7 @@ class CollaborationStore:
                 )
             return receipt
 
+    @_repeat_when_authority_busy
     async def wait_state(self, worker: DocumentTurnOwner, *, execution_id: str, operation_id: str, authorize: AuthorizeExchange) -> dict:
         """Read durable wake facts; a notification alone never resumes a model."""
         async with self._transaction(worker) as db:
@@ -954,6 +973,7 @@ class CollaborationStore:
         await authorize(db, worker, row["execution_id"], row["recipient_id"], inherited)
         return inherited
 
+    @_repeat_when_authority_busy
     async def expire(self, worker: DocumentTurnOwner) -> list[dict]:
         """Close expired answering obligations without claiming dependency resolution.
 
@@ -1015,6 +1035,7 @@ class CollaborationStore:
                 receipts.append(receipt)
             return receipts
 
+    @_repeat_when_authority_busy
     async def close_unanswered_owner_questions(self, worker: DocumentTurnOwner, *, question_ids: tuple[str, ...]) -> list[dict]:
         """Close required questions the task owner left pending after its coordination round.
 
@@ -1078,6 +1099,7 @@ class CollaborationStore:
                 rows = await cursor.fetchall()
             return [_publication(row, worker.turn_id) for row in rows]
 
+    @_repeat_when_authority_busy
     async def acknowledge_publication(self, worker: DocumentTurnOwner, *, operation_id: str) -> None:
         # Projection recovery can finish after execution is terminal. It cannot
         # mutate questions or start another Agent/model execution.

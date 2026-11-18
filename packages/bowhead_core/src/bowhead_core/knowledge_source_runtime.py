@@ -162,9 +162,56 @@ def _evidence_sources(evidence: dict) -> dict:
 
 
 async def require_evidence(ctx, evidence: dict) -> None:
-    for file_id, generation in _evidence_sources(evidence).items():
-        if not await readable_source(ctx, file_id, generation=generation, enforce=True):
+    await _require_sources(ctx, [_evidence_sources(evidence)])
+
+
+async def _require_sources(ctx, source_maps: list[dict]) -> None:
+    """``readable_source(enforce=True)`` for every cited (file, generation), each distinct file checked once.
+
+    Every ``readable_source`` call reads its file on a new connection and rebuilds the caller's
+    access context. History validation called it once per file per Tool message, before the
+    first model step: on 116 (1.7.53) a 19-Turn conversation spent 7.4 s there for 12 cited
+    files. With a batch-capable store and authorizer, all files are read with one ``get_many``
+    and authorized with one ``batch``; each file must pass the same checks as before, and a
+    file cited at two generations must match both.
+    """
+    required: dict[str, set] = {}
+    for sources in source_maps:
+        for file_id, generation in sources.items():
+            required.setdefault(file_id, set()).add(generation)
+    if not required:
+        return
+    store, authorizer = getattr(ctx, "kb_files_store", None), getattr(ctx, "kb_file_authorizer", None)
+    if not callable(getattr(store, "get_many", None)) or not callable(getattr(authorizer, "batch", None)):
+        for file_id, generations in required.items():
+            for generation in generations:
+                if not await readable_source(ctx, file_id, generation=generation, enforce=True):
+                    raise KnowledgeAccessError("knowledge_source_changed")
+        return
+    # readable_source's order: the context and the file ceiling first, then the stores.
+    scope = ctx.knowledge_scope
+    if scope is not None:
+        scope.require_context(ctx)
+        if not all(scope.permits(file_id) for file_id in required):
             raise KnowledgeAccessError("knowledge_source_changed")
+    ids = list(required)
+    files = {}
+    for offset in range(0, len(ids), 256):
+        files.update({file.file_id: file for file in await store.get_many(ids[offset : offset + 256])})
+    caller = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id)
+    for file_id, generations in required.items():
+        file = files.get(file_id)
+        if (
+            not file
+            or file.soft_deleted_at
+            or file.team_id != ctx.team_id
+            or not KbPermission.can_read(file, caller)
+            or any(file.active_generation_id != generation for generation in generations)
+        ):
+            raise KnowledgeAccessError("knowledge_source_changed")
+    decisions = await authorizer.batch(list(files.values()), ctx.user_id, ctx.team_id, ctx.workspace_id)
+    if decisions is None or not all(decisions.get(file_id) for file_id in required):
+        raise KnowledgeAccessError("knowledge_source_changed")
 
 
 async def filter_inherited_knowledge(ctx, invocations: list) -> list:
@@ -287,6 +334,8 @@ async def validate_source_messages(ctx, messages, *, defer_authorization: bool =
     from bowhead_core.subagent_resume import _CLEARED
 
     names = {}
+    # Cited sources of every Tool message; checked together after the loop, each file once.
+    cited: list[dict] = []
     for message in messages:
         for call in message.tool_calls or ():
             names[call.id] = call.name
@@ -313,9 +362,28 @@ async def validate_source_messages(ctx, messages, *, defer_authorization: bool =
             record_navigation_uses(ctx, navigation)
         evidence = result.get("knowledge_provenance")
         if evidence is not None:
-            sources = _evidence_sources(evidence)
-            if not defer_authorization:
-                await require_evidence(ctx, evidence)
-            record_source_uses(ctx, sources)
+            cited.append(_evidence_sources(evidence))
         elif ctx.knowledge_scope is not None and names.get(message.tool_call_id) in KNOWLEDGE_TOOLS and not result.get("error"):
             raise KnowledgeAccessError("knowledge_source_provenance_unavailable")
+    if not defer_authorization:
+        # One check for the whole history; a file cited at another generation adds a second.
+        for layer in _evidence_layers(cited):
+            await require_evidence(ctx, {"schema_version": 1, "sources": layer})
+    for sources in cited:
+        record_source_uses(ctx, sources)
+
+
+def _evidence_layers(source_maps: list[dict]) -> list[dict]:
+    """Merge cited sources into as few maps as possible; each map names a file once."""
+    layers: list[dict] = []
+    for sources in source_maps:
+        for file_id, generation in sources.items():
+            for layer in layers:
+                if file_id not in layer:
+                    layer[file_id] = generation
+                    break
+                if layer[file_id] == generation:
+                    break
+            else:
+                layers.append({file_id: generation})
+    return layers

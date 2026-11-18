@@ -39,10 +39,18 @@ async def compile_authoring_resources(
     *,
     audience_mode: Literal["private", "teamwide", "custom"],
     observed_tools: list[dict] | None = None,
+    offered_skills_only: bool = False,
 ) -> dict:
-    parse_exact_skill_grants(candidate.get("skill_grants", []))
+    """Check a candidate against Coach discovery, then compile it.
+
+    ``offered_skills_only`` refuses Skills the pickers do not offer for selection. Shared Plugins use it, because
+    the original Plugin editor accepts only the Skills its picker offers.
+    """
+    grants = parse_exact_skill_grants(candidate.get("skill_grants", []))
     tools, actor = await resource._items("tool")
-    skills, _ = await resource._items("skill")
+    skills = []
+    if grants:
+        skills, _ = await resource._items("skill", skill_identities={(grant.kind, grant.id) for grant in grants})
     visible_tools = {item["reference"]["id"]: item for item in tools}
     # A Skill follows its latest approved revision: the compiler rebases an
     # older grant revision, so eligibility is checked on the Skill identity.
@@ -69,6 +77,8 @@ async def compile_authoring_resources(
             rule = "skill_renamed"
         elif audience_mode not in item["allowed_audiences"]:
             rule = "skill_audience_not_allowed"
+        elif offered_skills_only and not item["can_select"]:
+            rule = "skill_not_offered_for_selection"
         else:
             continue
         raise AuthoringDependencyError("plugin_dependencies_unavailable", rule=rule, skill_name=str(reference.get("name") or ""))

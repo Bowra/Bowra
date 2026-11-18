@@ -119,8 +119,8 @@ class FeedbackCaseworkStore:
     async def get(self, candidate_id: str) -> FeedbackCasework | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM feedback_casework WHERE candidate_id=?", (candidate_id,))
-            row = await cursor.fetchone()
+            async with db.execute("SELECT * FROM feedback_casework WHERE candidate_id=?", (candidate_id,)) as cursor:
+                row = await cursor.fetchone()
             return FeedbackCasework.from_row(row) if row is not None else None
 
     async def get_many(self, candidate_ids: list[str]) -> dict[str, FeedbackCasework]:
@@ -130,11 +130,11 @@ class FeedbackCaseworkStore:
         placeholders = ",".join("?" for _ in ids)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
+            async with db.execute(
                 f"SELECT * FROM feedback_casework WHERE candidate_id IN ({placeholders})",  # noqa: S608 -- placeholders only
                 ids,
-            )
-            return {r["candidate_id"]: FeedbackCasework.from_row(r) for r in await cursor.fetchall()}
+            ) as cursor:
+                return {r["candidate_id"]: FeedbackCasework.from_row(r) for r in await cursor.fetchall()}
 
     async def ensure_row(self, candidate_id: str, team_id: str, *, trigger: str) -> None:
         now = _iso(_utcnow())
@@ -263,8 +263,8 @@ class FeedbackCaseworkStore:
         now = _iso(_utcnow())
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT status, reason_code FROM feedback_casework WHERE candidate_id=?", (candidate_id,))
-            row = await cursor.fetchone()
+            async with db.execute("SELECT status, reason_code FROM feedback_casework WHERE candidate_id=?", (candidate_id,)) as cursor:
+                row = await cursor.fetchone()
             was_blocked = row is not None and row["status"] == STATUS_BLOCKED and row["reason_code"] == reason_code
             cursor = await db.execute(
                 "UPDATE feedback_casework SET status=?, reason_code=?, finished_at=NULL, updated_at=? WHERE candidate_id=? AND status<>?",
@@ -281,11 +281,13 @@ class FeedbackCaseworkStore:
         所以「上个 tick 还在 block」＝episode 未断，「陈旧的 blocked」＝新 episode。
         """
 
-        async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute(
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute(
                 "SELECT 1 FROM feedback_casework WHERE team_id=? AND status=? AND reason_code=? AND updated_at>=? LIMIT 1",
                 (team_id, STATUS_BLOCKED, reason_code, _iso(since)),
-            )
+            ) as cursor,
+        ):
             return await cursor.fetchone() is not None
 
     async def count_started_today(self, team_id: str, now: datetime | None = None) -> int:
@@ -293,11 +295,11 @@ class FeedbackCaseworkStore:
 
         day = _day(now or _utcnow())
         async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT count(*) FROM feedback_casework WHERE team_id=? AND started_at IS NOT NULL AND substr(started_at,1,10)=?",
                 (team_id, day),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             return int(row[0]) if row else 0
 
     async def count_started_this_month(self, team_id: str, now: datetime | None = None) -> int:
@@ -305,11 +307,11 @@ class FeedbackCaseworkStore:
 
         month = _day(now or _utcnow())[:7]
         async with open_shared_ctx(self.db_path) as db:
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT count(*) FROM feedback_casework WHERE team_id=? AND started_at IS NOT NULL AND substr(started_at,1,7)=?",
                 (team_id, month),
-            )
-            row = await cursor.fetchone()
+            ) as cursor:
+                row = await cursor.fetchone()
             return int(row[0]) if row else 0
 
     async def take_redraft_slot(self, candidate_id: str, team_id: str, now: datetime | None = None) -> bool:

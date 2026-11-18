@@ -201,6 +201,49 @@ describe("AgentBlock", () => {
   );
 
   it.each([
+    ["zh-CN" as const, "peer_model_timeout", "timeout", "这个分析智能体等待模型回复超时，请稍后重试。"],
+    ["en-US" as const, "peer_model_timeout", "timeout", "This analysis agent timed out waiting for the model's reply. Please try again later."],
+    ["zh-CN" as const, "peer_model_unavailable", "upstream", "模型服务暂时不可用，这个分析智能体未能完成任务，请稍后重试。"],
+    [
+      "en-US" as const,
+      "peer_model_unavailable",
+      "upstream",
+      "This analysis agent could not finish because the model service is temporarily unavailable. Please try again later.",
+    ],
+  ])(
+    "states a helper's exhausted model failure in %s (%s) instead of a system error",
+    (locale, code, failureClass, friendlyMessage) => {
+      const { container } = renderIntl(
+        <AgentTrace
+          steps={[]}
+          peerNames={{ peer_1: "compute" }}
+          peerProse={{}}
+          peerTerminalById={{
+            peer_1: {
+              status: "failed",
+              failureReason: code,
+              failureDiagnostics: {
+                schemaVersion: 1,
+                disclosure: "authenticated",
+                code,
+                diagnosticCode: "chat_peer_failed",
+                occurrenceId: "0123456789abcdef0123456789abcdef",
+                turnId: "t_peer_1",
+                safeDetail: `phase=peer; failure_class=${failureClass}`,
+                retryable: true,
+              },
+            },
+          }}
+        />,
+        { locale },
+      );
+
+      expect(container.textContent).toContain(friendlyMessage);
+      expect(container.textContent).not.toContain(code);
+    },
+  );
+
+  it.each([
     [
       "zh-CN" as const,
       "Power BI 返回的结果不完整，系统已停止使用这份数据以避免得出错误结论；请缩小查询范围后重试。",

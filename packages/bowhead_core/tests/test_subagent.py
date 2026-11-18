@@ -1095,9 +1095,11 @@ async def test_subagent_spawn_blocks_before_peer_event_or_runner_on_admission_de
     assert not hasattr(bus, "_early_surface_decision")
 
 
+@pytest.mark.parametrize("reason_code", ["task_match", None, {"invalid": "shape"}])
 async def test_subagent_spawn_validates_exact_behavior_candidate_before_admission(
     dc,
     monkeypatch: pytest.MonkeyPatch,
+    reason_code: object,
 ) -> None:
     monkeypatch.setenv("FEATURE_AGENT_BEHAVIOR_M3", "1")
 
@@ -1161,11 +1163,12 @@ async def test_subagent_spawn_validates_exact_behavior_candidate_before_admissio
             "task": "create a poster",
             "role_id": "image",
             "candidate_id": candidate.candidate_id,
-            "reason_code": "task_match",
+            **({"reason_code": reason_code} if reason_code is not None else {}),
         },
         ctx,
     )
     assert accepted.result["ok"] is True
+    assert accepted.result.get("ignored_arguments", []) == (["reason_code"] if isinstance(reason_code, dict) else [])
     assert runner.admitted["profile_name"] == "visual-maker"
     assert runner.admitted["agent_id"] == "system:visual-maker"
     assert runner.admitted["expected"].revision_ref == candidate.revision_ref

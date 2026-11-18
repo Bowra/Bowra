@@ -120,12 +120,13 @@ class TeamLlmVerificationStore:
             "team_llm_v2_enrollments",
             "team_llm_apply_snapshots",
         }
-        async with open_shared_ctx(self.db_path) as db:
-            rows = await (
-                await db.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table'",
-                )
-            ).fetchall()
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
         present = {str(row[0]) for row in rows}
         missing = sorted(required - present)
         if missing:
@@ -146,17 +147,16 @@ class TeamLlmVerificationStore:
             async with open_shared_ctx(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
                 await db.execute("BEGIN IMMEDIATE")
-                existing = await (
-                    await db.execute(
-                        """
+                async with db.execute(
+                    """
                         SELECT * FROM team_llm_provider_identities
                         WHERE team_id = ? AND runtime_key = ?
                           AND state IN ('reserved', 'active')
                         LIMIT 1
                         """,
-                        (team_id, runtime_key),
-                    )
-                ).fetchone()
+                    (team_id, runtime_key),
+                ) as cursor:
+                    existing = await cursor.fetchone()
                 if existing is not None:
                     identity = _identity_from_row(existing)
                     reservation_active = (
@@ -230,16 +230,15 @@ class TeamLlmVerificationStore:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            existing = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_provider_identities
                     WHERE team_id = ? AND runtime_key = ?
                       AND state IN ('reserved', 'active')
                     """,
-                    (team_id, runtime_key),
-                )
-            ).fetchone()
+                (team_id, runtime_key),
+            ) as cursor:
+                existing = await cursor.fetchone()
             if existing is not None:
                 if str(existing["provider_id"]) != provider_id:
                     await db.rollback()
@@ -284,15 +283,14 @@ class TeamLlmVerificationStore:
     ) -> ProviderIdentity | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_provider_identities
                     WHERE team_id = ? AND provider_id = ?
                     """,
-                    (team_id, provider_id),
-                )
-            ).fetchone()
+                (team_id, provider_id),
+            ) as cursor:
+                row = await cursor.fetchone()
         return _identity_from_row(row) if row else None
 
     async def get_provider_identity_by_runtime_key(
@@ -303,18 +301,17 @@ class TeamLlmVerificationStore:
     ) -> ProviderIdentity | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            row = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT * FROM team_llm_provider_identities
                     WHERE team_id = ? AND runtime_key = ?
                       AND state IN ('reserved', 'active')
                     ORDER BY CASE state WHEN 'active' THEN 0 ELSE 1 END
                     LIMIT 1
                     """,
-                    (team_id, runtime_key),
-                )
-            ).fetchone()
+                (team_id, runtime_key),
+            ) as cursor:
+                row = await cursor.fetchone()
         return _identity_from_row(row) if row else None
 
     async def delete_provider_identity(
@@ -397,9 +394,8 @@ class TeamLlmVerificationStore:
     ) -> EvidenceProjection:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    """
+            async with db.execute(
+                """
                     SELECT id, config_signature, outcome, safe_code,
                            observed_at, fresh_until, actual_model_id
                     FROM team_llm_capability_evidence
@@ -408,13 +404,12 @@ class TeamLlmVerificationStore:
                     ORDER BY observed_at DESC, id DESC
                     LIMIT 100
                     """,
-                    (team_id, provider_id, model_id, capability),
-                )
-            ).fetchall()
+                (team_id, provider_id, model_id, capability),
+            ) as cursor_2:
+                rows = await cursor_2.fetchall()
             if attempt is None:
-                attempt_row = await (
-                    await db.execute(
-                        """
+                async with db.execute(
+                    """
                         SELECT state, safe_code, completed_at
                         FROM team_llm_verification_items
                         WHERE team_id = ? AND provider_id = ?
@@ -431,15 +426,15 @@ class TeamLlmVerificationStore:
                         ) DESC, id DESC
                         LIMIT 1
                         """,
-                        (
-                            team_id,
-                            provider_id,
-                            model_id,
-                            capability,
-                            current_signature,
-                        ),
-                    )
-                ).fetchone()
+                    (
+                        team_id,
+                        provider_id,
+                        model_id,
+                        capability,
+                        current_signature,
+                    ),
+                ) as cursor:
+                    attempt_row = await cursor.fetchone()
                 if attempt_row is not None:
                     attempt = AttemptRecord(
                         state=str(attempt_row["state"]),  # type: ignore[arg-type]

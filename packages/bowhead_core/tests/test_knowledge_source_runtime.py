@@ -260,3 +260,59 @@ async def test_delegated_review_origin_never_bypasses_current_source_access(nati
     assert isinstance(result, ReviewedDeliveryResult) is native_origin
     assert result["knowledge_provenance"]["sources"] == {"kbf_allowed": "generation_current"}
     assert "knowledge_provenance" not in value
+
+
+async def test_history_cited_sources_are_checked_once_in_one_batch():
+    """116 1.7.53: a 19-Turn conversation spent 7.4 s before the Lead's first step re-checking each
+    cited file per Tool message, each check on a new connection with a rebuilt access context.
+    Every distinct file is now read with one get_many and authorized with one batch, and each file
+    must still pass the same checks: current access, generation and team."""
+    import json
+
+    from bowhead_core.knowledge_source_runtime import validate_source_messages
+    from bowhead_router.types import Message
+
+    files = {
+        identity: SimpleNamespace(
+            file_id=identity, team_id="team_5", scope="space", scope_id="ws_42", soft_deleted_at=None, active_generation_id="gen_1"
+        )
+        for identity in ("kbf_a", "kbf_b", "kbf_c")
+    }
+    denied: set[str] = set()
+
+    async def get_many(ids, **_options):
+        return [files[identity] for identity in ids if identity in files]
+
+    async def batch(rows, *_scope, **_options):
+        return {row.file_id: row.file_id not in denied for row in rows}
+
+    authorizer = AsyncMock(side_effect=AssertionError("authorize each file in one batch"))
+    authorizer.batch = AsyncMock(side_effect=batch)
+    store = SimpleNamespace(get=AsyncMock(side_effect=AssertionError("read the files in one batch")), get_many=AsyncMock(side_effect=get_many))
+    ctx = _make_ctx(kb_files_store=store, kb_file_authorizer=authorizer)
+    ctx.knowledge_scope = None
+    ctx.knowledge_source_uses = {}
+
+    def message(call_id, *ids, generation="gen_1"):
+        evidence = {"schema_version": 1, "sources": dict.fromkeys(ids, generation)}
+        return Message(role="tool", tool_call_id=call_id, content=json.dumps({"summary": "x", "knowledge_provenance": evidence}))
+
+    history = [message("one", "kbf_a", "kbf_b"), message("two", "kbf_b", "kbf_c"), message("three", "kbf_a")]
+    await validate_source_messages(ctx, history)
+    assert store.get_many.await_count == 1 and sorted(store.get_many.await_args.args[0]) == ["kbf_a", "kbf_b", "kbf_c"]
+    assert authorizer.batch.await_count == 1
+    assert ctx.knowledge_source_uses == {"kbf_a": "gen_1", "kbf_b": "gen_1", "kbf_c": "gen_1"}
+
+    denied.add("kbf_c")
+    with pytest.raises(KnowledgeAccessError, match="source_changed"):
+        await validate_source_messages(ctx, history)
+    denied.clear()
+    files["kbf_b"].active_generation_id = "gen_2"
+    with pytest.raises(KnowledgeAccessError, match="source_changed"):
+        await validate_source_messages(ctx, history)
+    files["kbf_b"].active_generation_id = "gen_1"
+    with pytest.raises(KnowledgeAccessError, match="source_changed"):
+        await validate_source_messages(ctx, [*history, message("four", "kbf_a", generation="gen_0")])
+    files["kbf_a"].team_id = "team_other"
+    with pytest.raises(KnowledgeAccessError, match="source_changed"):
+        await validate_source_messages(ctx, history)

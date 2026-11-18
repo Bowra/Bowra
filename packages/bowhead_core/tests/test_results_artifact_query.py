@@ -5,7 +5,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
-from test_chat_reference_storage import _upgrade
+from core_legacy_database import copy_migrated_core
 
 
 async def _store(tmp_path: Path) -> ArtifactStore:
@@ -13,7 +13,7 @@ async def _store(tmp_path: Path) -> ArtifactStore:
         db_path=str(tmp_path / "bowhead.db"),
         backend=LocalBackend(root_dir=tmp_path / "files"),
     )
-    _upgrade(Path(store.db_path))
+    copy_migrated_core(Path(store.db_path))
     await store.initialize()
     async with aiosqlite.connect(store.db_path) as db:
         rows = [

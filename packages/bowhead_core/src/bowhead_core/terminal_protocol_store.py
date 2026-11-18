@@ -20,7 +20,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import repeat_when_authority_busy
+from bowhead_core._db import execute_and_close, open_pooled_read_ctx, repeat_when_authority_busy
 from bowhead_core.agent_draft_send_target import AgentDraftSendTarget
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
@@ -632,10 +632,10 @@ async def open_terminal_protocol_connection(db_path: str) -> AsyncIterator[aiosq
 
     connection = await diagnostic_connect(db_path)
     try:
-        await connection.execute("PRAGMA busy_timeout=5000")
+        await execute_and_close(connection, "PRAGMA busy_timeout=5000")
         await connection.execute("PRAGMA main.synchronous=FULL")
         await connection.execute("PRAGMA foreign_keys=ON")
-        await connection.execute("PRAGMA main.secure_delete=ON")
+        await execute_and_close(connection, "PRAGMA main.secure_delete=ON")
     except BaseException:
         await connection.close()
         raise
@@ -1088,7 +1088,8 @@ class TerminalProtocolStore:
 
         if not isinstance(turn_id, str) or not turn_id:
             raise ValueError("turn protocol scope identity is invalid")
-        async with self._open_connection() as connection:
+        # A pure read of core's workspaces: the read-only pool takes no authority lease for it.
+        async with open_pooled_read_ctx(self._db_path) as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """

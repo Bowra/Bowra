@@ -3915,7 +3915,8 @@
         "created_at",
         "input_document_json",
         "document_revision_target_json",
-        "context_maintenance_json"
+        "context_maintenance_json",
+        "selected_skills_json"
       ],
       "owner_columns": [
         "user_id"

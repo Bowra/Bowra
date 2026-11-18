@@ -90,6 +90,8 @@ const PEER_FAILURE_MESSAGE_KEYS: Record<
     "peer_errors.tool_failure_limit_exceeded",
   peer_tool_call_limit_exceeded: "peer_errors.tool_call_limit_exceeded",
   peer_model_call_limit_exceeded: "peer_errors.model_call_limit_exceeded",
+  peer_model_timeout: "peer_errors.model_timeout",
+  peer_model_unavailable: "peer_errors.model_unavailable",
   peer_credit_exhausted: "peer_errors.credit_exhausted",
 };
 

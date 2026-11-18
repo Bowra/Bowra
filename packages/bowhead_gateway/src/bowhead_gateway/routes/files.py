@@ -25,6 +25,9 @@ import aiosqlite
 import anyio
 from bowhead_core.artifact_classifier import is_legacy_category, normalize_category
 from bowhead_core.artifact_store import (
+    CSS_MIME,
+    INERT_SOURCE_MIMES,
+    JAVASCRIPT_MIME,
     SVG_MIME,
     TEAM_SCOPE_WORKSPACE_ID,
     _open_db,
@@ -183,6 +186,11 @@ _BROWSER_AMBIGUOUS_MIME: frozenset[str] = frozenset(
 _PRODUCER_TEXT_OUTPUTS: dict[str, tuple[str, frozenset[str]]] = {
     ".tex": ("text/x-tex", frozenset({"application/x-tex", "text/x-tex", "application/octet-stream", "text/plain"})),
     ".svg": (SVG_MIME, frozenset({SVG_MIME, "application/octet-stream", "text/plain", "text/xml", "application/xml"})),
+    ".js": (
+        JAVASCRIPT_MIME,
+        frozenset({JAVASCRIPT_MIME, "application/javascript", "application/x-javascript", "application/octet-stream", "text/plain"}),
+    ),
+    ".css": (CSS_MIME, frozenset({CSS_MIME, "application/octet-stream", "text/plain"})),
 }
 # An SVG document: optional XML declaration, comments and a DOCTYPE without an internal subset, then the svg root.
 _SVG_DOCUMENT_RE = re.compile(r"\A\ufeff?(?:\s+|<\?xml[^>]*\?>|<!--.*?-->|<!DOCTYPE[^>\[]*>)*<svg[\s/>]", re.IGNORECASE | re.DOTALL)
@@ -370,8 +378,8 @@ async def upload(
     if version_of and (effective_source == "upload" or kind != "deliverable" or not await producer_output_bound()):
         raise _file_error(status.HTTP_400_BAD_REQUEST, "invalid_file_upload_request")
 
-    # TeX and SVG sources are admitted only as an authenticated run output, never by a
-    # caller's source label or by relaxing ordinary browser upload MIME rules.
+    # TeX, SVG, JavaScript and CSS sources are admitted only as an authenticated run output,
+    # never by a caller's source label or by relaxing ordinary browser upload MIME rules.
     producer_text = _PRODUCER_TEXT_OUTPUTS.get(Path(file.filename or "").suffix.lower())
     if producer_text is not None:
         stored_mime, declared_aliases = producer_text
@@ -385,7 +393,7 @@ async def upload(
     limit = MAX_OFFICE_BYTES if inspect_office else MAX_SIZE
     content = await file.read(limit + 1)
     if len(content) > limit:
-        raise _file_error(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
+        raise _file_error(status.HTTP_413_CONTENT_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
     if producer_text is not None:
         try:
             text = content.decode("utf-8")
@@ -1496,7 +1504,7 @@ async def list_files(
     ),
     since: str | None = Query(None, description="ISO date, 起始"),
     until: str | None = Query(None, description="ISO date, 截止"),
-    sort: str = Query("created_desc", regex="^(created_desc|size_desc|last_used_desc)$"),
+    sort: str = Query("created_desc", pattern="^(created_desc|size_desc|last_used_desc)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     include_deleted: int = Query(0, ge=0, le=1),
@@ -2014,7 +2022,7 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
     try:
         assert_shareable(latest or art, in_kb=bool(set(members) & kb_ids))
     except ShareRejected as e:
-        raise _file_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "file_not_shareable") from e
+        raise _file_error(status.HTTP_422_UNPROCESSABLE_CONTENT, "file_not_shareable") from e
 
     subject_kind = body.subject_kind if body.subject_kind in {"workspace", "team"} else "workspace"
     subject_id = body.subject_id or (workspace_id if subject_kind == "workspace" else team_id)
@@ -2270,11 +2278,12 @@ async def download(artifact_id: str, request: Request):  # type: ignore[no-untyp
     if art.status == "missing":
         raise _file_error(status.HTTP_410_GONE, "file_content_missing")
 
-    if (art.mime or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml", SVG_MIME}:
+    if (art.mime or "").split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml", SVG_MIME, *INERT_SOURCE_MIMES}:
         from bowhead_gateway.artifact_streaming import artifact_streaming_response
 
-        # Keep the Team preview limit and the active-document isolation headers on the
-        # authorized response, including object-store artifacts; a redirect would lose them.
+        # Keep the Team preview limit, the active-document isolation headers and the inert
+        # source type on the authorized response, including object-store artifacts; a
+        # redirect would lose them.
         return await artifact_streaming_response(request, store, art, inline=False)
 
     # multimodal-v1: inline display (<img> in chat/canvas), owner already checked above.

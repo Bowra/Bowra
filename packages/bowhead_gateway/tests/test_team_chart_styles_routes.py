@@ -10,13 +10,10 @@ from uuid import uuid4
 import aiosqlite
 import jwt as jwt_lib
 import pytest
-from alembic import command
-from alembic.config import Config
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chart_style_store import ChartStyleStore
 from bowhead_core.chart_style_uow import ChartStyleUnitOfWork
 from bowhead_core.entitlements import CommunityResolver
-from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.team_settings_store import TeamSettingsStore
 from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import auth as auth_routes
@@ -24,18 +21,8 @@ from bowhead_gateway.routes import team_chart_styles
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from bowhead_core import migrations
-
 SECRET = "chart-style-routes-test-secret-long-enough"
 NOW = datetime(2026, 9, 6, 12, 0, 0, tzinfo=UTC)
-
-
-def _config(path: Path) -> Config:
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
-    config.attributes["bowhead_target"] = "core"
-    return config
 
 
 def _jwt(user_id: str) -> str:
@@ -68,14 +55,14 @@ def _create_body(name: str = "Sales Editorial") -> dict:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", SECRET)
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "prod")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
     auth_routes._RATE_BUCKET.clear()
 
     db_path = tmp_path / "chart-style-routes.db"
-    command.upgrade(_config(db_path), SOURCE_REVISION)
+    initialize_migrated_core_database(db_path)
     users = UserStore(db_path)
     await users.initialize()
     settings = TeamSettingsStore(db_path)

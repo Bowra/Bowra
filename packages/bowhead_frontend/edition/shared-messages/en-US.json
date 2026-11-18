@@ -12170,6 +12170,8 @@
       "tool_failure_limit_exceeded": "This analysis agent stopped after repeated tool failures. Please try again later.",
       "tool_call_limit_exceeded": "This analysis agent stopped because this turn reached the Team's tool-call limit. Continue the task, or ask a Team admin to raise the limit.",
       "model_call_limit_exceeded": "This analysis agent stopped because this turn reached the Team's model-call limit. Continue the task, or ask a Team admin to raise the limit.",
+      "model_timeout": "This analysis agent timed out waiting for the model's reply. Please try again later.",
+      "model_unavailable": "This analysis agent could not finish because the model service is temporarily unavailable. Please try again later.",
       "credit_exhausted": "This analysis agent stopped because the available credit ran out. Add credit, then continue the task."
     },
     "collab_errors": {
@@ -12502,6 +12504,8 @@
     "mode_hint_auto": "Auto-detects when a plan is needed",
     "mode_hint_plan": "Big tasks propose an approvable plan first",
     "blocked_needs_context": "Select a Datarc workspace in the card above first — the plan resumes automatically after you choose",
+    "failed_model_timeout": "Timed out waiting for the model. Click \"Resume plan\" later to run this step again.",
+    "failed_model_unavailable": "The model service is temporarily unavailable. Click \"Resume plan\" later to run this step again.",
     "feas_web": "Web research",
     "feas_needs_context": "Needs Datarc workspace",
     "feas_no_corpus": "Knowledge base empty",
@@ -14133,6 +14137,10 @@
       "configuration_mention_unavailable": "This deployment does not support mentioning Configuration Agent. Remove its reference and ask for the settings change in ordinary chat.",
       "resource_unavailable": "One or more selected resources are unavailable. Keep the draft and select them again.",
       "reference_receiver_selection_failed": "Automatic Agent selection did not complete. Your draft is preserved. Select an Agent with @ and send again.",
+      "skill_selection_unavailable": "Skills can’t be used right now. Your draft is preserved. Try again shortly, or remove the Skill and send without it.",
+      "selected_skill_unavailable": "A selected Skill is no longer available to you: it was turned off or your access was removed. Your draft is preserved. Remove it or choose another Skill from /, then send again.",
+      "selected_skill_changed": "A selected Skill was updated after you selected it. Your draft is preserved. Select it again from / and send.",
+      "selected_skill_too_large": "A selected Skill’s instructions are too large to send. Your draft is preserved. Remove that Skill, or ask its owner to shorten it, then send again.",
       "plan_execution_claim_lost": "The plan state changed. Review the plan again before running it.",
       "attachment_bundle_mismatch": "This attachment bundle changed. Upload it again before sending.",
       "attachment_metadata_stale": "This attachment changed. Select it again before sending.",

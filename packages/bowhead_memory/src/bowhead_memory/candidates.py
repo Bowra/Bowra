@@ -281,10 +281,10 @@ class MemoryCandidateStore:
     async def initialize(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with self.connect_factory(self.db_path) as db:
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await (await db.execute("PRAGMA main.secure_delete=ON")).close()
             await db.executescript(SCHEMA)
-            cur = await db.execute("PRAGMA table_info(memory_candidates)")
-            existing = {row[1] for row in await cur.fetchall()}
+            async with db.execute("PRAGMA table_info(memory_candidates)") as cur:
+                existing = {row[1] for row in await cur.fetchall()}
             for column, ddl in _MIGRATION_COLUMNS.items():
                 if column not in existing:
                     await db.execute(ddl)
@@ -482,20 +482,20 @@ class MemoryCandidateStore:
                 db,
                 user_id=user_id,
             )
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT id FROM memory_candidates WHERE user_id=? AND content_fingerprint=? AND status='pending'",
                 (user_id, fingerprint),
-            )
-            if await cur.fetchone():
-                await db.rollback()
-                logger.info("memory_candidate.skipped outcome=%s kind=%s key=%s", ENQUEUE_DUPLICATE_PENDING, kind, key)
-                return None, ENQUEUE_DUPLICATE_PENDING
+            ) as cur:
+                if await cur.fetchone():
+                    await db.rollback()
+                    logger.info("memory_candidate.skipped outcome=%s kind=%s key=%s", ENQUEUE_DUPLICATE_PENDING, kind, key)
+                    return None, ENQUEUE_DUPLICATE_PENDING
             # Suppressions are pooled by origin (see `_suppression_scope_key`): query only the candidate's own pool,
             # never another origin's. ⚠ **Do not add a second `if origin in ...` guard here**:
             # testing showed the two checks were redundant (removing either alone kept tests green; removing both made them fail).
             # Keeping both creates two implementations, neither individually verified by tests.
             suppressed = False
-            cur = await db.execute(
+            async with db.execute(
                 """
                 SELECT 1
                 FROM memory_candidate_suppressions
@@ -511,8 +511,8 @@ class MemoryCandidateStore:
                     kind,
                     fingerprint,
                 ),
-            )
-            suppressed = bool(await cur.fetchone())
+            ) as cur:
+                suppressed = bool(await cur.fetchone())
             if suppressed:
                 await db.rollback()
                 logger.info("memory_candidate.skipped outcome=%s kind=%s key=%s", ENQUEUE_SUPPRESSED, kind, key)
@@ -812,7 +812,7 @@ class MemoryCandidateStore:
         now = _now()
         async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("PRAGMA main.secure_delete=ON")
+            await (await db.execute("PRAGMA main.secure_delete=ON")).close()
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
                 """
@@ -1300,7 +1300,7 @@ async def _prepare_user_write(
     *,
     user_id: str,
 ) -> None:
-    await db.execute("PRAGMA main.secure_delete=ON")
+    await (await db.execute("PRAGMA main.secure_delete=ON")).close()
     await db.execute("BEGIN IMMEDIATE")
     await ensure_memory_write_allowed(
         db,

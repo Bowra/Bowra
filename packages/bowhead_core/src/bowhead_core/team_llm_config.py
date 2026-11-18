@@ -1178,6 +1178,10 @@ def build_router_from_v2_config(config: dict[str, Any], *, owner_team_id: str | 
     for binding in bindings:
         router.bind(binding)
     router.set_context_windows(context_windows_for_catalog(config))
+    from bowhead_router.visual_input import image_input_targets
+
+    # Visual self-check: which catalog models read images (rich `capabilities`, or provider `supports`).
+    router.set_image_input_targets(image_input_targets(config.get("providers")))
     from bowhead_core.rate_card import ModelCreditRates
 
     router.model_credit_rates = {

@@ -41,11 +41,11 @@ class CoachToolRequirements:
 
     async def _get(self, db: aiosqlite.Connection, requirement_id: str) -> dict:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM coach_tool_requirement WHERE id=? AND team_id=? AND user_id=? AND workspace_id=?",
             (requirement_id, self.scope.team_id, self.scope.user_id, self.scope.workspace_id),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             raise ValueError("tool_requirement_unavailable")
         return dict(row)
@@ -74,11 +74,11 @@ class CoachToolRequirements:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             parent_status = await self.authorize(db, parent, False)
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT * FROM coach_tool_requirement WHERE team_id=? AND user_id=? AND origin_turn_id=? AND key_hash=?",
                 (self.scope.team_id, self.scope.user_id, turn_id, _hash(request_id)),
-            )
-            existing = await cursor.fetchone()
+            ) as cursor:
+                existing = await cursor.fetchone()
             if existing:
                 if existing["request_hash"] != request_hash or existing["workspace_id"] != self.scope.workspace_id:
                     raise ValueError("tool_requirement_idempotency_conflict")
@@ -113,8 +113,10 @@ class CoachToolRequirements:
             parent_status = await self.authorize(db, json.loads(row["parent_json"]), False)
             result = self.receipt(row, parent_status)
             if observation_id is not None:
-                cursor = await db.execute("SELECT * FROM coach_tool_observation WHERE id=? AND requirement_id=?", (observation_id, requirement_id))
-                observation = await cursor.fetchone()
+                async with db.execute(
+                    "SELECT * FROM coach_tool_observation WHERE id=? AND requirement_id=?", (observation_id, requirement_id)
+                ) as cursor:
+                    observation = await cursor.fetchone()
                 if observation is None:
                     raise ValueError("tool_observation_unavailable")
                 result["observation"] = dict(observation)
@@ -143,10 +145,10 @@ class CoachToolRequirements:
             row = await self._get(db, requirement_id)
             parent_status = await self.authorize(db, json.loads(row["parent_json"]), False)
             key_hash = _hash([turn_id, request_id])
-            cursor = await db.execute(
+            async with db.execute(
                 "SELECT * FROM coach_tool_observation WHERE requirement_id=? AND request_key_hash=?", (requirement_id, key_hash)
-            )
-            existing = await cursor.fetchone()
+            ) as cursor:
+                existing = await cursor.fetchone()
             if existing:
                 if existing["reference_json"] != _json(reference):
                     raise ValueError("tool_observation_idempotency_conflict")

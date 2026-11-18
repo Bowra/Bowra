@@ -8,6 +8,7 @@ import sqlite3
 import uuid
 
 import pytest
+from bowhead_core._db import execute_and_close, open_pooled_read_ctx
 from bowhead_core.access_control import AccessContext, AccessControlStore
 
 # Exhaustive authorization cross-checks; excluded from the fast unit run.
@@ -76,22 +77,27 @@ async def test_batch_equals_single(tmp_path, monkeypatch, seed, enforce, distinc
     # oracle runs on ids that carry grants plus a few without, which is where decisions differ.
     checked = sorted(_granted_ids(tmp_path / "a.db") & set(ids))[:16] + ids[:3]
     compared = 0
-    for ctx in CTXS:
-        for as_dict in (False, True):
-            c = ctx
-            if as_dict:
-                c = {"user_id": ctx.user_id, "team_id": ctx.team_id, "workspace_id": ctx.workspace_id, "group_ids": list(ctx.group_ids)}
-            for kind in KINDS:
-                for perm in PERMS:
-                    query = ids + ids[:3] + [""]
-                    batch = await store.explain_decisions(c, kind, query, perm)
-                    assert set(batch) == set(ids)
-                    for rid in checked:
-                        single = await store.explain_decision(c, kind, rid, perm)
-                        b = batch[rid]
-                        if distinct_ts:
-                            assert b == single, (ctx, kind, perm, rid, b, single)
-                        else:
-                            assert {k: b[k] for k in ("allowed", "reason", "shadow")} == {k: single[k] for k in ("allowed", "reason", "shadow")}
-                        compared += 1
+    # The seeded grants are read-only throughout this case, so the reference
+    # per-ID queries can keep one snapshot across all comparisons.
+    async with open_pooled_read_ctx(store.db_path) as db:
+        await execute_and_close(db, "BEGIN")
+        for ctx in CTXS:
+            for as_dict in (False, True):
+                c = ctx
+                if as_dict:
+                    c = {"user_id": ctx.user_id, "team_id": ctx.team_id, "workspace_id": ctx.workspace_id, "group_ids": list(ctx.group_ids)}
+                for kind in KINDS:
+                    for perm in PERMS:
+                        query = ids + ids[:3] + [""]
+                        batch = await store.explain_decisions(c, kind, query, perm)
+                        assert set(batch) == set(ids)
+                        for rid in checked:
+                            single = await store.explain_decision(c, kind, rid, perm, connection=db)
+                            b = batch[rid]
+                            if distinct_ts:
+                                assert b == single, (ctx, kind, perm, rid, b, single)
+                            else:
+                                assert {k: b[k] for k in ("allowed", "reason", "shadow")} == {k: single[k] for k in ("allowed", "reason", "shadow")}
+                            compared += 1
+        await db.rollback()
     assert compared > 1000

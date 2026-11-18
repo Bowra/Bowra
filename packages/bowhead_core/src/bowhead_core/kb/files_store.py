@@ -298,10 +298,10 @@ class KbFilesStore:
         Fresh DBs created via _TABLE_SCHEMA already have the expanded CHECK
         and skip the copy-migrate (idempotent guard).
         """
-        cur = await db.execute(
+        async with db.execute(
             "SELECT sql FROM sqlite_schema WHERE type='table' AND name='kb_files'",
-        )
-        row = await cur.fetchone()
+        ) as cur:
+            row = await cur.fetchone()
         if row is None:
             return  # table missing — _TABLE_SCHEMA above will create
         existing_sql = row[0] or ""
@@ -322,8 +322,8 @@ class KbFilesStore:
         ):
             return  # already migrated
 
-        cur = await db.execute("SELECT name FROM pragma_table_info('kb_files')")
-        source_cols = {row[0] for row in await cur.fetchall()}
+        async with db.execute("SELECT name FROM pragma_table_info('kb_files')") as cur:
+            source_cols = {row[0] for row in await cur.fetchall()}
         optional_copy_cols = [name for name in ("auto_classified_doc_type_id", "extracted_rows_status") if name in source_cols]
         copy_cols = [*self._COPY_MIGRATE_COLS, *optional_copy_cols]
 

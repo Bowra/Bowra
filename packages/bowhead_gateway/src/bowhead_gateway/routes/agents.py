@@ -2540,13 +2540,11 @@ async def agent_authoring_catalog(
     skill_rows: dict[str, dict[str, Any]] = {}
     configured_catalog = getattr(request.app.state, "skill_catalog", None)
     if configured_catalog is not None:
-        from bowhead_core.builtin_tool_providers import builtin_skill_available
-        from bowhead_core.subagent_authoring_catalog import is_platform_only_skill
+        from bowhead_core.subagent_authoring_catalog import builtin_skill_offered_for_selection
 
         for spec in configured_catalog.list_specs():
             name = str(spec.name)
-            # Skills written for a built-in connection are offered only while that connection can be enabled.
-            if is_platform_only_skill(name) or not builtin_skill_available(name):
+            if not builtin_skill_offered_for_selection(name):
                 continue
             skill_rows[name] = {
                 "name": name,
@@ -2815,13 +2813,11 @@ async def rankings(
     if domain_id is not None and domain_id not in known_domains:
         raise HTTPException(status_code=422, detail={"code": "invalid_ranking_domain"})
     sources = await _catalog_store(store).list_team_sources(team_id=user.team_id)
-    async with open_shared_ctx(store.db_path) as db:
-        versions = {
-            f"system:{row[0]}": int(row[1])
-            for row in await (
-                await db.execute("SELECT name,row_version FROM team_builtin_subagent_override WHERE team_id=?", (user.team_id,))
-            ).fetchall()
-        }
+    async with (
+        open_shared_ctx(store.db_path) as db,
+        db.execute("SELECT name,row_version FROM team_builtin_subagent_override WHERE team_id=?", (user.team_id,)) as override_cursor,
+    ):
+        versions = {f"system:{row[0]}": int(row[1]) for row in await override_cursor.fetchall()}
     items = await _team_catalog_items(request, user=user, store=store, sources=sources)
     confirmed_domains = {source.id: safe_taxonomy_selection_from_listing(source.listing)["domains"] for source in sources}
     if domain_id:
@@ -5748,11 +5744,13 @@ async def review_agent_eval_suite(
             raise AgentEvalStoreError("agent_eval_suite_revision_not_found")
     except Exception as exc:
         _raise_eval_http(exc)
-    async with open_shared_ctx(store.db_path) as db:
-        cursor = await db.execute(
+    async with (
+        open_shared_ctx(store.db_path) as db,
+        db.execute(
             "SELECT result_json FROM agent_eval_suite_review WHERE suite_revision_id=? AND prompt_version=?",
             (body.suite_revision_id, SUITE_REVIEW_PROMPT_VERSION),
-        )
+        ) as cursor,
+    ):
         cached = await cursor.fetchone()
     if cached is not None:
         return {**result, "status": "reviewed", "cached": True, **json.loads(cached[0])}

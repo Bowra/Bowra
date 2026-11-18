@@ -1,8 +1,10 @@
 """Personal Skill authoring preserves packages and reconciles exact save effects."""
 
+import re
 import sqlite3
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import pytest
@@ -10,11 +12,15 @@ from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.coach_skill_authoring import CoachSkillAuthoring
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.skill_upload import SkillUploadError, bundle_sha256
+from bowhead_core.sqlite_diagnostics import DiagnosticCursor
 from core_legacy_database import TARGET_FILES
 from test_agent_revision_store import _db, _seed
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
+
+from bowhead_core import _db as db_runtime
+from bowhead_core import sqlite_domain_runtime
 
 pytestmark = pytest.mark.unit
 MIGRATION = import_module("bowhead_core.migrations.versions.0139_coach_skill_operations")
@@ -381,3 +387,114 @@ async def test_cancel_reserved_creation_does_not_create_package_or_metadata(tmp_
     assert (await service.cancel(operation_id=operation_id))["cancellation_status"] == "cancelled"
     assert not (service.root / "owned-method").exists()
     assert await service.instances.get(user_id=service.scope.user_id, name="owned-method") is None
+
+
+def lose_lease(monkeypatch, *, failing: set[int] | None = None, always: bool = False) -> list[int]:
+    """Fail the numbered writes to skill_instances with the runtime's marked authority-lease conflict."""
+    write = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b.*\bskill_instances\b", re.IGNORECASE | re.DOTALL)
+    attempts: list[int] = []
+    original = DiagnosticCursor.execute
+
+    def execute(self: DiagnosticCursor, sql: str, parameters: Any = (), /) -> Any:
+        if write.search(sql):
+            attempts.append(len(attempts) + 1)
+            if always or attempts[-1] in (failing or set()):
+                raise sqlite_domain_runtime._busy()
+        return original(self, sql, parameters)
+
+    monkeypatch.setattr(DiagnosticCursor, "execute", execute)
+    return attempts
+
+
+def review(service):
+    with sqlite3.connect(service.db_path) as db:
+        return db.execute("SELECT import_status,import_report_json,verdict FROM skill_instances WHERE name='owned-method'").fetchone()
+
+
+@pytest.mark.parametrize(
+    ("step", "failing"),
+    [
+        # Edit: write 1 is the prepare quarantine, write 2 the publish upsert after both package moves.
+        ("prepare", {1}),
+        ("publish", {2}),
+    ],
+)
+async def test_a_lost_lease_repeats_the_edit_step_and_moves_the_package_once(tmp_path, monkeypatch, step, failing):
+    service = await setup(tmp_path)
+    await create(service)
+    target = (await service.inspect(name="owned-method"))["target"]
+    bundle = service.root / "owned-method"
+    original_rename = Path.rename
+    moves = []
+
+    def rename(path, destination):
+        moves.append((path.name, Path(destination).name))
+        return original_rename(path, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rename", rename)
+        lose_lease(patch, failing=failing)
+        saved = await service.save(target=target, changes=[{"path": "SKILL.md", "content": BODY + "Edited"}], request_id="edit", turn_id="t_edit")
+    assert saved["ok"], saved
+    assert (bundle / "SKILL.md").read_text() == BODY + "Edited"
+    assert saved["result"]["target"]["revision"] == "sha256:" + bundle_sha256(bundle)
+    assert moves == [("owned-method", "backup"), ("package", "owned-method")], "A repeat continues from the hashes; it never moves again"
+    assert not (service.root / ".coach-operations" / saved["operation_id"]).exists()
+
+
+async def test_a_lost_lease_repeats_the_creation_publish(tmp_path, monkeypatch):
+    service = await setup(tmp_path)
+    with monkeypatch.context() as patch:
+        attempts = lose_lease(patch, failing={1})
+        saved, _ = await create(service)
+    assert len(attempts) > 1, "The publish ran again after its first skill_instances write lost the lease"
+    assert (service.root / "owned-method" / "SKILL.md").read_text() == BODY
+    instance = await service.instances.get(user_id=service.scope.user_id, name="owned-method")
+    assert instance is not None and saved["result"]["target"]["id"] == instance.id
+
+
+async def test_a_spent_lease_wait_in_preparation_applies_nothing_and_a_new_request_saves(tmp_path, monkeypatch):
+    service = await setup(tmp_path)
+    await create(service)
+    await service.instances.set_verdict(user_id=service.scope.user_id, name="owned-method", verdict="pass")
+    before = review(service)
+    target = (await service.inspect(name="owned-method"))["target"]
+    with monkeypatch.context() as patch:
+        patch.setattr(db_runtime, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+        lose_lease(patch, always=True)
+        busy = await service.save(target=target, changes=[{"path": "SKILL.md", "content": BODY + "Edited"}], request_id="edit", turn_id="t_edit")
+    assert busy["state"] == "failed" and busy["result"] == {"error": "skill_store_busy", "effect": "not_applied"}
+    assert (service.root / "owned-method" / "SKILL.md").read_text() == BODY
+    assert review(service) == before, "The quarantine rolled back with its transaction"
+    assert not (service.root / ".coach-operations" / busy["operation_id"]).exists()
+    saved = await service.save(target=target, changes=[{"path": "SKILL.md", "content": BODY + "Edited"}], request_id="again", turn_id="t_edit")
+    assert saved["ok"], saved
+
+
+async def test_a_spent_lease_wait_in_publication_keeps_the_save_recoverable(tmp_path, monkeypatch):
+    service = await setup(tmp_path)
+    target = (await service.inspect(name="owned-method"))["target"]
+    with monkeypatch.context() as patch:
+        patch.setattr(db_runtime, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+        lose_lease(patch, always=True)
+        pending = await service.save(target=target, changes=[{"path": "SKILL.md", "content": BODY}], request_id="create", turn_id="t_create")
+    assert pending["state"] == "prepared" and pending["outcome"] == "unknown" and pending["retry"] == "recover_original_operation"
+    assert await service.instances.get(user_id=service.scope.user_id, name="owned-method") is None
+    recovered = await service.get(operation_id=pending["operation_id"], recover=True)
+    assert recovered["ok"], recovered
+    assert recovered["result"]["target"]["revision"] == "sha256:" + bundle_sha256(service.root / "owned-method")
+
+
+async def test_a_lost_lease_repeats_cancellation_after_the_original_was_restored(tmp_path, monkeypatch):
+    service = await setup(tmp_path)
+    await create(service)
+    await service.instances.set_verdict(user_id=service.scope.user_id, name="owned-method", verdict="pass")
+    before = review(service)
+    operation_id = await prepare_interrupted(service, monkeypatch)
+    with monkeypatch.context() as patch:
+        attempts = lose_lease(patch, failing={1})
+        result = await service.cancel(operation_id=operation_id)
+    assert attempts == [1, 2]
+    assert result["cancellation_status"] == "cancelled"
+    assert review(service) == before
+    assert (service.root / "owned-method" / "SKILL.md").read_text() == BODY

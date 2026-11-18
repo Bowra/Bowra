@@ -63,25 +63,25 @@ _HELD_OUT_CASE = "COALESCE(json_extract(c.expected_contract_json,'$.held_out'),0
 async def _held_out_results(db: aiosqlite.Connection, *, run_ids: list[str]) -> dict[str, int]:
     """Counts of held-out attempts in runs: how many there are and how many passed. Nothing else."""
     marks = ",".join("?" for _ in run_ids)
-    cursor = await db.execute(
+    async with db.execute(
         f"""SELECT count(DISTINCT r.case_revision_id) AS cases,count(*) AS attempts,
                   coalesce(sum(CASE WHEN r.status='passed' THEN 1 ELSE 0 END),0) AS passed
            FROM agent_eval_case_result r JOIN agent_eval_case_revision c ON c.id=r.case_revision_id
            WHERE r.run_id IN ({marks}) AND {_HELD_OUT_CASE}""",
         tuple(run_ids),
-    )
-    row = await cursor.fetchone()
+    ) as cursor:
+        row = await cursor.fetchone()
     return {"cases": int(row["cases"] or 0), "attempts": int(row["attempts"] or 0), "passed_attempts": int(row["passed"] or 0)}
 
 
 async def _held_out_case_ids(db: aiosqlite.Connection, case_revision_ids: list[str]) -> set[str]:
     if not case_revision_ids:
         return set()
-    cursor = await db.execute(
+    async with db.execute(
         f"SELECT c.id FROM agent_eval_case_revision c WHERE c.id IN (SELECT value FROM json_each(?)) AND {_HELD_OUT_CASE}",
         (json.dumps(case_revision_ids),),
-    )
-    return {str(row[0]) for row in await cursor.fetchall()}
+    ) as cursor:
+        return {str(row[0]) for row in await cursor.fetchall()}
 
 
 def _held_out_classes(comparisons: Any, hidden: set[str]) -> dict[str, Any]:
@@ -134,7 +134,7 @@ class AgentCoachEvidence:
 
     async def _overview(self, db, target, offset, limit, expected):
         team_id = self.team_id
-        marker = await db.execute(
+        async with db.execute(
             """SELECT count(*) AS count,max(id) AS last_id,max(finished_at) AS finished_at,
                       sum(CASE WHEN status='queued' THEN 1 ELSE 0 END) AS queued,
                       sum(CASE WHEN status='running' THEN 1 ELSE 0 END) AS running,
@@ -143,11 +143,11 @@ class AgentCoachEvidence:
                        WHERE team_id=? AND agent_id=? AND agent_source_kind='team') AS suite_versions
                FROM agent_eval_run WHERE team_id=? AND agent_id=? AND agent_source_kind='team'""",
             (team_id, target["agent_id"], team_id, target["agent_id"], team_id, target["agent_id"]),
-        )
-        state = dict(await marker.fetchone())
+        ) as marker:
+            state = dict(await marker.fetchone())
         token = _fingerprint({"projection": "suite_history_v3", "team_id": team_id, "agent_id": target["agent_id"], "state": state})
         _page_check(expected, token, offset)
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT r.id,r.status,r.suite_revision_id,r.candidate_id,r.release_id,r.created_at,
                       suite.id AS suite_id,suite.name AS suite_name,
                       l.execution_id,l.subject_side,s.id AS snapshot_id,s.snapshot_hash
@@ -160,8 +160,8 @@ class AgentCoachEvidence:
                WHERE r.team_id=? AND r.agent_id=? AND r.agent_source_kind='team'
                ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?""",
             (team_id, target["agent_id"], limit + 1, offset),
-        )
-        rows = await cursor.fetchall()
+        ) as cursor:
+            rows = await cursor.fetchall()
         workbench = await read_agent_version_workbench_conn(db, team_id=self.team_id, agent_id=target["agent_id"], actor_user_id=self.actor_user_id)
         return {
             "workbench": workbench,
@@ -189,23 +189,23 @@ class AgentCoachEvidence:
         }
 
     async def _run(self, db, target, offset, limit, expected, excerpts):
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT * FROM agent_eval_run WHERE id=? AND team_id=? AND agent_id=? AND agent_source_kind='team'",
             (target["run_id"], self.team_id, target["agent_id"]),
-        )
-        run = await cursor.fetchone()
+        ) as cursor:
+            run = await cursor.fetchone()
         if run is None:
             raise AgentChangeProposalError("agent_eval_run_not_found")
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT count(*) AS recorded_attempts,coalesce(sum(cost_microusd),0) AS known_cost_microusd,
                       sum(CASE WHEN cost_microusd IS NULL THEN 1 ELSE 0 END) AS unknown_cost_attempts,
                       max(created_at) AS last_result_at
                FROM agent_eval_case_result WHERE run_id=?""",
             (run["id"],),
-        )
-        totals = dict(await cursor.fetchone())
-        cursor = await db.execute("SELECT count(*) FROM agent_eval_case_job WHERE run_id=?", (run["id"],))
-        planned = int((await cursor.fetchone())[0])
+        ) as cursor:
+            totals = dict(await cursor.fetchone())
+        async with db.execute("SELECT count(*) FROM agent_eval_case_job WHERE run_id=?", (run["id"],)) as cursor:
+            planned = int((await cursor.fetchone())[0])
         totals["expected_attempts"] = planned or None
         totals["unfinished_or_unrecorded_attempts"] = max(0, planned - totals["recorded_attempts"])
         totals["unknown_cost_attempts"] = int(totals["unknown_cost_attempts"] or 0)
@@ -218,23 +218,23 @@ class AgentCoachEvidence:
             and run["status"] not in {"queued", "running"}
             else None
         )
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT e.state,e.current_run_id,e.stale_reason FROM agent_eval_evidence_state e
                JOIN agent_eval_suite_revision r ON r.suite_id=e.suite_id
                WHERE r.id=? AND e.team_id=? AND e.agent_id=? AND e.agent_source_kind='team'""",
             (run["suite_revision_id"], run["team_id"], run["agent_id"]),
-        )
-        evidence_row = await cursor.fetchone()
+        ) as cursor:
+            evidence_row = await cursor.fetchone()
         evidence = dict(evidence_row) if evidence_row else None
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT current.id,current.case_set_hash,suite.state FROM agent_eval_suite_revision current
                JOIN agent_eval_suite suite ON suite.id=current.suite_id
                JOIN agent_eval_suite_revision original ON original.suite_id=suite.id
                WHERE original.id=? AND suite.team_id=? AND suite.agent_id=? AND suite.agent_source_kind='team'
                ORDER BY current.sequence DESC LIMIT 1""",
             (run["suite_revision_id"], self.team_id, target["agent_id"]),
-        )
-        current = await cursor.fetchone()
+        ) as cursor:
+            current = await cursor.fetchone()
         current_suite = {
             "revision_id": current["id"] if current else None,
             "state": current["state"] if current else None,
@@ -257,12 +257,12 @@ class AgentCoachEvidence:
         _page_check(expected, token, offset)
         held_out = await _held_out_results(db, run_ids=[run["id"]])
         # Held-out cases reach Coach only as counts (alignment loop A6); their rows are never listed.
-        cursor = await db.execute(
+        async with db.execute(
             f"""SELECT r.*,c.case_key,c.expected_contract_json FROM agent_eval_case_result r JOIN agent_eval_case_revision c ON c.id=r.case_revision_id
                WHERE r.run_id=? AND NOT ({_HELD_OUT_CASE}) ORDER BY c.case_key,r.case_revision_id,r.attempt LIMIT ? OFFSET ?""",
             (run["id"], limit + 1, offset),
-        )
-        rows = await cursor.fetchall()
+        ) as cursor:
+            rows = await cursor.fetchall()
         items = []
         for row in rows[:limit]:
             scores = _json(row["deterministic_json"])
@@ -292,8 +292,8 @@ class AgentCoachEvidence:
                 }
             )
         # A comparison run is one side of a release comparison; the outcome is in release_check.
-        cursor = await db.execute("SELECT execution_id,subject_side FROM agent_eval_comparison_run WHERE run_id=?", (run["id"],))
-        link = await cursor.fetchone()
+        async with db.execute("SELECT execution_id,subject_side FROM agent_eval_comparison_run WHERE run_id=?", (run["id"],)) as cursor:
+            link = await cursor.fetchone()
         return {
             "comparison": {"execution_id": link["execution_id"], "subject_side": link["subject_side"]} if link else None,
             "release_check": await self._release_check(db, target["agent_id"]) if link else None,
@@ -330,7 +330,7 @@ class AgentCoachEvidence:
         }
 
     async def _snapshot(self, db, target, offset, limit, expected):
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT s.*,c.active_snapshot_id,c.active_plan_id,c.readiness AS current_readiness,c.reason_codes_json,
                       c.active_execution_id,c.stale_subject,p.plan_hash,p.policy_revision_id,p.execution_workspace_id,p.execution_workspace_scope_hash,
                       a.state AS candidate_state,p.candidate_hash AS plan_candidate_hash,a.candidate_hash,
@@ -340,8 +340,8 @@ class AgentCoachEvidence:
                JOIN team_subagent_release_candidate a ON a.id=s.candidate_id
                WHERE s.id=? AND s.team_id=? AND s.agent_id=?""",
             (target["snapshot_id"], self.team_id, target["agent_id"]),
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             raise AgentChangeProposalError("agent_eval_snapshot_not_found")
         token = row["snapshot_hash"]
@@ -420,20 +420,20 @@ class AgentCoachEvidence:
         return {**outcome, "owner_surface": "release_tab", "owner_path": release_tab_path(agent_id)}
 
     async def _comparison_cost(self, db, execution_id, case_id=None):
-        cursor = await db.execute(
+        async with db.execute(
             """SELECT count(*) AS recorded_attempts,coalesce(sum(r.cost_microusd),0) AS known_cost_microusd,
                       sum(CASE WHEN r.cost_microusd IS NULL THEN 1 ELSE 0 END) AS unknown_cost_attempts
                FROM agent_eval_case_result r JOIN agent_eval_comparison_run l ON l.run_id=r.run_id
                WHERE l.execution_id=? AND (? IS NULL OR r.case_revision_id=?)""",
             (execution_id, case_id, case_id),
-        )
-        cost = dict(await cursor.fetchone())
-        cursor = await db.execute(
+        ) as cursor:
+            cost = dict(await cursor.fetchone())
+        async with db.execute(
             """SELECT count(*) FROM agent_eval_case_job j JOIN agent_eval_comparison_run l ON l.run_id=j.run_id
                WHERE l.execution_id=? AND (? IS NULL OR j.case_revision_id=?)""",
             (execution_id, case_id, case_id),
-        )
-        planned = int((await cursor.fetchone())[0])
+        ) as cursor:
+            planned = int((await cursor.fetchone())[0])
         cost["expected_attempts"] = planned or None
         cost["unfinished_or_unrecorded_attempts"] = max(0, planned - cost["recorded_attempts"])
         cost["unknown_cost_attempts"] = int(cost["unknown_cost_attempts"] or 0)

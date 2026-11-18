@@ -122,10 +122,10 @@ def test_admission_uses_retained_policy_and_keeps_other_entry_paths_legacy(monke
 
 
 @pytest.mark.parametrize("shared", [True, False])
-async def test_helper_continue_uses_saved_policy_and_budget_over_current_flag(tmp_path, monkeypatch, shared):
+async def test_helper_continue_uses_saved_policy_and_budget_over_current_flag(migrated_legacy_core_db, monkeypatch, shared):
     from bowhead_core.session_store import SessionStore
 
-    db_path = await _db(tmp_path)
+    db_path = await _db(migrated_legacy_core_db)
     ctx = context(team_id="team_1", session_store=SessionStore(db_path), knowledge_direct_use=shared)
     first, calls, _ = await run_shared(monkeypatch, [search_response(i) for i in range(3)] + [closeout()], ctx=ctx)
     assert first.ok and first.resume_checkpoint_id

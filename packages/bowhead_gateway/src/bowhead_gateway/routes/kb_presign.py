@@ -228,11 +228,11 @@ async def kb_presign_single(
     async with _open_db(artifact_store.db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE created_by = ? AND status = 'pending_upload'",
                 (user.id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             count = row[0] if row else 0
             if count >= _PRESIGN_PENDING_CAP:
                 await db.execute("ROLLBACK")
@@ -393,11 +393,11 @@ async def kb_presign_confirm(
     artifact_id = dto.artifact_id
     async with _open_db(artifact_store.db_path) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
+        async with db.execute(
             "SELECT id, status, path, expires_at, created_by FROM artifacts WHERE id=?",
             (artifact_id,),
-        )
-        art_row = await cur.fetchone()
+        ) as cur:
+            art_row = await cur.fetchone()
     if art_row is None:
         raise _kb_error(404, "kb_artifact_not_found")
     if art_row["created_by"] != user.id:
@@ -635,11 +635,11 @@ async def kb_presign_bundle(
     async with _open_db(artifact_store.db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE created_by = ? AND status = 'pending_upload'",
                 (user.id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             count = row[0] if row else 0
             if count >= _PRESIGN_PENDING_CAP:
                 await db.execute("ROLLBACK")
@@ -800,11 +800,11 @@ async def kb_presign_bundle_confirm(
     artifact_id = marker.artifact_id
     async with _open_db(artifact_store.db_path) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
+        async with db.execute(
             "SELECT id, status, path, expires_at, created_by FROM artifacts WHERE id=?",
             (artifact_id,),
-        )
-        art_row = await cur.fetchone()
+        ) as cur:
+            art_row = await cur.fetchone()
     if art_row is None:
         raise _kb_error(404, "kb_artifact_not_found")
     if art_row["created_by"] != user.id:

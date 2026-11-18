@@ -178,3 +178,40 @@ async def test_update_requires_exact_target_impact_and_current_authority(tmp_pat
     with pytest.raises(ValueError, match="team_admin_required"):
         await service.save(**create_args())
     assert (await service.get(operation_id=updated["operation_id"]))["state"] == "succeeded"
+
+
+async def test_save_repeats_after_a_lost_lease_without_validating_again(tmp_path, monkeypatch):
+    # census T7: the Plugin row is fenced; validation (possible I/O) runs once, before the write.
+    import re
+
+    from bowhead_core.sqlite_diagnostics import DiagnosticCursor
+
+    from bowhead_core import sqlite_domain_runtime
+
+    service = setup(tmp_path)
+    validations = []
+
+    async def counted(candidate, observed_tools):
+        validations.append(candidate["name"])
+        return await validate(candidate, observed_tools)
+
+    service.validate_resources = counted
+    write = re.compile(r"^\s*INSERT\b.*\bteam_capability\b", re.IGNORECASE | re.DOTALL)
+    attempts = []
+    original = DiagnosticCursor.execute
+
+    def lose_once(self, sql, parameters=(), /):
+        if write.search(sql):
+            attempts.append(len(attempts) + 1)
+            if len(attempts) == 1:
+                raise sqlite_domain_runtime._busy()
+        return original(self, sql, parameters)
+
+    monkeypatch.setattr(DiagnosticCursor, "execute", lose_once)
+    saved = await service.save(**create_args())
+
+    assert saved["state"] == "succeeded" and attempts[:2] == [1, 2]
+    assert validations == ["Research"]
+    with sqlite3.connect(service.db_path) as db:
+        assert db.execute("SELECT count(*) FROM team_capability").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM coach_plugin_operation").fetchone()[0] == 1

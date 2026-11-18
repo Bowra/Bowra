@@ -1,8 +1,10 @@
-"""artifact_store.py reaches its database only through ``_open_db``.
+"""artifact_store.py reaches its database only through ``_open_db`` and ``_open_read_db``.
 
-``_open_db`` borrows a pooled connection and applies the file store's settings.
-A connection opened anywhere else in the module would skip both: on the 116
-schema each new connection costs about 30 ms of CPU before its first statement.
+``_open_db`` borrows a pooled connection and applies the file store's settings;
+``_open_read_db`` borrows a read-only pooled connection for pure reads, which takes
+no cross-file authority lease. A connection opened anywhere else in the module would
+skip both: on the 116 schema each new connection costs about 30 ms of CPU before its
+first statement.
 """
 
 from __future__ import annotations
@@ -24,12 +26,13 @@ def _called(node: ast.Call) -> str:
 
 def test_file_store_connections_come_only_from_open_db() -> None:
     tree = ast.parse(ARTIFACT_STORE.read_text(encoding="utf-8"))
-    helper = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_open_db")
-    inside = set(ast.walk(helper))
+    helpers = {node.name: node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name in {"_open_db", "_open_read_db"}}
+    writer, reader = set(ast.walk(helpers["_open_db"])), set(ast.walk(helpers["_open_read_db"]))
     opens = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and _called(node) in OPENERS]
-    elsewhere = [(_called(node), node.lineno) for node in opens if node not in inside]
-    assert elsewhere == [], f"Connections must be taken through _open_db(); found {elsewhere}"
-    assert [_called(node) for node in opens if node in inside] == ["open_shared_ctx"], "_open_db() borrows from the shared pool, once"
+    elsewhere = [(_called(node), node.lineno) for node in opens if node not in writer and node not in reader]
+    assert elsewhere == [], f"Connections must be taken through _open_db() or _open_read_db(); found {elsewhere}"
+    assert [_called(node) for node in opens if node in writer] == ["open_shared_ctx"], "_open_db() borrows from the shared pool, once"
+    assert [_called(node) for node in opens if node in reader] == ["open_pooled_read_ctx"], "_open_read_db() borrows from the read pool, once"
 
 
 async def test_consecutive_file_store_blocks_reuse_one_connection(tmp_path, monkeypatch) -> None:

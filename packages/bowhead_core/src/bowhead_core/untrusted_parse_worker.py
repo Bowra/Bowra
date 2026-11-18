@@ -128,6 +128,11 @@ def main() -> int:
             result = _run_pptx_result_view(control)
         elif kind == "pptx_render_copy":
             result = _run_pptx_render_copy(control)
+        elif kind == "visual_view":
+            from bowhead_core.visual_view import visual_worker_entry
+
+            extra = {name[: -len("_path")]: Path(control[name]).read_bytes() for name in control if name.endswith("_path") and name != "data_path"}
+            result = visual_worker_entry(control, Path(control["data_path"]).read_bytes(), extra)
         elif kind == "pptx_structure":
             from bowhead_core.pptx_result_view import deck_structure
 

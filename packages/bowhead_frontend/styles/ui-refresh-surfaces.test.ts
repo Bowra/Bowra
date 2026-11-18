@@ -13,163 +13,10 @@
  *      every TSX-used class defined, call sites no longer restore original inline styles.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { allStylesheets } from "./css-contract";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FRONTEND = join(HERE, "..");
-const PREFIX = ":root:root";
-
-function read(rel: string): string {
-  return readFileSync(join(FRONTEND, rel), "utf8");
-}
-
-function stripComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-type Rule = { selector: string; body: string; media: string | null };
-
-/** Parse ordinary stylesheet rules;@media / @supports recurse (record outer conditions),@keyframes skip. */
-function parseRules(css: string, media: string | null = null): Rule[] {
-  const rules: Rule[] = [];
-  let i = 0;
-  while (i < css.length) {
-    const open = css.indexOf("{", i);
-    if (open === -1) break;
-    const prelude = css.slice(i, open).trim();
-    let depth = 0;
-    let close = open;
-    for (; close < css.length; close += 1) {
-      if (css[close] === "{") depth += 1;
-      else if (css[close] === "}") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    const body = css.slice(open + 1, close);
-    if (/^@(media|supports)\b/.test(prelude)) rules.push(...parseRules(body, prelude));
-    else if (!prelude.startsWith("@")) rules.push({ selector: prelude, body, media });
-    i = close + 1;
-  }
-  return rules;
-}
-
-/** Split selector list on top-level commas (ignore commas in :is() / :where() parentheses). */
-function splitSelectors(selector: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < selector.length; i += 1) {
-    const ch = selector[i];
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth -= 1;
-    else if (ch === "," && depth === 0) {
-      parts.push(selector.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(selector.slice(start));
-  return parts.map((part) => part.replace(/\s+/g, " ").trim()).filter(Boolean);
-}
-
-const norm = (text: string) => text.replace(/\s+/g, " ").trim();
-
-/** CSS specificity [id, class, type]: :is() / :not() / :has() take highest argument, :where() zero, pseudo-elements type. */
-function specificity(selector: string): [number, number, number] {
-  const max = (list: string): [number, number, number] =>
-    splitSelectors(list).map(specificity).reduce((a, b) => (cmpSpec(a, b) >= 0 ? a : b), [0, 0, 0] as [number, number, number]);
-  let a = 0;
-  let b = 0;
-  let c = 0;
-  let i = 0;
-  const s = selector;
-  const readIdent = () => {
-    const m = /^[\w-]+/.exec(s.slice(i));
-    i += m ? m[0].length : 0;
-    return m ? m[0] : "";
-  };
-  const readParens = () => {
-    let depth = 0;
-    const start = i;
-    for (; i < s.length; i += 1) {
-      if (s[i] === "(") depth += 1;
-      else if (s[i] === ")") {
-        depth -= 1;
-        if (depth === 0) {
-          i += 1;
-          return s.slice(start + 1, i - 1);
-        }
-      }
-    }
-    return s.slice(start + 1);
-  };
-  while (i < s.length) {
-    const ch = s[i];
-    if (ch === "#") {
-      i += 1;
-      readIdent();
-      a += 1;
-    } else if (ch === ".") {
-      i += 1;
-      readIdent();
-      b += 1;
-    } else if (ch === "[") {
-      const end = s.indexOf("]", i);
-      i = end === -1 ? s.length : end + 1;
-      b += 1;
-    } else if (ch === ":" && s[i + 1] === ":") {
-      i += 2;
-      readIdent();
-      if (s[i] === "(") readParens();
-      c += 1;
-    } else if (ch === ":") {
-      i += 1;
-      const name = readIdent();
-      if (s[i] === "(") {
-        const args = readParens();
-        if (name === "where") continue;
-        if (["is", "not", "has", "matches"].includes(name)) {
-          const [x, y, z] = max(args);
-          a += x;
-          b += y;
-          c += z;
-          continue;
-        }
-      }
-      b += 1;
-    } else if (/[\w-]/.test(ch)) {
-      readIdent();
-      c += 1;
-    } else if (ch === "*") {
-      i += 1;
-    } else {
-      i += 1;
-    }
-  }
-  return [a, b, c];
-}
-function cmpSpec(x: [number, number, number], y: [number, number, number]): number {
-  return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
-}
-
-
-/** Declaration map: property → value (normalize value whitespace). */
-function decls(body: string): Record<string, string> {
-  return Object.fromEntries(
-    stripComments(body)
-      .split(";")
-      .map((d) => d.trim())
-      .filter(Boolean)
-      .map((d) => {
-        const i = d.indexOf(":");
-        return [d.slice(0, i).trim(), norm(d.slice(i + 1))];
-      }),
-  );
-}
+import { allStylesheets, cascadeProblems, decls, FRONTEND, norm, parseRules, PREFIX, read, type Rule, specificity, splitSelectors, stripComments, tsxFiles } from "./css-contract";
 
 const CSS = read("styles/ui-refresh-surfaces.css");
 const RULES = parseRules(stripComments(CSS));
@@ -237,46 +84,7 @@ describe("引入位置", () => {
 });
 
 describe("级联：后写的覆盖规则不能输给先写的家族规则", () => {
-  /** Rule subject set: remove the :root:root prefix; entire :is(a, b) splits into a/b, otherwise entire selector. */
-  const subjects = (sel: string): string[] => {
-    const rest = norm(sel.slice(PREFIX.length));
-    if (!rest.startsWith(":is(")) return [rest];
-    let depth = 0;
-    for (let k = 3; k < rest.length; k += 1) {
-      if (rest[k] === "(") depth += 1;
-      else if (rest[k] === ")" && --depth === 0) return k === rest.length - 1 ? splitSelectors(rest.slice(4, -1)).map(norm) : [rest];
-    }
-    return [rest];
-  };
-  /** State rules (hover/press/focus/disabled/checked/highlight) apply only in corresponding state, excluded from family-default override comparison. */
   const STATEFUL = /:(hover|active|focus|focus-visible|focus-within|disabled|checked)\b|aria-(disabled|checked|selected|current)|data-active|\.is-(active|on|selected)\b|\.selected\b/;
-  /** Properties overlap if identical or one shorthand of other (margin vs margin-top, border vs border-top-color). */
-  const overlaps = (x: string, y: string) => x === y || x.startsWith(`${y}-`) || y.startsWith(`${x}-`);
-  /** Same subject/property: later rule specificity (:is() takes highest) must ≥ earlier, otherwise override ineffective. */
-  function cascadeProblems(rules: Rule[]): string[] {
-    const problems: string[] = [];
-    rules.forEach((later, j) => {
-      const laterProps = Object.keys(decls(later.body));
-      for (const lsel of splitSelectors(later.selector)) {
-        if (STATEFUL.test(lsel)) continue;
-        const lsub = subjects(lsel);
-        const lspec = specificity(lsel);
-        rules.slice(0, j).forEach((earlier) => {
-          const shared = Object.keys(decls(earlier.body)).filter((prop) => laterProps.some((lp) => overlaps(lp, prop)));
-          if (!shared.length) return;
-          for (const esel of splitSelectors(earlier.selector)) {
-            if (STATEFUL.test(esel)) continue;
-            if (!subjects(esel).some((x) => lsub.includes(x))) continue;
-            const espec = specificity(esel);
-            if (cmpSpec(lspec, espec) < 0) {
-              problems.push(`${lsel} (${lspec.join(",")}) 覆盖不了 ${esel.slice(0, 80)}… (${espec.join(",")}) 的 ${shared.join(" / ")}`);
-            }
-          }
-        });
-      }
-    });
-    return problems;
-  }
 
   it("权重计算：:is() 取最高项、:where() 为 0", () => {
     expect(specificity(":root:root .a")).toEqual([0, 3, 0]);
@@ -286,20 +94,20 @@ describe("级联：后写的覆盖规则不能输给先写的家族规则", () =
   });
 
   it("本文件没有被先写规则压住的覆盖", () => {
-    expect(cascadeProblems(RULES)).toEqual([]);
+    expect(cascadeProblems(RULES, STATEFUL)).toEqual([]);
   });
 
   it("能抓到「家族 :is() 里混进复合选择器、抬高权重压过窄屏覆盖」这一类", () => {
     const bad = parseRules(`${PREFIX} :is(.a, .b.c) { border-radius: 14px; }
 @media (max-width: 640px) { ${PREFIX} .a { border-radius: 0; } }`);
-    expect(cascadeProblems(bad)).toHaveLength(1);
+    expect(cascadeProblems(bad, STATEFUL)).toHaveLength(1);
     // Shorthand overriding longhand also counts (margin over margin-top).
     expect(cascadeProblems(parseRules(`${PREFIX} :is(.a, .b .c) { margin-top: 0; }
-${PREFIX} .a { margin: 8px 0 4px; }`))).toHaveLength(1);
+${PREFIX} .a { margin: 8px 0 4px; }`), STATEFUL)).toHaveLength(1);
     const ok = parseRules(`${PREFIX} :is(.a, .b) { border-radius: 14px; }
 ${PREFIX} .b.c { border-radius: 14px; }
 @media (max-width: 640px) { ${PREFIX} .a { border-radius: 0; } }`);
-    expect(cascadeProblems(ok)).toEqual([]);
+    expect(cascadeProblems(ok, STATEFUL)).toEqual([]);
   });
 });
 
@@ -594,14 +402,6 @@ describe("个人外观确认框（CSS Module）", () => {
     expect(backdrop.background).toBe("var(--c-scrim)");
   });
 });
-
-function tsxFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name === "node_modules" ? [] : tsxFiles(path);
-    return name.endsWith(".tsx") && !name.endsWith(".test.tsx") ? [path] : [];
-  });
-}
 
 describe("batch 5 base classes moved from inline styles", () => {
   const LEGACY_CSS = stripComments(read("styles/ui-controls-legacy.css"));

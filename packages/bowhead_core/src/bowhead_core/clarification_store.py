@@ -303,7 +303,7 @@ async def invalidate_pending_in_tx(
     )
     transitioned: list[ClarificationInvalidation] = []
     for identity in rows:
-        cursor = await db.execute(
+        async with db.execute(
             """
             UPDATE clarification_requests
             SET status=?, dismissed_at=CASE WHEN ?='dismissed' THEN ? ELSE dismissed_at END
@@ -317,8 +317,8 @@ async def invalidate_pending_in_tx(
                 identity.request_id,
                 identity.turn_id,
             ),
-        )
-        updated = await cursor.fetchone()
+        ) as cursor:
+            updated = await cursor.fetchone()
         if updated is None:
             continue
         event_id = clarification_invalidation_event_id(identity.request_id)
@@ -1242,8 +1242,8 @@ class ClarificationStore:
                 sql += " AND c.workspace_id = ?"
                 params.append(workspace_id)
             sql += " ORDER BY c.created_at ASC"
-            cur = await db.execute(sql, tuple(params))
-            rows = await cur.fetchall()
+            async with db.execute(sql, tuple(params)) as cur:
+                rows = await cur.fetchall()
         return [self._row_to_request(row) for row in rows]
 
     async def get_pending_for_turn(self, turn_id: str) -> list[ClarificationRequest]:
@@ -1270,11 +1270,11 @@ class ClarificationStore:
                 ORDER BY c.created_at ASC
                 """
             )
-            cur = await db.execute(
+            async with db.execute(
                 sql,
                 (turn_id,),
-            )
-            rows = await cur.fetchall()
+            ) as cur:
+                rows = await cur.fetchall()
             return [self._row_to_request(r) for r in rows]
 
     async def get_pending_for_session(self, *, session_id: str, user_id: str, workspace_id: str) -> list[ClarificationRequest]:
@@ -1291,11 +1291,11 @@ class ClarificationStore:
     async def get(self, request_id: str) -> ClarificationRequest | None:
         async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM clarification_requests WHERE request_id = ?",
                 (request_id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             return self._row_to_request(row) if row else None
 
     async def resolve(
@@ -1341,11 +1341,11 @@ class ClarificationStore:
         async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM clarification_requests WHERE request_id = ?",
                 (request_id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             if not row:
                 await db.execute("ROLLBACK")
                 return None, False
@@ -1426,11 +1426,11 @@ class ClarificationStore:
                     ),
                 )
             await db.commit()
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM clarification_requests WHERE request_id = ?",
                 (request_id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             return self._row_to_request(row), True
 
     async def record_resolution_outcome(
@@ -1452,11 +1452,11 @@ class ClarificationStore:
         async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT * FROM clarification_resolution_outbox WHERE request_id=?",
                 (request_id,),
-            )
-            existing = await cur.fetchone()
+            ) as cur:
+                existing = await cur.fetchone()
             if existing is None:
                 # Explicit legacy adoption only. New resolve paths create their
                 # pending work row atomically with pending→resolved.
@@ -1483,11 +1483,11 @@ class ClarificationStore:
                 if cursor.rowcount != 1:
                     await db.execute("ROLLBACK")
                     raise RuntimeError("clarification resolution ownership was lost")
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT state,payload_json FROM clarification_resolution_outbox WHERE request_id=?",
                 (request_id,),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             await db.commit()
         if row is None or str(row["state"]) != "completed" or row["payload_json"] is None:
             raise RuntimeError("clarification resolution outbox row disappeared")
@@ -1500,11 +1500,13 @@ class ClarificationStore:
         self,
         request_id: str,
     ) -> dict[str, Any] | None:
-        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
-            cur = await db.execute(
+        async with (
+            diagnostic_connect(domain_database_path(self.db_path, "execution")) as db,
+            db.execute(
                 "SELECT payload_json FROM clarification_resolution_outbox WHERE request_id=? AND state='completed'",
                 (request_id,),
-            )
+            ) as cur,
+        ):
             row = await cur.fetchone()
         if row is None:
             return None
@@ -1512,11 +1514,13 @@ class ClarificationStore:
         return payload if isinstance(payload, dict) else None
 
     async def get_resolution_work_state(self, request_id: str) -> str | None:
-        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
-            cur = await db.execute(
+        async with (
+            diagnostic_connect(domain_database_path(self.db_path, "execution")) as db,
+            db.execute(
                 "SELECT state FROM clarification_resolution_outbox WHERE request_id=?",
                 (request_id,),
-            )
+            ) as cur,
+        ):
             row = await cur.fetchone()
         return str(row[0]) if row is not None else None
 
@@ -1553,11 +1557,11 @@ class ClarificationStore:
             if cursor.rowcount != 1:
                 await db.execute("ROLLBACK")
                 return None
-            cur = await db.execute(
+            async with db.execute(
                 "SELECT work_json FROM clarification_resolution_outbox WHERE request_id=? AND state='pending' AND lease_owner=?",
                 (request_id, resolution_owner),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             await db.commit()
         if row is None:
             return None
@@ -2069,7 +2073,7 @@ class ClarificationStore:
         cutoff = (datetime.now(tz=UTC) - timedelta(minutes=within_minutes)).isoformat(timespec="microseconds")
         async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            async with db.execute(
                 """
                 SELECT * FROM clarification_requests
                 WHERE user_id = ? AND workspace_id = ? AND session_id = ?
@@ -2082,8 +2086,8 @@ class ClarificationStore:
                 LIMIT 1
                 """,
                 (user_id, workspace_id, session_id, kind, cutoff),
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             return self._row_to_request(row) if row else None
 
     async def mark_injected(self, request_id: str) -> bool:

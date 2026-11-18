@@ -16,7 +16,7 @@ from pathlib import PurePosixPath
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.artifact_store import ArtifactStore
 from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE, draft_source_name, source_mime, source_name, word_descriptor
 from bowhead_core.documents.executor import WorkerResult
@@ -174,8 +174,10 @@ class DocumentDeliveryStore:
         self.path = domain_database_path(artifacts.db_path, "execution")
 
     async def claim(self, *, scope: DocumentScope, job_id: str) -> str | None:
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+        # Every execution write below runs through run_sqlite_authority_write: these tables are
+        # fenced, so a running Turn holding a lease made them fail at once (census T6). Each
+        # callback rechecks scope, owner and state in its own transaction, so a repeat is safe.
+        async def write(db: aiosqlite.Connection) -> str | None:
             job = await _scope(db, scope, job_id, write=True)
             if job["status"] != "queued":
                 return None
@@ -190,7 +192,6 @@ class DocumentDeliveryStore:
                         "UPDATE document_executions SET state='failed',error_code='document_execution_interrupted',updated_at=? WHERE job_id=?",
                         (_now(), job_id),
                     )
-                    await db.commit()
                 return None
             async with db.execute(
                 """SELECT j.team_id FROM document_executions e JOIN document_jobs j ON j.id=e.job_id
@@ -206,27 +207,28 @@ class DocumentDeliveryStore:
                 VALUES (?,'preparing',?,?,?,?,?)""",
                 (job_id, owner, time.time() + 600, RATE_CARD_VERSION, now, now),
             )
-            await db.commit()
             return owner
 
+        return await run_sqlite_authority_write(self.path, write)
+
     async def recover_expired(self) -> None:
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+        async def write(db: aiosqlite.Connection) -> None:
             await db.execute(
                 """UPDATE document_executions SET state='failed',error_code='document_execution_interrupted',updated_at=?
               WHERE state IN ('preparing','planning','rendering') AND lease_until<=?
                 AND NOT EXISTS(SELECT 1 FROM document_turn_dispatches d WHERE d.job_id=document_executions.job_id)""",
                 (_now(), time.time()),
             )
-            await db.commit()
+
+        await run_sqlite_authority_write(self.path, write)
 
     async def cleanup(self) -> None:
         """Bounded daily private-file cleanup; permanent identities survive purge."""
         from bowhead_core.artifact_purge import purge_artifacts
 
         now = time.time()
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def claim_files(db: aiosqlite.Connection) -> list:
             async with db.execute(
                 """SELECT f.artifact_id,f.path FROM document_draft_files f JOIN document_executions e ON e.job_id=f.job_id
                 WHERE f.cleanup_after<=? AND julianday(e.updated_at)<julianday('now','-1 day') AND (
@@ -238,12 +240,14 @@ class DocumentDeliveryStore:
                 ORDER BY f.cleanup_after,f.artifact_id LIMIT 100""",
                 (now,),
             ) as cursor:
-                files = await cursor.fetchall()
+                files = [tuple(row) for row in await cursor.fetchall()]
             for artifact_id, _ in files:
                 await db.execute("UPDATE document_draft_files SET cleanup_after=? WHERE artifact_id=?", (now + 86400, artifact_id))
                 if not domain_layout_active(self.path):
                     await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (_now(), artifact_id))
-            await db.commit()
+            return files
+
+        files = await run_sqlite_authority_write(self.path, claim_files)
         if files and domain_layout_active(self.path):
             async with open_shared_ctx(self.artifacts.db_path) as content_db:
                 await content_db.executemany(
@@ -268,8 +272,8 @@ class DocumentDeliveryStore:
         permitted = {"image_id", "context_json", "response", "error_code", "question"}
         if not set(values) <= permitted or state not in {"planning", "rendering", "failed", "question"}:
             raise ValueError("Invalid document transition")
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def write(db: aiosqlite.Connection) -> None:
             previous = await _fence(db, scope, job_id, owner)
             allowed = {"preparing": {"planning", "failed"}, "planning": {"rendering", "failed"}, "rendering": {"planning", "question", "failed"}}
             if state not in allowed[previous["state"]]:
@@ -281,18 +285,20 @@ class DocumentDeliveryStore:
                   THEN ? ELSE lease_until END{"," if assignments else ""}{assignments} WHERE job_id=?""",
                 (state, _now(), state, time.time() + 600, *values.values(), job_id),
             )
-            await db.commit()
+
+        await run_sqlite_authority_write(self.path, write)
 
     async def fail(self, *, job_id: str, owner: str, code: str) -> None:
         """Content-free terminalization also works after revocation."""
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def write(db: aiosqlite.Connection) -> None:
             await db.execute(
                 """UPDATE document_executions SET state='failed',error_code=?,updated_at=?
                 WHERE job_id=? AND owner=? AND state IN ('preparing','planning','rendering')""",
                 (code, _now(), job_id, owner),
             )
-            await db.commit()
+
+        await run_sqlite_authority_write(self.path, write)
 
     async def save_draft(self, *, scope: DocumentScope, job_id: str, owner: str, result: WorkerResult) -> None:
         if result.record.get("kind") not in {"draft", "authoring_draft"}:
@@ -318,8 +324,9 @@ class DocumentDeliveryStore:
                     )
                     prepared_files[name] = (artifact_id, path, mime, sha)
                 await content_db.commit()
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def record_draft(db: aiosqlite.Connection) -> tuple[list, str, dict | None]:
+            # Content rows were staged above with fixed ids, so a repeat inserts the same rows.
             execution = await _fence(db, scope, job_id, owner)
             async with db.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
                 dispatch_row = await cursor.fetchone()
@@ -371,19 +378,22 @@ class DocumentDeliveryStore:
                     (job_id, name, artifact_id, path, sha, len(content)),
                 )
                 files.append((name, artifact_id, path, mime, sha))
-            await db.commit()
+            return files, output_stem, descriptor
+
+        files, output_stem, descriptor = await run_sqlite_authority_write(self.path, record_draft)
         for name, artifact_id, path, mime, sha in files:
             await self.artifacts.put_account_owned_immutable(user_id=scope.user_id, path=path, content=result.files[name], mime=mime)
             content = await self.artifacts.backend.read_bounded(path, limit=32 * 1024 * 1024)
             if hashlib.sha256(content).hexdigest() != sha:
                 raise DocumentRequestError("document_draft_hash_mismatch")
-            async with open_shared_ctx(self.path) as db:
-                await db.execute("BEGIN IMMEDIATE")
+
+            async def verify(db: aiosqlite.Connection, name: str = name, artifact_id: str = artifact_id) -> None:
                 await _fence(db, scope, job_id, owner)
                 await db.execute("UPDATE document_draft_files SET verified_at=? WHERE job_id=? AND name=?", (_now(), job_id, name))
                 if not domain_layout_active(self.path):
                     await db.execute("UPDATE artifacts SET status='ready' WHERE id=?", (artifact_id,))
-                await db.commit()
+
+            await run_sqlite_authority_write(self.path, verify)
             if domain_layout_active(self.path):
                 async with open_shared_ctx(self.artifacts.db_path) as content_db:
                     await content_db.execute("UPDATE artifacts SET status='ready' WHERE id=?", (artifact_id,))
@@ -396,17 +406,19 @@ class DocumentDeliveryStore:
             "files": {name: {"artifact_id": aid, "sha256": sha} for name, aid, _, _, sha in files},
         }
         encoded = _json(payload)
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def review(db: aiosqlite.Connection) -> None:
             await _fence(db, scope, job_id, owner)
             await db.execute(
                 "UPDATE document_executions SET state='review',draft_json=?,draft_digest=?,updated_at=? WHERE job_id=?",
                 (encoded, _digest(encoded), _now(), job_id),
             )
-            await db.commit()
+
+        await run_sqlite_authority_write(self.path, review)
 
     async def get(self, *, scope: DocumentScope, job_id: str) -> dict:
-        async with open_shared_ctx(self.path) as db:
+        # A pure read: on the read-only pool its core membership check takes no authority lease.
+        async with open_pooled_read_ctx(self.path) as db:
             await db.execute("BEGIN")
             job = await _scope(db, scope, job_id, write=False)
             execution = await _execution(db, job_id)
@@ -551,8 +563,7 @@ class DocumentDeliveryStore:
     async def _publish_confirmed_artifacts(self, *, scope: DocumentScope, job_id: str, draft_digest: str, repair: bool = False) -> None:
         # The committed execution confirmation is the approval authority. A
         # replay repairs content promotion after a crash between these commits.
-        async with open_shared_ctx(self.artifacts.db_path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+        async def promote(db: aiosqlite.Connection) -> tuple:
             job = await _scope(db, scope, job_id, write=True)
             execution = await _execution(db, job_id)
             if execution is None or execution["state"] != "published" or execution["draft_digest"] != draft_digest:
@@ -588,10 +599,11 @@ class DocumentDeliveryStore:
                 )
                 if cursor.rowcount != 1:
                     raise DocumentRequestError("document_draft_unavailable")
-            await db.commit()
+            return job, files, published_names
 
-        async with open_shared_ctx(self.path) as execution_db:
-            await execution_db.execute("BEGIN IMMEDIATE")
+        job, files, published_names = await run_sqlite_authority_write(self.artifacts.db_path, promote)
+
+        async def pin(execution_db: aiosqlite.Connection) -> None:
             await _scope(execution_db, scope, job_id, write=True)
             current = await _execution(execution_db, job_id)
             if current is None or current["state"] != "published" or current["draft_digest"] != draft_digest:
@@ -607,7 +619,8 @@ class DocumentDeliveryStore:
                         ),
                         (job["session_id"], file["artifact_id"], _now()),
                     )
-            await execution_db.commit()
+
+        await run_sqlite_authority_write(self.path, pin)
 
     async def _confirm_execution(self, *, scope: DocumentScope, job_id: str, command_id: str, draft_digest: str) -> dict:
         _command_id(command_id)
@@ -641,8 +654,8 @@ class DocumentDeliveryStore:
                 raise DocumentRequestError("document_draft_unavailable") from None
             if len(content) != file["size_bytes"] or hashlib.sha256(content).hexdigest() != file["sha256"]:
                 raise DocumentRequestError("document_draft_hash_mismatch")
-        async with open_shared_ctx(self.path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+
+        async def publish(db: aiosqlite.Connection) -> dict | None:
             job = await _scope(db, scope, job_id, write=True)
             execution = await _execution(db, job_id)
             if execution["state"] == "published" and execution["draft_digest"] == draft_digest:
@@ -694,5 +707,9 @@ class DocumentDeliveryStore:
                         "INSERT INTO session_attachments(session_id,artifact_id,pinned_at) VALUES (?,?,?)",
                         (job["session_id"], file["artifact_id"], _now()),
                     )
-            await db.commit()
+            return None
+
+        already = await run_sqlite_authority_write(self.path, publish)
+        if already is not None:
+            return already
         return await self.get(scope=scope, job_id=job_id)

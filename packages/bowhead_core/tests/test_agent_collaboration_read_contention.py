@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import AsyncIterator
 
 import pytest
@@ -13,7 +14,7 @@ from bowhead_core.agent_collaboration_runtime import CollaborationRuntime
 from test_agent_collaboration import CollaborationFixture
 from test_agent_collaboration import collab as collab
 
-from bowhead_core import sqlite_capacity
+from bowhead_core import _db, sqlite_capacity
 
 pytestmark = pytest.mark.integration
 
@@ -148,3 +149,50 @@ async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the
     for check in (fixture.store.expire(fixture.worker), fixture.store.obligations(fixture.worker, execution_id=fixture.requester)):
         with pytest.raises(CollaborationUnavailable, match="collaboration_worker_unavailable"):
             await check
+
+
+async def _hold_exclusive_core_lease(fixture: CollaborationFixture, released: asyncio.Event, seconds: float) -> None:
+    """Hold the exclusive core lease the way a Space metadata save does, then release it."""
+    async with open_shared_ctx(str(fixture.path)) as writer:
+        await writer.execute("BEGIN IMMEDIATE")
+        try:
+            await writer.execute("UPDATE workspaces SET description=?,revision=revision+1 WHERE id=?", ("Saving", fixture.worker.workspace_id))
+            released.set()
+            await asyncio.sleep(seconds)
+        finally:
+            await writer.rollback()
+
+
+async def test_collaboration_writes_repeat_until_an_authority_writer_lets_go(split_collab: CollaborationFixture) -> None:
+    """116 1.7.49: a collaboration write pinned the shared core lease at its first scope read and failed
+    at once beside a Space save. Writes now repeat their whole transaction and land once the lease is free."""
+    fixture = split_collab
+    holding = asyncio.Event()
+    holder = asyncio.create_task(_hold_exclusive_core_lease(fixture, holding, 0.3))
+    await holding.wait()
+    question = await asyncio.wait_for(fixture.ask(), timeout=10)
+    await holder
+    assert await fixture.count() == 1
+
+    holding = asyncio.Event()
+    holder = asyncio.create_task(_hold_exclusive_core_lease(fixture, holding, 0.3))
+    await holding.wait()
+    await asyncio.wait_for(fixture.reply(question), timeout=10)
+    await holder
+    assert await fixture.count() == 2
+
+
+async def test_a_collaboration_write_that_never_gets_the_lease_fails_as_before_and_writes_nothing(
+    split_collab: CollaborationFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = split_collab
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.2)
+    holding = asyncio.Event()
+    holder = asyncio.create_task(_hold_exclusive_core_lease(fixture, holding, 1.0))
+    await holding.wait()
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="authority lease is busy"):
+            await fixture.ask()
+    finally:
+        await holder
+    assert await fixture.count() == 0

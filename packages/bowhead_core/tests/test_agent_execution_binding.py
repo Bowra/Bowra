@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import atexit
 import hashlib
 import json
-import shutil
 import sqlite3
-import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +29,7 @@ from bowhead_core.session_store import SessionStore
 from bowhead_core.subagent import SubagentRunner, _agent_attribution_payload, _system_profile_snapshot
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.user_store import TeamSubagent, UserStore
-from core_legacy_database import upgrade
+from core_legacy_database import copy_migrated_core
 
 _NOW = "2026-09-04T00:00:00+00:00"
 
@@ -79,32 +76,9 @@ class _Fixture:
     turn_id: str
 
 
-_MIGRATED_CORE: list[Path] = []
-
-
-def _migrated_core_template() -> Path:
-    """Migrate one pristine core database per process; revisions are deterministic.
-
-    Running every revision from an empty file cost about 8 seconds per test and
-    dominated the reference suites that build on ``_setup``.
-    """
-    if not _MIGRATED_CORE:
-        directory = Path(tempfile.mkdtemp(prefix="bowhead-core-head-"))
-        atexit.register(shutil.rmtree, directory, True)
-        assert upgrade(f"sqlite+aiosqlite:///{directory / 'bowhead.db'}", target="core") == ("core",)
-        _MIGRATED_CORE.append(directory / "bowhead.db")
-    return _MIGRATED_CORE[0]
-
-
 async def _setup(tmp_path: Path) -> _Fixture:
     db_path = tmp_path / "bowhead.db"
-    # Callers may pass a fresh subdirectory; the migration this copy replaced created it implicitly.
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_migrated_core_template()) as source, sqlite3.connect(db_path) as destination:
-        source.backup(destination)
-    # The deployment migrator resolves the canonical core filename from the
-    # URL's directory, mirroring the real multi-database startup path (a no-op at head).
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    copy_migrated_core(db_path)
     users = UserStore(db_path)
     sessions = SessionStore(db_path)
     await users.initialize()

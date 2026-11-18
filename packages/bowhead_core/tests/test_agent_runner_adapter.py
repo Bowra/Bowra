@@ -25,7 +25,7 @@ from bowhead_core.agents.agent_runner_adapter import (
     register_manifest_as_profile,
 )
 from bowhead_core.agents.manifest import ToolsSpec
-from bowhead_core.agents.task_spec import BusRef, TaskSpec
+from bowhead_core.agents.task_spec import BusRef, PlanStepModelError, TaskSpec
 from bowhead_core.agents.turn_context import (
     RuntimeTurnContext,
     SerializableTurnContext,
@@ -567,6 +567,51 @@ async def test_runner_fn_failure_raises() -> None:
     spec = TaskSpec(agent_name="compute", user_question="q")
     with pytest.raises(RuntimeError, match="simulated subagent failure"):
         await runner_fn(manifest, spec, _mk_runtime_ctx())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("llm_reason_code", "error_kind"),
+    [
+        ("llm_provider_timeout", "llm_provider_timeout"),
+        ("llm_provider_unavailable", "llm_provider_unavailable"),
+        # Other model failures keep the generic step failure.
+        ("llm_stream_interrupted", None),
+        (None, None),
+    ],
+)
+async def test_runner_fn_keeps_the_model_failure_of_an_exhausted_step(llm_reason_code: str | None, error_kind: str | None) -> None:
+    """A model call that still failed after the Router's retries keeps its own classification."""
+    registry = AgentRegistry.bootstrap()
+    register_all_system_manifests(registry)
+    manifest = registry.get("compute")
+    stub_runner = _StubRunner(
+        next_result=SubagentResult(
+            profile="compute",
+            subagent_id="sub_x",
+            ok=False,
+            final_answer="",
+            error="subagent_internal_error",
+            llm_reason_code=llm_reason_code,
+        ),
+    )
+    runner_fn = make_legacy_agent_runner_fn(
+        subagent_runner=stub_runner,  # type: ignore[arg-type]
+        parent_turn_id="t_test",
+        parent_bus=_StubBus(),  # type: ignore[arg-type]
+        parent_ctx=_StubCtx(),  # type: ignore[arg-type]
+        team_sourced_names=frozenset(),
+    )
+    spec = TaskSpec(agent_name="compute", user_question="q")
+    if error_kind is None:
+        with pytest.raises(RuntimeError, match="subagent_internal_error"):
+            await runner_fn(manifest, spec, _mk_runtime_ctx())
+        return
+    with pytest.raises(PlanStepModelError) as raised:
+        await runner_fn(manifest, spec, _mk_runtime_ctx())
+    # The task runner records error_kind as the step's kind and the text as its reason.
+    assert raised.value.error_kind == error_kind
+    assert "Resume the plan" in str(raised.value) and "subagent_internal_error" not in str(raised.value)
 
 
 @pytest.mark.asyncio

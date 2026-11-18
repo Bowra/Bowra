@@ -74,6 +74,19 @@ async def test_handler_accepts_valid_payload_and_signals_terminal() -> None:
 
 
 @pytest.mark.unit
+async def test_a_long_number_ledger_is_accepted_and_counted() -> None:
+    """Observed case: a store helper registered all 80 numbers its report cites, as the prompt asks.
+    The return was refused five times for more than 64 entries and the helper stopped partial."""
+    reg = ToolRegistry()
+    register_subagent_return_tool(reg)
+    ledger = [{"key": f"store_{i}", "label": f"门店{i}营业额", "value": 1.5 + i, "unit": "亿元", "source": "given"} for i in range(80)]
+    inv = await reg.execute("subagent_return", {"payload": {**_good_payload(), "ground_facts": ledger}}, _stub_ctx())
+    assert inv.error is None
+    assert inv.result["ok"] is True
+    assert inv.result["summary"]["ground_facts_count"] == 80
+
+
+@pytest.mark.unit
 async def test_consume_clears_attr() -> None:
     reg = ToolRegistry()
     register_subagent_return_tool(reg)

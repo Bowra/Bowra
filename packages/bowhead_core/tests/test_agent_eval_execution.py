@@ -1396,7 +1396,7 @@ async def test_eval_service_total_duration_budget_interrupts_judge(tmp_path: Pat
             # Exhaust the unchanged run budget after the Judge starts, independent of setup load.
             clock[0] = 2.0
             try:
-                await asyncio.sleep(30)
+                await asyncio.Event().wait()
             except asyncio.CancelledError:
                 judge_interrupted.set()
                 raise
@@ -1431,14 +1431,11 @@ async def test_eval_service_total_duration_budget_interrupts_judge(tmp_path: Pat
         rubric_resolver=Rubric(),
         timeout_seconds=45,
     )
-    finished = await asyncio.wait_for(
-        service.execute_run(
-            run_id=run.run_id,
-            workspace_id=workspace_id,
-            worker_id="eval.duration",
-            limits=EvalExecutionLimits(max_duration_ms=1_000),
-        ),
-        timeout=4,
+    finished = await service.execute_run(
+        run_id=run.run_id,
+        workspace_id=workspace_id,
+        worker_id="eval.duration",
+        limits=EvalExecutionLimits(max_duration_ms=1_000),
     )
     assert judge_started.is_set()
     assert judge_interrupted.is_set()
