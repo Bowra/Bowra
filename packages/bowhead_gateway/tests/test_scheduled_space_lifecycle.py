@@ -78,7 +78,10 @@ async def test_archived_space_keeps_scheduled_history_readable(
     runs = client.get(f"/api/v1/scheduled/jobs/{job_id}/runs")
 
     assert listed.status_code == 200, listed.text
-    assert [item["id"] for item in listed.json()["items"]] == [job_id]
+    body = listed.json()
+    assert [item["id"] for item in body["items"]] == [job_id]
+    assert body["active_count"] == 1
+    assert body["max_active"] == 20
     assert fetched.status_code == 200, fetched.text
     assert runs.status_code == 200, runs.text
 

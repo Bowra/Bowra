@@ -399,7 +399,7 @@ it("separates connections, agent bindings, and call history into tabs", async ()
 
   fireEvent.click(screen.getByRole("tab", { name: "agentBindings" }));
   expect(
-    await screen.findByRole("heading", { name: "agentMcpTitle" }),
+    await screen.findByRole("heading", { name: "bindingEmptyTitle" }),
   ).toBeTruthy();
 
   fireEvent.click(screen.getByRole("tab", { name: "history" }));
@@ -423,7 +423,23 @@ it("does not claim there are no private agents while bindings are still loading"
   expect(screen.queryByText("noPrivateAgents")).toBeNull();
 
   finishBindings({ agents: [] });
-  expect(await screen.findByText("noPrivateAgents")).toBeTruthy();
+  expect(await screen.findByText("bindingEmptyTitle")).toBeTruthy();
+});
+
+it("shows one setup action for all agents when no personal tools are available", async () => {
+  mocks.api.mockImplementation(async (path: string) => {
+    if (path === "/capabilities") return { enabled: true };
+    if (path === "/agents/bindings") return { agents: Array.from({ length: 18 }, (_, index) => ({
+      id: `osa_${index}`, display_name: `Private agent ${index}`, revision_id: "rev_1", tool_ids_json: "[]", binding_version: 0,
+    })) };
+    return { connections: [] };
+  });
+  render(<PersonalMcpSettings />);
+  fireEvent.click(await screen.findByRole("tab", { name: "agentBindings" }));
+  expect(await screen.findAllByRole("heading", { name: "bindingEmptyTitle" })).toHaveLength(1);
+  expect(screen.queryByText("Private agent 0")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "addConnection" }));
+  expect(await screen.findByRole("dialog", { name: "addConnection" })).toBeTruthy();
 });
 
 it("names the private agents bound to a connection before it is deleted", async () => {
@@ -476,12 +492,15 @@ it("titles an agent without a display name by its slug", async () => {
         ],
       };
     }
-    return { connections: [] };
+    return { connections: [{
+      id: "pmc_search", name: "Search MCP", endpoint: "https://search.example/mcp", status: "ready",
+      tools: [{ id: "tool_search", remote_name: "web_search", description: "", selected: 1 }],
+    }] };
   });
   const { container } = render(<PersonalMcpAgentBindings />);
   await screen.findByText("Researcher");
-  const titles = [...container.querySelectorAll(".personal-mcp-agent-binding > legend")].map(
-    (legend) => legend.textContent,
+  const titles = [...container.querySelectorAll(".personal-mcp-binding-list summary")].map(
+    (summary) => summary.textContent?.trim(),
   );
   expect(titles).toEqual(["sales-helper", "Researcher"]);
 });

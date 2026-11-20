@@ -49,7 +49,7 @@ import {
 import { HtmlPreviewModeControl, useHtmlPreviewMode, type HtmlPreviewMode } from "./html-preview-mode";
 import { InPlaceFullView } from "./in-place-full-view";
 import type { HtmlPreviewIssue, InteractiveHtmlDocument } from "@/lib/html-preview-contract";
-import { ResultObjectActions } from "./result-object-actions";
+import { ResultObjectActions, type CompactResultToolbar } from "./result-object-actions";
 
 export function ArtifactPreview({
   fileId,
@@ -66,6 +66,8 @@ export function ArtifactPreview({
   sizeBytes,
   trust,
   showHeaderTitle = true,
+  compactToolbar,
+  allowFileShare = false,
   onReference,
   onDownload,
   capabilities,
@@ -76,6 +78,7 @@ export function ArtifactPreview({
   onOpenHistory,
   onFeedbackUnsupported,
   onRetry,
+  onContentVersionChanged,
   onOpenFailed,
   onClose,
 }: {
@@ -93,6 +96,8 @@ export function ArtifactPreview({
   sizeBytes?: number | null;
   trust?: string | null;
   showHeaderTitle?: boolean;
+  compactToolbar?: CompactResultToolbar;
+  allowFileShare?: boolean;
   onReference?: () => void;
   onDownload?: () => void;
   capabilities?: ReadonlySet<ResultCapability>;
@@ -100,9 +105,10 @@ export function ArtifactPreview({
   downloadLabel?: string;
   feedbackRecorded?: boolean;
   onViewerModeChange?: (mode: ResultsViewerMode) => void;
-  onOpenHistory?: () => void;
+  onOpenHistory?: (trigger?: HTMLElement) => void;
   onFeedbackUnsupported?: () => void;
   onRetry?: () => void;
+  onContentVersionChanged?: () => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
   onClose?: () => void;
 }) {
@@ -135,6 +141,7 @@ export function ArtifactPreview({
     href: rendererHref,
     declaredSize: sizeBytes,
     reloadToken,
+    onVersionChanged: onContentVersionChanged,
   });
 
   useEffect(() => {
@@ -181,7 +188,7 @@ export function ArtifactPreview({
         onModeChange: htmlMode.select,
         onEscape: () => setExpanded(false),
         trust,
-        onReload: () => setReloadToken((value) => value + 1),
+        onReload: onContentVersionChanged ?? (() => setReloadToken((value) => value + 1)),
       }
     : null;
   const bodyProps = {
@@ -201,6 +208,7 @@ export function ArtifactPreview({
     alt: filename,
     sizeBytes,
     safeHtml: safeHtmlBody,
+    compactHtml: Boolean(compactToolbar),
     video: videoActive
       ? {
           src: inlineHref,
@@ -220,30 +228,45 @@ export function ArtifactPreview({
     documentPreviewCacheRef,
   };
 
+  const leaveFullViewThen = <Args extends unknown[]>(action: (...args: Args) => void) => (...args: Args) => {
+    if (expanded) setExpanded(false);
+    action(...args);
+  };
+  const compactActions = compactToolbar && {
+    modes: viewerModesForProfile(profile),
+    returns: compactToolbar.returnActions.map((action) => ({
+      ...action,
+      onSelect: leaveFullViewThen(action.onSelect),
+    })),
+    html: safeHtmlBody && {
+      mode: safeHtmlBody.htmlMode,
+      paused: safeHtmlBody.paused,
+      onPause: safeHtmlBody.onPause,
+      onModeChange: safeHtmlBody.onModeChange,
+      onReload: safeHtmlBody.onReload,
+    },
+  };
+  const sharedHeaderProps = {
+    artifactId: fileId, filename, meta, href, onDownload, capabilities, resultRole, mode,
+    downloadLabel, feedbackRecorded, onFeedbackUnsupported,
+    compactActions,
+    onReference: onReference && leaveFullViewThen(onReference),
+    onViewerModeChange: compactToolbar && onViewerModeChange ? leaveFullViewThen(onViewerModeChange) : onViewerModeChange,
+    onOpenHistory: compactToolbar && onOpenHistory ? leaveFullViewThen(onOpenHistory) : onOpenHistory,
+  };
   return (
     <>
       <InPlaceFullView active={inPlaceFullView && expanded} label={filename}
         onClose={() => setExpanded(false)} returnFocusRef={returnFocusRef}>
         <ArtifactPreviewHeader
-          artifactId={fileId}
-          filename={filename}
-          meta={meta}
-          href={href}
+          {...sharedHeaderProps}
+          compactTitle={inPlaceFullView && expanded ? undefined : compactToolbar?.title}
           onExpand={(trigger) => {
             returnFocusRef.current = trigger;
             setExpanded((value) => !value);
           }}
           fullViewActive={inPlaceFullView && expanded}
-          onReference={onReference && inPlaceFullView && expanded ? () => { setExpanded(false); onReference(); } : onReference}
-          onDownload={onDownload}
-          capabilities={capabilities}
-          resultRole={resultRole}
-          mode={mode}
-          downloadLabel={downloadLabel}
-          feedbackRecorded={feedbackRecorded}
-          onViewerModeChange={onViewerModeChange}
-          onOpenHistory={onOpenHistory}
-          onFeedbackUnsupported={onFeedbackUnsupported}
+          allowFileShare={allowFileShare && isSafeHtmlMime(mime)}
           onClose={inPlaceFullView && expanded ? undefined : onClose}
           showTitle={showHeaderTitle}
         />
@@ -261,25 +284,7 @@ export function ArtifactPreview({
         >
           <div className="artifact-viewer-modal-panel" tabIndex={-1}>
             <ArtifactPreviewHeader
-              artifactId={fileId}
-              filename={filename}
-              meta={meta}
-              href={href}
-              onReference={onReference
-                ? () => {
-                    setExpanded(false);
-                    onReference();
-                  }
-                : undefined}
-              onDownload={onDownload}
-              capabilities={capabilities}
-              resultRole={resultRole}
-              mode={mode}
-              downloadLabel={downloadLabel}
-              feedbackRecorded={feedbackRecorded}
-              onViewerModeChange={onViewerModeChange}
-              onOpenHistory={onOpenHistory}
-              onFeedbackUnsupported={onFeedbackUnsupported}
+              {...sharedHeaderProps}
               onClose={() => setExpanded(false)}
               modalClose
             />
@@ -312,6 +317,7 @@ function ArtifactPreviewHeader({
   resultRole,
   mode = "preview",
   downloadLabel,
+  allowFileShare,
   feedbackRecorded,
   onViewerModeChange,
   onOpenHistory,
@@ -320,6 +326,8 @@ function ArtifactPreviewHeader({
   showTitle = true,
   modalClose = false,
   fullViewActive = false,
+  compactTitle,
+  compactActions,
 }: {
   artifactId: string;
   filename: string;
@@ -332,23 +340,48 @@ function ArtifactPreviewHeader({
   resultRole?: ArtifactResultRole;
   mode?: ResultsViewerMode;
   downloadLabel?: string;
+  allowFileShare?: boolean;
   feedbackRecorded?: boolean;
   onViewerModeChange?: (mode: ResultsViewerMode) => void;
-  onOpenHistory?: () => void;
+  onOpenHistory?: (trigger?: HTMLElement) => void;
   onFeedbackUnsupported?: () => void;
   onClose?: () => void;
   showTitle?: boolean;
   modalClose?: boolean;
   fullViewActive?: boolean;
+  compactTitle?: React.ReactNode;
+  compactActions?: React.ComponentProps<typeof ResultObjectActions>["compact"];
 }) {
   const t = useTranslations("artifact_viewer");
+  const expandLabel = t(fullViewActive ? "close" : "open_full");
+  const tools = onExpand || onClose ? (
+    <div className="artifact-viewer-tools">
+      {onExpand ? (
+        <button type="button" aria-label={expandLabel} title={compactActions ? expandLabel : undefined}
+          onClick={(event) => onExpand(event.currentTarget)}>
+          {fullViewActive ? <X size={13} aria-hidden="true" /> : <Maximize size={13} aria-hidden="true" />}
+          {compactActions ? null : expandLabel}
+        </button>
+      ) : null}
+      {onClose ? (
+        <button type="button" aria-label={t("close")} title={compactActions ? t("close") : undefined}
+          onClick={onClose} data-dialog-initial-focus={modalClose || undefined}>
+          <X size={13} aria-hidden="true" />
+          {compactActions ? null : t("close")}
+        </button>
+      ) : null}
+    </div>
+  ) : null;
   return (
-    <div className="artifact-viewer-head">
-      <div className="artifact-viewer-title">
-        {showTitle ? <strong title={filename}>{filename}</strong> : null}
-        {meta ? <span>{meta}</span> : null}
-      </div>
+    <div className={compactActions ? "artifact-viewer-head result-file-toolbar" : "artifact-viewer-head"}>
+      {compactTitle ?? (
+        <div className="artifact-viewer-title">
+          {showTitle ? <strong title={filename}>{filename}</strong> : null}
+          {!compactActions && meta ? <span>{meta}</span> : null}
+        </div>
+      )}
       <div className="artifact-viewer-actions">
+        {compactActions ? tools : null}
         <div className="artifact-object-actions">
           {capabilities && resultRole ? (
             <ResultObjectActions
@@ -358,7 +391,9 @@ function ArtifactPreviewHeader({
               mode={mode}
               downloadHref={href}
               downloadLabel={downloadLabel}
+              shareFilename={allowFileShare ? filename : undefined}
               feedbackRecorded={feedbackRecorded}
+              compact={compactActions}
               onReference={onReference}
               onDownload={onDownload}
               onModeChange={onViewerModeChange}
@@ -380,22 +415,7 @@ function ArtifactPreviewHeader({
             </>
           )}
         </div>
-        {onExpand || onClose ? (
-          <div className="artifact-viewer-tools">
-            {onExpand ? (
-              <button type="button" onClick={(event) => onExpand(event.currentTarget)}>
-                {fullViewActive ? <X size={13} aria-hidden="true" /> : <Maximize size={13} aria-hidden="true" />}
-                {t(fullViewActive ? "close" : "open_full")}
-              </button>
-            ) : null}
-            {onClose ? (
-              <button type="button" onClick={onClose} data-dialog-initial-focus={modalClose || undefined}>
-                <X size={13} aria-hidden="true" />
-                {t("close")}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        {compactActions ? null : tools}
       </div>
     </div>
   );
@@ -416,6 +436,7 @@ function ArtifactPreviewBody({
   sizeBytes,
   expanded = false,
   safeHtml,
+  compactHtml,
   video,
   imageView,
   onImageViewChange,
@@ -452,6 +473,7 @@ function ArtifactPreviewBody({
     onModeChange: (mode: HtmlPreviewMode) => void;
     onEscape: () => void;
   } | null;
+  compactHtml: boolean;
   video: {
     src: string;
     mime: string;
@@ -468,7 +490,7 @@ function ArtifactPreviewBody({
 }) {
   const t = useTranslations("artifact_viewer");
   if (loading && !error) return <div className="artifact-viewer-note loading">{t("loading")}</div>;
-  if (safeHtml) return <><SafeHtmlPreviewBody state={safeHtml} alt={alt} expanded={expanded} />{safeHtml.error ? recoveryActions : null}</>;
+  if (safeHtml) return <><SafeHtmlPreviewBody state={safeHtml} alt={alt} expanded={expanded} compact={compactHtml} />{safeHtml.error ? recoveryActions : null}</>;
   if (video) {
     return (
       <VideoArtifactPreview
@@ -570,6 +592,7 @@ function SafeHtmlPreviewBody({
   state,
   alt,
   expanded,
+  compact,
 }: {
   state: {
     document: string | null;
@@ -587,6 +610,7 @@ function SafeHtmlPreviewBody({
   };
   alt: string;
   expanded: boolean;
+  compact: boolean;
 }) {
   const t = useTranslations("artifact_viewer");
   const [issue, setIssue] = useState<HtmlPreviewIssue | null>(null);
@@ -594,7 +618,7 @@ function SafeHtmlPreviewBody({
   const message = state.error ? t(`safe_html_${state.error}`, { limit: formatByteSize(state.maxBytes ?? 0) }) : null;
   return (
     <div className={expanded ? "safe-html-preview expanded" : "safe-html-preview"}>
-      <div className="safe-html-preview-status">
+      {compact ? null : <div className="safe-html-preview-status">
         {state.htmlMode ? <HtmlPreviewModeControl value={state.htmlMode} onChange={state.onModeChange} />
           : <span className="safe-html-preview-badge">{t("safe_html_badge")}</span>}
         <span>{t(state.htmlMode === "interactive" ? "html_offline" : "safe_html_network_off")}</span>
@@ -606,7 +630,7 @@ function SafeHtmlPreviewBody({
           <RefreshCw size={13} aria-hidden="true" />
           {t("safe_html_reload")}
         </button>
-      </div>
+      </div>}
       {state.paused ? <div role="status" className="artifact-viewer-note">{t("html_paused")}</div> : message ? (
         <div className="artifact-viewer-note error" role="alert">{message}</div>
       ) : state.loading || state.document === null ? (
@@ -614,7 +638,17 @@ function SafeHtmlPreviewBody({
       ) : (
         <SafeHtmlFrame document={state.document} interactive={state.interactive} onEscape={state.onEscape} onIssue={setIssue} title={alt} className="safe-html-preview-frame" />
       )}
-      <div className="safe-html-preview-hint">{t(state.htmlMode === "interactive" ? "html_interactive_hint" : "safe_html_hint")}
+      <div className="safe-html-preview-hint">
+        {compact ? (
+          <>
+            {!state.htmlMode ? <span className="safe-html-preview-badge">{t("safe_html_badge")}</span> : null}{" "}
+            {t(state.htmlMode === "interactive" ? "html_offline" : "safe_html_network_off")}{" "}
+            {state.trust === "unverified" ? (
+              <span className="safe-html-preview-unverified">{t("safe_html_unverified")}</span>
+            ) : null}{" "}
+          </>
+        ) : null}
+        {t(state.htmlMode === "interactive" ? "html_interactive_hint" : "safe_html_hint")}
         {state.interactive?.externalResources ? ` ${t("html_external_blocked")}` : null}</div>
       {issue ? <div role="status" className="safe-html-preview-hint">{t(`html_issue_${issue}`)}</div> : null}
     </div>

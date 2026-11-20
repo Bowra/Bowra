@@ -1,7 +1,6 @@
 /**
  * Chat workbench and report canvas batch 4b: sharing entry and status group in the results report toolbar.
- *   · Flag on: toolbar has a「分享」icon button (same visibility as「复制权限链接」in「更多」: report session exists, not shared read-only view);
- *     it opens the existing report share dialog.「复制权限链接」stays in「更多」; toolbar has a status group, passed to ReportView as its host.
+ *   · Flag on: the toolbar opens the report share dialog and supplies the status host to ReportView.
  *   · Flag off: no share button/status group, and no status host passed to ReportView (same as before).
  */
 import "@testing-library/jest-dom/vitest";
@@ -398,7 +397,7 @@ describe("第 4b 批余项：写作中导出不可用、窄工具条、手机阅
     await waitFor(() => expect(editHost()).not.toBeNull());
     expect(toolbar()).not.toHaveAttribute("data-phone-reading");
     fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
-    await screen.findByRole("menuitem", { name: "复制权限链接" });
+    await screen.findByRole("menu");
     expect(screen.queryByRole("menuitem", { name: "编辑此报告" })).toBeNull();
   });
 
@@ -439,7 +438,7 @@ describe("report toolbar share and status", () => {
     expect(reportViewProps.openHistory).toHaveBeenCalled();
   });
 
-  it("有「分享」图标按钮，点开是这份报告的分享弹窗，回焦目标是这个按钮；「复制权限链接」仍在「更多」", async () => {
+  it("opens the correct report share dialog and restores focus to the toolbar button", async () => {
     renderWorkbench();
     const share = await screen.findByRole("button", { name: "分享报告" });
     expect(toolbar()!.contains(share)).toBe(true);
@@ -452,8 +451,6 @@ describe("report toolbar share and status", () => {
     expect(dialog.getAttribute("data-return-focus")).toBe("分享报告");
     fireEvent.click(screen.getByRole("button", { name: "close-share" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "share-dialog" })).toBeNull());
-    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
-    expect(await screen.findByRole("menuitem", { name: "复制权限链接" })).toBeTruthy();
   });
 
   it("工具条有状态组，ReportView 拿到它作状态组宿主", async () => {
@@ -486,7 +483,7 @@ describe("report toolbar share and status", () => {
     canvasState.status = "done";
     renderWorkbench();
     fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
-    await screen.findByRole("menuitem", { name: "复制权限链接" });
+    await screen.findByRole("menu");
     expect(screen.queryByRole("menuitem", { name: "复制轮次 ID" })).toBeNull();
   });
 

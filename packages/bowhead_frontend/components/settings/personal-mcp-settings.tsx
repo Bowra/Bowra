@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   personalMcpApi,
@@ -8,6 +8,10 @@ import {
   type PersonalMcpAgent,
 } from "@/lib/personal-mcp-api";
 import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
+import { ChevronDown } from "@/components/icons";
+import { appPath } from "@/lib/base-path";
 import { formatDateTime } from "@/lib/locale";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 
@@ -375,7 +379,13 @@ export function PersonalMcpSettings() {
           ) : null}
       </TabPanel>
       <TabPanel value="agents" className="personal-mcp-tab-panel">
-        <PersonalMcpAgentBindings connections={connections} />
+        <PersonalMcpAgentBindings
+          connections={connections}
+          onManageConnections={() => {
+            setTab("connections");
+            if (!hasConnections) addConnection();
+          }}
+        />
       </TabPanel>
       <TabPanel value="history" className="personal-mcp-tab-panel">
         <PersonalMcpHistory />
@@ -535,11 +545,14 @@ function ConnectionEditor({
 export function PersonalMcpAgentBindings({
   connections: supplied,
   agentId,
+  onManageConnections,
 }: {
   connections?: PersonalMcpConnection[];
   agentId?: string;
+  onManageConnections?: () => void;
 }) {
   const t = useTranslations("personalMcp");
+  const agentGroup = useId();
   const [connections, setConnections] = useState<PersonalMcpConnection[]>([]);
   // null = binding list has not returned; do not render the No Bindable Agents empty state yet.
   const [agents, setAgents] = useState<PersonalMcpAgent[] | null>(null);
@@ -584,47 +597,71 @@ export function PersonalMcpAgentBindings({
     }))
     .filter((connection) => connection.tools.length > 0);
   const loadingAgents = agents === null;
-  const visibleAgents = !agents
-    ? []
-    : agentId
-      ? agents.filter((agent) => agent.id === agentId)
-      : agents;
+  const visibleAgents = (agents ?? []).filter((agent) => !agentId || agent.id === agentId);
+  const editableAgents = usable.length
+    ? visibleAgents
+    : visibleAgents.filter((agent) => selectedIds(agent.tool_ids_json).size > 0);
   return (
     <section
       className="personal-mcp-panel personal-mcp-agent-bindings"
       aria-busy={loadingAgents || undefined}
     >
-      <header>
-        <div>
+      {loadingAgents || usable.length > 0 ? (
+        <header>
           <h3>{t("agentMcpTitle")}</h3>
           <p>{t("agentMcpDescription")}</p>
-        </div>
-      </header>
+        </header>
+      ) : null}
       {error ? <p role="alert">{t("error")}</p> : null}
-      {!loadingAgents && !visibleAgents.length ? (
+      {loadingAgents && !error ? <LoadingSkeleton rows={2} /> : null}
+      {!loadingAgents && !usable.length ? (
+        <div className="personal-mcp-binding-empty">
+          <div>
+            <h3>{t("bindingEmptyTitle")}</h3>
+            <p>{t("bindingEmptyHint")}</p>
+          </div>
+          {onManageConnections ? (
+            <Button variant="primary" onClick={onManageConnections}>
+              {(supplied ?? connections).length ? t("manageConnections") : t("addConnection")}
+            </Button>
+          ) : (
+            <a className="settings-button settings-button--primary settings-button--md" href={appPath("/connections/")}>{t("manageConnections")}</a>
+          )}
+        </div>
+      ) : null}
+      {usable.length > 0 && !loadingAgents && !visibleAgents.length ? (
         <p>{t("noPrivateAgents")}</p>
       ) : null}
-      {visibleAgents.map((agent) => (
-        <AgentBindingEditor
-          key={`${agent.id}:${agent.revision_id}:${agent.binding_version}`}
-          agent={agent}
-          connections={usable}
-          showAgentName={!agentId}
-          onSave={async (toolIds) => {
-            setError(false);
-            try {
-              await personalMcpApi(`/agents/${agent.id}/binding`, "PUT", {
-                revision_id: agent.revision_id,
-                tool_ids: toolIds,
-                version: agent.binding_version,
-              });
-              await load();
-            } catch {
-              setError(true);
-            }
-          }}
-        />
-      ))}
+      {editableAgents.length ? (
+        <div className="personal-mcp-binding-list">
+          {editableAgents.map((agent) => {
+            const editor = <AgentBindingEditor
+              key={`${agent.id}:${agent.revision_id}:${agent.binding_version}`}
+              agent={agent}
+              connections={usable}
+              onSave={async (toolIds) => {
+                setError(false);
+                try {
+                  await personalMcpApi(`/agents/${agent.id}/binding`, "PUT", {
+                    revision_id: agent.revision_id,
+                    tool_ids: toolIds,
+                    version: agent.binding_version,
+                  });
+                  await load();
+                } catch {
+                  setError(true);
+                }
+              }}
+            />;
+            return agentId ? editor : (
+              <details key={agent.id} name={agentGroup}>
+                <summary>{personalMcpAgentName(agent)} <ChevronDown size={16} aria-hidden="true" /></summary>
+                {editor}
+              </details>
+            );
+          })}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -632,7 +669,6 @@ export function PersonalMcpAgentBindings({
 function AgentBindingEditor({
   agent,
   connections,
-  showAgentName,
   onSave,
 }: {
   agent: PersonalMcpAgent;
@@ -642,10 +678,10 @@ function AgentBindingEditor({
     endpoint: string;
     tools: PersonalMcpConnection["tools"];
   }[];
-  showAgentName: boolean;
   onSave: (toolIds: string[]) => Promise<void>;
 }) {
   const t = useTranslations("personalMcp");
+  const editorId = useId();
   const selectedToolIds = agent.tool_ids_json;
   const [selected, setSelected] = useState<Set<string>>(() => selectedIds(selectedToolIds));
   const [busy, setBusy] = useState(false);
@@ -659,20 +695,18 @@ function AgentBindingEditor({
   return (
     <fieldset
       disabled={busy}
-      className={`personal-mcp-connection personal-mcp-agent-binding${showAgentName ? "" : " is-embedded"}`}
+      className="personal-mcp-connection personal-mcp-agent-binding is-embedded"
     >
-      {showAgentName ? <legend>{personalMcpAgentName(agent)}</legend> : null}
       <div className="personal-mcp-server-list">
         {connections.map((connection) => (
           <section
             key={connection.id}
             className="personal-mcp-server"
-            aria-labelledby={`personal-mcp-server-${connection.id}`}
+            aria-labelledby={`${editorId}-${connection.id}`}
           >
             <header>
               <div>
-                <span>{t("mcpServer")}</span>
-                <h4 id={`personal-mcp-server-${connection.id}`}>
+                <h4 id={`${editorId}-${connection.id}`}>
                   {connection.name}
                 </h4>
                 <p>{connection.endpoint}</p>
@@ -707,9 +741,6 @@ function AgentBindingEditor({
             </div>
           </section>
         ))}
-        {!connections.length ? (
-          <p className="personal-mcp-binding-empty">{t("noAvailableTools")}</p>
-        ) : null}
       </div>
       {missing.length ? (
         <div className="personal-mcp-missing-tools">

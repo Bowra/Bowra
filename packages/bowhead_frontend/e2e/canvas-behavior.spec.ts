@@ -5,8 +5,8 @@ import { enableResultsWorkspace, mockAuthedApp } from "./_app-mocks";
 /**
  * Chat Workbench/report canvas batch 4b (canvas behavior): real-browser toolbar status group, sharing entry, chapter menu, source cards,
  * selection-toolbar keyboard entry, revision-history wording, read-only sharing view. Chromium and WebKit (CROSS_BROWSER_SPECS),
- * widths 1440 and 412. Mock only, no real chat: reports use e2e-only __CANVAS_TEST_HYDRATE__ (same F5 hydration entry)
- * and __CANVAS_TEST_EVENTS__ (live writing, same store entries as SSE canvas events) to fill canvas store.
+ * widths 1440 and 412. Reload restores the mocked saved report over HTTP. Other cases use the test-only store hydration
+ * and live writing hooks, which feed the same store as the session and canvas events.
  */
 
 const SESSION = "s_wb4b";
@@ -22,9 +22,9 @@ const REVISIONS = [
 
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-async function routeReportApis(page: Page) {
+async function routeReportApis(page: Page, status: "active" | "verified" = "active") {
   await page.route(`**/api/v1/canvas/${CANVAS}/status`, (route) =>
-    route.fulfill(json({ status: "active", effectiveStatus: "active", quarantinedCount: 0 })),
+    route.fulfill(json({ status, effectiveStatus: status, quarantinedCount: 0 })),
   );
   await page.route(`**/api/v1/canvas/${CANVAS}/revisions`, (route) => route.fulfill(json({ items: REVISIONS })));
   await page.route(`**/api/v1/shares/report/${SESSION}`, (route) =>
@@ -43,10 +43,19 @@ async function routeReportApis(page: Page) {
   await page.route("**/api/v1/team/groups-directory", (route) => route.fulfill(json({ items: [] })));
 }
 
-async function open(page: Page, width: number) {
+async function open(page: Page, width: number, restoreSavedReport = false) {
   await page.setViewportSize({ width, height: 900 });
   await mockAuthedApp(page);
-  await routeReportApis(page);
+  await routeReportApis(page, restoreSavedReport ? "verified" : "active");
+  if (restoreSavedReport) {
+    await page.route(`**/api/v1/canvas/by-session/${SESSION}**`, (route) =>
+      route.fulfill(json({
+        canvas: { id: CANVAS, sessionId: SESSION, title: "华东 Q3 下滑归因" },
+        sections: SECTIONS,
+        sourceRefs: [],
+      })),
+    );
+  }
   // The Results toolbar belongs to the Results workspace (deployment flag); the e2e mock reports it on.
   await enableResultsWorkspace(page);
   await page.goto(`/?session=${SESSION}`);
@@ -125,7 +134,7 @@ const toolbar = (page: Page) => page.locator(".results-report-object-toolbar");
 
 for (const width of [1440, 412]) {
   test.describe(`工具条状态组与分享（${width}）`, () => {
-    test("live: writing progress is in the toolbar, the chapter being written is outlined, the body is not dimmed; when done the status badge is in the toolbar", async ({ page }) => {
+    test("live: writing progress is in the toolbar, the chapter being written is outlined, the body is not dimmed; when done active status actions return to More", async ({ page }) => {
       await openLive(page, width);
       await expect(toolbar(page)).toBeVisible();
       await startWriting(page);
@@ -151,32 +160,41 @@ for (const width of [1440, 412]) {
       const art = page.locator("article.canvas-report-article");
       await expect(art).toHaveAttribute("aria-busy", "true");
       expect(await art.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
-      // Batch 4b remainder: writing toolbar adds “写作完成后可以编辑和导出”; measure first row (status group).
-      const hintBox = (await toolbar(page).locator(".results-report-writing-hint").boundingBox())!;
-      expect(Math.round(hintBox.y - (await toolbar(page).boundingBox())!.y)).toBeLessThanOrEqual(width >= 1200 ? 44 : 61);
+      const hint = toolbar(page).getByText("写作完成后可以编辑和导出", { exact: true });
+      await expect(hint).toBeVisible();
+      await expect(hint).toBeInViewport();
+      const more = toolbar(page).getByRole("button", { name: "更多操作" });
+      if (width >= 1200) {
+        await expect(toolbar(page).getByRole("button", { name: "导出", exact: true })).toBeDisabled();
+      } else {
+        await more.click();
+        await expect(page.getByRole("menuitem", { name: "导出", exact: true })).toBeDisabled();
+        await page.keyboard.press("Escape");
+      }
       await finishWriting(page);
       // Writing ends: turn still running (mock timeline frozen), no turn terminal state ⇒ never guess; announce neutral “写作已结束”.
       await expect(announcer).toHaveText("写作已结束", { timeout: 5_000 });
-      const chip = toolbar(page).locator(".rc-status-trigger");
-      await expect(chip).toBeVisible();
-      await expect(page.locator(".rc-report-header-meta .rc-status-control")).toHaveCount(0);
+      await expect(stream).toHaveCount(0);
+      await expect(hint).toHaveCount(0);
+      await expect(toolbar(page).getByRole("button", { name: /报告状态/ })).toHaveCount(0);
       await expect(art).not.toHaveAttribute("aria-busy", "true");
+      await more.click();
+      await expect(page.getByRole("menuitem", { name: "标记为已核对", exact: true })).toBeVisible();
     });
 
-    test("F5: hydration rebuilds it; the status badge is in the toolbar and the report header keeps only History", async ({ page }) => {
-      await open(page, width);
-      await hydrate(page);
-      await page.reload();
-      await expect(page.locator("textarea").first()).toBeEditable({ timeout: 15_000 });
-      await hydrate(page);
+    test("reload restores the reviewed badge in the toolbar and History in More", async ({ page }) => {
+      await open(page, width, true);
       await showResults(page, width);
-      const chip = toolbar(page).locator(".rc-status-trigger");
+      const chip = toolbar(page).getByRole("button", { name: "报告状态：所有者已标记为已核对", exact: true });
+      await expect(chip).toBeVisible();
+      await page.reload();
+      await showResults(page, width);
       await expect(chip).toBeVisible();
       expect(await hitsItself(chip)).toBe(true);
-      await expect(page.locator(".rc-report-header-meta .rc-status-control")).toHaveCount(0);
-      await expect(page.locator(".rc-report-header-meta .canvas-report-history-btn")).toBeVisible();
-      await expect(page.locator(".rc-stream-banner, [data-testid='report-toolbar-streaming']")).toHaveCount(0);
-      expect(await toolbar(page).ariaSnapshot()).toContain('button "分享报告"');
+      await expect(toolbar(page).getByTestId("report-toolbar-streaming")).toHaveCount(0);
+      await expect(toolbar(page).getByRole("button", { name: "分享报告" })).toBeVisible();
+      await toolbar(page).getByRole("button", { name: "更多操作" }).click();
+      await expect(page.getByRole("menuitem", { name: "历史", exact: true })).toBeVisible();
     });
 
     test("the share icon opens the existing share dialog on top; closing returns focus to the share button", async ({ page }) => {
@@ -190,12 +208,10 @@ for (const width of [1440, 412]) {
       const dialog = page.getByRole("dialog", { name: /分享/ });
       await expect(dialog).toBeVisible();
       expect(await hitsItself(dialog)).toBe(true);
+      await expect(dialog.getByRole("button", { name: "复制链接", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(share).toBeFocused();
-      // “复制权限链接” remains in “更多”.
-      await toolbar(page).getByRole("button", { name: "更多操作" }).click();
-      await expect(page.getByRole("menuitem", { name: "复制权限链接" })).toBeVisible();
     });
   });
 }
@@ -204,7 +220,8 @@ test.describe("修改历史", () => {
   test("title, operation names and “who · which section” use user wording, without 📜 ↺ or internal ids", async ({ page }) => {
     await open(page, 1440);
     await hydrate(page);
-    await page.locator(".canvas-report-history-btn").click();
+    await toolbar(page).getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "历史", exact: true }).click();
     // D14: revision history is a sheet (drawer dialog); restore sits in its footer.
     const drawer = page.getByRole("dialog", { name: "修改历史" });
     await expect(drawer).toBeVisible();
@@ -451,7 +468,7 @@ const TABLE_SECTIONS = [
   },
 ];
 
-test("phone width: the maximized report keeps a 16px gutter and data tables scroll instead of squeezing", async ({ page }) => {
+test("phone width: the maximized report keeps 12px gutters and wide data tables scroll locally", async ({ page }) => {
   const width = 390;
   await open(page, width);
   await hydrate(page, TABLE_SECTIONS);
@@ -460,12 +477,13 @@ test("phone width: the maximized report keeps a 16px gutter and data tables scro
   await expect(art.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.locator(".v2-workspace.canvas-maxed")).toHaveCount(1);
   const gutter = await art.evaluate((el) => {
-    const pane = el.closest(".v2-ws-right-body")!.getBoundingClientRect();
+    const pane = el.closest(".v2-ws-right-body")!;
+    const usableLeft = pane.getBoundingClientRect().left + pane.clientLeft;
     const prose = el.querySelector(".ProseMirror")!.getBoundingClientRect();
-    return { left: Math.round(prose.left - pane.left), right: Math.round(el.getBoundingClientRect().right - prose.right) };
+    return { left: Math.round(prose.left - usableLeft), right: Math.round(usableLeft + pane.clientWidth - prose.right) };
   });
-  // Canvas Objects Spec C3: narrow (< 480) panes use 16px side gutters; wide panes keep the desktop gutter.
-  expect(gutter).toEqual({ left: 16, right: 16 });
+  // The reading layout uses a single 12px gutter per side below a 600px pane width.
+  expect(gutter).toEqual({ left: 12, right: 12 });
   const table = art.locator("table.v2-chart-table-el");
   await expect(table).toBeVisible();
   const layout = await table.evaluate((el) => {

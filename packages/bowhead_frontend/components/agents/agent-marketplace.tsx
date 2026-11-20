@@ -356,7 +356,6 @@ export function AgentMarketplace() {
   const [draftDomain, setDraftDomain] = useState("all");
   const [draftJob, setDraftJob] = useState("all");
   const [draftTag, setDraftTag] = useState("all");
-  const searchRef = useRef<HTMLInputElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const loadSequence = useRef(0);
   const catalogController = useRef<AbortController | null>(null);
@@ -524,16 +523,6 @@ export function AgentMarketplace() {
       catalogController.current?.abort();
     };
   }, [capability, domain, filtersReady, job, query, refresh, source, tag]);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   const capabilities = useMemo(() => capabilityFacets.map((entry) => ({
     id: entry.id,
@@ -611,8 +600,7 @@ export function AgentMarketplace() {
         <label className="am-search">
           <SearchIcon />
           <span className="sr-only">{t("search_label")}</span>
-          <input ref={searchRef} name="agent-search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("search_placeholder")} />
-          <kbd>⌘K</kbd>
+          <input name="agent-search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("search_placeholder")} />
         </label>
         {domainFacets.length || domain !== "all" ? (
           <FilterMenuButton

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { ChatCard } from "@/components/ui/card";
 import { dismissClarification, listPendingSessionQuestions, type PendingQuestionSummary } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
+import { clearClarificationDraft } from "@/lib/clarification-draft";
 import { isClarificationAnswered, markClarificationAnswered } from "@/lib/clarification-tombstone";
 import type { ErrorPresentation } from "@/lib/error-presentation";
 import { ruleClarificationErrorPresentation } from "@/lib/rule-clarification-error";
@@ -52,6 +53,7 @@ export function EarlierPendingQuestions({ sessionId, currentTurnId, running }: {
     try {
       const result = await dismissClarification(requestId);
       if (!result.dismissed) throw new ApiError(409, "clarification_not_resolvable", { code: "clarification_not_resolvable" });
+      clearClarificationDraft(requestId);
       markClarificationAnswered(requestId, { values: [], dismissed: true });
       if (token !== generation.current) return;
       setLoaded((value) => value?.sessionId === sessionId ? { ...value, items: value.items.filter((item) => item.request_id !== requestId) } : value);

@@ -2331,8 +2331,15 @@ class ArtifactStore:
 
     async def latest_live_version_id(self, artifact: Artifact) -> str | None:
         """The newest ready, non-deleted version of ``artifact``'s lineage."""
-        async with _open_db(self.db_path) as db:
-            return await _latest_live_version(db, artifact.lineage_root)
+        return await self.latest_live_version_id_for_lineage(artifact.lineage_root)
+
+    async def latest_live_version_id_for_lineage(self, lineage_id: str) -> str | None:
+        """Resolve a stable file ID even after its first version has been pruned."""
+        if not await self.versions_supported():
+            artifact = await self.get(lineage_id)
+            return artifact.id if artifact and artifact.status == "ready" else None
+        async with _open_read_db(self.db_path) as db:
+            return await _latest_live_version(db, lineage_id)
 
     async def newer_versions(self, refs: Mapping[str, tuple[str | None, int | None]]) -> dict[str, NewerVersion]:
         """Per artifact ID, the file's newest live version when it is newer than that ID.

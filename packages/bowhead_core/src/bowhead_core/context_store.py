@@ -283,7 +283,11 @@ async def _require_owner(db: aiosqlite.Connection, worker: ContextOwner, executi
         raise ContextStoreError("context_transaction_required")
     await require_context_owner_in_tx(db, worker=worker)
     row = await _row(db, "SELECT * FROM turn_agent_execution WHERE id=? AND turn_id=? AND team_id=?", (execution_id, worker.turn_id, worker.team_id))
-    if row is None or row["status"] not in ({"admitted", "running", "completed"} if for_publication else {"admitted", "running"}):
+    # A Lead whose Turn did not complete is settled as failed or cancelled before the Turn's
+    # terminal write; its transcript is still published there.
+    if row is None or row["status"] not in (
+        {"admitted", "running", "completed", "failed", "cancelled"} if for_publication else {"admitted", "running"}
+    ):
         raise ContextStoreError("context_execution_unavailable")
     return row
 

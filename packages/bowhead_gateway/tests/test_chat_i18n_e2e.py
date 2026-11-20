@@ -9,7 +9,7 @@
 只 inspect `req.system` 会把本文件的闸全变成假红。
 
 覆盖关键路径:
-- workspace_settings 含 i18n_v1=true → LanguageContext 生效
+- The language context is active by default.
 - user_profile.language=en-US → ui_language 解析为 en-US
 - workspace_settings.default_data_language=zh-CN → data_language=zh-CN
 - 最终请求（system + messages）含 §3.7 directive 段（output_language / data_language /
@@ -85,7 +85,7 @@ def _visible(req: LLMRequest) -> str:
 
 @pytest.fixture
 async def gateway_i18n_enabled(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
-    """构造一个 i18n_v1 启用的 gateway，workspace_id='test-ws'."""
+    """Set up a gateway for language behavior tests."""
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_PRIMARY_RUNTIME", "0")
     app = create_app()
 
@@ -110,8 +110,6 @@ async def gateway_i18n_enabled(tmp_path, monkeypatch, complete_community_http_in
     workspace_settings_store = WorkspaceSettingsStore(db_path)
     await workspace_settings_store.init()
 
-    # Seed workspace settings: i18n_v1 ON + zh-CN data.
-    await workspace_settings_store.set("test-ws", "i18n_v1", "true")
     await workspace_settings_store.set("test-ws", "default_data_language", "zh-CN")
     await workspace_settings_store.set("test-ws", "week_start_day", "monday")
 
@@ -233,7 +231,7 @@ async def _wait_for_done(client: httpx2.AsyncClient, stream_url: str, timeout: f
 
 @pytest.mark.integration
 async def test_i18n_directive_in_lead_prompt_when_enabled(gateway_i18n_enabled) -> None:
-    """端到端：i18n_v1 开 + en-US user → Lead system prompt 含 directive 段."""
+    """The Lead receives language guidance for the English user."""
     app = gateway_i18n_enabled["app"]
     adapter = gateway_i18n_enabled["adapter"]
 
@@ -278,13 +276,12 @@ async def test_i18n_directive_in_lead_prompt_when_enabled(gateway_i18n_enabled) 
 
 
 @pytest.mark.integration
-async def test_i18n_directive_skipped_when_flag_off(gateway_i18n_enabled) -> None:
-    """关掉 workspace.i18n_v1 → directive 不注入（行为回退到现状）."""
+async def test_legacy_workspace_opt_out_still_resolves_language(gateway_i18n_enabled) -> None:
+    """A Space carrying the retired opt-out still receives language guidance."""
     workspace_settings = gateway_i18n_enabled["workspace_settings_store"]
     adapter = gateway_i18n_enabled["adapter"]
     app = gateway_i18n_enabled["app"]
 
-    # Disable flag.
     await workspace_settings.set("test-ws", "i18n_v1", "false")
 
     transport = httpx2.ASGITransport(app=app)
@@ -304,18 +301,15 @@ async def test_i18n_directive_skipped_when_flag_off(gateway_i18n_enabled) -> Non
 
     assert len(adapter.captured) >= 1
     system = _visible(adapter.captured[0])
-    # Key assertion: directive segment absent.
-    assert "## 输出语言与术语规范" not in system, "directive should be absent when flag off"
-    assert "output_language=en-US" not in system
-    assert "Tool 调用约束" not in system
+    assert "output_language=en-US" in system
 
 
 @pytest.mark.integration
-async def test_kill_switch_overrides_workspace_flag(
+async def test_kill_switch_disables_language_directive(
     gateway_i18n_enabled,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """全局 kill switch (env BOWHEAD_I18N_V1_KILL=1) 即使 workspace 开了 flag 也 skip."""
+    """The deployment rollback suppresses language guidance."""
     monkeypatch.setenv("BOWHEAD_I18N_V1_KILL", "1")
     adapter = gateway_i18n_enabled["adapter"]
     app = gateway_i18n_enabled["app"]
@@ -501,10 +495,9 @@ async def test_inline_numbers_directive_when_flag_on(gateway_i18n_enabled) -> No
 )
 @pytest.mark.integration
 async def test_inline_numbers_disabled_when_flag_off(gateway_i18n_enabled) -> None:
-    """i18n_v1 开但 inline_numbers_v1 没开 → directive 不含 syntax 段; LLM 输出 syntax 不被 render."""
+    """Language guidance omits inline-number syntax when that feature is disabled."""
     adapter = gateway_i18n_enabled["adapter"]
     app = gateway_i18n_enabled["app"]
-    # Leave inline_numbers_v1 OFF (fixture enabled i18n_v1).
 
     from bowhead_router import LLMResponse
 
@@ -609,17 +602,11 @@ async def test_mixed_language_history_carries_through(gateway_i18n_enabled) -> N
 
 
 @pytest.mark.integration
-async def test_output_language_only_triggers_user_level_fallback(gateway_i18n_enabled) -> None:
-    """spawn-language review P2-3：flag 未设 + 用户只设 output_language（没动 ui_language）
-    也算「显式选过语言」→ user-level fallback 启用，directive 注入。
-    修前 user_picked_lang 只认 ui_language，output-only 用户拿不到 language_context，
-    peer 的语言兜底注入整条失效。"""
+async def test_saved_answer_language_applies_without_interface_preference(gateway_i18n_enabled) -> None:
+    """A saved answer-language preference works independently of interface language."""
     user_settings = gateway_i18n_enabled["user_settings_store"]
     adapter = gateway_i18n_enabled["adapter"]
     app = gateway_i18n_enabled["app"]
-    workspace_settings = gateway_i18n_enabled["workspace_settings_store"]
-
-    await workspace_settings.delete("test-ws", "i18n_v1")  # Flag unset, not false.
     user_id = app.state.settings.dev_default_user
     await user_settings.set(user_id, "output_language", "en-US")  # Set only output.
 
@@ -642,20 +629,10 @@ async def test_output_language_only_triggers_user_level_fallback(gateway_i18n_en
 
 
 @pytest.mark.integration
-async def test_flag_unset_and_no_user_language_now_enabled(gateway_i18n_enabled) -> None:
-    """flag 未设 + 用户什么语言都没选 → **启用**（2026-08-18 由 opt-in 翻成 opt-out）。
-
-    ⚠ 这条原本断言的是「stays off」。**判据变了不是断言失效**：默认值本身就是被测行为，
-    user 拍板界面语言不做 A/B（关着时后端退回 zh-CN 而前端只看 navigator.language，
-    两边判据不同会让「英文浏览器 + 没点过切换器」的用户看到混排）。
-    ★ 「显式关得掉」那一面没丢，由下面 `test_flag_false_...` 与
-      `bowhead_core/tests/test_i18n_flag.py` 的两条正对照守着。
-    """
+async def test_default_language_guidance_without_user_preferences(gateway_i18n_enabled) -> None:
+    """Language guidance is present before the user saves any preference."""
     adapter = gateway_i18n_enabled["adapter"]
     app = gateway_i18n_enabled["app"]
-    workspace_settings = gateway_i18n_enabled["workspace_settings_store"]
-
-    await workspace_settings.delete("test-ws", "i18n_v1")
 
     transport = httpx2.ASGITransport(app=app)
     async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:

@@ -37,6 +37,7 @@ from bowhead_router.input_admission import LLMInputAdmissionError, admit_request
 from bowhead_router.invocation import is_transport_failure, physical_invocation_required, physical_observation_active
 from bowhead_router.model_clock import model_now
 from bowhead_router.retry import DEFAULT_MAX_RETRIES, RetryNotice, adapter_timeout, admit_retry, attempt_fits
+from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse
 from bowhead_router.usage import record_usage
 from bowhead_router.visual_input import visual_self_check_enabled, withhold_images
@@ -262,16 +263,17 @@ class Router:
         return binding.primary in self._image_input_targets
 
     def _withhold_unreadable_images(self, req: LLMRequest, target: tuple[str, str]) -> None:
-        """With visual self-check on, a target without image input gets a notice for each image.
+        """With visual self-check on, a target without image input gets a notice for each render.
 
-        Covers renders and user attachments alike (tech design §3.2). Without catalog
-        capabilities (``set_image_input_targets`` never called) requests are unchanged.
+        Only the render message (``bowhead_visual_view_v1``) is withheld; user attachments are
+        sent as before, because many catalogs do not declare image input (tech design §3.2, D13).
+        Without catalog capabilities (``set_image_input_targets`` never called) requests are unchanged.
         """
         if self._image_input_targets is None or target in self._image_input_targets or not visual_self_check_enabled():
             return
-        if not any(message.images for message in req.messages):
+        if not any(message.images and message.name == VISUAL_VIEW_NOTE_NAME for message in req.messages):
             return
-        req.messages, req.images_withheld = withhold_images(req.messages)
+        req.messages, req.images_withheld = withhold_images(req.messages, names=frozenset({VISUAL_VIEW_NOTE_NAME}))
         _get_logger().info("router.images_withheld provider=%s model=%s count=%d", target[0], target[1], req.images_withheld)
 
     def set_context_windows(self, windows: Mapping[tuple[str, str], int]) -> None:

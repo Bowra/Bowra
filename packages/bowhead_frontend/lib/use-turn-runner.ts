@@ -26,6 +26,7 @@ import {
 } from "@/lib/transport-health";
 import { listClarificationsForTurn } from "@/lib/api";
 import { clarificationResumeFailure } from "./hydrate-clarifications";
+import { clearClarificationDraft } from "./clarification-draft";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { attachCanvasSSE, type CanvasSeqGate } from "./canvas-sse";
@@ -1514,6 +1515,7 @@ function useSSERunner(
           )
         ) return;
         if (visibleClarificationId) {
+          clearClarificationDraft(visibleClarificationId);
           markClarificationAnswered(visibleClarificationId, { values: [], dismissed: true });
         }
         setState((current) => {
@@ -2940,6 +2942,7 @@ function attachStream(
             && s.clarificationPending
             && (!doneTurnId || !s.turnId || doneTurnId === s.turnId)
           ) {
+            clearClarificationDraft(s.clarificationPending.clarificationId);
             ns.clarificationPending = null;
           }
           break;
@@ -3291,6 +3294,7 @@ function attachStream(
           // User selected → backend resolves the choice and pushes its event → frontend removes it from the list
           const reqId = String(payload.request_id ?? "");
           if (!reqId) break;
+          clearClarificationDraft(reqId);
           ns.clarifications = s.clarifications.filter((c) => c.request_id !== reqId);
           // 116-hitl-resume fix: reattachment triggers full Gateway replay (chat.py stream
           // reconnection semantics), redelivering old clarification_required and restoring
@@ -3317,6 +3321,7 @@ function attachStream(
         case "clarification.dismissed": {
           const reqId = String(payload.request_id ?? "");
           if (!reqId) break;
+          clearClarificationDraft(reqId);
           ns.clarifications = s.clarifications.filter(
             (clarification) => clarification.request_id !== reqId,
           );
@@ -3343,6 +3348,7 @@ function attachStream(
           }
           const reqId = String(payload.request_id ?? "");
           if (!reqId) return s;
+          clearClarificationDraft(reqId);
           if (ns.errorReason?.source === "clarification_resume") ns.errorReason = null;
           markClarificationAnswered(reqId, clarificationDisplayAnswer(reqId,
             Array.isArray(payload.chosen_values)

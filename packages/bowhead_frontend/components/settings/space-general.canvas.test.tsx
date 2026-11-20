@@ -77,7 +77,7 @@ afterEach(() => {
 it("hosts the original composite page and keeps metadata behind its explicit Save", async () => {
   mount();
   const name = await ready();
-  await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   expect(screen.getAllByRole("radiogroup")).toHaveLength(2);
   expect(screen.queryAllByRole("switch")).toHaveLength(0);
   fireEvent.change(name, { target: { value: "Manual name" } });
@@ -144,7 +144,7 @@ it("canonical readback preserves newer input and its original write revision", a
 it("confirms through the original receipt and reads back metadata without changing preference controls or focus", async () => {
   mount();
   const name = await ready();
-  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   act(() => { bridge.acceptToolOpen(suggestion.turn_id, target); applyLiteProposal(suggestion); });
   await screen.findByText("Finance");
   const receipt = { proposal_id: suggestion.proposal_id, form_id: suggestion.form_id, status: "applied", team_id: target.teamId, workspace_id: target.workspaceId, owner_user_id: target.userId };

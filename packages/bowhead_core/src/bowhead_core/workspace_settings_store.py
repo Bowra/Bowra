@@ -4,7 +4,7 @@ i18n v1 用途:
 - default_ui_language: workspace 范围 UI 语言兜底（用户未设时）
 - default_data_language: workspace 范围 DB 实际存储内容语言（admin 一次性设置，BI 查询拼语言提示用）
 - week_start_day: BI 时间分组的"周"起点（"monday" | "sunday"）
-- i18n_v1: workspace 级 feature flag（v1 灰度开关，默认 false）
+- i18n_v1: legacy Space setting retained for compatibility with stored rows
 
 设计:
 - 镜像 user_settings_store 的 KV 形态：(workspace_id, key, value, updated_at)

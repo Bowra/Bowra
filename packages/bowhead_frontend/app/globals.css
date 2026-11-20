@@ -9370,10 +9370,6 @@ textarea {
 .f-row.sel-on {
   background: var(--c-accent-tint);
 }
-.f-row:focus-visible {
-  outline: 2px solid var(--c-accent);
-  outline-offset: -2px;
-}
 .f-row.flash {
   animation: files-flash 2.4s var(--ease-v2) forwards;
 }
@@ -9427,6 +9423,21 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.f-row button.fname {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px;
+  text-align: start;
+}
+.f-row button.fname:hover {
+  text-decoration: underline;
+}
+.f-row .fname:focus-visible,
+.f-row .ck:has(input:focus-visible) {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
 .cellcat {
   display: flex;
   align-items: center;
@@ -9470,6 +9481,7 @@ textarea {
   opacity: 0;
 }
 .f-row:hover .ck,
+.f-row:focus-within .ck,
 .f-row.sel-on .ck,
 .f-body.picking .ck {
   opacity: 1;
@@ -23073,6 +23085,17 @@ textarea {
   color: var(--c-ink-2);
   font-size: var(--fs-sm);
   line-height: 1.6;
+}
+.model-settings-overview-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+.model-settings-external-link {
+  min-height: 44px;
+  text-decoration: none;
 }
 .team-openapi-tabs {
   display: flex;

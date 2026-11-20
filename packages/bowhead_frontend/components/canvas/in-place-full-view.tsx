@@ -1,6 +1,6 @@
 "use client";
 
-import { FloatingFocusManager, useDismiss, useFloating, useInteractions } from "@floating-ui/react";
+import { FloatingFocusManager, FloatingNode, FloatingTree, useDismiss, useFloating, useFloatingNodeId, useFloatingTree, useInteractions } from "@floating-ui/react";
 import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
 import { cycleTabWithin, focusFirstWithin } from "@/components/ui/dialog";
 import { lockBodyScroll } from "@/lib/body-scroll-lock";
@@ -19,13 +19,21 @@ export function useFullscreenMarker(active: boolean) {
   }, [active]);
 }
 
-/** Keep the same iframe node and browsing context while expanding it. */
-export function InPlaceFullView({ active, label, onClose, returnFocusRef, children }: {
+type FullViewProps = {
   active: boolean; label: string; onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>; children: ReactNode;
-}) {
+};
+
+/** Keep the same iframe node and browsing context while expanding it. */
+export function InPlaceFullView(props: FullViewProps) {
+  const tree = useFloatingTree();
+  return tree ? <FullViewNode {...props} /> : <FloatingTree><FullViewNode {...props} /></FloatingTree>;
+}
+
+function FullViewNode({ active, label, onClose, returnFocusRef, children }: FullViewProps) {
+  const nodeId = useFloatingNodeId();
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const { refs, context } = useFloating({ open: active, onOpenChange: (open) => { if (!open) onClose(); } });
+  const { refs, context } = useFloating({ nodeId, open: active, onOpenChange: (open) => { if (!open) onClose(); } });
   const dismiss = useDismiss(context, { enabled: active, outsidePress: false, bubbles: { escapeKey: false } });
   const { getFloatingProps } = useInteractions([dismiss]);
   const setRef = useCallback((node: HTMLDivElement | null) => {
@@ -38,17 +46,17 @@ export function InPlaceFullView({ active, label, onClose, returnFocusRef, childr
     if (element && !element.contains(document.activeElement)) element.focus({ preventScroll: true });
     return unlock;
   }, [active, element]);
-  return <FloatingFocusManager context={context} disabled={!active} modal guards={false}
+  return <FloatingNode id={nodeId}><FloatingFocusManager context={context} disabled={!active} modal guards={false}
     outsideElementsInert initialFocus={-1} returnFocus={returnFocusRef}>
     <div ref={setRef} className={active ? "artifact-viewer artifact-viewer-modal-panel artifact-viewer--fullscreen" : "artifact-viewer"}
       role={active ? "dialog" : undefined} aria-modal={active || undefined}
       aria-label={active ? label : undefined} tabIndex={active ? -1 : undefined}
       {...getFloatingProps({ onKeyDown: (event) => {
-        if (active && event.key === "Tab" && element) cycleTabWithin(element, event);
+        if (active && event.key === "Tab" && element?.contains(event.target as Node)) cycleTabWithin(element, event);
       } })}>
       {children}
       {active ? <span tabIndex={0} aria-hidden="true" className="rc-embed-focus-sentinel"
         onFocus={() => { if (element) focusFirstWithin(element); }} /> : null}
     </div>
-  </FloatingFocusManager>;
+  </FloatingFocusManager></FloatingNode>;
 }

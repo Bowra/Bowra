@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { defaultTreeAdapter, parse } from "parse5";
+import { defaultTreeAdapter, parse, serialize } from "parse5";
 import { createHash } from "node:crypto";
-import { buildInteractiveHtmlDocument } from "./interactive-html";
+import { buildInteractiveHtmlDocument, validateHtmlComplexity } from "./interactive-html";
 import { HTML_PREVIEW_BUDGET } from "./html-preview-budget";
 
 describe("offline interactive HTML preparation", () => {
@@ -50,6 +50,22 @@ describe("offline interactive HTML preparation", () => {
     expect(prepared.document).toContain("export const value=1");
     expect(prepared.document).toContain("script-src-attr 'unsafe-hashes'");
   });
+});
+
+it("preserves the parse5 tree around long text runs and buffer drops", () => {
+  const text = "Visible-data_123!".repeat(5000);
+  const raw = [
+    "<!doctype html><p>",
+    text,
+    " ".repeat(70_000),
+    text,
+    "&amp;字🚀\r\n",
+    "<span>next</span></p>",
+    "<template><p>" + text + "</p></template>",
+    "<textarea>" + text + "&amp;</textarea>",
+    "<table><tr><td>" + text + "</td></tr></table>",
+  ].join("");
+  expect(serialize(validateHtmlComplexity(raw))).toBe(serialize(parse(raw)));
 });
 
 it("rejects deeply nested HTML and repeated executable handlers before rendering", async () => {

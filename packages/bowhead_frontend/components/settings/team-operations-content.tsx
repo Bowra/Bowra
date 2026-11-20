@@ -8,9 +8,9 @@ import styles from "./team-operations.module.css";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 type Range = 1 | 7 | 30;
-type Metric = "login_users" | "sessions" | "tokens" | "background_tokens" | "skill_loads" | "tool_loads" | "tool_calls";
+type Metric = "active_users" | "sessions" | "tokens" | "background_tokens" | "skill_loads" | "tool_loads" | "tool_calls";
 
-const metrics: Metric[] = ["login_users", "sessions", "tokens", "background_tokens", "skill_loads", "tool_loads", "tool_calls"];
+const metrics: Metric[] = ["active_users", "sessions", "tokens", "background_tokens", "skill_loads", "tool_loads", "tool_calls"];
 const zones = ["Asia/Shanghai", "UTC", "Asia/Tokyo", "Europe/Berlin", "Europe/London", "America/New_York", "America/Los_Angeles"];
 
 function value(row: OperationsDay, metric: Metric): number {
@@ -20,7 +20,7 @@ function value(row: OperationsDay, metric: Metric): number {
 export function TeamOperationsContent() {
   const t = useTranslations("settings.teamOperations");
   const [range, setRange] = useState<Range>(7);
-  const [metric, setMetric] = useState<Metric>("login_users");
+  const [metric, setMetric] = useState<Metric>("active_users");
   const [report, setReport] = useState<TeamOperationsReport | null>(null);
   const [timezone, setTimezone] = useState("");
   const [loading, setLoading] = useState(true);

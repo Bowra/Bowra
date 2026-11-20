@@ -621,13 +621,13 @@ class WorkspaceI18nDraftDTO(BaseModel):
     )
     default_data_language: Literal["zh-CN", "en-US"] | None = Field(
         default=None,
-        description="Language of stored source data; affects translation for every Space member, independently of interface and AI-answer language.",
+        description="Language of names as stored in the data source. AI uses it to match names in queries for this Space. The original data, interface language, and answer language remain unchanged.",
     )
 
 
 _WS_I18N_GUIDANCE = """\
 - All fields are optional: propose only fields the user requested.
-- Source-data language affects translation for all Space members. Verify the intended data language and require user confirmation.
+- Source-data language helps queries match original names for all Space members. Verify the intended data language and require user confirmation.
 - This form does not admit interface language or personal AI-answer language."""
 
 _WS_I18N_DEFAULTS = {KEY_WEEK_START_DAY: "monday", KEY_DEFAULT_DATA_LANGUAGE: "zh-CN"}  # Same source as language_context.py:37-41.

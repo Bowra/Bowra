@@ -71,6 +71,32 @@ async function openCapabilityOverview(page: Page) {
   if (isCompact) await page.getByRole("menuitem", { name: "能力中心", exact: true }).click();
 }
 
+test("personal tool bindings show a single setup entry on desktop and phone", async ({ page }, testInfo) => {
+  await prepare(page);
+  await page.route("**/api/v1/personal-mcp/capabilities", (route) => route.fulfill({ json: { enabled: true } }));
+  await page.route("**/api/v1/personal-mcp", (route) => route.fulfill({ json: { connections: [] } }));
+  await page.route("**/api/v1/personal-mcp/agents/bindings", (route) => route.fulfill({ json: {
+    agents: Array.from({ length: 18 }, (_, i) => ({
+      id: `osa_${i}`, display_name: `Private agent ${i}`, revision_id: "rev_1", tool_ids_json: "[]", binding_version: 0,
+    })),
+  } }));
+  await page.goto("/connections/");
+  await page.getByRole("tab", { name: "我的智能体工具" }).click();
+  const panel = page.getByRole("tabpanel", { name: "我的智能体工具" });
+  await expect(panel.getByRole("heading", { name: "还没有可绑定的工具" })).toHaveCount(1);
+  await expect(panel.getByText("Private agent 0")).toHaveCount(0);
+  for (const width of [1380, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const add = panel.getByRole("button", { name: /添加.*连接/ });
+    await expect(add).toBeVisible();
+    expect((await add.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`personal-tools-${width}.png`) });
+  }
+  await panel.getByRole("button", { name: /添加.*连接/ }).click();
+  await expect(page.getByRole("dialog", { name: /添加.*连接/ })).toBeVisible();
+});
+
 test("member discovery and personal resources retain capability context on desktop", async ({
   page,
 }) => {

@@ -21,7 +21,10 @@ from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_CO
 from bowhead_core.documents.authoring_protocol import (
     COMPUTE_CONTRACT,
     CONTRACT,
+    HTML_VIEW_CONTRACT,
     MAX_COMPUTE_OUTPUT,
+    MAX_HTML_VIEW_PNG,
+    MAX_HTML_VIEW_TEXT,
     MAX_VIEW_PDF,
     PROFILE,
     control,
@@ -128,6 +131,18 @@ def read_preview(directory: Path, *, image_id: str, control_sha256: str, candida
         return WorkerResult(record, files, image_id)
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise OfficePackageError("document_authoring_output_invalid") from error
+
+
+@dataclass(frozen=True, slots=True)
+class HtmlView:
+    """A sandbox capture of an HTML or SVG file: PNG, visible text and content-free facts."""
+
+    png: bytes
+    text: str
+    scroll_width: int
+    scroll_height: int
+    issues: tuple[str, ...]
+    external_resources: bool
 
 
 class AuthoringExecutor(DocumentExecutor):
@@ -310,6 +325,75 @@ class AuthoringExecutor(DocumentExecutor):
             }:
                 raise OfficePackageError("document_authoring_output_invalid")
             return pdf
+
+        return await anyio.to_thread.run_sync(read_view)
+
+    async def view_html(self, kind: str, source: bytes, transform: bytes, *, readiness: dict | None = None) -> HtmlView:
+        """Capture an HTML or SVG file in the sandbox (visual self-check slice B, html_view).
+
+        ``readiness``: this executor's ``capabilities()`` when the caller already read them.
+        """
+        readiness = readiness if readiness is not None else await self.capabilities()
+        if self.profile != PROFILE or readiness.get("html_view_contract") != HTML_VIEW_CONTRACT:
+            raise OfficePackageError("document_runtime_unavailable")
+        source_sha256 = digest(source)
+        encoded = control("html_view", (source, transform, kind.encode("ascii")), parent_sha256=source_sha256)
+        directory, _ = await self._dispatch(
+            digest(uuid4().bytes),
+            (
+                WorkerInput("page.svg" if kind == "svg" else "page.html", "source", source),
+                WorkerInput("html-preview-transform.js", "code", transform),
+                WorkerInput("kind.txt", "data", kind.encode("ascii")),
+            ),
+            encoded,
+            expected_image_id=readiness["image_id"],
+            profile=self.profile,
+        )
+        output = directory / "output"
+
+        def read_view() -> HtmlView:
+            record = json.loads(read_file(output / "result.json", 8192))
+            control_sha256 = digest(encoded)
+            _raise_fixed_error(record, control_sha256=control_sha256, source_sha256=source_sha256)
+            png = read_file(output / "snapshot.png", MAX_HTML_VIEW_PNG)
+            text = read_file(output / "text.txt", MAX_HTML_VIEW_TEXT)
+            issues = record.get("issues")
+            if (
+                not png.startswith(b"\x89PNG")
+                or set(record)
+                != {
+                    "profile",
+                    "kind",
+                    "control_sha256",
+                    "source_sha256",
+                    "png_sha256",
+                    "text_sha256",
+                    "scroll_width",
+                    "scroll_height",
+                    "issues",
+                    "external_resources",
+                }
+                or record["profile"] != PROFILE
+                or record["kind"] != "html_view"
+                or record["control_sha256"] != control_sha256
+                or record["source_sha256"] != source_sha256
+                or record["png_sha256"] != digest(png)
+                or record["text_sha256"] != digest(text)
+                or type(record["scroll_width"]) is not int
+                or type(record["scroll_height"]) is not int
+                or not isinstance(issues, list)
+                or any(issue not in {"runtime", "blocked"} for issue in issues)
+                or type(record["external_resources"]) is not bool
+            ):
+                raise OfficePackageError("document_authoring_output_invalid")
+            return HtmlView(
+                png=png,
+                text=text.decode("utf-8", errors="ignore"),
+                scroll_width=record["scroll_width"],
+                scroll_height=record["scroll_height"],
+                issues=tuple(issues),
+                external_resources=record["external_resources"],
+            )
 
         return await anyio.to_thread.run_sync(read_view)
 

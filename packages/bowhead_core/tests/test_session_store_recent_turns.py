@@ -210,3 +210,97 @@ async def test_list_turn_spawns_falls_back_to_peer_dispatched_for_incomplete_tur
     assert out["td"] == plain["td"] and out["td"][0].status == "succeeded" and out["td"][0].task == "任务 d 全文"
     # Turns absent from incomplete_status are not synthesized even without summary (completed turns' peer_dispatched must not invent records).
     assert "tc" not in await store.list_turn_spawns(["tc"], incomplete_status={})
+
+
+async def test_list_turn_spawns_keeps_the_full_task_and_published_failures_of_a_helper_that_never_returned(tmp_path) -> None:
+    """A helper that never returned leaves its full task and its failed Tool calls (an interrupted task).
+
+    The task comes from `peer_dispatched`; the failures come from what events already publish.
+    """
+    from bowhead_core.context_assembly import TASK_TRUNCATION_NOTE, render_spawn_arguments, render_spawn_result
+    from bowhead_core.session_store import SessionStore
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    db = str(tmp_path / "s.db")
+    store = SessionStore(db_path=db)
+    await store.initialize()
+    log = TurnLogStore(db_path=db)
+    await log.initialize()
+
+    async def _ev(turn_id: str, event_type: str, payload: dict) -> None:
+        await log.record(turn_id=turn_id, event_type=event_type, payload=payload)
+
+    task = "Inspect the workspace and write an HTML analysis. " * 15
+    download = "download_data failed (errcode=0 type=unknown): 下载数据失败, 请检查 query 日志."
+    label = "BIQueryFailedError: download_data failed (errcode=0 type=unk"
+    assert len(task) > 200
+    await _ev("tn", "peer_dispatched", {"call_id": "call_n", "profile": "compute", "spawn_id": "sub_n", "rationale": "r", "task": task})
+    await _ev("tn", "agent_spawned", {"subagent_id": "sub_n", "profile": "compute", "task": task[:200]})
+    await _ev("tn", "tool_result", {"subagent_id": "sub_n", "tool_name": "bi_schema", "call_id": "c0", "ok": True})
+    # A Tool that returned its own error publishes each query's message in the result.
+    await _ev(
+        "tn",
+        "tool_result",
+        {
+            "subagent_id": "sub_n",
+            "tool_name": "bi_query",
+            "call_id": "c1",
+            "ok": False,
+            "failure_code": "tool_execution_failed",
+            "result_inline": {
+                "ok": False,
+                "error_message": "All queries failed.",
+                "results": [{"ok": False, "error_message": download}, {"ok": False, "error_message": download}],
+            },
+        },
+    )
+    await _ev("tn", "step_done", {"call_id": "c1", "tool_name": "bi_query", "ok": False, "output_preview": "失败: 执行出错"})
+    # A Tool that raised publishes a code; its step row shows the first 60 characters of the error.
+    for call in ("c2", "c3"):
+        await _ev(
+            "tn",
+            "tool_result",
+            {"subagent_id": "sub_n", "tool_name": "bi_query", "call_id": call, "ok": False, "error": "tool_execution_failed", "result_inline": None},
+        )
+        await _ev("tn", "step_done", {"call_id": call, "tool_name": "bi_query", "ok": False, "output_preview": f"失败: {label}"})
+    # Neither a returned message nor a label: the failure code.
+    await _ev(
+        "tn", "tool_result", {"subagent_id": "sub_n", "tool_name": "python_sandbox", "call_id": "c4", "ok": False, "failure_code": "sandbox_timeout"}
+    )
+    # Another agent's failure is not this helper's.
+    await _ev(
+        "tn", "tool_result", {"subagent_id": "sub_lead", "tool_name": "web_search", "call_id": "c5", "ok": False, "failure_code": "search_failed"}
+    )
+    # A Turn recorded before `peer_dispatched.task` existed keeps only the 200-character preview.
+    await _ev("to", "peer_dispatched", {"call_id": "call_o", "profile": "compute", "spawn_id": "sub_o", "rationale": "r"})
+    await _ev("to", "agent_spawned", {"subagent_id": "sub_o", "profile": "compute", "task": task[:200]})
+    # A helper that returned reads the full task too; its summary keeps 2000 characters.
+    long_task = "x" * 2500
+    await _ev("tr", "peer_dispatched", {"call_id": "call_r", "profile": "compute", "spawn_id": "sub_r", "rationale": "r", "task": long_task})
+    await _ev(
+        "tr",
+        "lead.subagent_summary",
+        {"spawn_id": "sub_r", "call_id": "call_r", "profile": "compute", "status": "succeeded", "child_tool_count": 1, "task": long_task[:2000]},
+    )
+
+    out = await store.list_turn_spawns(["tn", "to", "tr"], incomplete_status={"tn": "failed", "to": "cancelled"})
+    (new,) = out["tn"]
+    assert new.task == task.strip() and new.task_truncated is False and new.child_tool_count == 5
+    assert new.tool_failures == (("bi_query", download), ("bi_query", label), ("bi_query", label), ("python_sandbox", "sandbox_timeout"))
+    assert render_spawn_arguments(new)["task"] == task.strip()
+    assert render_spawn_result(new) == (
+        "failed｜子工具 5 次｜没有回执（被中止前是否已写入画布未知，以画布现状为准）｜"
+        f"Helper tool failures: bi_query ×1: {download}; bi_query ×2: {label}; python_sandbox ×1: sandbox_timeout"
+    )
+    (old,) = out["to"]
+    # The preview ends on a space here; the cut is still recognized from the recorded length.
+    assert task[199] == " " and old.task == task[:200].strip() and len(old.task) == 199 and old.tool_failures == ()
+    assert old.task_truncated is True
+    (returned,) = out["tr"]
+    assert returned.task == long_task and returned.synthesized is False and returned.tool_failures == ()
+    assert render_spawn_arguments(old)["task"] == old.task + TASK_TRUNCATION_NOTE
+    # A short task that was never cut carries no note.
+    await _ev("ts", "peer_dispatched", {"call_id": "call_s", "profile": "compute", "spawn_id": "sub_s", "rationale": "r"})
+    await _ev("ts", "agent_spawned", {"subagent_id": "sub_s", "profile": "compute", "task": "Short task."})
+    (short,) = (await store.list_turn_spawns(["ts"], incomplete_status={"ts": "aborted"}))["ts"]
+    assert short.task_truncated is False and render_spawn_arguments(short)["task"] == "Short task."

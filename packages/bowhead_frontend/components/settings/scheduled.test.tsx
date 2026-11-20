@@ -89,6 +89,22 @@ afterEach(() => {
 });
 
 describe("SettingsScheduled progressive error disclosure", () => {
+  it("shows the account-wide quota and enables creation after pausing an active task", async () => {
+    readSpacesMock.mockResolvedValue({ items: [] });
+    fetchScheduledJobsMock.mockResolvedValue({ items: [JOB], active_count: 20, max_active: 20 });
+    patchScheduledJobMock.mockResolvedValue({ ...JOB, status: "paused" });
+    renderIntl(<SettingsScheduled />);
+    expect(await screen.findByText("当前账号已启用 20 / 20 个定时任务。暂停一个已启用的任务即可腾出名额。")).toBeTruthy();
+    const create = screen.getByRole<HTMLButtonElement>("button", { name: "新建定时任务" });
+    expect(create.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "定位已启用任务" }));
+    const task = screen.getByRole("group", { name: JOB.name });
+    expect(document.activeElement).toBe(task);
+    fireEvent.click(screen.getAllByRole("switch")[0]);
+    await waitFor(() => expect(create.disabled).toBe(false));
+    expect(patchScheduledJobMock).toHaveBeenCalledWith(JOB.id, { status: "paused" });
+  });
+
   it("maps every scheduled backend code to both locale catalogs", () => {
     const backendCodes = [
       "authz_lookup_failed",

@@ -10,7 +10,6 @@ DELETE /api/v1/workspace-settings/{workspace_id}/{key}  → 删单个 key
 - default_ui_language: 兜底用户未设
 - default_data_language: workspace 范围 DB 内容语言（admin 一次性设置）
 - week_start_day: BI 时间分组的"周"起点 ("monday" | "sunday")
-- i18n_v1: workspace 级 feature flag (默认 false)
 
 权限校验：`_check_workspace_access` — 空间必须属当前团队（否则 404 反枚举），
 并且调用者必须是该空间成员；写入和 Space 常规配置仅限显式 Space admin。
@@ -25,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from bowhead_core.access_control import normalize_workspace_role
 from bowhead_core.space_governance import SpaceGovernanceError
 from bowhead_core.user_store import _UNSET
+from bowhead_core.workspace_settings_store import KEY_I18N_V1_ENABLED
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,6 @@ _ALLOWED_KEYS = {
     "default_ui_language",
     "default_data_language",
     "week_start_day",
-    "i18n_v1",
 }
 # Batch 2/c14 (PRD §3.8): BI semantics keys (key_metrics/known_dimensions/internal_definitions/
 # default_time_window) are **permanently excluded** from this allowlist; Datarc owns its semantics, Bowhead
@@ -118,8 +117,6 @@ def _validate_value(key: str, value: str) -> None:
                 400,
                 f"invalid week_start_day: {value} (allowed: {sorted(_VALID_WEEK_START)})",
             )
-    elif key == "i18n_v1" and value not in ("true", "false"):
-        raise HTTPException(400, f"i18n_v1 must be 'true' or 'false', got: {value}")
 
 
 class SettingsValue(BaseModel):
@@ -165,6 +162,7 @@ async def list_workspace_settings(
         require_admin=False,
     )
     settings = await store.list_for_workspace(workspace_id)
+    settings.pop(KEY_I18N_V1_ENABLED, None)
     return SettingsAll(settings=settings, **page_field_contract("workspace_i18n"))
 
 

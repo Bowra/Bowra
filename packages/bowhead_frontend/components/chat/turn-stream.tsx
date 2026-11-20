@@ -17,11 +17,13 @@
  */
 
 import type { TurnRunnerState } from "@/lib/types";
+import type { ComposerPersistenceScope } from "@/lib/composer-persistence-scope";
 
 import { TurnContainer } from "./TurnContainer";
 
 interface Props {
   runner: TurnRunnerState;
+  clarificationDraftScope?: ComposerPersistenceScope | null;
   /** HITL continuation — picker option selection (forwarded to TurnContainer). */
   onSend?: (text: string) => void;
   /** Continue button: resume these saved helper runs with a visible "continue" message. */
@@ -40,12 +42,13 @@ interface Props {
   retryRestoresDraft?: boolean;
 }
 
-export function TurnStream({ runner, onSend, onContinue, onSolidify, onSolidifySession, onComposerPrefill, onRetryTurn, retryRestoresDraft }: Props) {
+export function TurnStream({ runner, clarificationDraftScope, onSend, onContinue, onSolidify, onSolidifySession, onComposerPrefill, onRetryTurn, retryRestoresDraft }: Props) {
   // onComposerPrefill puts text back into the composer without sending it (expired clarification "Ask again",
   // failure-card "Edit and send").
   return (
     <TurnContainer
       runner={runner}
+      clarificationDraftScope={clarificationDraftScope}
       onSend={onSend}
       onContinue={onContinue}
       onSolidify={onSolidify}

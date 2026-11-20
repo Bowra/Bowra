@@ -108,7 +108,7 @@ describe("integration pages follow the interface language", () => {
     const { container } = renderIntl(<SettingsIntegrations />, { locale });
 
     expect(
-      await screen.findByText(copyFor(locale).overview_planned_empty),
+      await screen.findByText(copyFor(locale).overview_available_empty),
     ).toBeInTheDocument();
     expect(userFacingText(container)).not.toMatch(HAN);
   });
@@ -185,7 +185,7 @@ describe("translated integration copy is not an English placeholder", () => {
     const own = copyFor(locale);
     const pick = (c: typeof en) => [
       c.provider_status_healthy,
-      c.overview_planned_empty,
+      c.overview_available_empty,
       c.detail_common.copy_value,
       c.slack.load_failed,
       c.teams.help_show,

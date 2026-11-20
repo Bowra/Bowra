@@ -2,7 +2,7 @@
 
 Unter **Modellzuweisungen → Wissensbasis → Anzahl der Suchergebnisse** sind **15 Ergebnisse** voreingestellt. Wählen Sie 5, 10, 15, 20, 30 oder 50. Die Änderung baut den Index nicht neu auf. Mehr Ergebnisse können die Abdeckung verbessern, benötigen jedoch mehr Modellkontext. Berechtigungs- und Relevanzprüfungen können weniger Treffer liefern. Vorhandene eigene Werte von 1 bis 50 bleiben auswählbar.
 
-Teamverantwortliche und Teamadministratoren verwalten Modelldienste unter **Team-Einstellungen → Modelle**. Die Seite trennt Verbindungsverwaltung, produktive Zuweisungen samt Prüfnachweisen sowie externe Capabilities und den Indexstatus.
+Teamverantwortliche und Teamadministratoren verwalten Modelldienste unter **Team-Einstellungen → Modelle**. Die Seite hat eigene Registerkarten für Modellverbindungen und Modellzuweisungen. **Externe Fähigkeiten** öffnet eine separate Seite für Bilderzeugung und Websuche.
 
 **Quellenbeschreibungen** ist eine optionale, standardmäßig deaktivierte Modellzuweisung. Ein deklariertes Textmodell verarbeitet neue durchsuchbare Veröffentlichungen und ausdrückliche Generierungsaufträge. Speichern verarbeitet keine vorhandenen Dateien; Quellenlesen ruft kein Modell auf. Entfernen stoppt neue Aufgaben; weiterhin gültige Beschreibungen bleiben nutzbar.
 
@@ -46,9 +46,9 @@ Unter **Modellzuweisungen** enthält **Modellverhalten** eine Einstellung: **Aut
 
 Bricht die Verbindung ab, nachdem das Modell bereits zu antworten begonnen hat, verschwindet die unvollständige Antwort und das Modell antwortet von vorn, sodass keine Antwort doppelt erscheint. Der abgebrochene Aufruf wird nicht von Ihren Credits abgezogen. Jede Wiederholung zählt zum Zeitlimit der Runde; reicht die Zeit nicht mehr, endet der Versuch mit einer Fehlermeldung. Erhält ein Analyse-Agent oder ein Planschritt auch nach den Wiederholungen keine Antwort, zeigt der Schritt an, ob beim Warten auf das Modell eine Zeitüberschreitung aufgetreten ist oder der Modelldienst nicht verfügbar war; einen Planschritt können Sie später mit **Plan fortsetzen** erneut ausführen. Während einer Wiederholung zeigt der Laufstatus der Unterhaltung z. B. „Zeitüberschreitung bei der Modellantwort, neuer Versuch (1/3)“. Meldet die Seite, dass sich die Konfiguration geändert hat, laden Sie die Seite neu und legen Sie den Wert erneut fest.
 
-## Externe Capabilities und Indizes
+## Externe Fähigkeiten und Indizes
 
-Konfigurieren Sie Anbietermodelle für Suche, Bilderzeugung und andere unterstützte externe Funktionen im jeweils vorgesehenen Bereich. Prüfen Sie den Indexstatus, bevor Sie sich auf einen Wissensdienst verlassen. Eine gespeicherte Verbindung ist dadurch weder automatisch einer produktiven Aufgabe zugewiesen noch einsatzbereit.
+Öffnen Sie **Externe Fähigkeiten**, um Bilderzeugung und Websuche einzurichten. Kehren Sie aus den Einstellungen zur Übersicht der externen Fähigkeiten zurück. Von dort bringt Sie **Zurück zur Übersicht** zu der Modellregisterkarte, von der aus Sie gestartet sind. Den Indexstatus können Sie in der Dateiansicht der Wissensbasis prüfen.
 
 Speichern Sie Ihre Änderungen, bevor Sie die Seite verlassen. Öffnen Sie den betreffenden Bereich erneut und prüfen Sie die angezeigten Werte. In einer Unterhaltung stehen nur die Modelle zur Auswahl, die das Team freigegeben hat.
 

@@ -105,7 +105,7 @@ def _validate_password_strength(pwd: str) -> None:
 
 
 import contextlib
-from datetime import UTC
+from datetime import UTC, datetime
 
 from bowhead_core.access_control import normalize_workspace_role, workspace_role_rank
 from bowhead_core.credit_activation import credit_capabilities_for_role
@@ -116,6 +116,7 @@ from bowhead_core.space_governance import (
     SpaceGovernanceError,
     space_admin_v2_enabled,
 )
+from bowhead_core.team_operations_report import record_team_presence
 from bowhead_core.user_cron import next_monthly_credit_reset
 from bowhead_core.user_store import _UNSET, User, UserStore, _now
 
@@ -2654,6 +2655,7 @@ async def logout_everywhere(
 async def me(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     identity: User = Depends(_authenticated_identity),
     store: UserStore = Depends(_store),
 ) -> dict:
@@ -2871,6 +2873,7 @@ async def me(
         "german_ai_output": german_ai_output_enabled(),
         "account_deletion": getattr(request.app.state, "account_deletion_service", None) is not None,
     }
+    background_tasks.add_task(record_team_presence, store.db_path, team_id=user.team_id, user_id=user.id, observed_at=datetime.now(UTC))
     return {
         "id": user.id,
         "email": user.email,
@@ -3354,32 +3357,28 @@ async def list_active_sessions(
     user: User = Depends(_current_user),
     store: UserStore = Depends(_store),
 ) -> dict:
-    """G10 — list active refresh-token sessions for current user.
-
-    is_current flag set by comparing token_hash to current cookie's refresh hash.
-    """
+    """List the user's sessions with an opaque key for grouping likely devices."""
     sessions = await store.list_refresh_tokens(user.id, active_only=True)
-    # Compute current session id from cookie
     current_refresh_raw = request.cookies.get("bowhead_refresh")
-    import hashlib
-
-    current_hash = None
-    if current_refresh_raw:
-        current_hash = hashlib.sha256(current_refresh_raw.encode()).hexdigest()
+    current_hash = hashlib.sha256(current_refresh_raw.encode()).hexdigest() if current_refresh_raw else None
+    device_keys: dict[tuple[str, str], str] = {}
     items = []
     for s in sessions:
+        user_agent, ip = s["user_agent"], s["ip"]
+        device_key = device_keys.setdefault((user_agent, ip), s["id"]) if user_agent and ip else s["id"]
         items.append(
             {
                 "session_id": s["id"],
+                "device_key": device_key,
                 "expires_at": s["expires_at"],
                 "created_at": s["created_at"],
                 "last_used_at": s["last_used_at"],
                 "user_agent": s.get("user_agent"),
                 "ip_masked": _mask_ip(s.get("ip")),
-                "is_current": s.get("token_hash") == current_hash if current_hash else False,
+                "is_current": current_hash is not None and s["token_hash"] == current_hash,
             }
         )
-    return {"items": items, "current_identified": current_hash is not None}
+    return {"items": items, "current_identified": any(item["is_current"] for item in items)}
 
 
 @router.delete("/sessions/{session_id}")

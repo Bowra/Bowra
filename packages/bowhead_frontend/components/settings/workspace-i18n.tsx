@@ -10,7 +10,6 @@ import { getWorkspaceSettingsView, setWorkspaceSetting, type WorkspaceSettings }
 import { ApiError } from "@/lib/api-client";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
-import { Switch } from "@/components/ui/switch";
 import { Segment, SegmentedControl } from "@/components/ui/segmented-control";
 import { CanvasSection, FieldRow, SectionHeading } from "@/components/ui/section-heading";
 import { getActiveTeamId } from "@/lib/team-storage";
@@ -49,7 +48,7 @@ export function SettingsWorkspaceI18n(props: WorkspaceI18nPageProps) {
 }
 
 /**
- * i18n v1 · Workspace admin settings — data_language / week_start_day / i18n_v1 flag.
+ * Space administration preferences for language and the first day of the week.
  */
 function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAgentInterfaceChange, onAccessDenied, hosted = false }: WorkspaceI18nPageProps) {
   const t = useTranslations("settings.workspace_i18n");
@@ -269,8 +268,8 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
   );
 }
 
-export type WorkspaceI18nField = "i18n_v1" | "default_data_language" | "default_ui_language" | "week_start_day";
-const ALL_FIELDS: readonly WorkspaceI18nField[] = ["i18n_v1", "default_data_language", "default_ui_language", "week_start_day"];
+export type WorkspaceI18nField = "default_data_language" | "default_ui_language" | "week_start_day";
+const ALL_FIELDS: readonly WorkspaceI18nField[] = ["default_data_language", "default_ui_language", "week_start_day"];
 const HOSTED_FIELDS: readonly WorkspaceI18nField[] = ["week_start_day", "default_data_language"];
 
 /** Controlled domain fields: hydration never calls a save callback. */
@@ -291,21 +290,20 @@ export function WorkspaceI18nFields({
   variant?: "select" | "segmented";
 }) {
   const t = useTranslations("settings.workspace_i18n");
-  const i18nEnabled = settings.i18n_v1 === "true";
   if (variant === "segmented") {
     return (
       <>
         {fields.map((field) => field === "week_start_day" ? (
-          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("hosted_week_label")} />} title={t("hosted_week_label")} control={(
-            <SegmentedControl aria-label={t("hosted_week_label")} busy={readOnly} value={settings.week_start_day ?? "monday"}
+          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("field_week_label")} />} title={t("field_week_label")} description={t("field_week_hint")} control={(
+            <SegmentedControl aria-label={t("field_week_label")} busy={readOnly} value={settings.week_start_day ?? "monday"}
               onValueChange={(value) => onChange("week_start_day", value)}>
               <Segment value="monday">{t("week_monday_short")}</Segment>
               <Segment value="sunday">{t("week_sunday_short")}</Segment>
             </SegmentedControl>
           )} />
         ) : field === "default_data_language" ? (
-          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("hosted_data_lang_label")} />} title={t("hosted_data_lang_label")} control={(
-            <SegmentedControl aria-label={t("hosted_data_lang_label")} busy={readOnly} value={settings.default_data_language ?? "zh-CN"}
+          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("field_data_lang_label")} />} title={t("field_data_lang_label")} description={t("field_data_lang_hint")} control={(
+            <SegmentedControl aria-label={t("field_data_lang_label")} busy={readOnly} value={settings.default_data_language ?? "zh-CN"}
               onValueChange={(value) => onChange("default_data_language", value)}>
               <Segment value="zh-CN">{t("lang_zh")}</Segment>
               <Segment value="en-US">{t("lang_en")}</Segment>
@@ -317,20 +315,6 @@ export function WorkspaceI18nFields({
   }
   return (
     <>
-      {fields.includes("i18n_v1") ? (
-        <Field label={t("field_flag_label")} hint={t("field_flag_hint")}>
-          <span className="ui-ws-i18n-switch">
-            <Switch
-              checked={i18nEnabled}
-              disabled={readOnly}
-              aria-label={t("field_flag_label")}
-              onCheckedChange={(checked) => onChange("i18n_v1", checked ? "true" : "false")}
-            />
-            <span className="ui-ws-i18n-switch-state">{i18nEnabled ? t("flag_on") : t("flag_off")}</span>
-          </span>
-        </Field>
-      ) : null}
-
       {fields.includes("default_data_language") ? (
         <Field help={<ConfigurationFieldHelp contract={contract} field="workspace_i18n.default_data_language" label={t("field_data_lang_label")} />} label={t("field_data_lang_label")} hint={t("field_data_lang_hint")}>
           <select

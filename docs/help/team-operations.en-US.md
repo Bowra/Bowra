@@ -4,7 +4,7 @@ Team owners and administrators can open **Settings → Team → Operations → O
 
 The reporting time zone is shared by the team. Select a time zone and save it to change which hours belong to each day. A change updates the displayed daily grouping; it does not change the underlying activity.
 
-- **Daily login users** counts each person once per day after a successful sign-in. Adding daily values across a week counts a person again on each day they signed in.
+- **Daily active users** counts each person once on a day when they used Bowhead in a visible tab or sent a chat message. Period totals add up the daily counts. Earlier days may show only the activity captured in chat.
 - **New sessions** counts ordinary chat sessions created that day. Test and evaluation sessions are excluded.
 - **Chat tokens** adds input and output tokens from chat model requests. **Background tokens** shows other attributed model work separately. These are tokens, not credit charges.
 - **Skill loads** counts actual Skill reads or invocations. **Tool loads** counts tool definitions supplied to model requests. **Tool calls** counts tool execution attempts, including failed calls.

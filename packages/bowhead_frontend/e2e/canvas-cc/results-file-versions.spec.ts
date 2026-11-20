@@ -14,7 +14,7 @@ const entry: ResultItemDTO = {
   key: "artifact:art_rv_1", object_type: "artifact", title: "report.md",
   primary_group: "deliverables", secondary_group: null, viewer_profile: "text", status: "ready",
   route: { type: "artifact", artifact_id: "art_rv_3", default_mode: "preview" },
-  capabilities: ["download", "view_details", "view_raw"], relation_roles: ["main_deliverable"],
+  capabilities: ["download", "view_details", "view_raw", "view_history"], relation_roles: ["main_deliverable"],
   execution: null, version: null, lineage: { number: 3, count: 3 }, position: 1,
   display_context: {
     source_role: "sandbox", output_role: "main_deliverable", execution_label: null,
@@ -97,4 +97,47 @@ test("each card of a revised file opens the version it delivered", async ({ page
       await expect(viewer.locator(`a[href*="/api/v1/files/${other}"]`)).toHaveCount(0);
     }
   }
+});
+
+test("phone history, exact-version download and All Results return use the compact toolbar", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 786 });
+  await page.route("**/api/v1/chat/sessions/*/reference-queue?*", (route) => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/sessions/*/results/versions", (route) => route.fulfill({ json: {
+    versions: versions.map((id, index) => ({
+      artifact_id: id, version_no: index + 1, latest: index === 2, filename: "report.md", mime: "text/markdown",
+      size: sizes[id], created_at: "2026-11-13T00:03:00Z",
+    })),
+  } }));
+  const sessionId = await openSession(page);
+  await page.goto(`/?session=${sessionId}&result=art_rv_2&mode=preview`);
+  const toolbar = page.locator(".result-file-toolbar");
+  const title = toolbar.getByRole("button", { name: "选择成果，当前文件为report.md", exact: true });
+  const more = toolbar.getByRole("button", { name: "更多操作", exact: true });
+  const select = async (name: string) => {
+    await more.click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+  };
+
+  await expect(page.getByText("content of art_rv_2")).toBeVisible();
+  await more.click();
+  await expect(page.getByRole("menuitem", { name: "下载", exact: true })).toHaveAttribute("href", "/api/v1/files/art_rv_2");
+  await page.keyboard.press("Escape");
+  await select("版本历史");
+  const history = page.getByTestId("file-versions-drawer");
+  const rows = history.getByTestId("file-version-row");
+  await expect(rows).toHaveCount(3);
+  await expect(history.getByRole("link", { name: "下载第 2 版" })).toHaveAttribute("href", "/api/v1/files/art_rv_2");
+  await page.keyboard.press("Escape");
+  await expect(more).toBeFocused();
+
+  await title.click();
+  await page.getByRole("button", { name: /浏览全部成果/ }).click();
+  const explorerItem = page.locator('.results-explorer-pane [data-result-key="artifact:art_rv_1"] button');
+  await explorerItem.click();
+  await expect(page.getByText("content of art_rv_3")).toBeVisible();
+  await select("返回全部成果");
+  await expect(explorerItem).toBeVisible();
+  await expect(explorerItem).toBeFocused();
+  await expect(page).toHaveURL(/results=all/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
 });

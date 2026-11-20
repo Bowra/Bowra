@@ -3,6 +3,7 @@
 import { appFetch as fetch, appPath } from "@/lib/base-path";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import { useTranslations } from "next-intl";
 import { formatDateTime, getCurrentLocale } from "@/lib/locale";
 import { useFocusedItemScroll } from "@/lib/use-focused-item-scroll";
@@ -29,7 +30,7 @@ import {
 import { X } from "@/components/icons";
 import { Tab, TabList, Tabs } from "@/components/ui/tabs";
 import { ArtifactPreview } from "./artifact-preview";
-import { ResultObjectActions } from "./result-object-actions";
+import { ResultObjectActions, type CompactResultToolbar } from "./result-object-actions";
 import type { CanvasExportFmt } from "@/lib/api";
 import { useArtifactRepresentation } from "@/lib/use-artifact-representation";
 
@@ -242,6 +243,7 @@ export function DataTabFiles({
   viewerMode,
   onViewerModeChange,
   viewerOnly = false,
+  compactToolbar,
   artifactItems,
   artifactItemsError = null,
   onArtifactItemsRetry,
@@ -264,6 +266,7 @@ export function DataTabFiles({
     history?: "push" | "replace",
   ) => void;
   viewerOnly?: boolean;
+  compactToolbar?: CompactResultToolbar;
   artifactItems?: ArtifactItem[] | null;
   artifactItemsError?: ResultsWorkspaceErrorClass | null;
   onArtifactItemsRetry?: () => void;
@@ -272,7 +275,7 @@ export function DataTabFiles({
   resultCapabilities?: ReadonlySet<ResultCapability>;
   resultRole?: ArtifactResultRole;
   downloadLabel?: string;
-  onOpenArtifactHistory?: () => void;
+  onOpenArtifactHistory?: (trigger?: HTMLElement) => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
 }) {
   const t = useTranslations("data_files");
@@ -292,12 +295,9 @@ export function DataTabFiles({
   // The viewer shows the file its route names. An earlier selection must not
   // stand in for a file that is missing from the list, or Download would
   // fetch a different file than the one the user opened.
-  const visibleSelected =
-    selected
-    && items?.some((item) => item.id === selected.id)
-    && (!viewerOnly || !focusArtifactId || selected.id === focusArtifactId)
-      ? selected
-      : null;
+  const visibleSelected = viewerOnly && focusArtifactId
+    ? items?.find((item) => item.id === focusArtifactId) ?? null
+    : selected && items?.some((item) => item.id === selected.id) ? selected : null;
   const reportedOpenFailureRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -369,6 +369,7 @@ export function DataTabFiles({
         sessionId={sessionId}
         scope={scope}
         standalone
+        compactToolbar={compactToolbar}
         viewerMode={viewerMode}
         onViewerModeChange={onViewerModeChange}
         onRegenerateExport={onRegenerateExport}
@@ -554,6 +555,7 @@ export function FilePreviewer({
   scope,
   onClose,
   standalone = false,
+  compactToolbar,
   viewerMode,
   onViewerModeChange,
   onRegenerateExport,
@@ -570,6 +572,7 @@ export function FilePreviewer({
   scope: ArtifactScope;
   onClose?: () => void;
   standalone?: boolean;
+  compactToolbar?: CompactResultToolbar;
   viewerMode?: ResultsViewerMode;
   onViewerModeChange?: (
     mode: ResultsViewerMode,
@@ -581,7 +584,7 @@ export function FilePreviewer({
   capabilities?: ReadonlySet<ResultCapability>;
   resultRole?: ArtifactResultRole;
   downloadLabel?: string;
-  onOpenHistory?: () => void;
+  onOpenHistory?: (trigger?: HTMLElement) => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
 }) {
   const dataT = useTranslations("data_files");
@@ -646,7 +649,10 @@ export function FilePreviewer({
   ]);
 
   return (
-    <div className={standalone ? "result-file-viewer standalone" : "result-file-viewer"}>
+    <div className={clsx("result-file-viewer", {
+      standalone,
+      "result-file-viewer--compact": compactToolbar,
+    })}>
       {item.trust?.startsWith("export_copy_legacy_") ? (
         <div role="note" style={{
           padding: "10px 12px", border: "1px solid var(--c-warn-line)", borderRadius: 6,
@@ -667,7 +673,7 @@ export function FilePreviewer({
             ) : null}
         </div>
       ) : null}
-      <Tabs value={mode} onValueChange={changeMode}>
+      {compactToolbar ? null : <Tabs value={mode} onValueChange={changeMode}>
         <TabList appearance="segmented" className="result-viewer-modes" aria-label={resultsT("viewer_modes")}>
           {viewerModes.map((value) => (
             <Tab key={value} value={value} className={mode === value ? "active" : undefined}>
@@ -675,7 +681,7 @@ export function FilePreviewer({
             </Tab>
           ))}
         </TabList>
-      </Tabs>
+      </Tabs>}
       {/* Feishu 07.06 #21: remove outer custom header; one ArtifactPreview header owns close/fullscreen/download
           in one row, showing filename + type/size once (previously duplicate headers split the actions). */}
       {mode === "details" && preview?.details && !err ? (
@@ -691,6 +697,8 @@ export function FilePreviewer({
           onDownload={onDownload}
           capabilities={capabilities}
           resultRole={resultRole}
+          compactToolbar={compactToolbar}
+          viewerModes={viewerModes}
           mode={mode}
           downloadLabel={downloadLabel}
           feedbackRecorded={feedbackRecorded}
@@ -704,6 +712,7 @@ export function FilePreviewer({
           key={`${representation.contextKey}:${representation.scopeUnavailable ? "unavailable" : "authorized"}`}
           fileId={item.id}
           filename={item.filename}
+          compactToolbar={compactToolbar}
           mime={item.mime}
           sizeLabel={fmtArtifactSize(item.size)}
           preview={preview}
@@ -721,6 +730,7 @@ export function FilePreviewer({
           onDownload={onDownload}
           capabilities={representation.scopeUnavailable ? new Set<ResultCapability>() : capabilities}
           resultRole={resultRole}
+          allowFileShare={scope === "session" && item.kind === "deliverable" && !representation.scopeUnavailable}
           downloadLabel={downloadLabel}
           feedbackRecorded={feedbackRecorded}
           onViewerModeChange={changeMode}
@@ -740,6 +750,8 @@ function ArtifactDetails({
   onDownload,
   capabilities,
   resultRole,
+  compactToolbar,
+  viewerModes,
   mode,
   downloadLabel,
   feedbackRecorded,
@@ -754,11 +766,13 @@ function ArtifactDetails({
   onDownload?: () => void;
   capabilities: ReadonlySet<ResultCapability>;
   resultRole: ArtifactResultRole;
+  compactToolbar?: CompactResultToolbar;
+  viewerModes: readonly ResultsViewerMode[];
   mode: ResultsViewerMode;
   downloadLabel?: string;
   feedbackRecorded: boolean;
   onViewerModeChange: (mode: ResultsViewerMode) => void;
-  onOpenHistory?: () => void;
+  onOpenHistory?: (trigger?: HTMLElement) => void;
   onFeedbackUnsupported: () => void;
   onClose?: () => void;
 }) {
@@ -783,11 +797,11 @@ function ArtifactDetails({
   ];
   return (
     <div className="artifact-details">
-      <div className="artifact-details-head">
-        <div>
+      <div className={clsx("artifact-details-head", { "result-file-toolbar": compactToolbar })}>
+        {compactToolbar?.title ?? <div>
           <strong title={item.filename}>{item.filename}</strong>
           <span>{t("details_exact_object")}</span>
-        </div>
+        </div>}
         <div className="artifact-viewer-actions">
           <ResultObjectActions
             artifactId={item.id}
@@ -797,6 +811,7 @@ function ArtifactDetails({
             downloadHref={downloadHref}
             downloadLabel={downloadLabel}
             feedbackRecorded={feedbackRecorded}
+            compact={compactToolbar ? { modes: viewerModes, returns: compactToolbar.returnActions } : undefined}
             onReference={onReference}
             onDownload={onDownload}
             onModeChange={onViewerModeChange}
@@ -811,6 +826,7 @@ function ArtifactDetails({
           ) : null}
         </div>
       </div>
+      {compactToolbar ? <p className="result-file-details-note">{t("details_exact_object")}</p> : null}
       <dl>
         {rows.map(([label, value]) => (
           <div key={label}>

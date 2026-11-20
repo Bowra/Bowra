@@ -129,8 +129,11 @@ async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the
     async with open_shared_ctx(str(fixture.path)) as writer:
         await writer.execute("BEGIN IMMEDIATE")
         try:
-            # The Space metadata save bumps the fenced revision, so it holds the exclusive core lease.
-            await writer.execute("UPDATE workspaces SET description=?,revision=revision+1 WHERE id=?", ("Saving", fixture.worker.workspace_id))
+            # A Space archive changes the fenced status, so it holds the exclusive core lease. (The 116 case
+            # was a Space metadata save; 0230 stopped fencing the revision and description it changes.)
+            await writer.execute("UPDATE workspaces SET status='archived' WHERE id=?", (fixture.worker.workspace_id,))
+            # Guard against a holder that stops fencing: the exclusive core lease must really be held.
+            assert writer._conn._leases.get("core") == 2, writer._conn._leases
             assert await asyncio.wait_for(fixture.store.expire(fixture.worker), timeout=2) == []
             obligations = await asyncio.wait_for(fixture.store.obligations(fixture.worker, execution_id=fixture.requester), timeout=2)
             assert [item["question_id"] for item in obligations] == [question["operation_id"]]
@@ -152,11 +155,16 @@ async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the
 
 
 async def _hold_exclusive_core_lease(fixture: CollaborationFixture, released: asyncio.Event, seconds: float) -> None:
-    """Hold the exclusive core lease the way a Space metadata save does, then release it."""
+    """Hold the exclusive core lease the way a Space archive does, then roll back.
+
+    Space metadata saves no longer fence (revision 0230), so the holder changes the fenced status.
+    """
     async with open_shared_ctx(str(fixture.path)) as writer:
         await writer.execute("BEGIN IMMEDIATE")
         try:
-            await writer.execute("UPDATE workspaces SET description=?,revision=revision+1 WHERE id=?", ("Saving", fixture.worker.workspace_id))
+            await writer.execute("UPDATE workspaces SET status='archived' WHERE id=?", (fixture.worker.workspace_id,))
+            # Guard against a holder that stops fencing: the exclusive core lease must really be held.
+            assert writer._conn._leases.get("core") == 2, writer._conn._leases
             released.set()
             await asyncio.sleep(seconds)
         finally:
@@ -165,7 +173,7 @@ async def _hold_exclusive_core_lease(fixture: CollaborationFixture, released: as
 
 async def test_collaboration_writes_repeat_until_an_authority_writer_lets_go(split_collab: CollaborationFixture) -> None:
     """116 1.7.49: a collaboration write pinned the shared core lease at its first scope read and failed
-    at once beside a Space save. Writes now repeat their whole transaction and land once the lease is free."""
+    at once beside an authority writer. Writes now repeat their whole transaction and land once the lease is free."""
     fixture = split_collab
     holding = asyncio.Event()
     holder = asyncio.create_task(_hold_exclusive_core_lease(fixture, holding, 0.3))

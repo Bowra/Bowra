@@ -84,7 +84,7 @@ export function SettingsIntegrations() {
   const connected = visibleProviders.filter(
     ({ item }) => item.enabled && item.healthy,
   );
-  const planned = visibleProviders.filter(
+  const available = visibleProviders.filter(
     ({ item }) => !item.enabled || !item.healthy,
   );
 
@@ -92,7 +92,6 @@ export function SettingsIntegrations() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>{t("overview_eyebrow")}</p>
           <h1 className="ui-page-title">{t("title")}</h1>
           <p className="ui-page-desc">{t("overview_description")}</p>
         </div>
@@ -118,25 +117,25 @@ export function SettingsIntegrations() {
           </div>
         </div>
       ) : null}
-      <ProviderSection
-        title={t("overview_active")}
-        empty={t("overview_active_empty")}
-        providers={connected}
-        action={t("overview_manage_action")}
-        onOpen={(href) => router.push(href)}
-      />
-      <ProviderSection
-        title={t("overview_planned")}
-        empty={
-          loading ? t("overview_planned_loading") : t("overview_planned_empty")
-        }
-        providers={planned}
-        action={t("overview_start_action")}
-        onOpen={(href) => router.push(href)}
-      />
-      <div className={styles.sectionLabel}>
+      {(!loading && !error) || visibleProviders.length > 0 ? (
+        <>
+          <ProviderSection
+            title={t("overview_active")}
+            empty={t("overview_active_empty")}
+            providers={connected}
+            onOpen={(href) => router.push(href)}
+          />
+          <ProviderSection
+            title={t("overview_available")}
+            empty={t("overview_available_empty")}
+            providers={available}
+            onOpen={(href) => router.push(href)}
+          />
+        </>
+      ) : null}
+      <h2 className={styles.sectionLabel}>
         {t("overview_coming_soon")}
-      </div>
+      </h2>
       <div className={styles.plannedGrid}>
         <PlannedCard
           name={t("provider_wecom")}
@@ -155,27 +154,20 @@ function ProviderSection({
   title,
   empty,
   providers,
-  action,
   onOpen,
 }: {
   title: string;
   empty: string;
   providers: Array<ProviderDefinition & { item: IntegrationOverviewItemDTO }>;
-  action: string;
   onOpen: (href: string) => void;
 }) {
   return (
     <>
-      <div className={styles.sectionLabel}>{title}</div>
+      <h2 className={styles.sectionLabel}>{title}</h2>
       {providers.length ? (
         <div className={styles.providerGrid}>
           {providers.map((provider) => (
-            <ProviderCard
-              key={provider.id}
-              provider={provider}
-              action={action}
-              onOpen={onOpen}
-            />
+              <ProviderCard key={provider.id} provider={provider} onOpen={onOpen} />
           ))}
         </div>
       ) : (
@@ -189,17 +181,19 @@ function ProviderSection({
 
 function ProviderCard({
   provider,
-  action,
   onOpen,
 }: {
   provider: ProviderDefinition & { item: IntegrationOverviewItemDTO };
-  action: string;
   onOpen: (href: string) => void;
 }) {
   const t = useTranslations("settings.integrations");
   const detail = provider.item.configured
     ? t("provider_configured_detail")
     : t("provider_unconfigured_detail");
+  const { enabled, healthy, configured } = provider.item;
+  const action = enabled
+    ? t(healthy ? "overview_manage_action" : "overview_review_action")
+    : t(configured ? "overview_resume_action" : "overview_start_action");
   return (
     <article className={styles.providerCard}>
       <span className={styles.providerIcon} aria-hidden="true">
@@ -217,9 +211,9 @@ function ProviderCard({
         <span className={styles.statusGrid}>
           <span className={styles.statusCell}>
             <span>{t("provider_status_label")}</span>
-            <strong className={styles.good}>
+            <strong className={healthy ? styles.good : styles.warn}>
               <i className={styles.statusDot} aria-hidden="true" />
-              {t("provider_status_healthy")}
+              {t(healthy ? "provider_status_healthy" : "provider_status_unhealthy")}
             </strong>
           </span>
         </span>
@@ -239,7 +233,6 @@ function ProviderCard({
 }
 
 function PlannedCard({ name, detail }: { name: string; detail: string }) {
-  const t = useTranslations("settings.integrations");
   return (
     <div className={styles.plannedCard}>
       <div className={styles.plannedMark} aria-hidden="true">
@@ -247,9 +240,7 @@ function PlannedCard({ name, detail }: { name: string; detail: string }) {
       </div>
       <div>
         <strong>{name}</strong>
-        <span>
-          {detail} · {t("provider_planned")}
-        </span>
+        <span>{detail}</span>
       </div>
     </div>
   );

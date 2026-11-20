@@ -4,6 +4,8 @@ Verbinden Sie einen entfernten MCP-Dienst, damit Ihr privater Agent externe Tool
 
 ## Verbindung hinzufügen und Tools auswählen
 
+Sind unter **Meine Agent-Tools** keine Tools verfügbar, fügen Sie eine Verbindung hinzu oder aktivieren Sie die benötigten Tools in einer bestehenden Verbindung. Klappen Sie dann den gewünschten Agenten auf.
+
 1. Öffnen Sie **Capability Center → Meine Verbindungen** (`/connections/`).
 2. Geben Sie einen Namen und die Adresse des entfernten MCP-Dienstes ein. Wählen Sie keine Authentifizierung, Bearer-Token oder API-Schlüssel. Bei einem API-Schlüssel können Sie den vom Dienst geforderten Headernamen verwenden.
 3. Wählen Sie **Verbinden und Tools suchen**, markieren Sie die benötigten Tools und speichern Sie.

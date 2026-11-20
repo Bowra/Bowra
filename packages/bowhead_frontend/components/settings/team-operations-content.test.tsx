@@ -15,7 +15,7 @@ beforeEach(() => {
     timezone: "Asia/Shanghai",
     days: Array.from({ length: days }, (_, offset) => ({
       day: `2026-10-${String(offset + 1).padStart(2, "0")}`,
-      login_users: offset === 0 ? 2 : 0,
+      active_users: offset === 0 ? 2 : 0,
       sessions: 0,
       input_tokens: 0,
       output_tokens: 0,
@@ -30,6 +30,8 @@ beforeEach(() => {
 it("shows daily zeros and switches between complete-day ranges", async () => {
   renderIntl(<TeamOperationsContent />);
   expect(await screen.findByText("2026-10-01")).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "活跃用户（日累计）" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "每日趋势: 活跃用户（日累计）" })).toBeTruthy();
   expect(screen.getAllByRole("row")).toHaveLength(8);
   fireEvent.click(screen.getByRole("button", { name: "昨天" }));
   await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));

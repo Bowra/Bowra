@@ -252,3 +252,38 @@ async def test_lead_empty_answer_recovery_preserves_cancellation(monkeypatch):
             ),
         )
     assert len(router.requests) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("first", "corrected"),
+    [
+        # Only the protocol markers, no answer and no Tool call. Finalization strips them, so the
+        # user would see a blank answer unless the run treats the reply as empty.
+        ("<response_kind>chat</response_kind>\n<headline>RBU 2026年1–10月经营复盘</headline>", True),
+        ("<response_kind>chat</response_kind>\n<headline>RBU 复盘</headline>\n需要先确认快照日。", False),
+    ],
+)
+async def test_lead_reply_made_only_of_markers_counts_as_empty(monkeypatch, first, corrected):
+    monkeypatch.setitem(
+        PROFILES, "lead", SubagentProfile(name="lead", llm_agent_type="lead", tool_whitelist=(), system_prompt="Answer.", max_iterations=4)
+    )
+    router = ScriptedRouter([LLMResponse(content=first), LLMResponse(content="Recovered answer.")])
+    bus = TurnEventBus()
+    result = await SubagentRunner(router=router, tool_registry=ToolRegistry()).run(
+        profile_name="lead",
+        task="Answer",
+        parent_turn_id="t_marker_only",
+        parent_bus=bus,
+        parent_ctx=ToolExecutionContext(
+            workspace_id="ws_test", user_id="u_test", member_uid="m_test", turn_id="t_marker_only", session_id="s_test", datarc=None
+        ),
+    )
+    timings = [e.payload for e in bus.snapshot() if e.event_type == "llm.call_timing"]
+    assert timings[0]["empty_response"] is corrected
+    assert len(router.requests) == (2 if corrected else 1)
+    assert result.ok
+    assert result.final_answer == ("Recovered answer." if corrected else first)
+    if corrected:
+        assert timings[1]["empty_answer_retry"] is True
+        assert "no answer or executable Tool call" in router.requests[1].messages[-1].content

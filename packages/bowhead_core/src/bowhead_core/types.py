@@ -181,7 +181,7 @@ class TurnRequest:
     # Default False = reactive Lead (current production behavior); True = paradigm v2 (Lead manager + spawn).
     # Gateway chat.py injects workspace_settings.paradigm_v2_enabled; see docs/M158-architecture-clarity.md.
     paradigm_v2: bool = False
-    # M158-12: full workspace_settings kv (i18n_v1 / paradigm_v2_enabled / default_time_window /
+    # M158-12: full workspace_settings key-value settings (paradigm_v2_enabled / default_time_window /
     # key_metrics / known_dimensions / internal_definitions / etc.), prefetched by chat.py,
     # passed by turn_runner to build_lead_system_prompt for workspace_context injection.
     workspace_settings: dict[str, str] | None = None

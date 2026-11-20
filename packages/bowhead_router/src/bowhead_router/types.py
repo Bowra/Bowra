@@ -125,6 +125,9 @@ class LLMRequest:
     images_withheld: int = field(default=0, repr=False, compare=False)
 
 
+_MAX_TRACED_PHASES = 16
+
+
 @dataclass(frozen=True, slots=True)
 class LLMResponseDiagnostics:
     """Content-free adapter observations; absent counts mean unobserved, not zero."""
@@ -139,15 +142,24 @@ class LLMResponseDiagnostics:
     output_budget: dict[str, Any] | None = None
     # Images withheld because the serving target does not read images; absent when none.
     images_withheld: int | None = None
+    # Responses surface only: the `phase` of each assistant message item in output order
+    # (`commentary`, `final_answer`, or `unlabeled` when the provider sent none). Absent on other surfaces.
+    output_phases: tuple[str, ...] | None = None
 
     def trace_fields(self) -> dict[str, Any]:
         """Project a fixed, bounded shape without model-controlled strings."""
 
         count = self.upstream_tool_call_count
         withheld = self.images_withheld
+        phases = self.output_phases
         return {
             **({"output_budget": dict(self.output_budget)} if self.output_budget is not None else {}),
             **({"images_withheld": withheld} if type(withheld) is int and withheld > 0 else {}),
+            **(
+                {"output_phases": [phase if phase in {"commentary", "final_answer"} else "unlabeled" for phase in phases[:_MAX_TRACED_PHASES]]}
+                if isinstance(phases, tuple)
+                else {}
+            ),
             "mode": self.transport_mode if isinstance(self.transport_mode, str) and self.transport_mode in {"stream", "invoke"} else "unknown",
             "upstream_tool_call_count": count if type(count) is int and count >= 0 else None,
             "upstream_finish_reason": (

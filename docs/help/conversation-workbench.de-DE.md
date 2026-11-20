@@ -31,6 +31,8 @@ Nummerierte Zitatmarker in Antworten behalten ihre Position, Nummer und Quelle. 
 
 Karten, auf denen Sie etwas auswählen, ergänzen oder einen Plan freigeben sollen, haben während der Bearbeitung einen farblich hervorgehobenen Rand. Nach Ihrer Antwort oder Freigabe klappt die Karte zu einem einzeiligen Ergebnis zusammen. Dieses bleibt auch nach dem Aktualisieren in der Unterhaltung erhalten.
 
+Solange die Frage offen ist, stellt das Neuladen desselben Tabs Ihre Auswahl, Ihre Eingaben und den Antwortfortschritt wieder her. Wählen Sie **Weiter**, um Ihre Antworten zu senden.
+
 Wenn der Versand einer E-Mail oder der Aufruf eines externen Tools Ihre Bestätigung erfordert, erscheint die Karte unter dem wartenden Schritt. Prüfen Sie die geplante Aktion und treffen Sie Ihre Wahl, bevor die Zeit abläuft. Bei Ablauf wird die Aktion übersprungen. Die Karte zeigt das Ergebnis auch nach der Fortsetzung.
 
 ## Ergebnisbereich

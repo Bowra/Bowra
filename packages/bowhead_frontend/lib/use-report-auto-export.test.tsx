@@ -68,7 +68,8 @@ describe("useReportAutoExport", () => {
     expect(triggerExport).not.toHaveBeenCalled();
   });
 
-  it("consumes a real report and starts the V2-ready retry path", async () => {
+  it.each(["xlsx", "docx"])("opens a hydrated report and requests a single %s export", async (format) => {
+    window.history.replaceState({}, "", `/?session=s_target&report=1&export=${format}`);
     const triggerExport = vi.fn(async () => true);
 
     renderHook(() => useReportAutoExport({
@@ -79,7 +80,7 @@ describe("useReportAutoExport", () => {
     }));
 
     await waitFor(() => expect(triggerExport).toHaveBeenCalledWith(
-      "xlsx",
+      format,
       { retryTransient: true },
     ));
     expect(new URL(window.location.href).searchParams.has("export")).toBe(false);
@@ -87,7 +88,7 @@ describe("useReportAutoExport", () => {
   });
 
   it("consumes an unsupported format without exporting or retrying on refresh", () => {
-    window.history.replaceState({}, "", "/?session=s_target&report=1&export=docx");
+    window.history.replaceState({}, "", "/?session=s_target&report=1&export=exe");
     const triggerExport = vi.fn(async () => true);
 
     renderHook(() => useReportAutoExport({

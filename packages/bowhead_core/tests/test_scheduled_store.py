@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING
 
+import anyio
 import pytest
 
 if TYPE_CHECKING:
@@ -53,20 +54,21 @@ async def test_list_for_user_isolation(db_path: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_active_cap_rejects_11th(db_path: str) -> None:
-    from bowhead_core.scheduled_store import MAX_ACTIVE_JOBS_PER_USER, ScheduledJobStore
+async def test_active_cap_rejects_overflow_and_serializes_the_last_slot(db_path: str) -> None:
+    from bowhead_core.scheduled_store import MAX_ACTIVE_JOBS_PER_USER, ScheduledJobLimitError, ScheduledJobStore
 
     store = ScheduledJobStore(db_path)
     await store.initialize()
+    paused = None
     for i in range(MAX_ACTIVE_JOBS_PER_USER):
-        await store.create(
+        paused = await store.create(
             user_id="u1",
             workspace_id="w1",
             name=f"j{i}",
             cron="* * * * *",
             query="q",
         )
-    with pytest.raises(ValueError, match="max"):
+    with pytest.raises(ScheduledJobLimitError, match="max"):
         await store.create(
             user_id="u1",
             workspace_id="w1",
@@ -74,6 +76,29 @@ async def test_active_cap_rejects_11th(db_path: str) -> None:
             cron="* * * * *",
             query="q",
         )
+    assert paused is not None
+    await store.patch(paused.id, status="paused")
+    winners = []
+
+    async def create_new() -> None:
+        try:
+            await store.create(user_id="u1", workspace_id="w2", name="new", cron="@manual", query="q")
+        except ScheduledJobLimitError:
+            return
+        winners.append("create")
+
+    async def resume_paused() -> None:
+        try:
+            assert await store.patch(paused.id, status="active") is True
+        except ScheduledJobLimitError:
+            return
+        winners.append("resume")
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(create_new)
+        group.start_soon(resume_paused)
+    assert len(winners) == 1
+    assert await store.count_active("u1") == MAX_ACTIVE_JOBS_PER_USER
 
 
 @pytest.mark.asyncio

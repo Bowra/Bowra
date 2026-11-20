@@ -269,6 +269,11 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level, settings.log_format)
     log = structlog.get_logger()
     _load_dotenv_into_process(log)
+    # Same-user processes (the export Chromium rendering model-written HTML) cannot read
+    # this process's environment or memory (visual self-check, decision D5 hardening).
+    from bowhead_gateway.process_hardening import deny_same_user_inspection
+
+    deny_same_user_inspection(log)
     from bowhead_core.agent_run_limits import get_runtime_controls
 
     get_runtime_controls()
@@ -2591,7 +2596,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     canvas_store._anchor_invalidation_hook = _anchor_invalidation_hook
 
-    # i18n v1: workspace settings store (data_language / week_start_day / i18n_v1 flag)
+    # Space preferences store for source-data language and week start.
     from bowhead_core.workspace_settings_store import WorkspaceSettingsStore
 
     workspace_settings_store = WorkspaceSettingsStore(db_path)
@@ -3811,10 +3816,12 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         await provider_registry.close_all()
         from bowhead_core._db import close_pooled_readers
         from bowhead_core.sqlite_lease_wait import flush_summary as flush_lease_wait_summary
+        from bowhead_core.sqlite_pool_summary import flush_summary as flush_pool_summary
 
         await close_pooled_readers()
-        # Write the last window of authority-lease waits; a restart would otherwise drop it.
+        # Write the last window of authority-lease waits and pool counts; a restart would otherwise drop them.
         flush_lease_wait_summary()
+        flush_pool_summary()
 
 
 def _read_version() -> str:
@@ -4283,7 +4290,7 @@ def create_app() -> FastAPI:
 
     app.include_router(theme_routes.router)
 
-    # i18n v1: workspace settings (default_data_language / week_start_day / i18n_v1)
+    # Space language and week-start settings.
     from bowhead_gateway.routes import workspace_settings as workspace_settings_routes
 
     app.include_router(workspace_settings_routes.router)

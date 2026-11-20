@@ -11,6 +11,10 @@ import { useTranslations } from "next-intl";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { appPath } from "@/lib/base-path";
 import { ApiError } from "@/lib/api-client";
+import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
+import { addFileShare, fileShareUrl, getFileShares, putFileShareAudience, revokeFileShare } from "@/lib/file-share";
+import { copyPermissionedReportLink } from "@/lib/report-share";
+import { copyShareLink } from "@/lib/share-link";
 import { retryResultsCapabilities, useResultsCapabilities } from "@/lib/use-results-capabilities";
 import { DialogShell } from "@/components/ui/dialog";
 import {
@@ -19,6 +23,7 @@ import {
   type DirectoryGroup,
   type DirectoryUser,
   type ShareKind,
+  type ShareGrant,
   type ShareState,
   addShareGrant,
   fetchTeamDirectory,
@@ -35,12 +40,13 @@ import { CharIcon } from "@/components/char-icon";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 export interface ShareDialogProps {
-  kind: ShareKind;
+  kind: ShareKind | "file";
   resourceId: string;
   label?: string;
   onClose: () => void;
   /** fired after any mutation so the host list can refresh audience badges */
   onChanged?: () => void;
+  onLinkCopied?: () => void;
   /** skill-team-governance: team_skill broadcast audience locked; visibility changes require approval state machine
    * (server set_audience always returns 422 for rows other than team_wide+approved); caller derives prop from row state. */
   teamWideLocked?: boolean;
@@ -56,6 +62,15 @@ type Suggestion =
 
 /** translator handle for the `share` namespace, threaded into child fn-components */
 type Tr = ReturnType<typeof useTranslations>;
+
+type DialogGrant = Pick<ShareGrant, "id" | "principal_id" | "principal_name"> & {
+  principal_type: ShareGrant["principal_type"] | "workspace" | "team";
+};
+
+type DialogShareState = Omit<ShareState, "kind" | "grants"> & {
+  grants?: DialogGrant[];
+  file?: { id: string; sharingEnabled: boolean };
+};
 
 /** locale-resolved per-kind display strings (KIND_META now carries only icon + perm flavor) */
 interface LocalizedMeta {
@@ -76,33 +91,65 @@ function localizedMeta(kind: ShareKind, t: Tr): LocalizedMeta {
 
 export function ShareDialog(props: ShareDialogProps) {
   const t = useTranslations("share");
+  const fileT = useTranslations("file_share");
   const isMobile = useMediaQuery("(max-width: 760px)");
-  const meta = localizedMeta(props.kind, t);
+  const ownerId = useOptionalAuthSession()?.me?.id;
+  const isFile = props.kind === "file";
+  const isReport = props.kind === "report";
+  const isDocument = isFile || isReport;
+  const meta: LocalizedMeta = props.kind === "file"
+    ? { typeLabel: fileT("type"), verb: t("kind_report_verb"), perm: t("perm_view"), icon: "doc" }
+    : localizedMeta(props.kind, t);
+  const [state, setState] = useState<DialogShareState | null>(null);
   const capabilities = useResultsCapabilities();
   const [serverDisabled, setServerDisabled] = useState(false);
-  const sharingAllowed = props.kind !== "report" || (capabilities.contentSharing === true && !serverDisabled);
-  const sharingNotice = sharingAllowed ? undefined : t(serverDisabled || capabilities.sharingDisabled ? "deployment_disabled" : "capability_unavailable");
+  const sharingAllowed = isFile ? state?.file?.sharingEnabled === true && !serverDisabled
+    : !isReport || (capabilities.contentSharing === true && !serverDisabled);
+  const sharingNotice = sharingAllowed ? undefined : t(
+    serverDisabled || (isFile ? state?.file?.sharingEnabled === false : capabilities.sharingDisabled)
+      ? "deployment_disabled" : "capability_unavailable",
+  );
   useEffect(() => {
     setServerDisabled(false);
     if (props.kind === "report") void retryResultsCapabilities();
   }, [props.kind, props.resourceId]);
 
-  const [state, setState] = useState<ShareState | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [individualRevoke, setIndividualRevoke] = useState<DialogGrant | null>(null);
+  const [copying, setCopying] = useState(false);
   // User-intended audience view overrides server-derived value. Empty custom roster derives private server-side, but clicking
   // “指定人·组” must show picker to add first person → view holds custom (otherwise picker unreachable).
   const [view, setView] = useState<Audience | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setState(await getShares(props.kind, props.resourceId));
+      if (props.kind === "file") {
+        const data = await getFileShares(props.resourceId);
+        setState({
+          resource_id: props.resourceId,
+          label: "",
+          owner_id: ownerId ?? null,
+          audience: data.audience ?? (data.shares.length ? "custom" : "private"),
+          can_manage: true,
+          file: { id: data.file_id, sharingEnabled: data.sharing_enabled },
+          grants: data.shares.map((grant) => ({
+            id: `${grant.subject_kind}:${grant.subject_id}`,
+            principal_type: grant.subject_kind,
+            principal_id: grant.subject_id,
+            principal_name: grant.subject_name,
+          })),
+        });
+      } else {
+        setState(await getShares(props.kind, props.resourceId));
+      }
       setErr(null);
     } catch (e) {
+      setState(null);
       setErr(withHttpFailureReason(t("load_failed_safe"), e, { read: true }));
     }
-  }, [props.kind, props.resourceId, t]);
+  }, [props.kind, props.resourceId, ownerId, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -114,10 +161,17 @@ export function ShareDialog(props: ShareDialogProps) {
       if (e instanceof ApiError && e.code === "content_sharing_disabled") {
         setServerDisabled(true);
         setErr(null);
+      } else if (e instanceof ApiError && e.code === "file_share_invalid_recipient") {
+        setErr(fileT("invalid_recipient"));
       } else setErr(withHttpFailureReason(t("change_failed_safe"), e));
     }
     finally { setBusy(false); }
-  }, [load, fireChanged, t]);
+  }, [load, fireChanged, fileT, t]);
+
+  const updateAudience = useCallback((target: Audience) => {
+    const { kind, resourceId } = props;
+    return mutate(() => kind === "file" ? putFileShareAudience(resourceId, target) : putAudience(kind, resourceId, target));
+  }, [mutate, props.kind, props.resourceId]);
 
   // team_skill broadcast lock derives live from **current server value** (review P3: static prop becomes stale after in-dialog downgrade;
   // server allows only rows already team_wide+approved to re-pick team_wide). Once current audience differs from
@@ -126,7 +180,6 @@ export function ShareDialog(props: ShareDialogProps) {
     props.kind === "team_skill" ? (state ? state.audience !== "team_wide" : !!props.teamWideLocked) : false;
   // Narrowing an approved team-wide Skill is an admin action; lock the narrower audiences while it is team-wide.
   const downgradeLocked = props.kind === "team_skill" && !!props.downgradeLocked && state?.audience === "team_wide";
-
   const pickAudience = useCallback((target: Audience) => {
     if (!state || (!sharingAllowed && target !== "private")) return;
     if (target === "team_wide" && teamWideLocked) {
@@ -142,15 +195,36 @@ export function ShareDialog(props: ShareDialogProps) {
       // one PUT to revoke team grant and downgrade; already custom/private needs no repeated PUT.
       setView("custom");
       if (state.audience !== "custom") {
-        void mutate(() => putAudience(props.kind, props.resourceId, "custom"));
+        void updateAudience("custom");
       }
       return;
     }
     setView(null);  // private / team_wide follow server-derived value.
     if (target === state.audience) return;
     if (target === "private" && hasRoster(state)) { setConfirmRevoke(true); return; }
-    void mutate(() => putAudience(props.kind, props.resourceId, target));
-  }, [state, mutate, props.kind, props.resourceId, teamWideLocked, downgradeLocked, sharingAllowed, t]);
+    void updateAudience(target);
+  }, [state, updateAudience, teamWideLocked, downgradeLocked, sharingAllowed, t]);
+
+  function revoke(grant: DialogGrant) {
+    const { kind, resourceId } = props;
+    if (kind === "file") {
+      const principal = grant.principal_type;
+      if (principal === "user" || principal === "group") void mutate(() => revokeFileShare(resourceId, principal, grant.principal_id));
+    } else {
+      void mutate(() => revokeShareGrant(kind, resourceId, grant.id));
+    }
+  }
+
+  async function copyLink() {
+    setCopying(true);
+    try {
+      const copied = isReport ? await copyPermissionedReportLink(props.resourceId)
+        : state?.file ? await copyShareLink(fileShareUrl(state.file.id), fileT("copied")) : false;
+      if (copied) props.onLinkCopied?.();
+    } finally {
+      setCopying(false);
+    }
+  }
 
   // Effective rendered audience = user-intent override ?? server-derived value.
   const effectiveAudience: Audience = view ?? state?.audience ?? "private";
@@ -162,17 +236,45 @@ export function ShareDialog(props: ShareDialogProps) {
       downgradeLocked={downgradeLocked}
       sharingAllowed={sharingAllowed}
       sharingNotice={sharingNotice}
-      onAddGrant={(p) => { if (sharingAllowed) void mutate(() => addShareGrant(props.kind, props.resourceId, p)); }}
-      onRevokeGrant={(gid) => mutate(() => revokeShareGrant(props.kind, props.resourceId, gid))}
+      fileT={fileT}
+      ownerId={ownerId}
+      isDocument={isDocument}
+      copying={copying}
+      onCopyLink={isReport || state?.file ? () => void copyLink() : undefined}
+      onAddGrant={(p) => {
+        const { kind, resourceId } = props;
+        if (sharingAllowed) void mutate(() => kind === "file"
+          ? addFileShare(resourceId, p.principal_type, p.principal_id)
+          : addShareGrant(kind, resourceId, p));
+      }}
+      onRevokeGrant={(grant) => {
+        if (isDocument) setIndividualRevoke(grant);
+        else revoke(grant);
+      }}
       onPickAudience={pickAudience}
     />
   );
 
-  const confirm = confirmRevoke ? (
+  const confirm = individualRevoke ? (
     <RevokeConfirm
-      t={t} state={state} mobile={isMobile}
+      t={t} mobile={isMobile}
+      title={t("revoke_title")}
+      description={t("revoke_body", { name: individualRevoke.principal_name || fileT("member") })}
+      individual
+      onCancel={() => setIndividualRevoke(null)}
+      onConfirm={() => { setIndividualRevoke(null); revoke(individualRevoke); }}
+    />
+  ) : confirmRevoke ? (
+    <RevokeConfirm
+      t={t} mobile={isMobile}
+      title={t("revoke_all_title")}
+      description={t("revoke_all_body", { n: state?.grants?.length ?? 0 })}
       onCancel={() => setConfirmRevoke(false)}
-      onConfirm={() => { setView(null); setConfirmRevoke(false); void mutate(() => putAudience(props.kind, props.resourceId, "private")); }}
+      onConfirm={() => {
+        setView(null);
+        setConfirmRevoke(false);
+        void updateAudience("private");
+      }}
     />
   ) : null;
 
@@ -183,14 +285,16 @@ export function ShareDialog(props: ShareDialogProps) {
       <DialogShell
         presentation="center"
         onClose={props.onClose}
-        mount="inline"
+        mount={isFile ? "body" : "inline"}
+        layer={isFile ? "top" : "base"}
+        busy={busy}
         returnFocusRef={props.returnFocusRef}
         label={t("aria_share", { title })}
         backdropClassName="legacy-share-backdrop legacy-share-backdrop--end"
         panelClassName="legacy-share-sheet"
       >
         <div className="legacy-share-grabber" />
-        <SheetHeader t={t} title={title} typeLabel={meta.typeLabel} icon={meta.icon} />
+        <SheetHeader t={t} title={title} typeLabel={meta.typeLabel} icon={meta.icon} onClose={props.onClose} busy={busy} />
         {body}
         {confirm}
       </DialogShell>
@@ -201,14 +305,16 @@ export function ShareDialog(props: ShareDialogProps) {
     <DialogShell
       presentation="center"
       onClose={props.onClose}
-      mount="inline"
+      mount={isFile ? "body" : "inline"}
+      layer={isFile ? "top" : "base"}
+      busy={busy}
       returnFocusRef={props.returnFocusRef}
       label={t("aria_share", { title })}
       backdropClassName="legacy-share-backdrop legacy-share-backdrop--center"
       panelClassName="legacy-share-panel"
       panelStyle={{ width: state && !state.can_manage ? 480 : 560 }}
     >
-      <DesktopHeader t={t} title={title} typeLabel={meta.typeLabel} icon={meta.icon} onClose={props.onClose} />
+      <DesktopHeader t={t} title={title} typeLabel={meta.typeLabel} icon={meta.icon} onClose={props.onClose} busy={busy} />
       {body}
       {confirm}
     </DialogShell>
@@ -217,36 +323,43 @@ export function ShareDialog(props: ShareDialogProps) {
 
 /* ───────── audience-aware body (shared desktop + mobile) ───────── */
 function DialogBody({
-  t, meta, state, audience, err, busy, mobile, teamWideLocked, downgradeLocked, sharingAllowed, sharingNotice, onAddGrant, onRevokeGrant, onPickAudience,
+  t, meta, state, audience, err, busy, mobile, teamWideLocked, downgradeLocked, sharingAllowed, sharingNotice,
+  fileT, ownerId, isDocument, copying, onCopyLink, onAddGrant, onRevokeGrant, onPickAudience,
 }: {
   t: Tr;
   meta: { typeLabel: string; verb: string; perm: string };
-  state: ShareState | null; audience: Audience; err: string | null; busy: boolean; mobile: boolean;
+  state: DialogShareState | null; audience: Audience; err: string | null; busy: boolean; mobile: boolean;
   teamWideLocked?: boolean;
   downgradeLocked?: boolean;
   sharingAllowed: boolean;
   sharingNotice?: string;
+  fileT: Tr;
+  ownerId?: string;
+  isDocument: boolean;
+  copying: boolean;
+  onCopyLink?: () => void;
   onAddGrant: (p: { principal_type: "user" | "group"; principal_id: string }) => void;
-  onRevokeGrant: (grantId: string) => void;
+  onRevokeGrant: (grant: DialogGrant) => void;
   onPickAudience: (a: Audience) => void;
 }) {
-  if (err) return <div className={`legacy-share-state-err${mobile ? " is-mobile" : ""}`}>{err}</div>;
+  if (!state && err) return <div role="alert" className={`legacy-share-state-err${mobile ? " is-mobile" : ""}`}>{err}</div>;
   if (!state) return <div className={`legacy-share-state-loading${mobile ? " is-mobile" : ""}`}>{t("loading")}</div>;
 
   if (!state.can_manage) return <ReadOnlyBody t={t} state={state} mobile={mobile} />;
 
   const grants = state.grants ?? [];
   const pending = state.pending_requests ?? 0;
+  const directSharing = audience === "custom" || (isDocument && audience === "private");
   return (
     <div className={`legacy-share-body${mobile ? " is-mobile" : ""}`}>
       {sharingNotice && <p role="status">{sharingNotice}</p>}
+      {err ? <div role="alert" className="legacy-share-state-err">{err}</div> : null}
       <ShSegmented active={audience} onPick={onPickAudience} busy={busy}
         lockedIds={!sharingAllowed ? ["custom", "team_wide"] : teamWideLocked ? ["team_wide"] : downgradeLocked ? ["custom", "private"] : undefined}
         lockedTitle={
           sharingNotice ?? (teamWideLocked ? t("team_wide_locked_hint") : downgradeLocked ? t("team_wide_downgrade_locked_hint") : undefined)
         }
         height={mobile ? 42 : 38} fontSize={mobile ? 12.5 : 13} />
-
       {pending > 0 && (
         <a href={appPath("/settings/access-requests/")} className="legacy-share-pending">
           <ShIcon name="users" size={14} className="legacy-share-flex-none" />
@@ -255,20 +368,22 @@ function DialogBody({
         </a>
       )}
 
-      {audience === "private" && (
+      {audience === "private" && !directSharing && (
         <ShQuietState icon="lock" title={t("private_title", { verb: meta.verb, typeLabel: meta.typeLabel })}
           sub={t("private_sub")} />
       )}
 
-      {audience === "custom" && (
+      {directSharing && (
         <CustomBody t={t} grants={grants} perm={meta.perm} verb={meta.verb} typeLabel={meta.typeLabel}
-          busy={busy} sharingAllowed={sharingAllowed} onAddGrant={onAddGrant} onRevokeGrant={onRevokeGrant} />
+          busy={busy} sharingAllowed={sharingAllowed} onAddGrant={onAddGrant} onRevokeGrant={onRevokeGrant}
+          fileT={fileT} ownerId={ownerId}
+        />
       )}
 
       {audience === "team_wide" && (
         <>
           <ShQuietState icon="globe" tint title={t("team_wide_title", { verb: meta.verb })}
-            sub={t("team_wide_sub", { typeLabel: meta.typeLabel })} />
+            sub={state.file ? fileT("team_wide_sub") : t("team_wide_sub", { typeLabel: meta.typeLabel })} />
           {grants.length > 0 && (
             <div className="legacy-share-roster-kept">
               <ShIcon name="users" size={13} className="legacy-share-roster-kept-icon" />
@@ -280,28 +395,36 @@ function DialogBody({
 
       <Footer
         mobile={mobile}
-        note={audience === "custom" ? t("footer_notify_note") : undefined}
+        note={[
+          directSharing && sharingAllowed ? t("footer_notify_note") : null,
+          state.file ? fileT("latest_version") : null,
+        ].filter(Boolean).join(" ")}
+        copyLabel={t("copy_link")}
+        onCopyLink={onCopyLink}
+        busy={busy || copying}
       />
     </div>
   );
 }
 
 function CustomBody({
-  t, grants, perm, verb, typeLabel, busy, sharingAllowed, onAddGrant, onRevokeGrant,
+  t, grants, perm, verb, typeLabel, busy, sharingAllowed, onAddGrant, onRevokeGrant, fileT, ownerId,
 }: {
-  t: Tr;
-  grants: ShareState["grants"]; perm: string; verb: string; typeLabel: string; busy: boolean;
+  t: Tr; fileT: Tr;
+  grants: DialogGrant[]; perm: string; verb: string; typeLabel: string; busy: boolean;
+  ownerId?: string;
   sharingAllowed: boolean;
   onAddGrant: (p: { principal_type: "user" | "group"; principal_id: string }) => void;
-  onRevokeGrant: (grantId: string) => void;
+  onRevokeGrant: (grant: DialogGrant) => void;
 }) {
-  const rows = grants ?? [];
+  const existing = new Set(grants.map((grant) => grant.principal_id));
+  if (ownerId) existing.add(ownerId);
   return (
     <>
       {sharingAllowed && <div className="legacy-share-search-row">
-        <DirectorySearch t={t} busy={busy} existing={new Set(rows.map((g) => g.principal_id))} onPick={onAddGrant} />
+        <DirectorySearch t={t} busy={busy} existing={existing} onPick={onAddGrant} />
       </div>}
-      {rows.length === 0 ? (
+      {grants.length === 0 ? (
         <div className="legacy-share-roster-empty">
           <ShQuietState icon="users" title={t("empty_roster_title")}
             sub={t("empty_roster_sub", { verb, typeLabel })} />
@@ -309,13 +432,13 @@ function CustomBody({
       ) : (
         <div className="legacy-share-roster">
           <div className="legacy-share-roster-head">
-            <span className="legacy-share-roster-count">{t("roster_count", { count: rows.length })}</span>
+            <span className="legacy-share-roster-count">{t("roster_count", { count: grants.length })}</span>
             <span className="legacy-share-grow" />
             <span className="legacy-share-roster-perm">{t("perm_fixed_note", { perm })}</span>
           </div>
           <div className="legacy-share-roster-rows">
-            {rows.map((g) => (
-              <RosterRow key={g.id} t={t} grant={g} perm={perm} onRevoke={() => onRevokeGrant(g.id)} />
+            {grants.map((grant) => (
+              <RosterRow key={grant.id} t={t} fileT={fileT} grant={grant} perm={perm} busy={busy} onRevoke={() => onRevokeGrant(grant)} />
             ))}
           </div>
         </div>
@@ -324,20 +447,23 @@ function CustomBody({
   );
 }
 
-function RosterRow({ t, grant, perm, onRevoke }: { t: Tr; grant: NonNullable<ShareState["grants"]>[number]; perm: string; onRevoke: () => void }) {
+function RosterRow({ t, fileT, grant, perm, busy, onRevoke }: {
+  t: Tr; fileT: Tr; grant: DialogGrant; perm: string; busy: boolean; onRevoke: () => void;
+}) {
   const [hover, setHover] = useState(false);
   const isGroup = grant.principal_type === "group";
+  const scope = grant.principal_type === "workspace" || grant.principal_type === "team" ? grant.principal_type : null;
   // 0708 ⑤: show resolved name; avatar color stays keyed on the id for stability.
-  const display = grant.principal_name || grant.principal_id;
+  const display = grant.principal_name || (scope ? fileT(scope) : grant.id.startsWith("user:") ? fileT("member") : grant.principal_id);
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <div className={`legacy-share-row${hover ? " is-hover" : ""}`}>
-        {isGroup ? <ShGroupAvatar size={30} /> : <ShAvatar name={display} color={avatarColor(grant.principal_id)} size={30} />}
+        {isGroup || scope ? <ShGroupAvatar size={30} /> : <ShAvatar name={display} color={avatarColor(grant.principal_id)} size={30} />}
         <span className="legacy-share-row-name">{display}</span>
-        <ShTypeTag kind={isGroup ? t("tag_group") : t("tag_user")} />
+        {!scope ? <ShTypeTag kind={isGroup ? t("tag_group") : t("tag_user")} /> : null}
         <span className="legacy-share-grow" />
         <ShPermTag label={perm} />
-        <button title={t("remove")} onClick={onRevoke} className={`legacy-share-row-remove${hover ? " is-visible" : ""}`}><ShIcon name="trash" size={11} />{t("remove")}</button>
+        {!scope ? <button type="button" disabled={busy} title={t("remove")} onClick={onRevoke} className={`legacy-share-row-remove${hover ? " is-visible" : ""}`}><ShIcon name="trash" size={11} />{t("remove")}</button> : null}
       </div>
       {isGroup && (
         <div className="legacy-share-row-group-note">
@@ -351,7 +477,12 @@ function RosterRow({ t, grant, perm, onRevoke }: { t: Tr; grant: NonNullable<Sha
 /* ───────── directory search + suggestions ───────── */
 function DirectorySearch({
   t, busy, existing, onPick,
-}: { t: Tr; busy: boolean; existing: Set<string>; onPick: (p: { principal_type: "user" | "group"; principal_id: string }) => void }) {
+}: {
+  t: Tr;
+  busy: boolean;
+  existing: Set<string>;
+  onPick: (p: { principal_type: "user" | "group"; principal_id: string }) => void;
+}) {
   const [q, setQ] = useState("");
   const [focus, setFocus] = useState(false);
   // ⑥ (bug 0708): users paginate (infinite scroll), groups are a bounded one-shot.
@@ -410,11 +541,14 @@ function DirectorySearch({
   return (
     // Feishu07.06 #24: dropdown candidates were in-flow placeholders, stretching sharing dialog with more content.
     // position:relative container + absolute dropdown overlay → floats above following content without adding height.
-    <div className="legacy-share-search">
+    <div className="legacy-share-search" onFocus={() => setFocus(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocus(false);
+      }}>
       <label className={`legacy-share-search-box${focus ? " is-focus" : ""}`}>
         <ShIcon name="search" size={14} />
         <input value={q} disabled={busy} onChange={(e) => setQ(e.target.value)}
-          onFocus={() => setFocus(true)} onBlur={() => setTimeout(() => setFocus(false), 150)}
+          aria-label={t("search_placeholder")}
           placeholder={t("search_placeholder")} className="legacy-share-search-input" />
       </label>
       {focus && sugg.length > 0 && (
@@ -424,7 +558,7 @@ function DirectorySearch({
             const el = e.currentTarget;
             if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) loadMore();
           }} className="legacy-share-suggest">
-          {sugg.map((s) => <SuggestRow key={s.kind === "user" ? s.user.id : s.group.id} t={t} s={s} onPick={onPick} />)}
+          {sugg.map((s) => <SuggestRow key={s.kind === "user" ? s.user.id : s.group.id} t={t} s={s} busy={busy} onPick={onPick} />)}
           {loadingMore ? (
             <div className="legacy-share-suggest-more">
               {t("loading_more")}
@@ -436,12 +570,13 @@ function DirectorySearch({
   );
 }
 
-function SuggestRow({ t, s, onPick }: { t: Tr; s: Suggestion; onPick: (p: { principal_type: "user" | "group"; principal_id: string }) => void }) {
+function SuggestRow({ t, s, busy, onPick }: { t: Tr; s: Suggestion; busy: boolean; onPick: (p: { principal_type: "user" | "group"; principal_id: string }) => void }) {
   const [hover, setHover] = useState(false);
   const isUser = s.kind === "user";
   return (
-    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      onMouseDown={(e) => { e.preventDefault(); onPick(isUser ? { principal_type: "user", principal_id: s.user.id } : { principal_type: "group", principal_id: s.group.id }); }}
+    <button type="button" disabled={busy} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onPick(isUser ? { principal_type: "user", principal_id: s.user.id } : { principal_type: "group", principal_id: s.group.id })}
       className={`legacy-share-suggest-row${hover ? " is-hover" : ""}`}>
       {isUser ? <ShAvatar name={s.user.display_name} color={avatarColor(s.user.id)} size={26} /> : <ShGroupAvatar size={26} />}
       <span className="legacy-share-suggest-name">{isUser ? s.user.display_name : s.group.name}</span>
@@ -449,12 +584,12 @@ function SuggestRow({ t, s, onPick }: { t: Tr; s: Suggestion; onPick: (p: { prin
       {!isUser && <ShTypeTag kind={t("tag_group")} />}
       <span className="legacy-share-grow" />
       {hover && <span className="legacy-share-suggest-add"><ShIcon name="plus" size={11} />{t("add")}</span>}
-    </div>
+    </button>
   );
 }
 
 /* ───────── recipient read-only ───────── */
-function ReadOnlyBody({ t, state, mobile }: { t: Tr; state: ShareState; mobile: boolean }) {
+function ReadOnlyBody({ t, state, mobile }: { t: Tr; state: DialogShareState; mobile: boolean }) {
   const tMember = useTranslations("agents_marketplace");
   // Never show the raw owner id; an unresolved owner reads as a generic "Team member".
   const ownerName = state.owner_name?.trim();
@@ -490,14 +625,16 @@ function ReadOnlyBody({ t, state, mobile }: { t: Tr; state: ShareState; mobile: 
 
 /* ───────── confirm revoke (→ “仅自己”) ───────── */
 function RevokeConfirm({
-  t, state, mobile, onCancel, onConfirm,
-}: { t: Tr; state: ShareState | null; mobile: boolean; onCancel: () => void; onConfirm: () => void }) {
-  const n = state?.grants?.length ?? 0;
+  t, title, description, individual = false, mobile, onCancel, onConfirm,
+}: {
+  t: Tr; title: string; description: string; individual?: boolean; mobile: boolean;
+  onCancel: () => void; onConfirm: () => void;
+}) {
   const card = (
     <div className={mobile ? "legacy-share-revoke is-mobile" : "legacy-share-revoke"}>
-      <div className="legacy-share-revoke-title">{t("revoke_all_title")}</div>
+      <div className="legacy-share-revoke-title">{title}</div>
       <div className="legacy-share-revoke-body">
-        {t("revoke_all_body", { n })}
+        {description}
       </div>
       <div className="legacy-share-revoke-foot">
         <ShBtn kind="ghost" h={mobile ? 42 : 31} fs={mobile ? 13.5 : 12.5} onClick={onCancel} style={mobile ? { flex: 1 } : undefined}>{t("cancel")}</ShBtn>
@@ -511,7 +648,8 @@ function RevokeConfirm({
       presentation="center"
       onClose={onCancel}
       mount="inline"
-      label={t("revoke_all_title")}
+      label={title}
+      role={individual ? "alertdialog" : "dialog"}
       // FloatingOverlay supplies inline position: fixed; override with inline absolute here (cover sharing dialog only).
       backdropStyle={{ position: "absolute" }}
       backdropClassName={mobile ? "legacy-share-revoke-backdrop is-mobile" : "legacy-share-revoke-backdrop"}
@@ -526,7 +664,9 @@ function RevokeConfirm({
  * Legacy shell appearance (backdrop/panel/header/footer/revoke-access confirmation) is legacy-share-* in styles/ui-controls-legacy.css,
  * appearance-refresh batch 5 in styles/ui-refresh-surfaces.css. */
 
-function DesktopHeader({ t, title, typeLabel, icon, onClose }: { t: Tr; title: string; typeLabel: string; icon: "doc" | "bot" | "spark"; onClose: () => void }) {
+function DesktopHeader({ t, title, typeLabel, icon, onClose, busy }: {
+  t: Tr; title: string; typeLabel: string; icon: "doc" | "bot" | "spark"; onClose: () => void; busy: boolean;
+}) {
   return (
     <div className="legacy-share-head">
       <div className="legacy-share-head-main">
@@ -539,12 +679,14 @@ function DesktopHeader({ t, title, typeLabel, icon, onClose }: { t: Tr; title: s
           <ShTypeTag kind={typeLabel} />
         </div>
       </div>
-      <button aria-label={t("aria_close")} onClick={onClose} className="legacy-share-close"><ShIcon name="x" size={14} /></button>
+      <button type="button" aria-label={t("aria_close")} disabled={busy} onClick={onClose} className="legacy-share-close"><ShIcon name="x" size={14} /></button>
     </div>
   );
 }
 
-function SheetHeader({ t, title, typeLabel, icon }: { t: Tr; title: string; typeLabel: string; icon: "doc" | "bot" | "spark" }) {
+function SheetHeader({ t, title, typeLabel, icon, onClose, busy }: {
+  t: Tr; title: string; typeLabel: string; icon: "doc" | "bot" | "spark"; onClose: () => void; busy: boolean;
+}) {
   return (
     <div className="legacy-share-sheet-head">
       <span className="legacy-share-type-mark"><ShIcon name={icon} size={15} /></span>
@@ -553,20 +695,24 @@ function SheetHeader({ t, title, typeLabel, icon }: { t: Tr; title: string; type
         <div className="legacy-share-sheet-title">{title}</div>
       </div>
       <ShTypeTag kind={typeLabel} />
+      <button type="button" aria-label={t("aria_close")} disabled={busy} onClick={onClose} className="legacy-share-close"><ShIcon name="x" size={14} /></button>
     </div>
   );
 }
 
-function Footer({ mobile, note }: { mobile: boolean; note?: string }) {
-  if (mobile) return null;
+function Footer({ mobile, note, copyLabel, onCopyLink, busy }: {
+  mobile: boolean; note?: string; copyLabel: string; onCopyLink?: () => void; busy: boolean;
+}) {
+  if (mobile && !onCopyLink) return null;
   return (
-    <div className="legacy-share-foot">
+    <div className={`legacy-share-foot${mobile ? " is-mobile" : ""}`}>
       {note && <span className="legacy-share-foot-note">{note}</span>}
       <span className="legacy-share-grow" />
+      {onCopyLink ? <ShBtn kind="ghost" h={mobile ? 42 : 32} onClick={onCopyLink} disabled={busy}>{copyLabel}</ShBtn> : null}
     </div>
   );
 }
 
-function hasRoster(s: ShareState): boolean {
+function hasRoster(s: DialogShareState): boolean {
   return s.audience === "custom" && (s.grants?.length ?? 0) > 0;
 }

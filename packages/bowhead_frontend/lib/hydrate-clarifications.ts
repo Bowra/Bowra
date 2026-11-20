@@ -15,6 +15,7 @@
  */
 
 import { listClarificationsForTurn, type ClarificationListDTO } from "./api";
+import { clearClarificationDraft } from "./clarification-draft";
 import { normalizeErrorDiagnostics } from "./error-presentation";
 import { parseRecoveryAction } from "./turn-feedback";
 import type { SseErrorReason } from "./types";
@@ -50,8 +51,13 @@ export async function readHydratedClarificationAuthority(
     return { clarifications: candidates, resumeFailure: null };
   }
   const authority = await listClarificationsForTurn(turnId);
+  const pendingRequestIds = new Set(authority.items.map((item) => item.request_id));
+  for (const candidate of candidates) {
+    const requestId = clarificationId(candidate);
+    if (!pendingRequestIds.has(requestId)) clearClarificationDraft(requestId);
+  }
   return {
-    clarifications: retainPendingClarifications(candidates, new Set(authority.items.map((item) => item.request_id))),
+    clarifications: retainPendingClarifications(candidates, pendingRequestIds),
     resumeFailure: lastDoneStatus === "clarification_pending"
       ? clarificationResumeFailure(authority.resume_failure, turnId, generation) : null,
   };

@@ -1852,6 +1852,9 @@
   color: var(--c-ink) !important;
   font-weight: 500 !important;
 }
+.shared-html-page {
+  padding: clamp(12px, 2vw, 28px);
+}
 /* ⋯ more actions: square icon button with a 16 glyph */
 :root:root .result-file-viewer .result-object-actions-trigger {
   width: var(--control-h-md);
@@ -2014,6 +2017,92 @@
   min-height: 36px;
   border-bottom: var(--hairline) solid var(--c-separator);
 }
+
+/* The compact session viewer keeps one row of chrome above its renderer. */
+:root:root .result-file-viewer.standalone.result-file-viewer--compact {
+  padding: 0;
+  gap: 0;
+}
+:root:root .result-file-toolbar:is(.artifact-viewer-head, .artifact-details-head).result-file-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  min-height: 45px;
+  gap: 0;
+  padding: 0 max(8px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  background: var(--c-surface);
+}
+:root:root :is(.artifact-viewer--fullscreen, .artifact-viewer-modal-panel) > .result-file-toolbar {
+  padding-top: env(safe-area-inset-top);
+}
+:root:root .result-file-toolbar :is(.results-head-context, .artifact-viewer-title) {
+  flex: 1;
+  min-width: 0;
+}
+:root:root .result-file-toolbar .result-file-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: start;
+  gap: 6px;
+  padding: 0 7px;
+  background: transparent;
+  font-weight: 600;
+}
+:root:root .result-file-toolbar .result-file-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .result-file-toolbar .result-file-title svg {
+  flex: none;
+}
+:root:root .result-file-toolbar .artifact-viewer-actions {
+  width: auto;
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+:root:root .result-file-toolbar .artifact-viewer-tools {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+:root:root .result-file-toolbar.result-file-toolbar :is(.artifact-viewer-tools button, .result-object-actions-trigger) {
+  width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+:root:root .result-file-toolbar.result-file-toolbar :is(.artifact-viewer-tools button, .result-object-actions-trigger):hover {
+  background: var(--c-fill-2);
+}
+:root:root .result-file-viewer--compact .artifact-viewer > .safe-html-preview {
+  border: 0;
+  border-radius: 0;
+}
+:root:root .result-file-viewer--compact .artifact-details dl,
+:root:root .result-file-viewer--compact .artifact-viewer > .artifact-viewer-body {
+  padding-inline: 12px;
+}
+.result-file-details-note {
+  margin: 10px 12px 4px;
+  color: var(--c-ink-3);
+  font: var(--fs-sm) var(--font-control);
+}
+:root:root .ui-menu-sheet:has(.result-object-actions-pop--compact) {
+  background: var(--c-surface-2);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root:root .result-object-actions-pop--compact [role^="menuitem"] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 :root:root .result-file-viewer .artifact-details dt {
   color: var(--c-ink-3);
   font-family: var(--font-control);

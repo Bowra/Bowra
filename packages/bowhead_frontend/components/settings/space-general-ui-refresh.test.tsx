@@ -1,6 +1,6 @@
 /**
  * Space settings · General (page-by-page acceptance A): name and description sit in grouped cards and save through the
- * save bar; the multilingual feature toggle is an immediately effective Switch.
+ * save bar; language preferences save immediately.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
@@ -33,7 +33,7 @@ const META = { id: "ws_1", name: "销售", description: "旧描述", revision: 3
 beforeEach(() => {
   vi.mocked(getWorkspaceMetadata).mockResolvedValue(META as never);
   vi.mocked(updateWorkspaceMetadata).mockImplementation(async (_id, body) => ({ ...META, ...body, revision: 4 }) as never);
-  vi.mocked(getWorkspaceSettings).mockResolvedValue({ i18n_v1: "false" } as never);
+  vi.mocked(getWorkspaceSettings).mockResolvedValue({ default_data_language: "zh-CN" } as never);
   vi.mocked(setWorkspaceSetting).mockResolvedValue(undefined as never);
 });
 afterEach(() => {
@@ -75,11 +75,10 @@ describe("SpaceGeneral", () => {
     expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("writes the multilingual feature Switch immediately", async () => {
+  it("saves a change to the source data language immediately", async () => {
     renderPage();
-    const toggle = await screen.findByRole("switch", { name: messages.settings.workspace_i18n.field_flag_label });
-    expect(screen.queryByRole("checkbox")).toBeNull();
-    fireEvent.click(toggle);
-    await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledWith("ws_1", "i18n_v1", "true"));
+    const language = await screen.findByRole("combobox", { name: messages.settings.workspace_i18n.field_data_lang_label });
+    fireEvent.change(language, { target: { value: "en-US" } });
+    await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledWith("ws_1", "default_data_language", "en-US"));
   });
 });

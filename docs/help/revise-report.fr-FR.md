@@ -28,4 +28,12 @@ Un graphique remplacé ou retiré n’est pas supprimé définitivement. Il rejo
 - Modifier une seule partie ne met pas à jour la conclusion finale. Demandez-le explicitement si vous souhaitez adapter aussi la conclusion.
 - Si la partie citée ne correspond pas au rapport (par exemple « chapitre 5 » pour un rapport en quatre parties), Bowra ne devine pas d’après la position : il vous demande laquelle vous visez. S’il modifie une partie sous un autre nom, ou ajoute le contenu comme nouvelle section, la réponse l’indique. Le plus sûr est de nommer le chapitre, par exemple « seulement le chapitre sur les catégories ».
 - Pour corriger un fichier livré plus tôt dans la conversation, par exemple les graphiques d’un rapport HTML ou une colonne d’un tableur, nommez le fichier et la partie à modifier. Bowra écrit une nouvelle version de ce fichier sous le même nom et la cite dans sa réponse. Le texte du rapport du Canvas reste inchangé ; une section qui intègre ce fichier HTML passe à la nouvelle version et indique « Mis à jour vers la version N ». « Résultats » n’affiche le fichier qu’une fois et ouvre sa dernière version ; les cartes de fichier plus anciennes de la conversation ouvrent aussi la dernière version. Si Bowra ne retrouve pas la partie citée dans le rapport du Canvas, sa question liste aussi les fichiers livrés plus tôt.
-- Les documents de modèle publiés se modifient par leur processus documentaire, et non en demandant une nouvelle version de fichier dans la conversation.
+- Pour réviser un brouillon créé par le plugin de brouillons PPTX, utilisez l’action de révision dans le chat depuis le brouillon.
+
+## Rechercher et gérer les rapports
+
+Ouvrez **Mes rapports** dans la barre latérale. Recherchez un rapport, filtrez par espace ou changez le tri. Activez le filtre des rapports sans contenu si vous en cherchez un. Les rapports reçus figurent dans **Partagés avec moi**.
+
+Ouvrez un rapport par son titre. Les actions de ligne peuvent proposer le partage, le téléchargement, la copie d’un lien, le changement d’état et la suppression. Sur téléphone, ouvrez le menu de la ligne. Lors d’une suppression, vérifiez si la conversation liée est aussi sélectionnée.
+
+Les fichiers générés seuls restent disponibles dans **Fichiers** et dans les **Résultats** de la conversation d’origine. **Mes rapports** affiche les rapports Canvas.

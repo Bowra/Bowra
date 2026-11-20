@@ -7,3 +7,5 @@
 3. Wählen Sie eine neue Unterhaltung je Lauf oder die Fortsetzung der verknüpften Unterhaltung. Richten Sie bei Bedarf die E-Mail-Zustellung ein und speichern Sie.
 
 Starten, bearbeiten, pausieren oder löschen Sie die Aufgabe über ihr Zeilenmenü. Im Laufverlauf sehen Sie das Ergebnis, die zugehörige Arbeit und den Zustellstatus. Rückfragen beantworten Sie auf der ursprünglichen Fragekarte. Wenn fehlender Zugriff auf einen Bereich, Agent oder ein Tool die Aufgabe pausiert hat, stellen Sie den Zugriff vor dem erneuten Aktivieren wieder her. [Aufgabenmeldungen und Zustellung](scheduled-task-alerts.de-DE.md)
+
+Pro Konto können bereichsübergreifend bis zu 20 geplante Aufgaben aktiv sein. Ist das Limit erreicht, wählen Sie **Zu einer aktiven Aufgabe** und pausieren Sie eine Aufgabe.

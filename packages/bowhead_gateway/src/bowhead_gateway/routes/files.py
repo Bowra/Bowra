@@ -17,12 +17,15 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from urllib.parse import urlencode
 
 import aiosqlite
 import anyio
+from bowhead_core.access_control import FileShareAction
 from bowhead_core.artifact_classifier import is_legacy_category, normalize_category
 from bowhead_core.artifact_store import (
     CSS_MIME,
@@ -43,10 +46,12 @@ from bowhead_core.documents.package_io import (
     inspect_office_package,
     office_upload_mime,
 )
+from bowhead_core.results_artifact_policy import is_results_internal_artifact
 from bowhead_core.space_governance import SpaceOperation
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 
+from bowhead_gateway._entitlement_gate import require_not_readonly
 from bowhead_gateway.access_context import (
     AccessContextError,
     access_context_to_dict,
@@ -75,6 +80,8 @@ from bowhead_gateway.media_preview import INLINE_MEDIA_MIMES
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
+
+    from bowhead_core.artifact_store import Artifact
 
     from bowhead_core import ArtifactStore
 
@@ -1980,6 +1987,241 @@ class ShareRequest(_BaseModel):
     subject_id: str = ""
 
 
+async def _require_shareable_html(request: Request, store: ArtifactStore, art: Artifact) -> None:
+    from bowhead_gateway.files_sharing import ShareRejected, assert_shareable
+
+    if (
+        art.kind != "deliverable"
+        or art.status != "ready"
+        or art.mime.split(";", 1)[0].strip().lower() not in {"text/html", "application/xhtml+xml"}
+        or is_results_internal_artifact(art)
+    ):
+        raise _file_error(422, "file_not_shareable")
+    kb_store = getattr(request.app.state, "kb_files_store", None)
+    if kb_store is None:
+        raise _file_error(503, "file_access_service_unavailable")
+    members = await store.lineage_member_ids(art.id, user_id=art.created_by)
+    try:
+        assert_shareable(art, in_kb=bool(await kb_store.artifact_ids_in_kb(members)))
+    except ShareRejected as exc:
+        raise _file_error(422, "file_not_shareable") from exc
+
+
+async def _html_file_source(request: Request, store: ArtifactStore, art: Artifact) -> tuple[str, str]:
+    """Resolve the source Team from persisted file provenance and a real Space."""
+    workspace_id = art.workspace_id or await _artifact_workspace_id(request, store, art)
+    if not workspace_id or workspace_id == TEAM_SCOPE_WORKSPACE_ID:
+        raise _file_error(422, "file_share_context_required")
+    team_id = await request.app.state.user_store.get_workspace_team_id(workspace_id)
+    if not team_id:
+        raise _file_error(422, "file_share_context_required")
+    return team_id, workspace_id
+
+
+async def _html_share_owner_context(
+    request: Request, store: ArtifactStore, art: Artifact, owner_id: str, operation: SpaceOperation
+) -> tuple[str, Artifact]:
+    latest_id = await store.latest_live_version_id(art)
+    latest = await store.get(latest_id) if latest_id else None
+    if latest is None or latest.created_by != owner_id:
+        raise _file_not_found()
+    team_id, workspace_id = await _html_file_source(request, store, latest)
+    try:
+        await build_access_context(
+            user_store=request.app.state.user_store,
+            access_store=None,
+            user_id=owner_id,
+            workspace_id=workspace_id,
+            expected_team_id=team_id,
+            operation=operation,
+        )
+    except AccessContextError as exc:
+        raise _file_not_found() from exc
+    return team_id, latest
+
+
+class HtmlShareAudience(_BaseModel):
+    audience: Literal["private", "custom", "team_wide"]
+
+
+_HTML_SHARE_PRINCIPALS = frozenset({"user", "group", "team"})
+
+
+async def _write_html_share(request: Request, art: Artifact, action: FileShareAction, principal: tuple[str, str] | None = None) -> None:
+    from bowhead_gateway.sharing_policy import require_sharing_expansion
+
+    store = _store(request)
+    owner_id = _user_id(request)
+    await require_not_readonly(request)
+    team_id, latest = await _html_share_owner_context(request, store, art, owner_id, SpaceOperation.WRITE)
+    if action != "remove":
+        await _require_shareable_html(request, store, latest)
+    if action in {"add", "custom", "team_wide"}:
+        require_sharing_expansion("artifact")
+    access_store = getattr(request.app.state, "access_control_store", None)
+    if access_store is None:
+        raise _file_error(503, "file_access_service_unavailable")
+    if principal is not None:
+        kind, principal_id = principal
+        if not principal_id or (kind == "user" and principal_id == owner_id):
+            raise _file_error(422, "file_share_invalid_recipient")
+        if action == "add":
+            if kind == "user":
+                valid = bool(await request.app.state.user_store.filter_active_team_members(team_id, {principal_id}))
+            else:
+                group = await access_store.get_group(team_id, principal_id)
+                valid = group is not None and group.status == "active" and not group.workspace_id
+            if not valid:
+                raise _file_error(422, "file_share_invalid_recipient")
+    result = await access_store.write_file_share(
+        team_id=team_id,
+        lineage_id=latest.lineage_root,
+        owner_id=owner_id,
+        versioned=await store.versions_supported(),
+        action=action,
+        principal=principal,
+    )
+    if not result.found:
+        raise _file_not_found()
+    if action == "add" and result.grant_id and principal is not None:
+        await _notify_html_file_share(request, latest, team_id, owner_id, principal, result.grant_id)
+
+
+async def _notify_html_file_share(request: Request, art: Artifact, team_id: str, owner_id: str, principal: tuple[str, str], grant_id: str) -> None:
+    service = getattr(request.app.state, "notification_service", None)
+    if service is None:
+        return
+    try:
+        user_store = request.app.state.user_store
+        owner = await user_store.get_user(owner_id)
+        if owner is None:
+            return
+        kind, principal_id = principal
+        if kind == "group":
+            members = await request.app.state.access_control_store.list_group_members(team_id, principal_id)
+            candidates = {member.principal_id for member in members if member.status == "active" and member.principal_type == "user"}
+            candidates = await user_store.filter_active_team_members(team_id, candidates)
+        else:
+            candidates = {principal_id}
+        recipients = []
+        for candidate in sorted(candidates - {owner_id}):
+            try:
+                await _read_shared_html(request, art.lineage_root, viewer_id=candidate)
+            except HTTPException as exc:
+                if exc.status_code >= 500:
+                    log.warning("files.share_notification_read_failed grant_id=%s status=%s", grant_id, exc.status_code)
+            else:
+                recipients.append(candidate)
+        await service.emit_content_shared(
+            team_id=team_id,
+            actor_user_id=owner_id,
+            actor_name=owner.display_name or owner.email,
+            kind="artifact",
+            resource_id=art.lineage_root,
+            resource_label=art.filename,
+            action_url="/files/view/?" + urlencode({"file": art.lineage_root}),
+            grant_id=grant_id,
+            recipient_ids=recipients,
+        )
+    except Exception:
+        log.warning("files.share_notification_failed grant_id=%s", grant_id, exc_info=True)
+
+
+async def _read_shared_html(request: Request, file_id: str, *, viewer_id: str | None = None) -> Artifact:
+    from bowhead_core.share_service import content_sharing_enabled
+
+    from bowhead_gateway.files_sharing import ARTIFACT_RESOURCE_KIND, file_granted
+
+    store = _store(request)
+    viewer_id = viewer_id or _user_id(request)
+    latest_id = await store.latest_live_version_id_for_lineage(file_id)
+    art = await store.get(latest_id) if latest_id else None
+    if art is None or art.lineage_root != file_id or not art.created_by:
+        raise _file_not_found()
+    user_store = request.app.state.user_store
+    try:
+        team_id, workspace_id = await _html_file_source(request, store, art)
+        await build_access_context(
+            user_store=user_store,
+            access_store=None,
+            user_id=art.created_by,
+            workspace_id=workspace_id,
+            expected_team_id=team_id,
+            operation=SpaceOperation.READ_HISTORY,
+        )
+        if viewer_id != art.created_by:
+            if not content_sharing_enabled() or not await user_store.filter_active_team_members(team_id, {viewer_id}):
+                raise _file_not_found()
+            workspace = await user_store.get_workspace(workspace_id)
+            if workspace is None:
+                raise _file_not_found()
+            is_member = bool(await user_store.get_member_role(workspace_id, viewer_id))
+            if workspace.get("status") == "archived":
+                await build_access_context(
+                    user_store=user_store,
+                    access_store=None,
+                    user_id=viewer_id,
+                    workspace_id=workspace_id,
+                    expected_team_id=team_id,
+                    operation=SpaceOperation.READ_HISTORY,
+                )
+            access_store = getattr(request.app.state, "access_control_store", None)
+            if access_store is None:
+                raise _file_not_found()
+            grant_space = workspace_id if is_member else None
+            groups = await access_store.principal_group_ids(team_id, viewer_id, grant_space)
+            grants = await access_store.granted_resource_ids(
+                team_id,
+                user_id=viewer_id,
+                workspace_id=grant_space,
+                group_ids=groups,
+                kind=ARTIFACT_RESOURCE_KIND,
+                allow_principal_types=_HTML_SHARE_PRINCIPALS,
+            )
+            if not await file_granted(store, art.id, grants):
+                raise _file_not_found()
+        await _require_shareable_html(request, store, art)
+    except AccessContextError as exc:
+        raise _file_not_found() from exc
+    except HTTPException as exc:
+        if exc.status_code != 404 and exc.status_code < 500:
+            raise _file_not_found() from exc
+        raise
+    return art
+
+
+_SHARED_FILE_HEADERS = {"Cache-Control": "private, no-store", "Vary": "Cookie"}
+
+
+async def _resolve_shared_html(request: Request, file_id: str) -> Artifact:
+    try:
+        return await _read_shared_html(request, file_id)
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **_SHARED_FILE_HEADERS}
+        raise
+
+
+@router.get("/shared/{file_id}/view")
+async def shared_html_view(file_id: str, request: Request, response: Response) -> dict[str, Any]:
+    art = await _resolve_shared_html(request, file_id)
+    response.headers.update(_SHARED_FILE_HEADERS)
+    return {"filename": art.filename, "mime": art.mime, "size": art.size, "version_id": art.id, "version": art.version_no or 1}
+
+
+@router.get("/shared/{file_id}/content")
+async def shared_html_content(file_id: str, request: Request, version_id: str = "") -> Response:
+    from bowhead_gateway.artifact_streaming import artifact_streaming_response
+
+    art = await _resolve_shared_html(request, file_id)
+    if art.id != version_id:
+        error = _file_error(409, "file_share_version_changed")
+        error.headers = _SHARED_FILE_HEADERS
+        raise error
+    response = await artifact_streaming_response(request, _store(request), art, inline=False)
+    response.headers.update(_SHARED_FILE_HEADERS)
+    return response
+
+
 @router.post("/{artifact_id}/share", status_code=status.HTTP_201_CREATED)
 async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> dict[str, Any]:
     """把一份资产分享给空间/团队（只读）。owner-only。
@@ -2004,6 +2246,10 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
         operation=SpaceOperation.WRITE,
         user_id=user_id,
     )
+    if body.subject_kind in {"user", "group"}:
+        recipient_id = body.subject_id.strip()
+        await _write_html_share(request, art, "add", (body.subject_kind, recipient_id))
+        return {"artifact_id": artifact_id, "subject_kind": body.subject_kind, "subject_id": recipient_id}
     _ctx = await _share_ctx(request)
     team_id, workspace_id = _ctx.team_id, _ctx.workspace_id
     if not team_id:
@@ -2069,6 +2315,9 @@ async def unshare_file(
         operation=SpaceOperation.WRITE,
         user_id=user_id,
     )
+    if subject_kind in {"user", "group"}:
+        await _write_html_share(request, art, "remove", (subject_kind, subject_id))
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     team_id = (await _share_ctx(request)).team_id
     access_store = getattr(request.app.state, "access_control_store", None)
     if access_store is None or not team_id:
@@ -2088,8 +2337,21 @@ async def unshare_file(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.put("/{artifact_id}/shares/audience", status_code=status.HTTP_204_NO_CONTENT)
+async def set_html_share_audience(artifact_id: str, body: HtmlShareAudience, request: Request) -> Response:
+    """Change the audience of an HTML deliverable across all of its versions."""
+    store = _store(request)
+    user_id = _user_id(request)
+    art = await store.get(artifact_id)
+    if art is None or art.created_by != user_id:
+        raise _file_not_found()
+    await _require_artifact_visible(request, store, art, operation=SpaceOperation.WRITE, user_id=user_id)
+    await _write_html_share(request, art, body.audience)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{artifact_id}/shares")
-async def list_file_shares(artifact_id: str, request: Request) -> dict[str, Any]:
+async def list_file_shares(artifact_id: str, request: Request, response: Response, html: bool = False) -> dict[str, Any]:
     """这份文件分享给了谁。owner-only。"""
     from bowhead_gateway.files_sharing import ARTIFACT_RESOURCE_KIND
 
@@ -2107,14 +2369,20 @@ async def list_file_shares(artifact_id: str, request: Request) -> dict[str, Any]
         operation=SpaceOperation.READ_HISTORY,
         user_id=user_id,
     )
-    team_id = (
-        await _share_ctx(
-            request,
-            operation=SpaceOperation.READ_HISTORY,
-        )
-    ).team_id
+    payload: dict[str, Any] = {}
+    if html:
+        from bowhead_core.share_service import content_sharing_enabled
+
+        team_id, latest = await _html_share_owner_context(request, store, art, user_id, SpaceOperation.READ_HISTORY)
+        await _require_shareable_html(request, store, latest)
+        payload.update(file_id=latest.lineage_root, sharing_enabled=content_sharing_enabled())
+        response.headers.update(_SHARED_FILE_HEADERS)
+    else:
+        team_id = (await _share_ctx(request, operation=SpaceOperation.READ_HISTORY)).team_id
     access_store = getattr(request.app.state, "access_control_store", None)
     if access_store is None or not team_id:
+        if html:
+            raise _file_error(503, "file_access_service_unavailable")
         return {"shares": []}
     # File versions R5: a share on any version covers the file.
     grants = [
@@ -2122,12 +2390,29 @@ async def list_file_shares(artifact_id: str, request: Request) -> dict[str, Any]
         for member in await store.lineage_member_ids(artifact_id, user_id=user_id)
         for grant in await access_store.list_resource_grants(team_id, resource_kind=ARTIFACT_RESOURCE_KIND, resource_id=member)
     ]
-    shares = {
-        (g.principal_type, g.principal_id): {"subject_kind": g.principal_type, "subject_id": g.principal_id}
+    now = datetime.now(UTC).isoformat()
+    active = [
+        g
         for g in grants
-        if getattr(g, "revoked_at", None) is None and g.effect == "allow"
-    }
-    return {"shares": list(shares.values())}
+        if getattr(g, "revoked_at", None) is None and g.effect == "allow" and (not html or g.expires_at is None or g.expires_at > now)
+    ]
+    shares = {(g.principal_type, g.principal_id): {"subject_kind": g.principal_type, "subject_id": g.principal_id} for g in active}
+    if html:
+        from bowhead_core.share_service import derive_audience
+
+        audience = derive_audience(active, team_id=team_id)
+        if audience == "private" and any(kind == "workspace" for kind, _ in shares):
+            audience = "custom"
+        payload["audience"] = audience
+        user_ids = [principal_id for kind, principal_id in shares if kind == "user"]
+        names = await request.app.state.user_store.get_team_member_labels(team_id, user_ids)
+        for principal_id, name in names.items():
+            shares[("user", principal_id)]["subject_name"] = name
+        if any(kind == "group" for kind, _ in shares):
+            for group in await access_store.list_groups(team_id, workspace_id=""):
+                if entry := shares.get(("group", group.id)):
+                    entry["subject_name"] = group.name
+    return {**payload, "shares": list(shares.values())}
 
 
 class PurgeRequest(_BaseModel):

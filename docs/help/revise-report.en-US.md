@@ -98,4 +98,6 @@ While preparing a document draft, the assistant may calculate or check the compl
 
 Open **My Reports** from the sidebar. Search, filter by Space, or change the sort. Turn on the empty-report filter if you are looking for a report without generated content. Use **Shared with me** to find reports others gave you access to.
 
-Open a report by its title. The row actions can offer sharing, downloading, copying a permissioned link, updating status, and deleting. On a phone, look in the row’s **More** menu. When deleting a report, check whether the confirmation also selects the associated conversation.
+Open a report by its title. The row actions can offer sharing, downloading, updating status, and deleting. Open **Share** to add recipients or copy the report link. On a phone, look in the row’s **More** menu. When deleting a report, check whether the confirmation also selects the associated conversation.
+
+Standalone files stay in **Files** and the original conversation’s **Results**. **My reports** lists Canvas reports.

@@ -1205,6 +1205,13 @@
   margin-left: -22px;
   margin-right: -22px;
 }
+.legacy-share-foot.is-mobile {
+  margin-inline: 0;
+  padding-inline: 0;
+}
+.legacy-share-foot .legacy-share-btn {
+  flex-shrink: 0;
+}
 /* Revoke-access confirmation (backdrop covers only share dialog: inline absolute determines position) */
 .legacy-share-revoke-backdrop {
   inset: 0;
@@ -3613,6 +3620,18 @@
   display: flex;
   align-items: flex-start;
   gap: 18px;
+}
+.scheduled-quota-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-block: 12px;
+}
+.routine:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
 }
 .legacy-ai-sched-head-text {
   flex: 1;
@@ -6072,7 +6091,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
+  border: 0;
   background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
   cursor: pointer;
 }
 .legacy-share-ro-body {

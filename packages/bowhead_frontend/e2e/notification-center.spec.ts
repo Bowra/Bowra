@@ -111,7 +111,7 @@ test("notification center shows action/update counts and supports read-all/archi
   await panel.getByRole("button", { name: "归档通知" }).click();
   await expect(panel).toContainText("0 待处理 · 0 未读更新");
   await expect(panel).toContainText("没有待处理事项");
-  await expect(page.getByRole("button", { name: "通知" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "通知", exact: true })).toBeVisible();
 });
 
 test("scheduled notification action opens the live scheduled settings tab", async ({ page }) => {
@@ -197,10 +197,11 @@ test("update-only badge and retry preserve composer text and keyboard focus", as
   await expect(bell.locator(".notification-bell__dot")).toBeVisible();
   await bell.focus();
   await bell.press("Enter");
-  await expect(page.getByText(zh.notifications.load_failed_notice)).toBeVisible();
+  const panel = page.getByRole("region", { name: zh.notifications.panel_aria });
+  await expect(panel).toContainText("没能加载通知。服务暂时不可用，可能正在重启或维护，请稍后重试。");
   unavailable = false;
-  await page.getByRole("button", { name: zh.notifications.retry, exact: true }).click();
-  await expect(page.locator("[data-notification-center]").getByText(zh.notifications.empty_action, { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: zh.notifications.retry, exact: true }).click();
+  await expect(panel.getByText(zh.notifications.empty_action, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(bell).toBeFocused();
   await expect(page.locator("[data-notification-center]")).toHaveCount(0);

@@ -147,7 +147,7 @@ async def test_burst_bounds_combined_idle_and_shutdown_closes_late_return(tmp_pa
         for path in paths:
             await stack.enter_async_context(_db.open_pooled_read_ctx(path))
             await stack.enter_async_context(_db.open_shared_ctx(path))
-    assert sqlite_capacity._used - baseline <= max(1, sqlite_capacity.LIMIT // 8)
+    assert sqlite_capacity._used - baseline <= sqlite_capacity.combined_idle_cap()
     async with _db.open_shared_ctx(paths[0]):
         await _db.close_pooled_readers()
     assert sqlite_capacity._used == baseline

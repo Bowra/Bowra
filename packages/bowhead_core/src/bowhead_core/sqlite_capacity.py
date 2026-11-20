@@ -65,6 +65,19 @@ def _connection_limit() -> int:
 
 LIMIT = _connection_limit()
 RESERVE = min(4, LIMIT // 4)
+#: Upper bound of :func:`combined_idle_cap`.
+COMBINED_IDLE_MAX = 32
+
+
+def combined_idle_cap() -> int:
+    """Most idle pooled connections kept across both pools and every file.
+
+    Idle connections hold slots of ``LIMIT``, so the cap is a quarter of it (at most 32) and three quarters stay
+    for borrowers. It was ``LIMIT // 8`` (16 on a 128-connection host). On 116 with four concurrent Turns
+    (1.7.56) almost every pool close came from that cap while the execution file opened about ten
+    connections a second, each loading the schema on a new worker thread.
+    """
+    return min(COMBINED_IDLE_MAX, max(1, LIMIT // 4))
 
 
 class SQLiteCapacityError(RuntimeError):

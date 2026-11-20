@@ -409,8 +409,8 @@ describe("scoped model settings", () => {
     expect(within(panel).queryByText("外部能力")).toBeNull();
     expect(within(panel).queryByText("当前生效连接")).toBeNull();
 
-    fireEvent.click(screen.getByRole("tab", { name: "外部能力" }));
-    expect(navigation.push).toHaveBeenCalledWith("/team/settings/models/external/");
+    fireEvent.click(screen.getByRole("link", { name: "外部能力" }));
+    expect(navigation.push).toHaveBeenCalledWith("/team/settings/models/external/?from=assignments");
     cleanup();
     const externalPanel = show("external").container;
     await screen.findByRole("heading", { name: "外部能力", level: 1 });
@@ -592,8 +592,8 @@ describe("scoped model settings", () => {
     expect(navigation.push).toHaveBeenLastCalledWith(
       "/team/settings/models/assignments/",
     );
-    fireEvent.click(screen.getByRole("tab", { name: "外部能力" }));
-    expect(navigation.push).toHaveBeenLastCalledWith("/team/settings/models/external/");
+    fireEvent.click(screen.getByRole("link", { name: "外部能力" }));
+    expect(navigation.push).toHaveBeenLastCalledWith("/team/settings/models/external/?from=assignments");
     cleanup();
     show("external");
     await screen.findByText("联网搜索");

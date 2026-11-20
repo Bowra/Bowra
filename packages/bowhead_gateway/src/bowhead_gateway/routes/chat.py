@@ -30,7 +30,7 @@ from bowhead_core.chart.selected_context import ChartSelectedContext
 from bowhead_core.chat_references import InputDocument, SkillResourceRef
 from bowhead_core.document_revision_target import DOCUMENT_REVISION_ADMISSION_ERRORS, DocumentRevisionTarget
 from bowhead_core.i18n_flag import (
-    is_i18n_enabled_for_workspace,
+    is_kill_switch_active,
     is_paradigm_v2_enabled_for_workspace,
 )
 from bowhead_core.language_context import resolve_turn_language
@@ -1130,19 +1130,8 @@ async def _resolve_web_language_inputs(
     if _stored_answer_style and not (profile_dict or {}).get("answer_style"):
         profile_dict = {**(profile_dict or {}), "answer_style": _stored_answer_style}
 
-    # 2026-08-18: is_i18n_enabled_for_workspace became **default-on** (opt-out), so
-    # the old unconfigured-flag + explicit-language-choice patch condition dissolves; it existed
-    # to bypass default-off. Consolidate the criterion instead of maintaining two halves.
-    # ⚠ Rollback unchanged: global BOWHEAD_I18N_V1_KILL=1 or workspace i18n_v1=false.
     language_context: LanguageContext | None = None
-    # 2026-08-18: is_i18n_enabled_for_workspace became **default-on** (opt-out), so
-    # the old unconfigured-flag + explicit-language-choice patch condition dissolves; it existed
-    # to bypass default-off. Consolidate the criterion instead of maintaining two halves.
-    # ★ Its final version also expanded once (spawn-language review P2-3): output_language alone
-    #   must count as an explicit choice, or output-only users lacked language_context and the entire peer
-    #   language-fallback injection failed. **Default-on strictly covers that requirement**: these users now have context.
-    # ⚠ Rollback unchanged: global BOWHEAD_I18N_V1_KILL=1 or workspace i18n_v1=false.
-    if is_i18n_enabled_for_workspace(workspace_settings_kv):
+    if not is_kill_switch_active():
         # Unset answer preferences and explicit `follow_input` follow this question's
         # language (docs/design/language-policy.md). The preference decision, whether
         # to detect the question language, and the final resolution stay together in

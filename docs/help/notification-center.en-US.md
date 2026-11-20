@@ -17,6 +17,8 @@ The bell at the top of the page collects what happened while you were working el
 2. Select an item to open the page where you handle it. Items that need you also show buttons, such as **Review** or **Answer**; the first one is the usual next step.
 3. To remove an item from your own list, select **Archive** on its row. Archiving does not handle it for anyone else.
 
+A sharing update opens the report or HTML file directly. Bowhead checks your current access when you open it.
+
 ## Items from your other teams
 
 If you belong to more than one team, each item shows the name of the team it came from. Opening an item from another team switches you to that team first, then opens the item. If that team uses its own web address, Bowhead opens that address instead; open the item again from the bell there.

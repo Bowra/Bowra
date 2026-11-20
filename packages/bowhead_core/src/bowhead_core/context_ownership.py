@@ -44,6 +44,44 @@ class TerminalContextFinalizationOwner(TerminalContextOwner):
     prepared: PreparedFinalizationContext
 
 
+class StoppedTurnOwner(DocumentTurnOwner):
+    """The worker that owned a Turn when the user stopped it.
+
+    The Stop request commits the cancelled status before it signals the worker, so that
+    worker is no longer the live owner. This capability lets it publish the stopped Turn's
+    transcript and nothing else: it is accepted only by ``require_context_owner_in_tx``,
+    and every fence that admits new work still requires the live owner.
+    """
+
+
+async def require_stopped_worker_in_tx(db: aiosqlite.Connection, *, worker: StoppedTurnOwner) -> None:
+    """Admit a context write for a Turn the user stopped, by the worker that was running it.
+
+    No later Turn may exist in the Session. Creating a Turn and this write go to the same
+    database, so a successor either exists already, and this is refused, or is created
+    afterwards and reads what this publishes. It never loads history that is replaced later.
+    """
+    from bowhead_core.ordinary_lead_continuation import OrdinaryWorkerUnavailable
+
+    try:
+        await require_reference_request_scope(db, context_scope(worker))
+    except ValueError as error:
+        raise OrdinaryWorkerUnavailable() from error
+    async with db.execute(
+        """SELECT 1 FROM turns t JOIN sessions s ON s.id=t.session_id JOIN workspaces w ON w.id=s.workspace_id
+        JOIN chat_turn_spawn_dispatch d ON d.turn_id=t.id AND d.session_id=s.id
+        WHERE t.id=? AND s.id=? AND s.user_id=? AND s.workspace_id=? AND w.team_id=?
+          AND s.deleted_at IS NULL AND t.status='cancelled' AND t.error_kind='user_cancel'
+          AND COALESCE(t.terminal_protocol_version,0)=0
+          AND t.execution_generation=? AND d.owner_id=? AND d.lease_execution_generation=t.execution_generation
+          AND d.cancel_requested_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM turns n WHERE n.session_id=t.session_id AND n.seq>t.seq)""",
+        (worker.turn_id, worker.session_id, worker.user_id, worker.workspace_id, worker.team_id, worker.generation, worker.owner_id),
+    ) as cursor:
+        if await cursor.fetchone() is None:
+            raise OrdinaryWorkerUnavailable()
+
+
 ContextOwner = DocumentTurnOwner | TerminalContextOwner
 
 
@@ -77,6 +115,9 @@ def context_scope(owner: ContextOwner) -> ReferenceRequestScope:
 
 
 async def require_context_owner_in_tx(db: aiosqlite.Connection, *, worker: ContextOwner) -> None:
+    if isinstance(worker, StoppedTurnOwner):
+        await require_stopped_worker_in_tx(db, worker=worker)
+        return
     if isinstance(worker, DocumentTurnOwner):
         await require_live_worker_in_tx(db, worker=worker)
         return

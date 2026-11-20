@@ -40,3 +40,11 @@ Ce réglage concerne réponses, rapports et titres des graphiques. Les noms d’
 Les réponses en allemand peuvent nécessiter une activation pendant leur déploiement. Dans ce cas, l’interface reste disponible en allemand, mais l’IA répond en anglais. Contactez votre administrateur pour obtenir réponses et rapports en allemand.
 
 Les réponses IA en français sont disponibles. Les libellés des rapports et les indications sur les sources prennent également en charge le français.
+
+## Langue et début de semaine dans l’espace
+
+Les administrateurs de l’espace accèdent à ces réglages sous **Paramètres de l’espace → Général**. Les changements sont enregistrés immédiatement.
+
+- **Langue des données source** aide l’IA à retrouver les noms d’origine dans les requêtes. Les données source restent intactes.
+- **Langue d’affichage par défaut des conversations** concerne les conversations et les messages des canaux en l’absence de langue d’interface. La langue de l’interface Web se règle dans votre compte.
+- **Début de semaine** fixe le premier jour des synthèses hebdomadaires de l’espace.

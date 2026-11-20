@@ -48,8 +48,8 @@ export function teamSettingsPath(tab: TeamSettingsPathTab, fromSetup = false): s
 }
 
 /** External capability overview and its focused configuration pages. */
-export function modelExternalCapabilitiesPath(section?: "image" | "search"): string {
-  return `${teamSettingsPath("llm")}external/${section ? `${section}/` : ""}`;
+export function modelExternalCapabilitiesPath(section?: "image" | "search", returnToAssignments = false): string {
+  return `${teamSettingsPath("llm")}external/${section ? `${section}/` : ""}${returnToAssignments ? "?from=assignments" : ""}`;
 }
 
 /** Presentation tab within the model-settings overview, separate from editor routes. */

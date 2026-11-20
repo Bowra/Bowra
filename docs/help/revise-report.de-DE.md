@@ -28,4 +28,12 @@ Wird ein altes Diagramm durch ein neues ersetzt oder bitten Sie darum, eines zu 
 - Wenn Sie nur einen Teil ändern, wird das zusammenfassende Fazit am Ende nicht aktualisiert. Soll es ebenfalls zum neuen Umfang passen, sagen Sie das ausdrücklich.
 - Passt der genannte Teil nicht zum Bericht (etwa „Kapitel 5“ bei einem Bericht mit vier Teilen), rät Bowra nicht anhand der Position, sondern fragt nach, welchen Teil Sie meinen. Ändert es einen Teil unter einem anderen Namen oder fügt den Inhalt stattdessen als neuen Abschnitt hinzu, sagt die Antwort das. Am zuverlässigsten ist es, das Kapitel beim Namen zu nennen, z. B. „nur das Kapitel zu den Warengruppen“.
 - Um eine früher im Chat gelieferte Datei zu korrigieren, etwa Diagramme in einem HTML-Bericht oder eine Spalte in einer Tabelle, nennen Sie die Datei und den zu ändernden Teil. Bowra schreibt eine neue Version dieser Datei mit demselben Namen und nennt sie in der Antwort. Der Text des Canvas-Berichts bleibt unverändert; ein Abschnitt, der diese HTML-Datei einbettet, wechselt zur neuen Version und zeigt „Auf Version N aktualisiert“. „Ergebnisse“ zeigt die Datei nur einmal und öffnet ihre neueste Version; auch frühere Dateikarten im Chat öffnen die neueste Version. Kann Bowra das Genannte nicht dem Canvas-Bericht zuordnen, listet seine Rückfrage auch die früher gelieferten Dateien auf.
-- Veröffentlichte Vorlagendokumente ändern Sie über ihren Dokument-Workflow, nicht durch eine neue Dateiversion im Chat.
+- Verwenden Sie zum Überarbeiten eines Entwurfs aus dem Plugin für PPTX-Vorlagenentwürfe die Aktion zum Überarbeiten im Chat.
+
+## Berichte finden und verwalten
+
+Öffnen Sie **Meine Berichte** in der Seitenleiste. Suchen, filtern Sie nach Bereich oder ändern Sie die Sortierung. Wenn Sie einen Bericht ohne erzeugten Inhalt suchen, aktivieren Sie den entsprechenden Filter. Freigegebene Berichte finden Sie unter **Mit mir geteilt**.
+
+Öffnen Sie einen Bericht über seinen Titel. Das Zeilenmenü kann Teilen, Download, Link, Status und Löschen anbieten. Prüfen Sie vor dem Löschen, ob auch die verknüpfte Unterhaltung ausgewählt ist.
+
+Einzelne Dateien bleiben unter **Dateien** und in den **Ergebnissen** der ursprünglichen Unterhaltung auffindbar. **Meine Berichte** zeigt Canvas-Berichte.

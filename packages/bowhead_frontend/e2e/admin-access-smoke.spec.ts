@@ -173,7 +173,15 @@ test.describe("admin access page", () => {
     await expect.poll(() => posted).toBe(true);
   });
 
-  test("submits generic tool resource grant form", async ({ page }) => {
+  test("selects a resource and member by name and saves the reviewed grant", async ({ page }) => {
+    await page.route("**/api/v1/team-subagents/tools", (route) => route.fulfill({ json: {
+      native_tools: ["canvas_add_section"], team_tools: [],
+    } }));
+    await page.route("**/api/v1/admin/members?*", (route) => route.fulfill({ json: {
+      items: new URL(route.request().url()).searchParams.get("q") === "Sales"
+        ? [{ user_id: "u_sales", display_name: "Sales", email: "sales@example.com" }]
+        : [],
+    } }));
     let posted = false;
     await page.route("**/api/v1/resource-grants", async (route) => {
       if (route.request().method() === "POST") {
@@ -213,13 +221,19 @@ test.describe("admin access page", () => {
     const grants = page.locator(".access-wide", {
       has: page.getByRole("heading", { name: /资源授权|Resource Grants/ }),
     });
-    await grants.locator("select").nth(0).selectOption("tool");
-    await grants.getByPlaceholder("resource_id").fill("canvas_add_section");
-    await grants.locator("select").nth(1).selectOption("user");
-    await grants.getByPlaceholder("principal_id").fill("u_sales");
-    await grants.locator("select").nth(2).selectOption("use");
-    await grants.locator("select").nth(3).selectOption("deny");
-    await grants.getByRole("button", { name: /保存|Save/ }).click();
+    const save = grants.getByRole("button", { name: /保存|Save/ });
+    await expect(save).toBeDisabled();
+    await grants.getByRole("combobox", { name: "资源类型", exact: true }).selectOption("tool");
+    await grants.getByRole("combobox", { name: "资源", exact: true }).selectOption("canvas_add_section");
+    await grants.getByRole("combobox", { name: "授权对象类型", exact: true }).selectOption("user");
+    await grants.getByRole("searchbox", { name: "按名称搜索授权对象" }).fill("Sales");
+    await grants.getByRole("combobox", { name: "授权对象", exact: true }).selectOption({ label: "Sales · sales@example.com" });
+    await grants.getByRole("combobox", { name: "权限", exact: true }).selectOption("use");
+    await grants.getByRole("combobox", { name: "效果", exact: true }).selectOption("deny");
+    await expect(grants.locator(".resource-grant-summary")).toContainText("Sales · sales@example.com");
+    await expect(grants.locator(".resource-grant-summary")).toContainText("canvas_add_section");
+    expect(posted).toBe(false);
+    await save.click();
     await expect.poll(() => posted).toBe(true);
   });
 

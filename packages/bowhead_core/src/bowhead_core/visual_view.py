@@ -79,6 +79,20 @@ def is_blank(image: Any) -> bool:
     return close / len(pixels) >= BLANK_SHARE
 
 
+def is_uniform(image: Any) -> bool:
+    """Every pixel at full resolution within ``BLANK_TOLERANCE`` of the corner colour.
+
+    For page captures (slice B): a sparse page, one heading on white, is not blank, which the
+    share-based ``is_blank`` on a thumbnail would call blank.
+    """
+    from PIL import Image, ImageChops
+
+    rgb = image.convert("RGB")
+    solid = Image.new("RGB", rgb.size, rgb.getpixel((0, 0)))
+    difference = ImageChops.difference(rgb, solid).convert("L").point(lambda value: 255 if value > BLANK_TOLERANCE else 0)
+    return difference.getbbox() is None
+
+
 def tile(images: Sequence[Any], labels: Sequence[str]) -> Any:
     """One sheet: ``SHEET_COLUMNS`` columns of ``SHEET_TILE_WIDTH`` px tiles, each labelled."""
     from PIL import Image, ImageDraw
@@ -216,6 +230,118 @@ def render_image_view(data: bytes) -> dict[str, Any]:
         "page_px": [image.width, image.height],
         "images": [{**encode(image), "label": "Image"}],
     }
+
+
+SCREEN_HEIGHT = 800
+
+
+def _screens(image: Any) -> list[Any]:
+    """A page capture cut into 1280x800 screens; the last one padded with white."""
+    from PIL import Image
+
+    screens = []
+    for top in range(0, image.height, SCREEN_HEIGHT):
+        screen = image.crop((0, top, image.width, min(top + SCREEN_HEIGHT, image.height)))
+        if screen.height < SCREEN_HEIGHT:
+            padded = Image.new("RGB", (image.width, SCREEN_HEIGHT), (255, 255, 255))
+            padded.paste(screen, (0, 0))
+            screen = padded
+        screens.append(screen)
+    return screens
+
+
+def render_screens_view(
+    png: bytes, *, kind: str, pages: Sequence[int] | None = None, detail: str = "sheet", text_present: bool = True
+) -> dict[str, Any]:
+    """An HTML page capture (slice B) as screens; an SVG capture as one image.
+
+    Default: the first screen at full width and, for a longer page, every screen in a
+    numbered sheet. ``detail`` ``full`` shows up to ``MAX_FULL_PAGES`` chosen screens at
+    full width. A capture whose screens are all one colour while the page has text is
+    ``blank_render``.
+    """
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(png))
+    image.load()
+    image = image.convert("RGB")
+    if kind == "svg":
+        if is_uniform(image):
+            return {"status": "not_completed", "reason": "blank_render", "pages": 1}
+        original = (image.width, image.height)
+        image.thumbnail((SINGLE_PAGE_WIDTH, SINGLE_PAGE_WIDTH))
+        resized = "" if original == (image.width, image.height) else f" (captured {original[0]}x{original[1]})"
+        return {
+            "status": "shown",
+            "pages": 1,
+            "shown": f"the SVG at {image.width}x{image.height} px{resized}",
+            "not_shown": None,
+            "page_px": [image.width, image.height],
+            "images": [{**encode(image), "label": "SVG"}],
+        }
+    screens = _screens(image)
+    total = len(screens)
+    if text_present and all(is_uniform(screen) for screen in screens):
+        return {"status": "not_completed", "reason": "blank_render", "pages": total}
+    wanted = sorted({index for index in (pages if pages is not None else range(total)) if 0 <= index < total})
+    if not wanted:
+        return {"status": "not_completed", "reason": "render_failed", "pages": total}
+    width, height = screens[0].width, SCREEN_HEIGHT
+    if detail == "full" or len(wanted) == 1:
+        shown, rest = wanted[:MAX_FULL_PAGES], wanted[MAX_FULL_PAGES:]
+        noun = "screen" if len(shown) == 1 else "screens"
+        return {
+            "status": "shown",
+            "pages": total,
+            "shown": f"{noun} {_ranges([i + 1 for i in shown])}, each at {width}x{height} px",
+            "not_shown": f"screens {_ranges([i + 1 for i in rest])}" if rest else None,
+            "page_px": [width, height],
+            "images": [{**encode(screens[index]), "label": f"Screen {index + 1}"} for index in shown],
+        }
+    in_sheet, rest = wanted[:MAX_PAGES_PER_SHEET], wanted[MAX_PAGES_PER_SHEET:]
+    sheet = tile([screens[index] for index in in_sheet], [f"Screen {index + 1}" for index in in_sheet])
+    tile_height = round(height * SHEET_TILE_WIDTH / width)
+    return {
+        "status": "shown",
+        "pages": total,
+        "shown": (
+            f"screen {wanted[0] + 1} at {width}x{height} px, then screens {_ranges([i + 1 for i in in_sheet])} in 1 sheet, "
+            f"each screen at {SHEET_TILE_WIDTH}x{tile_height} px"
+        ),
+        "not_shown": f"screens {_ranges([i + 1 for i in rest])}" if rest else None,
+        "page_px": [SHEET_TILE_WIDTH, tile_height],
+        "images": [
+            {**encode(screens[wanted[0]]), "label": f"Screen {wanted[0] + 1}"},
+            {**encode(sheet), "label": f"screens {_ranges([i + 1 for i in in_sheet])}"},
+        ],
+    }
+
+
+def html_content_snapshot(text: str) -> dict[str, Any]:
+    """Visible text of a captured HTML page, for comparing a declared presentation fix."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return {"kind": "html", "texts": [lines], "tables": [[]], "charts": {}}
+
+
+def svg_content_snapshot(svg: bytes) -> dict[str, Any] | None:
+    """The text of an SVG's ``<text>`` and ``<foreignObject>`` elements; ``None`` when it is not well-formed XML.
+
+    The capture shows the SVG as an image, which has no readable text, so the file is read instead.
+    """
+    from lxml import etree
+
+    try:
+        root = etree.fromstring(svg, etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False))
+    except etree.XMLSyntaxError:
+        return None
+    lines: list[str] = []
+    for element in root.iter("{*}text", "{*}foreignObject"):
+        if any(etree.QName(parent).localname in {"text", "foreignObject"} for parent in element.iterancestors()):
+            continue
+        text = " ".join("".join(element.itertext()).split())
+        if text:
+            lines.append(text)
+    return {"kind": "svg", "texts": [lines], "tables": [[]], "charts": {}}
 
 
 # ------------------------------------------------------------- PPTX structure
@@ -479,13 +605,25 @@ def compare_content(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
 def visual_worker_entry(control: dict[str, Any], data: bytes, extra: dict[str, bytes]) -> dict[str, Any]:
     """Single ``untrusted_parse_worker`` entry (kind ``visual_view``).
 
-    ``op``: ``pptx_render`` (one process for a saved PPTX: slide hashes, content snapshot,
+    ``op``: ``screens_view`` (data = an HTML or SVG capture; an extra ``svg`` file adds its
+    content snapshot), ``pptx_render`` (one process for a saved PPTX: slide hashes, content snapshot,
     the slides changed since ``previous_hashes`` and, with ``render`` true and an extra
     ``pdf``, their view), ``pptx_view`` (data = PPTX, extra pdf = the executor render),
     ``pdf_view`` (with ``snapshot`` true it adds the PDF's content snapshot),
     ``image_view``, ``pptx_inspect`` or ``pdf_inspect``.
     """
     op = control.get("op")
+    if op == "screens_view":
+        view = render_screens_view(
+            data,
+            kind=control.get("kind") or "html",
+            pages=control.get("pages"),
+            detail=control.get("detail") or "sheet",
+            text_present=bool(control.get("text_present")),
+        )
+        if "svg" in extra:
+            view["snapshot"] = svg_content_snapshot(extra["svg"])
+        return view
     if op == "pptx_render":
         hashes = pptx_slide_hashes(data)
         result: dict[str, Any] = {"hashes": hashes, "snapshot": pptx_content_snapshot(data)}

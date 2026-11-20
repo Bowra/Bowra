@@ -63,7 +63,19 @@ def test_db_helper_module_exists() -> None:
 # beneath `_db.py`: connection capacity, lock diagnostics, domain routing and the domain map.
 # These modules form the foundation layer `_db.py` builds on; none of them may import `_db.py`
 # or any Store at module import time.
-_SQLITE_FOUNDATION = frozenset({"sqlite_capacity", "sqlite_diagnostics", "sqlite_domain_runtime", "sqlite_domains"})
+# Leaf modules count too: ``sqlite_request_deadline`` (stdlib only), ``sqlite_lease_wait`` (stdlib and structlog)
+# and ``sqlite_pool_summary`` (stdlib and structlog; it reads ``sqlite_capacity`` only lazily when it writes a summary).
+_SQLITE_FOUNDATION = frozenset(
+    {
+        "sqlite_capacity",
+        "sqlite_diagnostics",
+        "sqlite_domain_runtime",
+        "sqlite_domains",
+        "sqlite_lease_wait",
+        "sqlite_pool_summary",
+        "sqlite_request_deadline",
+    }
+)
 
 
 def _module_level_internal_imports(module: str) -> set[str]:

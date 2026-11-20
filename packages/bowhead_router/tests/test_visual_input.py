@@ -57,11 +57,13 @@ class _Recorder:
 
 
 def _request() -> LLMRequest:
+    from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
+
     return LLMRequest(
         model="",
         messages=[
-            Message(role="user", content="Make a deck."),
-            Message(role="user", content="Rendered view.", images=[ImageRef(base64="AAAA", mime="image/png")]),
+            Message(role="user", content="Make a deck like this.", images=[ImageRef(base64="BBBB", mime="image/png")]),
+            Message(role="user", name=VISUAL_VIEW_NOTE_NAME, content="Rendered view.", images=[ImageRef(base64="AAAA", mime="image/png")]),
         ],
     )
 
@@ -92,19 +94,23 @@ def test_accepts_images_is_false_without_catalog_capabilities() -> None:
     assert router.accepts_images_for("lead") is False
 
 
-def test_withhold_images_keeps_messages_without_images_identical() -> None:
+def test_withhold_images_keeps_other_messages_identical() -> None:
+    from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
+
     request = _request()
-    messages, count = withhold_images(request.messages)
+    messages, count = withhold_images(request.messages, names=frozenset({VISUAL_VIEW_NOTE_NAME}))
     assert count == 1
-    assert messages[0] is request.messages[0]
+    assert messages[0] is request.messages[0]  # the user's attachment is not touched
     assert messages[1].images == []
     assert messages[1].content == f"Rendered view.\n{WITHHELD_IMAGE_NOTICE}"
     assert request.messages[1].images  # the caller's request is unchanged
+    everything, total = withhold_images(request.messages)
+    assert total == 2 and everything[0].images == []
 
 
 @pytest.mark.asyncio
-async def test_fallback_without_vision_gets_the_notice_when_the_switch_is_on(monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", "1")
+async def test_fallback_without_vision_gets_the_notice_for_renders_only(monkeypatch) -> None:
+    monkeypatch.delenv("FEATURE_VISUAL_SELF_CHECK", raising=False)  # on by default (D13)
     flash, pro = _Recorder(fail=1), _Recorder()
     router = _router(("deepseek", "deepseek-flash"), [("deepseek_pro", "deepseek-v4-pro")], {"deepseek": flash, "deepseek_pro": pro})
     router.set_image_input_targets({("deepseek", "deepseek-flash")})
@@ -112,13 +118,14 @@ async def test_fallback_without_vision_gets_the_notice_when_the_switch_is_on(mon
     assert flash.requests[0].messages[1].images  # the vision primary received the image
     sent = pro.requests[0].messages[1]
     assert sent.images == [] and WITHHELD_IMAGE_NOTICE in sent.content
+    assert pro.requests[0].messages[0].images  # user attachments are sent as before
     assert response.diagnostics is not None and response.diagnostics.images_withheld == 1
     assert response.diagnostics.trace_fields()["images_withheld"] == 1
 
 
 @pytest.mark.asyncio
 async def test_switch_off_sends_images_unchanged(monkeypatch) -> None:
-    monkeypatch.delenv("FEATURE_VISUAL_SELF_CHECK", raising=False)
+    monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", "0")
     pro = _Recorder()
     router = _router(("deepseek_pro", "deepseek-v4-pro"), [], {"deepseek_pro": pro})
     response = await router.invoke("lead", _request())
@@ -201,3 +208,14 @@ def test_openai_compatible_sends_the_render_as_a_user_item_after_the_tool_output
     serialized = _flatten(render["content"])
     assert RUNTIME_NOTE_PREFIX.strip() in serialized and "data:image/png;base64,AAAA" in serialized
     assert "bowhead_visual_view_v1" not in _flatten(body)
+
+
+@pytest.mark.parametrize(("value", "enabled"), [(None, True), ("1", True), ("on", True), ("0", False), ("false", False), (" OFF ", False)])
+def test_switch_is_on_by_default_and_zero_turns_it_off(monkeypatch, value, enabled) -> None:
+    from bowhead_router.visual_input import visual_self_check_enabled
+
+    if value is None:
+        monkeypatch.delenv("FEATURE_VISUAL_SELF_CHECK", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", value)
+    assert visual_self_check_enabled() is enabled

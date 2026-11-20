@@ -35,7 +35,7 @@ import { MenuFloating, useMenu, useMenuItem } from "@/components/ui/menu";
 import { useCanvasExport } from "@/lib/use-canvas-export";
 import { ExportToast, ExportsDrawer } from "@/components/canvas/export-ui";
 import { reportDisplayTitle } from "@/lib/report-title";
-import { copyPermissionedReportLink, reportExportHrefForSession, reportHrefForSession } from "@/lib/report-share";
+import { AUTO_EXPORT_FMTS, copyPermissionedReportLink, reportExportHrefForSession, reportHrefForSession } from "@/lib/report-share";
 import { Doc, FileDown, Search, Spinner } from "@/components/icons";
 import { track } from "@/lib/metrics";
 import { ShareDialog } from "@/components/share/share-dialog";
@@ -68,6 +68,7 @@ function loadFailedKey(error: unknown): "load_failed_detail" | "load_failed_offl
 
 export default function ReportsPage() {
   const t = useTranslations("reports_page");
+  const exportT = useTranslations("export_ui");
   const tStatus = useTranslations("report_status");
   const copyDiagnosticsAction = useCopyDiagnosticsToastAction();
   // Batch 4b: hide "分享" for read-only accounts (same rule as the workbench report toolbar).
@@ -515,13 +516,12 @@ export default function ReportsPage() {
                     label={busy ? t("exporting") : t("download")}
                     onPick={(fmt) => void exportReport(r, fmt)}
                   />
-                  {/* "复制权限链接" and "删除" (dangerous) live in the row-end ⋯ (batch four convention, 逐页验收 B). */}
                   <RowActionsMenu
                     className="reports-card-more"
                     label={moreLabel}
                     busy={deletingId === r.id}
                     busyLabel={t("deleting")}
-                    actions={[...statusActions, copyAction, deleteAction]}
+                    actions={[...statusActions, ...(hideShareForReadOnly ? [copyAction] : []), deleteAction]}
                   />
                 </div>
                 {/* Phones: every row action in one ⋯ (44px, always shown); opening is the title link. */}
@@ -532,14 +532,14 @@ export default function ReportsPage() {
                   busyLabel={t("deleting")}
                   actions={[
                     ...(hideShareForReadOnly ? [] : [{ id: "share", label: t("share"), onSelect: () => setShareTarget({ rid: r.session_id, label: title }) }]),
-                    ...(["pdf", "pptx", "xlsx"] as const).map((fmt) => ({
+                    ...AUTO_EXPORT_FMTS.map((fmt) => ({
                       id: `download-${fmt}`,
-                      label: `${t("download")} ${fmt.toUpperCase()}`,
+                      label: `${t("download")} ${fmt === "docx" ? exportT("docx_name") : fmt.toUpperCase()}`,
                       disabled: downloadDisabled,
                       onSelect: () => void exportReport(r, fmt),
                     })),
                     ...statusActions,
-                    copyAction,
+                    ...(hideShareForReadOnly ? [copyAction] : []),
                     deleteAction,
                   ]}
                 />
@@ -626,6 +626,7 @@ export default function ReportsPage() {
         label={shareTarget.label}
         onClose={() => setShareTarget(null)}
         onChanged={() => { void reload({ silent: true }); }}
+        onLinkCopied={() => track("bowhead_report_library_total", { action: "copy_link" })}
       />
     )}
     {deleteTarget && (
@@ -700,7 +701,7 @@ function ReportDownloadMenu({
           ref={menu.refs.setFloating}
           {...menu.getFloatingProps({ className: "reports-download-menu", "aria-label": label })}
         >
-          {(["pdf", "pptx", "xlsx"] as const).map((fmt) => (
+          {AUTO_EXPORT_FMTS.map((fmt) => (
             <ReportDownloadItem key={fmt} fmt={fmt} onPick={onPick} />
           ))}
         </div>
@@ -710,10 +711,11 @@ function ReportDownloadMenu({
 }
 
 function ReportDownloadItem({ fmt, onPick }: { fmt: ExportFmt; onPick: (fmt: ExportFmt) => void }) {
+  const exportT = useTranslations("export_ui");
   const itemProps = useMenuItem({ onSelect: () => onPick(fmt) });
   return (
     <button type="button" {...itemProps}>
-      <FileDown aria-hidden="true" /> {fmt.toUpperCase()}
+      <FileDown aria-hidden="true" /> {fmt === "docx" ? exportT("docx_name") : fmt.toUpperCase()}
     </button>
   );
 }

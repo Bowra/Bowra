@@ -35,7 +35,7 @@ from uuid import uuid4
 
 from bowhead_router.errors import provider_failure_kind
 from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
-from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME
+from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME, RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import TokenUsage
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.sandbox_call_shape import FLAT_SANDBOX_TOOL, SANDBOX_SCRIPT, SANDBOX_SKILL_NAME, SKILL_INVOKE_TOOL, sandbox_entry_for
@@ -74,6 +74,7 @@ from bowhead_core.agents.capability_protocols import render_capability_protocols
 # (tool_context_select dispatch-gate sentinel), restoring loop break (see comment at :2246).
 from bowhead_core.agents.clarification_tool import collect_clarification_sentinels, is_clarification_sentinel, is_tool_context_selection
 from bowhead_core.agents.plan_propose_tool import is_plan_propose_sentinel
+from bowhead_core.agents.response_kind_scanner import strip_response_kind_markers
 from bowhead_core.analysis_payload import is_short_answer_payload, strip_internal_object_ids
 from bowhead_core.bi_workspace_continuation import (
     BiWorkspaceAttachmentContinuation,
@@ -180,6 +181,16 @@ _KAPPA_STREAM_IDLE_TIMEOUT_SEC = 300.0
 _STREAM_ATTEMPT: contextvars.ContextVar[object | None] = contextvars.ContextVar("bowhead_stream_attempt", default=None)
 
 
+def _answer_text(content: str | None) -> str:
+    """Return a model reply without the Lead's protocol markers.
+
+    Finalization strips `<response_kind>` and `<headline>` before the user sees the reply, so a reply
+    made only of them shows nothing. Completion checks must judge the same text the user would see,
+    or such a reply skips the empty-answer correction and ends as a blank answer.
+    """
+    return strip_response_kind_markers(content or "").strip()
+
+
 def current_stream_attempt() -> object | None:
     """Return the token of the model attempt currently delivering stream deltas."""
     return _STREAM_ATTEMPT.get()
@@ -208,9 +219,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Per-request user messages a reused accepted request must not carry into a coordination round:
-# the retained-material supplement (result_material_history.SUPPLEMENT_NAME) and rendered views.
-_PER_REQUEST_NOTES = frozenset({"bowhead_material_supplement_v1", VISUAL_VIEW_NOTE_NAME})
+# User messages a reused accepted request must not carry into a coordination round:
+# the retained-material supplement (result_material_history.SUPPLEMENT_NAME), rendered views,
+# and the base loop's output-recovery checkpoint. That checkpoint governs only the base loop's
+# own next request; in a coordination round it would be moved after the question and shift
+# the lane boundary (context_lane_boundary_invalid, an interrupted task).
+_PER_REQUEST_NOTES = frozenset({"bowhead_material_supplement_v1", VISUAL_VIEW_NOTE_NAME, OUTPUT_RECOVERY_STATE_NAME})
 
 _VISION_MESSAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 
@@ -1520,6 +1534,29 @@ def _tool_failure_summary(invocations: list[Any]) -> str:
 _COORDINATION_CORRECTABLE = frozenset({"collaboration_arguments_invalid", "collaboration_coordination_reply_only"})
 # The same for a user round (mid-run steering), whose only call is an update to a running participant.
 _USER_ROUND_CORRECTABLE = frozenset({"collaboration_arguments_invalid", "collaboration_user_round_update_only"})
+
+
+def _coordination_record(items: list[dict], response_text: str | None, invocations: Sequence[ToolInvocation]) -> dict:
+    """What one coordination round leaves in the execution's own transcript.
+
+    The round's ``agent_message`` calls keep their arguments: they are what this execution
+    told a participant. Without them the base loop does not know what it answered and answers
+    again once the batch has settled (replay of an interrupted task: 15 of 16 runs, then 0 of
+    16). A call refused because it is not a collaboration action keeps only its refusal.
+    """
+    return {
+        "coordination_input": items,
+        "coordination_response": response_text,
+        "receipts": [
+            {
+                "tool": inv.tool_name,
+                **({"arguments": inv.arguments} if inv.tool_name == "agent_message" else {}),
+                "result": inv.result,
+                "error": inv.error,
+            }
+            for inv in invocations
+        ],
+    }
 
 
 def _coordination_brief(context: dict, execution_id: str, running_line: str) -> str:
@@ -4601,6 +4638,39 @@ class SubagentRunner:
 
         _prerun_marks.append(("context_view", time.perf_counter()))
 
+        # The parallel batch in flight, as (call, task), until its results have joined `messages`.
+        _open_batch: list[tuple[ToolCall, asyncio.Future]] = []
+        if context_view is not None and profile.name == "lead" and exact_binding is not None and exact_binding.parent_execution_id is None:
+
+            async def _unfinished_context_publication(status: str, *, owner: Any = None) -> Any:
+                """This run's transcript for a Turn that ends ``failed``, ``aborted`` or ``cancelled``.
+
+                Every call without a result gets one: a finished sibling's real result, a running
+                helper's record, or a statement that the result was not recorded. ``owner`` is the
+                stopped owner after a user Stop, when the live worker may no longer write context.
+                """
+                from bowhead_core.unfinished_turn_context import open_delegations, repair_pending_tool_calls
+
+                if context_view.last_budget is None or not (
+                    getattr(parent_ctx, "_model_context_history", None) is not None
+                    or (ordinary_checkpoint is not None and ordinary_checkpoint.context_projection_enabled)
+                ):
+                    return None
+                if owner is not None:
+                    context_view.worker = owner
+
+                def known_result(call: ToolCall) -> str | None:
+                    for open_call, pending in _open_batch:
+                        if open_call.id == call.id and pending.done() and not pending.cancelled() and pending.exception() is None:
+                            outcome = pending.result()
+                            if isinstance(outcome, ToolInvocation):
+                                return _serialize(outcome, ref_allowlist=_ν15_allowlist)
+                    return open_delegations(parent_bus).result(call.id, status)
+
+                return await context_view.conversation_publication(repair_pending_tool_calls(messages, known_result))
+
+            parent_bus._unfinished_context_publication = _unfinished_context_publication  # type: ignore[attr-defined]
+
         def record_context_usage(response: LLMResponse) -> None:
             nonlocal tokens_in, tokens_out, tokens_cached
             tokens_in += response.usage.input_tokens
@@ -5991,7 +6061,7 @@ class SubagentRunner:
                             if _llm_diagnostics.get("output_token_limit") is not None
                             else None
                         ),
-                        empty_response=not (resp.content or "").strip() and not resp.tool_calls,
+                        empty_response=not _answer_text(resp.content) and not resp.tool_calls,
                         closeout_attempt=_empty_peer_closeout_attempted,
                         empty_answer_retry=iteration == _empty_lead_retry_iteration,
                         output_recovery_attempt=output_recovery.attempts,
@@ -6378,15 +6448,15 @@ class SubagentRunner:
                     )
                 else:
                     if _answer_now:
-                        if not (resp.content or "").strip():
+                        if not _answer_text(resp.content):
                             return await _limit_wrap_up(_answer_now_stop) if _answer_now_stop else refused_tools_result()
                         final_answer = resp.content
                         break
-                    if runtime_control is not None and not runtime_control.can_decide and not (resp.content or "").strip():
+                    if runtime_control is not None and not runtime_control.can_decide and not _answer_text(resp.content):
                         return await _limit_wrap_up(runtime_control.limit_reason)
                     # No operation has run: a single correction can safely resume
                     # the original request without replaying discovery or writes.
-                    if profile.name == "lead" and not (resp.content or "").strip() and not invocations:
+                    if profile.name == "lead" and not _answer_text(resp.content) and not invocations:
                         if not _empty_lead_retry_attempted and can_decide(iteration) and resp.finish_reason != "content_filter":
                             _empty_lead_retry_attempted = True
                             _empty_lead_retry_iteration = iteration + 1
@@ -6545,7 +6615,7 @@ class SubagentRunner:
                         messages.append(Message(role="assistant", content=resp.content or "", name=correction.assistant_history_name))
                         # A server-authored runtime note, never the user's reply to that answer.
                         messages.append(Message(role="user", name=RUNTIME_CORRECTION_NOTE_NAME, content=correction.instruction))
-                        if profile.name == "lead" and (resp.content or "").strip():
+                        if profile.name == "lead" and _answer_text(resp.content):
                             _final_answer_written = True
                             # The rejected final already streamed; supersede it like every Lead bounce.
                             _rejected_hook = getattr(parent_ctx, "_final_answer_rejected", None)
@@ -7286,7 +7356,11 @@ class SubagentRunner:
                     if collaboration is not None and collaboration.permit is not None
                     else contextlib.nullcontext()
                 ):
-                    batch_outcomes = list(await _await_tools(asyncio.gather(*[_bounded_exec(tc) for tc, _q in survived_tcs])))
+                    _batch_tasks = [asyncio.ensure_future(_bounded_exec(tc)) for tc, _q in survived_tcs]
+                    # Kept when the wait raises or is cancelled: an unfinished Turn pairs each
+                    # finished call with its real result.
+                    _open_batch[:] = [(tc, pending) for (tc, _q), pending in zip(survived_tcs, _batch_tasks, strict=True)]
+                    batch_outcomes = list(await _await_tools(asyncio.gather(*_batch_tasks)))
                 for outcome in batch_outcomes:
                     if isinstance(outcome, InvocationOutcomeUnknownError):
                         raise outcome
@@ -7392,6 +7466,8 @@ class SubagentRunner:
                             + json.dumps({"unread_revisions": unread_revisions}, ensure_ascii=False),
                         )
                     )
+            # Every result of the batch has joined the transcript.
+            _open_batch.clear()
             # Temporary coordination messages enter the base transcript only
             # after every original native call has its actual Tool result.
             messages.extend(coordination_messages)
@@ -8919,15 +8995,7 @@ class SubagentRunner:
                 current.append(invocation)
             invocations.extend(current)
             retained.append(
-                CollaborationExecution.input_message(
-                    [
-                        {
-                            "coordination_input": context["items"] if not correction else [],
-                            "coordination_response": response.content,
-                            "receipts": [{"tool": inv.tool_name, "result": inv.result, "error": inv.error} for inv in current],
-                        }
-                    ]
-                )
+                CollaborationExecution.input_message([_coordination_record(context["items"] if not correction else [], response.content, current)])
             )
             rejected = bool(current) and all(isinstance(inv.result, dict) and inv.result.get("error") in _COORDINATION_CORRECTABLE for inv in current)
             if correction or not (rejected or (not current and pending_ids)):
@@ -10103,6 +10171,15 @@ class SubagentRunner:
         # A rejected attempt is not success merely because the model can retry.
         # Expected pauses retain the shared live/persist/replay classification.
         _evt_ok = _tool_outcome.state != "failure"
+        if running_profile != "lead":
+            from bowhead_core.unfinished_turn_context import open_delegations, returned_error_messages
+
+            # In memory only: a raised exception's text reaches the model, never events.
+            open_delegations(bus).observe(
+                subagent_id,
+                _surface_tool_name,
+                None if _evt_ok else ([public_error] if public_error else returned_error_messages(public_result)) or [_tool_outcome.code or "failed"],
+            )
         _result_event = OrchestratorEvent(
             event_type="tool_result",
             turn_id=parent_turn_id,
@@ -11935,6 +12012,24 @@ def _figure_anchor_id(inv: ToolInvocation, ref_allowlist: Any) -> str | None:
         return None
 
 
+_LEAD_CAVEAT_CAP = 12
+_LEAD_CAVEAT_CHARS = 400
+
+
+def caveats_for_lead(payload: Any) -> tuple[list[str], int]:
+    """The helper's own caveats for the Lead's view of a report result, and how many were left out.
+
+    A report shows only system caveats (2026-09-07 document minimalism), and the Lead sees
+    this result rather than the payload, so without this the helper's stated limitations
+    reach no reader. System caveats are excluded because the report already shows them.
+    """
+    from bowhead_core.analysis_payload import author_caveats
+
+    stated = [c.strip() for c in author_caveats(payload) if c.strip()]
+    kept = [c if len(c) <= _LEAD_CAVEAT_CHARS else c[: _LEAD_CAVEAT_CHARS - 1] + "…" for c in stated[:_LEAD_CAVEAT_CAP]]
+    return kept, len(stated) - len(kept)
+
+
 _SCRIPT_TOOLS = frozenset({"python_exec", "python_sandbox", "skill_invoke"})
 _EXCEPTION_LINE = re.compile(r"\s*([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt)\b.*)$")
 _TRACE_FRAME = re.compile(r'File "([^"]+)", line (\d+)')
@@ -13175,6 +13270,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "call_id": _spawn_call_id,
                         "parent_step_id": _spawn_parent_step_id,
                         "rationale": rationale or "",  # chat-v4 W3.2 NEW (full text, I-W3-7)
+                        # The full task: history rebuilt from events reads it. `agent_spawned.task`
+                        # is a 200-character preview for the interface's Agent card.
+                        "task": task,
                         "parent_ctx_summary": (rationale or task)[:200],  # KEEP for back-compat
                         **_agent_attribution_payload(_exact_binding),
                     },
@@ -13182,6 +13280,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             )
         except Exception:  # noqa: S110
             pass
+        # Until this helper returns, an unfinished Turn reports what it ran into.
+        from bowhead_core.unfinished_turn_context import open_delegations
+
+        open_delegations(bus).open(_spawn_call_id or "", profile=profile, subagent_id=_peer_pre_minted_subagent_id or "")
 
         # Sprint phase-plan-removal: phase.update(running) emit removed.
         # Phase tracking event was decorative; FE shape gate now uses
@@ -13801,6 +13903,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             # V4Spawn card consumes that directly.
         except Exception as _w42_exc:
             logger.warning("v4.subagent_summary_emit_failed err=%s", _w42_exc)
+        open_delegations(bus).close(_spawn_call_id or "")
         # said-not-done Seam B prevention: return **facts** about this turn's actual output to Lead.
         #
         # Motivation: in Regression check (t_bef61acf9854), a peer said "PDF 已成功导出",
@@ -14144,6 +14247,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             recs_n = len(result.payload.get("recommendations") or [])
             kpis_n = len(result.payload.get("kpis") or [])
             _peer_exec_summary = str(result.payload.get("exec_summary") or "").strip()
+            _lead_caveats, _lead_caveats_omitted = caveats_for_lead(result.payload)
             # ★ Caught in Regression check on 2026-08-27 (t_1ee75cbfb876): structured bail envelopes were **invisible** inside Lead's loop.
             # The peer used the intended entry: `subagent_return(payload={"error":{"kind":"domain_mismatch",
             # "message":"「火星省」不是本工作区「省」维度下的真实值…"}})`, also faithfully accepted by `validate_payload`
@@ -14283,6 +14387,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         # Bail reasons live in `error.message`; fall back there, otherwise the directive below to copy the reason from
                         # payload_summary.exec_summary points to an empty field.
                         "exec_summary": _peer_exec_summary or str((_bail or {}).get("message") or "").strip(),
+                        **({"caveats": _lead_caveats} if _lead_caveats else {}),
+                        **({"caveats_omitted": _lead_caveats_omitted} if _lead_caveats_omitted else {}),
                     },
                     "directive": (
                         (

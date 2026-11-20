@@ -142,6 +142,7 @@ describe("ShareDialog", () => {
     fireEvent.click(team);
     expect(putAudience).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Remove/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop access" }));
     await waitFor(() => expect(revokeShareGrant).toHaveBeenCalledWith("report", "rpt_1", "grt_1"));
   });
 

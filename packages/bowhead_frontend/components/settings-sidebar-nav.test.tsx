@@ -156,6 +156,8 @@ describe("SettingsSidebarNav", () => {
     await waitFor(() => expect(screen.getByRole("link", { name: /访问申请/ }).textContent).toContain("1 个待处理"));
     expect(api.fetchApprovals).not.toHaveBeenCalled();
     expect(api.fetchScheduledJobs).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索设置" }), { target: { value: "SMTP" } });
+    expect(screen.queryByRole("link", { name: "邮件服务" })).toBeNull();
   });
 
   it.each(["member", "audit_admin"] as const)("hides Team settings on a denied deep link for %s", (role) => {
@@ -193,6 +195,10 @@ describe("SettingsSidebarNav", () => {
     fireEvent.change(search, { target: { value: "模型" } });
     const nav = screen.getByRole("navigation", { name: "设置导航" });
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["模型"]);
+    fireEvent.change(search, { target: { value: "  ｓｍｔｐ   发件人  " } });
+    expect(within(nav).getByRole("link", { name: "邮件服务" }).getAttribute("href")).toBe("/team/settings/email-service/");
+    fireEvent.change(search, { target: { value: "周起始日" } });
+    expect(within(nav).getByRole("link", { name: "常规" })).toBeTruthy();
     fireEvent.change(search, { target: { value: "zzz" } });
     expect(screen.getByRole("status").textContent).toBe("没有匹配的设置");
   });

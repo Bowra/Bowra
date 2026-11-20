@@ -487,7 +487,7 @@ export function SessionsDrawer({
               >
                 {item.expandOnly ? <button
                   type="button"
-                  className="unified-drawer-nav-item is-group-link"
+                  className="unified-drawer-nav-item is-group-link unified-nav-disclosure"
                   aria-expanded={open}
                   aria-controls={`unified-drawer-group-${item.id}`}
                   data-testid={`unified-drawer-nav-${item.id}`}
@@ -495,6 +495,7 @@ export function SessionsDrawer({
                 >
                   <Folder size={20} aria-hidden />
                   {tNav(item.labelKey)}
+                  <Caret className="unified-nav-disclosure-caret" aria-hidden />
                 </button> : (
                 <a
                   href={appPath(item.route)}
@@ -519,26 +520,28 @@ export function SessionsDrawer({
                   {tNav(item.labelKey)}
                 </a>
                 )}
-                <button
-                  type="button"
-                  className="unified-drawer-group-toggle"
-                  onClick={() =>
-                    setOpenGroups((current) =>
-                      current.includes(item.id)
-                        ? current.filter((id) => id !== item.id)
-                        : [...current, item.id],
-                    )
-                  }
-                  aria-label={tNav(
-                    open ? "collapse_group" : "expand_group",
-                    { name: tNav(item.labelKey) },
-                  )}
-                  aria-expanded={open}
-                  aria-controls={`unified-drawer-group-${item.id}`}
-                  data-testid={`unified-drawer-nav-${item.id}-toggle`}
-                >
-                  <Caret aria-hidden />
-                </button>
+                {item.expandOnly ? null : (
+                  <button
+                    type="button"
+                    className="unified-drawer-group-toggle"
+                    onClick={() =>
+                      setOpenGroups((current) =>
+                        current.includes(item.id)
+                          ? current.filter((id) => id !== item.id)
+                          : [...current, item.id],
+                      )
+                    }
+                    aria-label={tNav(
+                      open ? "collapse_group" : "expand_group",
+                      { name: tNav(item.labelKey) },
+                    )}
+                    aria-expanded={open}
+                    aria-controls={`unified-drawer-group-${item.id}`}
+                    data-testid={`unified-drawer-nav-${item.id}-toggle`}
+                  >
+                    <Caret aria-hidden />
+                  </button>
+                )}
               </div>
               {open ? (
                 <div

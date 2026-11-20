@@ -171,7 +171,26 @@ class ScheduledRunSourceError(RuntimeError):
 
 
 # Rate limit: maximum active jobs per user.
-MAX_ACTIVE_JOBS_PER_USER = 10
+MAX_ACTIVE_JOBS_PER_USER = 20
+
+
+class ScheduledJobLimitError(ValueError):
+    """The user has no remaining slot for an active scheduled job."""
+
+
+async def _count_active_jobs(db: aiosqlite.Connection, user_id: str) -> int:
+    async with db.execute(
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE user_id = ? AND status = 'active'",
+        (user_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+async def _require_active_job_slot(db: aiosqlite.Connection, user_id: str) -> None:
+    if await _count_active_jobs(db, user_id) >= MAX_ACTIVE_JOBS_PER_USER:
+        raise ScheduledJobLimitError(f"Active scheduled job limit reached (max {MAX_ACTIVE_JOBS_PER_USER})")
+
 
 #: Pause reason written on space archival; unarchive resumes only pauses with this reason.
 ARCHIVE_PAUSE_REASON = "workspace_archived"
@@ -295,12 +314,6 @@ class ScheduledJobStore:
         recipe_ref: str | None = None,
         agent_binding: ScheduledAgentBindingSeed | None = None,
     ) -> ScheduledJob:
-        # Rate limit: active-job count cap.
-        active = await self.count_active(user_id=user_id)
-        if active >= MAX_ACTIVE_JOBS_PER_USER:
-            raise ValueError(
-                f"user {user_id} already has {active} active jobs (max {MAX_ACTIVE_JOBS_PER_USER})",
-            )
         job = ScheduledJob(
             id=f"sj_{uuid4().hex[:12]}",
             user_id=user_id,
@@ -365,6 +378,7 @@ class ScheduledJobStore:
         async with diagnostic_connect(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
+                await _require_active_job_slot(db, user_id)
                 await db.execute(
                     f"INSERT INTO scheduled_jobs({', '.join(cols)}) VALUES ({placeholders})",  # noqa: S608 — fixed column set
                     vals,
@@ -407,15 +421,8 @@ class ScheduledJobStore:
         return [_row_to_job(r) for r in rows]
 
     async def count_active(self, user_id: str) -> int:
-        async with (
-            diagnostic_connect(self._db_path) as db,
-            db.execute(
-                "SELECT COUNT(*) FROM scheduled_jobs WHERE user_id = ? AND status = 'active'",
-                (user_id,),
-            ) as cur,
-        ):
-            row = await cur.fetchone()
-        return int(row[0]) if row else 0
+        async with diagnostic_connect(self._db_path) as db:
+            return await _count_active_jobs(db, user_id)
 
     async def patch(
         self,
@@ -487,11 +494,11 @@ class ScheduledJobStore:
             return False
         sets.append("updated_at = ?")
         vals.append(_now())
-        vals.append(job_id)
+        target_params = [job_id]
         where = "id = ?"
         if expected_updated_at is not None:
             where += " AND updated_at = ?"
-            vals.append(expected_updated_at)
+            target_params.append(expected_updated_at)
         async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -508,9 +515,17 @@ class ScheduledJobStore:
                 if assignment is None or str(assignment["personal_state"]) != "active" or int(assignment["row_version"]) != row_version:
                     await db.execute("ROLLBACK")
                     return False
+            if status == "active":
+                async with db.execute(
+                    f"SELECT user_id, status FROM scheduled_jobs WHERE {where}",  # noqa: S608 — fixed predicates
+                    target_params,
+                ) as cursor:
+                    target = await cursor.fetchone()
+                if target is not None and target["status"] != "active":
+                    await _require_active_job_slot(db, target["user_id"])
             cur = await db.execute(
                 f"UPDATE scheduled_jobs SET {', '.join(sets)} WHERE {where}",  # noqa: S608 — fixed column set
-                vals,
+                [*vals, *target_params],
             )
             if cur.rowcount > 0:
                 if agent_binding is not None:

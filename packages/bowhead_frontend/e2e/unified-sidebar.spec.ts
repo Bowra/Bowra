@@ -209,7 +209,7 @@ test.describe("Option A unified sidebar", () => {
     await expect(sidebar).toHaveAttribute("data-presentation", "drawer");
   });
 
-  test("redirects the old Library overview to Files and keeps group disclosure separate", async ({
+  test("redirects the old Library overview to Files and uses a single Library disclosure", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
@@ -218,22 +218,26 @@ test.describe("Option A unified sidebar", () => {
     // Library only expands/collapses its children; its old overview URL opens Files.
     await expect(page).toHaveURL(/\/files\/?$/);
     const library = page.getByTestId("unified-nav-library");
-    const libraryToggle = page.getByTestId("unified-nav-library-toggle");
+    const libraryRow = library.locator("..");
+    await expect(libraryRow.getByRole("button")).toHaveCount(1);
+    const caret = library.locator(".unified-nav-disclosure-caret");
+    await expect(caret).toHaveAttribute("aria-hidden", "true");
     const sidebarFiles = page
       .getByTestId("unified-sidebar")
       .getByRole("link", { name: /文件|Files/ });
     await expect(library).toHaveAttribute("type", "button");
     await expect(library).not.toHaveAttribute("href");
     await expect(library).toHaveAttribute("aria-expanded", "true");
-    await expect(libraryToggle).toHaveAttribute("aria-expanded", "true");
     await expect(sidebarFiles).toBeVisible();
 
-    await library.click();
+    await library.press("Enter");
     await expect(library).toHaveAttribute("aria-expanded", "false");
-    await expect(libraryToggle).toHaveAttribute("aria-expanded", "false");
     await expect(sidebarFiles).toHaveCount(0);
     await expect(page).toHaveURL(/\/files\/?$/);
-    await library.click();
+    await expect(library).toHaveCSS("display", "flex");
+    const [row, arrow] = await Promise.all([library.boundingBox(), caret.boundingBox()]);
+    expect(row && arrow && arrow.x > row.x + row.width / 2).toBeTruthy();
+    await library.click({ position: { x: arrow!.x - row!.x + arrow!.width / 2, y: arrow!.y - row!.y + arrow!.height / 2 } });
     await expect(sidebarFiles).toBeVisible();
 
     await page.goto("/capabilities/");

@@ -20,6 +20,8 @@ After connecting, select the Slack tools you need and bind them to an Agent you 
 
 ## Bind tools to an Agent you own
 
+If there are no tools in **My Agent tools**, add a connection or manage an existing one and enable the tools you need. Then expand the Agent you want to configure.
+
 In **My Connections → My Agent tools**, or in the Agent's tool area, select tools and save the binding. The Agent must have a published version that you own in the current team. You can share the Agent with selected people or the team without removing its personal tool binding. Only your own runs include those tools; other members' runs do not include them and cannot use your connection. When a new version changes the Agent definition, select the personal tools again. A new version that only changes the audience keeps the binding.
 
 ## Approve every call

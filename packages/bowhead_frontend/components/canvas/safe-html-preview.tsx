@@ -234,12 +234,14 @@ export function useSafeHtmlDocument({
   declaredSize,
   reloadToken = 0,
   presentation = "static",
+  onVersionChanged,
 }: {
   enabled: boolean;
   href: string;
   declaredSize?: number | null;
   reloadToken?: number;
   presentation?: "static" | "interactive";
+  onVersionChanged?: () => void;
 }): {
   document: string | null;
   error: SafeHtmlErrorCode | null;
@@ -299,6 +301,10 @@ export function useSafeHtmlDocument({
           signal: controller.signal,
         });
         if (!response.ok) {
+          if (response.status === 409 && onVersionChanged && !controller.signal.aborted) {
+            onVersionChanged();
+            return;
+          }
           commit({ key: requestKey, document: null, error: "unavailable" });
           return;
         }
@@ -335,7 +341,7 @@ export function useSafeHtmlDocument({
       }
     })();
     return () => controller.abort();
-  }, [declaredSize, enabled, href, reloadToken, requestKey, presentation, sourceKey]);
+  }, [declaredSize, enabled, href, reloadToken, requestKey, presentation, sourceKey, onVersionChanged]);
 
   const current = enabled && state?.key === requestKey ? state : null;
   return {

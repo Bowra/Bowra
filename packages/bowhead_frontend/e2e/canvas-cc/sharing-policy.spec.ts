@@ -49,6 +49,10 @@ for (const enabled of [true, false]) {
       await expect(dialog.getByRole("status")).toContainText("此部署已关闭分享");
       await expect(dialog.locator(".legacy-share-search-row")).toHaveCount(0);
       await dialog.locator(".legacy-share-row-remove").click();
+      const confirmation = page.getByRole("alertdialog", { name: "撤销访问权限？" });
+      await expect(confirmation).toBeVisible();
+      expect(revoked).toBe(false);
+      await confirmation.getByRole("button", { name: "停止访问", exact: true }).click();
       await expect.poll(() => revoked).toBe(true);
       expect(expanded).toBe(false);
     }

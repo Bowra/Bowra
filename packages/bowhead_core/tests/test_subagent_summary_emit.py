@@ -682,6 +682,38 @@ async def test_non_empty_payload_keeps_delivered_and_title() -> None:
     )
     assert res["delivered"] == "payload"
     assert res["payload_summary"]["title"] == "2026年7月各省利润率排名"
+    assert "caveats" not in res["payload_summary"]
+
+
+def _deck_payload(caveats: list[str]) -> dict:
+    return {
+        "title": "商超零售 2026年1-10月 业绩回顾",
+        "exec_summary": "已按模板生成新的 PPTX。",
+        "insights": [{"title": "i", "thesis": "t", "narrative": "n" * 40, "evidence": []}],
+        "caveats": caveats,
+    }
+
+
+@pytest.mark.unit
+async def test_report_result_gives_the_lead_the_helpers_own_caveats() -> None:
+    """A report shows only system caveats, so the helper's own limitations reach a reader only through the Lead."""
+    from bowhead_core.analysis_payload import FABRICATION_CAVEAT_PREFIX, PLAN_GAP_CAVEAT_PREFIX
+
+    own = ["第4页模板预置 31 个省份，本数据源仅覆盖 5 省；其余省份保留行并留空。", "第9页分省数据用 10 月营业额占比填充。"]
+    res = await _spawn(_result_with(_deck_payload([own[0], FABRICATION_CAVEAT_PREFIX + "42.1", PLAN_GAP_CAVEAT_PREFIX + "缺少上游输入", own[1]])))
+    assert res["payload_summary"]["caveats"] == own
+    assert "caveats_omitted" not in res["payload_summary"]
+
+
+@pytest.mark.unit
+async def test_report_result_caveats_are_bounded() -> None:
+    own = [f"第{i}条局限。" for i in range(14)] + ["长" * 500]
+    res = await _spawn(_result_with(_deck_payload(own[-1:] + own[:-1])))
+    caveats = res["payload_summary"]["caveats"]
+    assert len(caveats) == 12
+    assert caveats[0] == "长" * 399 + "…"
+    assert caveats[1:] == own[:11]
+    assert res["payload_summary"]["caveats_omitted"] == 3
 
 
 @pytest.mark.unit

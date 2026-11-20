@@ -566,7 +566,7 @@ async def create_share_grant(
 
 
 _SHARE_ACTION_URL = {
-    "report": "/?session={rid}",
+    "report": "/?session={rid}&report=1",
     "team_subagent": "/settings/subagents",
     "team_skill": "/skills/",
 }

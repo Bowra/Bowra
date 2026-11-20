@@ -14,12 +14,12 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.subagent_write_boundary import (
@@ -64,6 +64,15 @@ def _now() -> str:
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
+
+
+FileShareAction = Literal["add", "remove", "private", "custom", "team_wide"]
+
+
+@dataclass(frozen=True)
+class FileShareWrite:
+    found: bool
+    grant_id: str | None = None
 
 
 def _require_read_transaction(connection: aiosqlite.Connection | None) -> None:
@@ -837,6 +846,75 @@ class AccessControlStore:
             await db.commit()
         return changed
 
+    async def write_file_share(
+        self,
+        *,
+        team_id: str,
+        lineage_id: str,
+        owner_id: str,
+        versioned: bool,
+        action: FileShareAction,
+        principal: tuple[str, str] | None = None,
+    ) -> FileShareWrite:
+        """Update a file's grants atomically across versions owned by its current owner."""
+        from bowhead_core.artifact_store import _latest_live_version
+
+        if action in {"custom", "team_wide"}:
+            principal = ("team", team_id)
+        if action != "private" and principal is None:
+            raise ValueError("A principal is required for this file share action")
+
+        async def write(db: aiosqlite.Connection) -> FileShareWrite:
+            latest_id = await _latest_live_version(db, lineage_id) if versioned else lineage_id
+            if not latest_id:
+                return FileShareWrite(found=False)
+            file_match = "COALESCE(lineage_id, id) = ?" if versioned else "id = ?"
+            async with db.execute(
+                "SELECT 1 FROM artifacts WHERE id = ? AND created_by = ? AND deleted_at IS NULL AND status = 'ready'",
+                (latest_id, owner_id),
+            ) as cur:
+                if await cur.fetchone() is None:
+                    return FileShareWrite(found=False)
+            match = (
+                "team_id = ? AND resource_kind = 'artifact' "
+                "AND permission = 'read' AND effect = 'allow' AND revoked_at IS NULL "
+                f"AND resource_id IN (SELECT id FROM artifacts WHERE {file_match} AND created_by = ?)"
+            )
+            params: tuple[str, ...] = (team_id, lineage_id, owner_id)
+            if principal is not None:
+                match += " AND principal_type = ? AND principal_id = ?"
+                params += principal
+            now = _now()
+            grant_id = None
+            if action in {"add", "team_wide"} and principal is not None:
+                async with db.execute(
+                    f"SELECT id FROM resource_grants WHERE {match} AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at, id LIMIT 1",  # noqa: S608
+                    (*params, now),
+                ) as cur:
+                    existing = await cur.fetchone()
+                    if existing is not None:
+                        return FileShareWrite(found=True, grant_id=str(existing[0]))
+                grant_id = _id("grant")
+                await db.execute(
+                    """INSERT INTO resource_grants
+                    (id, team_id, resource_kind, resource_id, principal_type, principal_id,
+                     permission, effect, created_by, created_at, updated_at)
+                    VALUES (?, ?, 'artifact', ?, ?, ?, 'read', 'allow', ?, ?, ?)""",
+                    (grant_id, team_id, latest_id, *principal, owner_id, now, now),
+                )
+                changed = True
+            else:
+                cur = await db.execute(
+                    f"UPDATE resource_grants SET revoked_at = ?, updated_at = ? WHERE {match}",  # noqa: S608
+                    (now, now, *params),
+                )
+                changed = cur.rowcount > 0
+            if changed:
+                await self._bump_policy_epoch_conn(db, team_id)
+            return FileShareWrite(found=True, grant_id=grant_id)
+
+        return await run_sqlite_authority_write(self.db_path, write)
+
     # ── Content sharing primitives (docs/sprints/content-permissions/tech-design.md §2.2) ──
 
     async def granted_resource_ids(
@@ -847,6 +925,7 @@ class AccessControlStore:
         group_ids: tuple[str, ...] | list[str] = (),
         workspace_id: str | None = None,
         kind: str,
+        allow_principal_types: frozenset[str] | None = None,
         connection: aiosqlite.Connection | None = None,
     ) -> frozenset[str]:
         """Resource ids of ``kind`` reachable by this principal chain via grants.
@@ -875,7 +954,7 @@ class AccessControlStore:
         for ptype, pid in principals:
             params.extend([ptype, pid])
         sql = (
-            "SELECT resource_id, effect FROM resource_grants "
+            "SELECT resource_id, effect, principal_type FROM resource_grants "
             "WHERE team_id=? AND resource_kind=? "
             "AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) "
             f"AND ({principal_clause})"
@@ -885,8 +964,11 @@ class AccessControlStore:
             rows = await cur.fetchall()
         allow: set[str] = set()
         deny: set[str] = set()
-        for resource_id, effect in rows:
-            (deny if effect == "deny" else allow).add(str(resource_id))
+        for resource_id, effect, principal_type in rows:
+            if effect == "deny":
+                deny.add(str(resource_id))
+            elif allow_principal_types is None or principal_type in allow_principal_types:
+                allow.add(str(resource_id))
         return frozenset(allow - deny)
 
     async def revoke_grants_for_resource(

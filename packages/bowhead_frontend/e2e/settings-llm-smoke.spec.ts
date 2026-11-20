@@ -835,10 +835,10 @@ test("模型设置分区：连接、分工和外部能力使用各自页面", as
   await expect(page).toHaveURL(/\/models\/assignments\/?$/);
   await expect(page.locator('select[name="primary_model"]')).toHaveValue("deepseek_anthropic::deepseek-v4-pro");
   await page.getByRole("button", { name: "返回概览" }).click();
-  await page.getByRole("tab", { name: "外部能力" }).click();
+  await page.getByRole("link", { name: "外部能力" }).click();
   await expect(page.getByRole("heading", { name: "外部能力" })).toBeVisible();
   await page.getByRole("button", { name: "配置", exact: true }).first().click();
-  await expect(page).toHaveURL(/\/models\/external\/image\/?$/);
+  await expect(page).toHaveURL(/\/models\/external\/image\/\?from=assignments$/);
   await page.getByRole("button", { name: "添加服务模型" }).click();
   await expect(page.getByLabel("模型 ID", { exact: true })).toBeVisible();
   await expect(page.getByLabel("连接", { exact: true })).toHaveValue("我们的 OpenAI 代理");

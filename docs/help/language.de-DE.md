@@ -40,3 +40,11 @@ Die Einstellung gilt für KI-Antworten, Berichtstexte und Diagrammtitel. Namen v
 Während der Einführung müssen deutsche KI-Antworten gegebenenfalls erst aktiviert werden. Dann kann die Oberfläche auf Deutsch erscheinen, während die KI auf Englisch antwortet. Wenden Sie sich an Ihren Administrator, wenn Sie deutsche Antworten und Berichte benötigen.
 
 Französische KI-Antworten sind verfügbar. Auch Berichtsbeschriftungen und Quellenhinweise unterstützen Französisch.
+
+## Sprache und Wochenbeginn im Bereich
+
+Administratoren des Bereichs finden diese Einstellungen unter **Bereichseinstellungen → Allgemein**. Änderungen werden sofort gespeichert.
+
+- **Sprache der Quelldaten** hilft der KI, die Originalnamen von Filialen oder Produkten in Abfragen zu finden. Die Quelldaten bleiben unverändert.
+- **Standard-Anzeigesprache für Unterhaltungen** gilt für Unterhaltungs- und Kanalnachrichten, wenn keine Oberflächensprache verfügbar ist. Die Sprache der Weboberfläche legen Sie im Konto fest.
+- **Wochenbeginn** bestimmt, mit welchem Wochentag die Auswertungen in diesem Bereich beginnen.

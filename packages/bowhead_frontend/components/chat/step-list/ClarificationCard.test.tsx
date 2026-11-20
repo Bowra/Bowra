@@ -1,5 +1,5 @@
 /**
- * ClarificationCard (Chat Cards Spec §1, D2): selection only selects, "Continue" (or Enter) submits.
+ * ClarificationCard (Chat Cards Spec §1, D2): selection only selects and Continue submits.
  *
  * · single question: arrows / Home / End select within one Tab stop, nothing is sent until Continue
  * · "Other, type your own" is a field; typing replaces a single-choice selection
@@ -66,7 +66,7 @@ describe("ClarificationCard · one question (D2)", () => {
     );
   });
 
-  it("moves and selects with arrows / Home / End in one Tab stop, and Enter submits", () => {
+  it("moves and selects with arrows and End in one Tab stop without submitting", () => {
     const THREE = [{ question: "用哪个工作区？", options: ["甲", "乙", "丙"], type: "single_select" as const }];
     const onSingle = vi.fn();
     renderIntl(<ClarificationCard questions={THREE} onSubmitSingle={onSingle} onSubmitMulti={vi.fn()} />);
@@ -80,6 +80,8 @@ describe("ClarificationCard · one question (D2)", () => {
     expect(radios[2].getAttribute("aria-checked")).toBe("true");
     expect(onSingle).not.toHaveBeenCalled();
     fireEvent.keyDown(radios[2], { key: "Enter" });
+    expect(onSingle).not.toHaveBeenCalled();
+    fireEvent.click(continueButton());
     expect(onSingle).toHaveBeenCalledWith(
       { question: THREE[0].question, source: "candidate", answer: "丙", option_index: 2 },
       undefined,
@@ -94,6 +96,8 @@ describe("ClarificationCard · one question (D2)", () => {
     fireEvent.change(field, { target: { value: "西南大区" } });
     expect(screen.getAllByRole("radio")[0].getAttribute("aria-checked")).toBe("false");
     fireEvent.keyDown(field, { key: "Enter" });
+    expect(onSingle).not.toHaveBeenCalled();
+    fireEvent.click(continueButton());
     expect(onSingle).toHaveBeenCalledWith({ question: QUESTIONS[0].question, source: "custom", answer: "西南大区" }, undefined);
   });
 
@@ -285,16 +289,6 @@ describe("ClarificationCard · document draft (spec §3) and skip wording", () =
     expect(screen.getByRole("button", { name: "跳过，让模型判断" })).toBeTruthy();
   });
 
-  it("does not submit on the Enter that ends an IME composition (keyCode 229)", () => {
-    const onSingle = vi.fn();
-    renderIntl(<ClarificationCard questions={QUESTIONS} onSubmitSingle={onSingle} onSubmitMulti={vi.fn()} />);
-    const radios = screen.getAllByRole("radio");
-    fireEvent.click(radios[0]);
-    fireEvent.keyDown(radios[0], { key: "Enter", keyCode: 229 });
-    expect(onSingle).not.toHaveBeenCalled();
-    fireEvent.keyDown(radios[0], { key: "Enter", keyCode: 13 });
-    expect(onSingle).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("ClarificationCard · focus after submitting (keyboard and screen reader)", () => {

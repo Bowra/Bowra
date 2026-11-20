@@ -82,20 +82,20 @@ class TestPermissionCheck:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.put(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
-                json={"value": "true"},
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
+                json={"value": "sunday"},
                 headers={"x-bowhead-user-id": app.state.admin_id},
             )
             assert r.status_code == 200
-            assert r.json()["value"] == "true"
+            assert r.json()["value"] == "sunday"
 
     @pytest.mark.asyncio
     async def test_other_admin_can_set(self, app: FastAPI) -> None:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.put(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
-                json={"value": "true"},
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
+                json={"value": "sunday"},
                 headers={"x-bowhead-user-id": app.state.other_admin_id},
             )
             assert r.status_code == 200
@@ -105,8 +105,8 @@ class TestPermissionCheck:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.put(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
-                json={"value": "true"},
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
+                json={"value": "sunday"},
                 headers={"x-bowhead-user-id": app.state.random_id},
             )
             assert r.status_code == 403
@@ -146,12 +146,12 @@ class TestDelete:
     @pytest.mark.asyncio
     async def test_admin_can_delete(self, app: FastAPI) -> None:
         store: WorkspaceSettingsStore = app.state.workspace_settings_store
-        await store.set(app.state.ws_id, "i18n_v1", "true")
+        await store.set(app.state.ws_id, "week_start_day", "sunday")
 
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.delete(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
                 headers={"x-bowhead-user-id": app.state.admin_id},
             )
             assert r.status_code == 200
@@ -161,7 +161,7 @@ class TestDelete:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.delete(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
                 headers={"x-bowhead-user-id": app.state.random_id},
             )
             assert r.status_code == 403
@@ -173,7 +173,7 @@ class TestGetRequiresMembership:
     @pytest.mark.asyncio
     async def test_member_can_read(self, app: FastAPI) -> None:
         store: WorkspaceSettingsStore = app.state.workspace_settings_store
-        await store.set(app.state.ws_id, "i18n_v1", "true")
+        await store.set(app.state.ws_id, "week_start_day", "sunday")
 
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
@@ -182,7 +182,7 @@ class TestGetRequiresMembership:
                 headers={"x-bowhead-user-id": app.state.admin_id},
             )
             assert r.status_code == 200
-            assert r.json()["settings"]["i18n_v1"] == "true"
+            assert r.json()["settings"]["week_start_day"] == "sunday"
 
     @pytest.mark.asyncio
     async def test_non_member_read_rejected(self, app: FastAPI) -> None:
@@ -199,8 +199,8 @@ class TestGetRequiresMembership:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.put(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
-                json={"value": "true"},
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
+                json={"value": "sunday"},
                 headers={"x-bowhead-user-id": app.state.team_admin_id},
             )
             assert r.status_code == 403
@@ -275,8 +275,8 @@ class TestMetadataRequiresSpaceAdmin:
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
             r = await c.put(
-                f"/api/v1/workspace-settings/{app.state.ws_id}/i18n_v1",
-                json={"value": "true"},
+                f"/api/v1/workspace-settings/{app.state.ws_id}/week_start_day",
+                json={"value": "sunday"},
                 headers={"x-bowhead-user-id": app.state.admin_id},
             )
             assert r.status_code == 409

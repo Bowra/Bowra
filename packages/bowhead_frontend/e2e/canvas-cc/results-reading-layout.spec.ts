@@ -301,6 +301,28 @@ test.describe("compact report entry and reading", () => {
     await expect(page.getByRole("tab", { name: "对话", exact: true })).toHaveAttribute("aria-selected", "true");
   });
 
+  test("phone return actions restore the report and code sources", async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 786 });
+    await openReport(page);
+    await page.goto("/?session=s_e2e&result=report");
+    const tableAction = page.locator(".canvas-report-article .v2-chart-table").first().locator(".is-more");
+    const more = page.locator(".result-file-toolbar").getByRole("button", { name: "更多操作", exact: true });
+    await tableAction.click();
+    await page.getByRole("menuitem", { name: "打开数据", exact: true }).click();
+    await expect(page).toHaveURL(/result=art_stdout/);
+    await more.click();
+    await page.getByRole("menuitem", { name: "返回报告：各市场净营收", exact: true }).click();
+    await expect(tableAction).toBeFocused();
+
+    await page.goto("/?session=s_e2e&result=code");
+    const output = page.getByRole("button", { name: "打开输出", exact: true });
+    await output.click();
+    await expect(page).toHaveURL(/result=art_stdout/);
+    await more.click();
+    await page.getByRole("menuitem", { name: "返回代码", exact: true }).click();
+    await expect(output).toBeFocused();
+  });
+
   test("revenue reading retains every observation across touch widths and repeated resizing", async ({ page }) => {
     await page.route("**/api/v1/canvas/by-session/s_e2e**", async (route) => {
       const response = await route.fetch();
@@ -377,3 +399,66 @@ for (const colorMode of ["palette", "HEX"] as const) for (const width of [390, 1
     await page.screenshot({ path: test.info().outputPath(`native-${colorMode}-${width}.png`) });
   });
 }
+
+test("the report library uses the existing Word export job on phone and desktop", async ({ page }) => {
+  const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? "18080"}/api/v1`;
+  await page.request.post(`${api}/_test/reset`);
+  const seeded = await page.request.post(`${api}/chat/send`, { data: { message: "resultsworkspace" } });
+  const { session_id: sessionId, turn_id: turnId } = await seeded.json();
+  const { canvas, sections } = await (await page.request.get(`${api}/canvas/by-session/${sessionId}`)).json();
+  const detail = await (await page.request.get(`${api}/sessions/${sessionId}`)).json();
+  await page.route(`**/api/v1/sessions/${sessionId}`, (route) => route.fulfill({ json: {
+    ...detail,
+    turns: [{ id: turnId, seq: 1, user_text: "resultsworkspace", intent: "analysis", status: "completed",
+      started_at: "2026-10-27T00:00:00Z", ended_at: "2026-10-27T00:00:01Z", final_answer: "Report ready", trace_steps: [] }],
+  } }));
+  await page.route("**/api/v1/results/capabilities", (route) => route.fulfill({
+    json: { dto_version: 1, workspace: true, complete_list: false, scale_nav: false, max_page_size: 50 },
+  }));
+  await page.route("**/api/v1/chat/sessions/*/reference-queue?*", (route) => route.fulfill({ json: { items: [] } }));
+  await page.route(`**/api/v1/canvas/${canvas.id}?raw=true`, (route) => route.fulfill({
+    json: { canvas, sections, exportV2Capabilities: [{ format: "pdf", profile: "full_report" }] },
+  }));
+  const report = {
+    id: canvas.id,
+    session_id: sessionId,
+    workspace_id: canvas.workspaceId,
+    title: "Word export fixture",
+    status: canvas.status,
+    sections_count: sections.length,
+    created_at: "2026-11-18T00:00:00Z",
+    updated_at: "2026-11-18T00:00:00Z",
+  };
+  await page.route(/\/api\/v1\/canvas\?/, (route) => {
+    const items = new URL(route.request().url()).searchParams.get("scope") === "shared" ? [] : [report];
+    return route.fulfill({ json: { items, total: items.length, next_cursor: null } });
+  });
+  let started = 0;
+  const downloadPath = "/api/v1/files/art_word_fixture";
+  await page.route("**/api/v1/canvas/*/export", (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ fmt: "docx" });
+    started += 1;
+    return route.fulfill({ json: {
+      id: `export-word-${started}`, fmt: "docx", status: "done",
+      filename: "Word export fixture.docx", download_url: downloadPath,
+    } });
+  });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/reports/");
+    const card = page.locator("article").filter({ hasText: report.title });
+    const trigger = width < 640 ? card.getByRole("button", { name: /更多操作/ })
+      : card.getByRole("button", { name: zh.reports_page.download, exact: true });
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    const job = page.waitForRequest((request) => /\/api\/v1\/canvas\/[^/]+\/export$/.test(request.url()), { timeout: 15000 });
+    await page.getByRole("menuitem", { name: /Word/ }).click();
+    const request = await job;
+    expect(request.postDataJSON()).toMatchObject({ fmt: "docx" });
+    await expect.poll(() => new URL(page.url()).searchParams.has("export")).toBe(false);
+    const download = page.locator(".rc-export-toast").getByRole("link", { name: zh.export_ui.download, exact: true });
+    await expect(download).toBeVisible();
+    await expect(download).toHaveAttribute("href", downloadPath);
+  }
+  expect(started).toBe(2);
+});

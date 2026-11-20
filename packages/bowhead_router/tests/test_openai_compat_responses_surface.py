@@ -345,7 +345,24 @@ async def test_responses_tool_call_parsed_with_call_id_and_commentary_kept() -> 
         "incomplete_reason": None,
         "reasoning_tokens": 0,
         "output_token_limit": 32000,
+        "output_phases": ["commentary"],
     }
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_responses_invoke_records_unlabeled_message_phase() -> None:
+    """A provider that sends no `phase` is recorded as such, so diagnostics can tell it from `commentary`."""
+    message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "<headline>x</headline>"}]}
+    respx.post(f"{BASE}/responses").respond(200, json=_responses_ok(output=[message, {**message, "phase": "bogus"}]))
+    adapter = _adapter()
+    try:
+        resp = await adapter.invoke(LLMRequest(model="resp-model", messages=[Message(role="user", content="x")]))
+    finally:
+        await adapter.close()
+    assert resp.diagnostics is not None
+    assert resp.diagnostics.output_phases == ("unlabeled", "unlabeled")
+    assert resp.diagnostics.trace_fields()["output_phases"] == ["unlabeled", "unlabeled"]
 
 
 @pytest.mark.unit
@@ -1403,3 +1420,56 @@ def test_optional_response_diagnostics_keep_unknown_observations_content_free(va
     assert fields["reasoning_tokens"] is None and fields["output_token_limit"] is None
     assert fields["incomplete_reason"] == (None if value is None else "unknown")
     assert "private" not in json.dumps(fields)
+
+
+@pytest.mark.unit
+@respx.mock
+@pytest.mark.parametrize("terminal_output", [True, False])
+async def test_responses_stream_records_message_phases(terminal_output: bool) -> None:
+    """Stream diagnostics carry each message phase; the terminal frame's full output outranks per-item frames."""
+    commentary = {
+        "type": "message",
+        "role": "assistant",
+        "phase": "commentary",
+        "content": [{"type": "output_text", "text": "<headline>x</headline>"}],
+    }
+    final = {**commentary, "phase": "final_answer"}
+    frames = [
+        {"type": "response.created", "response": {}},
+        {"type": "response.output_text.delta", "item_id": "m1", "output_index": 0, "delta": "<headline>x</headline>"},
+        {"type": "response.output_item.done", "output_index": 0, "item": commentary},
+        {
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "output": [commentary, final] if terminal_output else [],
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+        },
+    ]
+    respx.post(f"{BASE}/responses").side_effect = lambda request: _sse(_sse_frames(*frames))
+    adapter = _adapter()
+    try:
+        chunks = await _collect_stream(adapter, LLMRequest(model="resp-model", messages=[Message(role="user", content="x")], stream=True))
+    finally:
+        await adapter.close()
+    diagnostics = next(chunk.diagnostics for chunk in chunks if chunk.diagnostics is not None)
+    assert diagnostics.trace_fields()["output_phases"] == (["commentary", "final_answer"] if terminal_output else ["commentary"])
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_chat_surface_records_no_message_phases() -> None:
+    respx.post(f"{BASE}/chat/completions").respond(
+        200,
+        json={
+            "choices": [{"message": {"role": "assistant", "content": "pong"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        },
+    )
+    adapter = _adapter()
+    try:
+        resp = await adapter.invoke(LLMRequest(model="chat-model", messages=[Message(role="user", content="x")]))
+    finally:
+        await adapter.close()
+    assert resp.diagnostics is None or "output_phases" not in resp.diagnostics.trace_fields()

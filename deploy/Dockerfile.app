@@ -75,7 +75,9 @@ RUN echo "cachebust=$CACHEBUST version=$BOWHEAD_VERSION" \
     && mv out out-de-DE \
     && rm -rf .next \
     && BOWHEAD_SKIP_BUILD_CHECKS=1 NEXT_PUBLIC_BOWHEAD_SSE_MODE=sse NEXT_PUBLIC_BOWHEAD_VERSION=$BOWHEAD_VERSION NEXT_PUBLIC_BUILD_LOCALE=fr-FR npm run build \
-    && mv out out-fr-FR
+    && mv out out-fr-FR \
+    && npm run build:html-preview-transform \
+    && rm -rf node_modules/playwright/lib/mcp/test
 
 # Build runtime image.
 ARG DOCKER_REGISTRY=
@@ -119,6 +121,9 @@ COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend-builder /build/node_modules/playwright ./export-visual-runtime/node_modules/playwright
 COPY --from=frontend-builder /build/node_modules/playwright-core ./export-visual-runtime/node_modules/playwright-core
 COPY --from=frontend-builder /build/scripts/render-export-visual.mjs ./export-visual-runtime/scripts/render-export-visual.mjs
+# Visual self-check slice B (FEATURE_VISUAL_SELF_CHECK): the product preview's HTML transform,
+# sent with each HTML file to the sandbox document worker, which captures it. Not served.
+COPY --from=frontend-builder /build/dist/html-preview-transform.js ./export-visual-runtime/dist/html-preview-transform.js
 COPY --from=frontend-builder /ms-playwright /ms-playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN node /app/export-visual-runtime/node_modules/playwright/cli.js install-deps chromium

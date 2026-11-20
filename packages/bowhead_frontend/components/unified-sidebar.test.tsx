@@ -271,10 +271,10 @@ describe("UnifiedSidebar", () => {
         ?.getAttribute("viewBox"),
     ).toBe("200 380 850 480");
 
-    fireEvent.click(screen.getByRole("button", { name: "展开资料库" }));
+    fireEvent.click(screen.getByRole("button", { name: "资料库" }));
     expect(screen.getByText("文件")).toBeTruthy();
     expect(screen.getByText("知识库")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "收起资料库" }));
+    fireEvent.click(screen.getByRole("button", { name: "资料库" }));
     expect(screen.queryByText("文件")).toBeNull();
     await waitFor(() => expect(fetchMe).toHaveBeenCalled());
   });
@@ -720,6 +720,8 @@ describe("UnifiedSidebar", () => {
     const library = screen.getByTestId("unified-nav-library");
     expect(library.tagName).toBe("BUTTON");
     expect(library.getAttribute("href")).toBeNull();
+    expect(library.parentElement?.querySelectorAll("button")).toHaveLength(1);
+    expect(library.querySelector("svg.unified-nav-disclosure-caret")?.getAttribute("aria-hidden")).toBe("true");
     const before = library.getAttribute("aria-expanded");
     fireEvent.click(library);
     expect(push).not.toHaveBeenCalled();

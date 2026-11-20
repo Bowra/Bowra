@@ -302,3 +302,38 @@ async def test_increment_cite_count(store: KbFilesStore) -> None:
     assert dto2 is not None
     assert dto2.cite_count == 1
     assert dto2.last_cited_at is not None
+
+
+async def test_reads_reuse_a_pooled_connection_and_see_the_latest_write(store: KbFilesStore, monkeypatch) -> None:
+    # 116 (1.7.60): every Lead model call checked up to 12 knowledge sources one by one, each read opening a new
+    # connection (a thread, five ATTACHes, six schema loads): about 0.4 s per call idle, the 2 s hint cap under load.
+    from bowhead_core.kb import files_store
+
+    from bowhead_core import _db
+
+    file_id = await _make(store)
+    opened = []
+    original_reader = _db._open_pooled_reader
+
+    async def counting_reader(path):  # type: ignore[no-untyped-def]
+        opened.append(path)
+        return await original_reader(path)
+
+    def unpooled(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("a pure kb_files read opened an unpooled connection")
+
+    monkeypatch.setattr(_db, "_open_pooled_reader", counting_reader)
+    with monkeypatch.context() as reads_only:
+        reads_only.setattr(files_store, "diagnostic_connect", unpooled)
+        for _ in range(12):
+            assert (await store.get(file_id)).file_id == file_id
+        listed = await store.list_for_scopes_filtered(team_id="team_5", personal_owner_id="user_a", space_id="ws_42", team_scope_id="team_5")
+        assert [file.file_id for file in listed] == [file_id]
+        assert await store.artifact_ids_in_kb(["art_x"]) == {"art_x"}
+        assert await store.find_active_by_artifact("art_x") == file_id
+        assert (await store.readiness_stats_for_team("team_5")).active_file_count == 1
+    assert len(opened) <= 1
+
+    await store.soft_delete(file_id)
+    assert (await store.get(file_id)).soft_deleted_at is not None
+    assert await store.artifact_ids_in_kb(["art_x"]) == set()

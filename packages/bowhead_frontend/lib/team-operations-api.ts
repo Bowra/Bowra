@@ -2,7 +2,7 @@ import { apiJson } from "./api-client";
 
 export interface OperationsDay {
   day: string;
-  login_users: number;
+  active_users: number;
   sessions: number;
   input_tokens: number;
   output_tokens: number;

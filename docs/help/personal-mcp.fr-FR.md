@@ -20,6 +20,8 @@ Sélectionnez ensuite les outils Slack et associez-les à votre Agent privé. Ce
 
 ## Associer à un Agent privé
 
+Si aucun outil n’est disponible dans **Mes outils d’agent**, ajoutez une connexion ou activez les outils nécessaires dans une connexion existante. Développez ensuite l’agent à configurer.
+
 Dans **Mes connexions → Outils d’Agent privé**, ou la zone d’outils de l’Agent, sélectionnez et enregistrez. L’Agent doit être votre version privée publiée dans l’équipe actuelle. Publiez de nouveau une version avant de resélectionner ses outils personnels. Les Agents d’équipe, l’assistant principal et ceux d’autres personnes ne reçoivent jamais votre connexion.
 
 ## Confirmer chaque appel

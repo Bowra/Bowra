@@ -10,7 +10,7 @@ Modifiez votre nom affiché, puis enregistrez. La ligne de l’e-mail indique s�
 
 Ouvrez **Sécurité → Modifier le mot de passe** et saisissez l’ancien puis le nouveau. Les autres appareils sont déconnectés après la modification. Si vous avez oublié le mot de passe, utilisez le lien de réinitialisation. Si vous vous connectez uniquement via un fournisseur externe, gérez le mot de passe chez ce fournisseur.
 
-Dans **Sessions actives**, vérifiez les appareils connectés et révoquez toute session inconnue depuis son menu. La déconnexion de tous les appareils inclut l’appareil actuel.
+Dans **Sessions actives**, consultez la dernière activité enregistrée pour chaque appareil. Les connexions qui partagent les mêmes informations de navigateur et la même adresse réseau figurent sur une seule ligne. Le menu de la ligne permet de révoquer ces sessions. Sur l’appareil actuel, la session en cours reste ouverte. La déconnexion de tous les appareils ferme aussi cette session.
 
 ## Apparence
 

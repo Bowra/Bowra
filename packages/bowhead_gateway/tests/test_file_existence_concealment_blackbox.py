@@ -55,11 +55,14 @@ _EXEMPT = {
     ("GET", "/api/v1/canvas/by-session/{session_id}/artifacts/{artifact_id}"): "report family: report_unavailable contract",
     ("GET", "/api/v1/canvas/by-session/{session_id}/artifacts/{artifact_id}/representations/{representation}"): "report family",
     ("GET", "/api/v1/canvas/by-session/{session_id}/artifacts/{artifact_id}/preview"): "report family",
+    ("POST", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}/rerun"): "matrix-scoped; see test_kb_matrix_authz",
+    ("PATCH", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}"): "matrix-scoped; see test_kb_matrix_authz",
+}
+
+_BUSINESS_EXEMPT = {
     ("GET", "/api/v1/branding/assets/{artifact_id}"): "team branding assets are public brand resources",
     ("HEAD", "/api/v1/branding/assets/{artifact_id}"): "team branding assets are public brand resources",
     ("DELETE", "/api/v1/team-branding/assets/{artifact_id}"): "team branding: team admin route",
-    ("POST", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}/rerun"): "matrix-scoped; see test_kb_matrix_authz",
-    ("PATCH", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}"): "matrix-scoped; see test_kb_matrix_authz",
 }
 
 # (method, path) -> (which seeded id fills the path, request kwargs)
@@ -74,7 +77,10 @@ _COVERED: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {
     ("POST", "/api/v1/files/{artifact_id}/category"): ("artifact", {_JSON: {"category": "dataset"}}),
     ("POST", "/api/v1/files/{artifact_id}/share"): ("artifact", {_JSON: {"subject_kind": "workspace", "subject_id": WS}}),
     ("DELETE", "/api/v1/files/{artifact_id}/share/{subject_kind}/{subject_id}"): ("artifact", {"subject_kind": "workspace", "subject_id": WS}),
+    ("PUT", "/api/v1/files/{artifact_id}/shares/audience"): ("html_artifact", {_JSON: {"audience": "team_wide"}}),
     ("GET", "/api/v1/files/{artifact_id}/shares"): ("artifact", {}),
+    ("GET", "/api/v1/files/shared/{file_id}/view"): ("html_artifact", {}),
+    ("GET", "/api/v1/files/shared/{file_id}/content"): ("html_artifact", {}),
     ("POST", "/api/v1/files/presign/{file_id}/confirm"): ("artifact", {_JSON: {}}),
     ("GET", "/api/v1/kb/files/{file_id}"): ("kb_file", {}),
     ("GET", "/api/v1/kb/files/{file_id}/health"): ("kb_file", {}),
@@ -126,9 +132,12 @@ def test_every_per_id_route_is_covered_or_exempt() -> None:
         if _is_per_id(route.path or "")
         for method in getattr(route, "methods", None) or ()
     }
-    unaccounted = live - set(_COVERED) - set(_EXEMPT)
+    exempt = set(_EXEMPT)
+    if production_app.state.edition == "business":
+        exempt.update(_BUSINESS_EXEMPT)
+    unaccounted = live - set(_COVERED) - exempt
     assert not unaccounted, f"new per-id routes need a concealment case or an explicit exemption: {sorted(unaccounted)}"
-    stale = (set(_COVERED) | set(_EXEMPT)) - live
+    stale = (set(_COVERED) | exempt) - live
     assert not stale, f"listed routes no longer exist: {sorted(stale)}"
 
 
@@ -153,6 +162,9 @@ class _MembershipStore:
 
     async def get_team_role(self, user_id: str, team_id: str) -> str | None:
         return "member"
+
+    async def filter_active_team_members(self, team_id: str, user_ids: set[str]) -> set[str]:
+        return user_ids if team_id == TEAM else set()
 
     async def get_team_member_labels(self, team_id: str, user_ids: list[str]) -> dict[str, str]:
         return {}
@@ -208,6 +220,15 @@ async def env(initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch
     art = await artifacts.put_bytes(
         content=b"secret-plan body", filename="secret-plan.csv", mime="text/csv", source="upload", created_by=OWNER, kind="user_upload"
     )
+    html_art = await artifacts.put_bytes(
+        content=b"<p>secret-plan body</p>",
+        filename="secret-plan.html",
+        mime="text/html",
+        source="python_sandbox",
+        created_by=OWNER,
+        kind="deliverable",
+        workspace_id=WS,
+    )
     kb_art = await artifacts.put_bytes(
         content=b"secret-plan body", filename="secret-plan.md", mime="text/markdown", source="kb_upload", created_by=OWNER, kind="user_upload"
     )
@@ -223,7 +244,7 @@ async def env(initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch
         uploaded_by=OWNER,
         initial_parse_status="done",
     )
-    ids = {"artifact": art.id, "kb_file": kb_file, "kb_artifact": kb_art.id}
+    ids = {"artifact": art.id, "html_artifact": html_art.id, "kb_file": kb_file, "kb_artifact": kb_art.id}
     return SimpleNamespace(client=TestClient(app, raise_server_exceptions=False), ids=ids, sessions=sessions)
 
 

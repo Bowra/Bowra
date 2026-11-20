@@ -21,7 +21,9 @@ from bowhead_core.published_diagnostics import (
 )
 from bowhead_core.scheduled_agent_binding import ScheduledAgentBindingError
 from bowhead_core.scheduled_store import (
+    MAX_ACTIVE_JOBS_PER_USER,
     ActiveRunExistsError,
+    ScheduledJobLimitError,
     ScheduledJobStore,
     ScheduledRunSourceError,
 )
@@ -569,6 +571,8 @@ class BindableWorkflowListDTO(BaseModel):
 
 class ScheduledJobListDTO(BaseModel):
     items: list[ScheduledJobDTO]
+    active_count: int
+    max_active: int
 
 
 class ScheduledJobRunDTO(BaseModel):
@@ -974,7 +978,11 @@ async def list_jobs(
         )
         for job in visible_jobs
     ]
-    return ScheduledJobListDTO(items=visible)
+    return ScheduledJobListDTO(
+        items=visible,
+        active_count=sum(job.status == "active" for job in jobs),
+        max_active=MAX_ACTIVE_JOBS_PER_USER,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=ScheduledJobDTO)
@@ -1008,26 +1016,6 @@ async def patch_job(
         job.workspace_id,
         SpaceOperation.EXECUTE,
     )
-    # Un-pausing must honor the active-job cap (create enforces it; patch did not → un-pause could exceed it).
-    if body.status == "active" and job.status != "active":
-        from bowhead_core.scheduled_store import MAX_ACTIVE_JOBS_PER_USER
-
-        try:
-            active_count = await store.count_active(job.user_id)
-        except Exception as exc:
-            logger.exception(
-                "scheduled.active_count_failed error_type=%s",
-                type(exc).__name__,
-            )
-            raise _coded_failure(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "scheduled_job_update_failed",
-            ) from exc
-        if active_count >= MAX_ACTIVE_JOBS_PER_USER:
-            raise _coded_failure(
-                status.HTTP_409_CONFLICT,
-                "scheduled_job_limit_reached",
-            )
     if body.cron is not None:
         _validate_cron(body.cron)
     # Binding changes share create's single validation entry. ⚠ Omitting this means DTO accepts recipe_ref but server
@@ -1092,6 +1080,11 @@ async def patch_job(
             )
     except HTTPException:
         raise
+    except ScheduledJobLimitError as exc:
+        raise _coded_failure(
+            status.HTTP_409_CONFLICT,
+            "scheduled_job_limit_reached",
+        ) from exc
     except ScheduledAgentBindingError as exc:
         raise _coded_failure(
             status.HTTP_409_CONFLICT,

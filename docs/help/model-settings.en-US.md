@@ -1,12 +1,14 @@
 # Manage team model settings
 
-Team owners and administrators manage model services in **Team settings → Models**. The page has three tabs: **Model connections**, **Model assignments**, and **External capabilities**. Add services and maintain their models in the first tab. Use the second tab to choose models for team tasks and review verification evidence. Use the third tab to configure image generation and web search. Review index updates in **Knowledge base → Files**.
+Team owners and administrators manage model services in **Team settings → Models**. Use **Model connections** to add services and maintain their models. Use **Model assignments** to choose models for team tasks and review verification evidence. The **External capabilities** link opens a separate page for image generation and web search. Review index updates in **Knowledge base → Files**.
 
 **Source descriptions** is an optional knowledge-base model assignment and is disabled by default. Select a declared text model to generate discovery descriptions for new searchable publications and explicit file-level generation requests. It does not backfill files when saved or call a model during source browsing. Clearing the assignment stops new work; existing descriptions remain usable while their sources and permissions remain valid. See [source discovery](knowledge-base.en-US.md#source-discovery-descriptions-and-categories).
 
 ## Manage connections and model capabilities
 
 On **Model connections**, add a connection or edit an existing one. Enter the provider address, authentication, required parameters, model IDs, and supported capabilities. Use **Plan verification** before or after saving the connection to review capabilities, request count, and possible cost before running verification. Verification contacts the provider and may consume credits, but it does not automatically save configuration changes.
+
+Mark **Vision** only for models that can read images. When an agent's main model has Vision, Bowhead shows it pictures of the presentations, images, PDFs, HTML pages and SVG files it saves, so it can find and fix layout problems such as overflowing text or a wrong number on a card before it delivers. These checks add a few seconds to each save. Models without Vision are not shown pictures of files; images you attach to a message are sent to the model as before.
 
 For each model in the catalog, set its **Input**, **Cached input**, and **Output** credit multipliers. All three default to 1, including for existing models. A cached input multiplier applies only when the service reports cache hits; other input uses the input multiplier. Use values from 0 to 1,000 with at most six decimal places. After saving, each new model call captures the rates then in effect; earlier calls keep their recorded rates, even if the same task continues. Review the multipliers before changing a model's pricing. See [View and allocate credits](credits.en-US.md) for the calculation and usage details.
 
@@ -76,7 +78,7 @@ If the connection drops after the model has started replying, the partial reply 
 
 ## External capabilities
 
-Choose **External capabilities** in model settings to open its own page and review image generation and web search. Choose **Configure** or **Edit configuration** in the image or search row to open its settings. The return button in either editor opens the external capabilities overview.
+Choose **External capabilities** in model settings to open its own page and review image generation and web search. Choose **Configure** or **Edit configuration** in the image or search row to open its settings. The return button in either editor opens the external capabilities overview. From there, **Back to overview** restores the model settings tab you left.
 
 Choose a saved connection, enter the service model and request method, then select the model the team will use. Manage its address and credentials under **Model connections**. Review index updates and retry failures from **Knowledge base → Files**. Change knowledge base models under **Model assignments**. A saved connection does not mean it has been assigned to production or is ready for use.
 

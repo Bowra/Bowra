@@ -339,3 +339,64 @@
   border-radius: var(--r-2);
   background: var(--c-surface-2);
 }
+
+.resource-grant-form fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.resource-grant-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-block: 12px;
+}
+
+.resource-grant-target {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.resource-grant-target button {
+  justify-self: start;
+}
+
+.resource-grant-target [role="status"]:empty {
+  display: none;
+}
+
+.resource-grant-form .access-field {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resource-grant-form .access-field :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.resource-grant-summary {
+  margin-block: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .resource-grant-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .resource-grant-form :is(input, select, button) {
+    min-height: 44px;
+  }
+}

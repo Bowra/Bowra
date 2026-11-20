@@ -15,6 +15,8 @@ import { modelExternalCapabilitiesPath, modelSettingsOverviewPath, teamSettingsP
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
+import { appPath } from "@/lib/base-path";
+import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
 import { claimBowraImport, startBowraConnection, type BowraImport } from "@/lib/bowra-connect-api";
 import { ApiError } from "@/lib/api-client";
 import { fetchModelConfigurationProposal } from "@/lib/llm-config-api";
@@ -1596,7 +1598,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   newConnection?: boolean;
 }) {
   const router = useAppRouter();
-  const requestedProposalId = useSearchParams()?.get("configuration_proposal") ?? null;
+  const searchParams = useSearchParams();
+  const requestedProposalId = searchParams?.get("configuration_proposal") ?? null;
+  const returnToAssignments = searchParams?.get("from") === "assignments";
   const [bowraCallback] = useState(() => {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
     return { token: query.get("bowra_import"), error: query.get("bowra_error") };
@@ -1634,12 +1638,15 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const [pageMode, setPageMode] = useState<"overview" | "edit">(
     section !== "overview" ? "edit" : LLM_SETTINGS_V4_ENABLED ? "overview" : "edit",
   );
-  const [overviewTab, setOverviewTab] = useState<"connections" | "assignments" | "external">("connections");
+  const [overviewTab, setOverviewTab] = useState<"connections" | "assignments">("connections");
   const overviewReturnPath = section === "index"
     ? "/knowledge/?tab=files"
     : section === "image" || section === "search"
-      ? modelExternalCapabilitiesPath()
-      : section === "assignments" ? modelSettingsOverviewPath("assignments") : teamSettingsPath("llm");
+      ? modelExternalCapabilitiesPath(undefined, returnToAssignments)
+      : section === "assignments" || (section === "external" && returnToAssignments)
+        ? modelSettingsOverviewPath("assignments")
+        : teamSettingsPath("llm");
+  const externalEntry = modelExternalCapabilitiesPath(undefined, overviewTab === "assignments");
   useEffect(() => {
     if (section !== "overview") return;
     const syncTab = () => {
@@ -4140,8 +4147,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       searchConfigured={Boolean(config.search?.active?.web_search)}
       section={scoped ? section === "external" ? "external" : "index" : overviewTab}
       onEdit={scoped ? undefined : () => router.push("/team/settings/models/assignments/")}
-      onConfigureImage={() => router.push(modelExternalCapabilitiesPath("image"))}
-      onConfigureSearch={() => router.push(modelExternalCapabilitiesPath("search"))}
+      onConfigureImage={() => router.push(modelExternalCapabilitiesPath("image", returnToAssignments))}
+      onConfigureSearch={() => router.push(modelExternalCapabilitiesPath("search", returnToAssignments))}
       onRetryIndex={reindexFailed && section === "index" && typeof config.kb.pending_embed?.model === "string" && config.kb.models[config.kb.pending_embed.model]
         ? () => {
             const model = config.kb.pending_embed?.model as string;
@@ -4214,17 +4221,25 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 
       {showOverview && !scoped ? (
         <Tabs value={overviewTab} onValueChange={(value) => {
-          if (value === "external") router.push(modelExternalCapabilitiesPath());
-          else if (value === "connections" || value === "assignments") {
+          if (value === "connections" || value === "assignments") {
             setOverviewTab(value);
             router.replace(modelSettingsOverviewPath(value), { scroll: false });
           }
         }} idBase="model-settings">
-          <TabList appearance="underline" className="team-openapi-tabs" aria-label={t("sections.overview_tabs_label")}>
-            <Tab value="connections" className={overviewTab === "connections" ? "is-active" : undefined}>{t("sections.tab_connections")}</Tab>
-            <Tab value="assignments" className={overviewTab === "assignments" ? "is-active" : undefined}>{t("sections.tab_assignments")}</Tab>
-            <Tab value="external" className={overviewTab === "external" ? "is-active" : undefined}>{t("sections.tab_external")}</Tab>
-          </TabList>
+          <div className="model-settings-overview-navigation">
+            <TabList appearance="underline" className="team-openapi-tabs" aria-label={t("sections.overview_tabs_label")}>
+              <Tab value="connections" className={overviewTab === "connections" ? "is-active" : undefined}>{t("sections.tab_connections")}</Tab>
+              <Tab value="assignments" className={overviewTab === "assignments" ? "is-active" : undefined}>{t("sections.tab_assignments")}</Tab>
+            </TabList>
+            <a className="ui-btn model-settings-external-link" href={appPath(externalEntry)}
+              onClick={(event) => {
+                if (!shouldHandleAppLinkClick(event)) return;
+                event.preventDefault();
+                router.push(externalEntry);
+              }}>
+              {t("sections.tab_external")} <ChevronRight size={15} aria-hidden />
+            </a>
+          </div>
           <TabPanel value="connections" className="team-openapi-panel">{modelOverview}</TabPanel>
           <TabPanel value="assignments" className="team-openapi-panel">
             {modelOverview}
@@ -4245,7 +4260,6 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               }}
             />
           </TabPanel>
-          <TabPanel value="external" className="team-openapi-panel">{modelOverview}</TabPanel>
         </Tabs>
       ) : section === "assignments" ? null : modelOverview}
 

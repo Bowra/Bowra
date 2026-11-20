@@ -138,9 +138,23 @@ for (const width of [412, 1280]) {
     if (await closeNavigator.isVisible()) await closeNavigator.click();
     await expect(original).toBeVisible();
     await expect(original).toContainText("original CSV");
-    await page.getByRole("tab", { name: "详情", exact: true }).click();
+    const more = page.locator(".result-file-toolbar").getByRole("button", {
+      name: "更多操作",
+      exact: true,
+    });
+    if (width <= 640) {
+      await more.click();
+      await page.getByRole("menuitemradio", { name: "详情", exact: true }).click();
+    } else {
+      await page.getByRole("tab", { name: "详情", exact: true }).click();
+    }
     await expect(page.locator(".artifact-details")).toContainText("art_stdout");
-    await page.getByRole("button", { name: /返回报告/ }).click();
+    if (width <= 640) {
+      await more.click();
+      await page.getByRole("menuitem", { name: /返回报告/ }).click();
+    } else {
+      await page.getByRole("button", { name: /返回报告/ }).click();
+    }
     await expect(
       page.locator('[data-presentation="results-reading"]'),
     ).toBeVisible();

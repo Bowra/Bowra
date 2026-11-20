@@ -7,3 +7,5 @@ Open **Scheduled Tasks** from Capability Center when available. The management p
 3. Choose how the task uses conversations, such as starting a fresh conversation for each run or continuing in its linked conversation. Set optional email delivery and save.
 
 Use the row menu to **Run now**, edit, pause, or delete. Open **Run history** to check outcomes, open the resulting work, and inspect delivery status. If a run is waiting for information, use the original question card. If the task was paused after losing access to a Space, Agent or tool, repair the dependency before enabling it again. [Task alerts and delivery](scheduled-task-alerts.en-US.md)
+
+Each account can have up to 20 active scheduled tasks across its Spaces. At the limit, choose **Go to an active task** and pause an active task to free a slot.

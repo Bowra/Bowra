@@ -38,6 +38,8 @@ Les repères numérotés conservent emplacement, numéro et source. Une source i
 
 Les cartes demandant un choix, une précision ou l’approbation d’un plan ont une bordure d’avertissement pendant l’attente. Après réponse ou approbation, elles se réduisent à un résultat sur une ligne, conservé dans la conversation même après actualisation.
 
+Tant que la question reste ouverte, actualiser le même onglet restaure vos choix, vos réponses saisies et votre progression. Sélectionnez **Continuer** pour envoyer vos réponses.
+
 Lorsqu’un e-mail ou un outil externe nécessite votre confirmation, la carte apparaît sous l’étape en attente. Vérifiez ce qui sera envoyé ou modifié et faites votre choix avant la fin du compte à rebours. À l’expiration du délai, l’action est ignorée. La carte conserve le résultat après la reprise.
 
 ## Zone des résultats

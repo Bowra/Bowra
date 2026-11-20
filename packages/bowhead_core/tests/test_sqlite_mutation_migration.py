@@ -166,3 +166,98 @@ def test_0230_interrupted_replacement_keeps_the_deployed_fences(tmp_path, monkey
         with pytest.raises(RuntimeError, match="interrupted fence replacement"):
             _run_0230(monkeypatch, deployed)
         assert _update_triggers(deployed) == before
+
+
+def test_chain_head_fences_user_settings_only_under_privacy_and_access_keys(directory):
+    from bowhead_core.sqlite_mutation_guards import mutation_triggers
+
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
+    upgrade(f"sqlite:///{directory / 'bowhead.db'}")
+    expected = {statement.split('"')[1]: statement for statement in mutation_triggers("core") if ' ON "user_settings"' in statement}
+    with closing(sqlite3.connect(directory / "bowhead.db")) as db:
+        installed = dict(
+            db.execute("SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND tbl_name='user_settings' AND name GLOB 'trg_domain_mutation_*'")
+        )
+    assert installed == expected
+    assert all("'memory_dreaming_paused'" in sql and "kb_file_scope" not in sql for sql in installed.values())
+
+
+def _settings_with_fences(path, *, scoped: bool) -> sqlite3.Connection:
+    """A core file with ``user_settings`` fenced as deployed before ``0231`` or as a fresh install generates it."""
+    from bowhead_core.sqlite_domain_runtime import _AUTHORITY
+    from bowhead_core.sqlite_mutation_guards import mutation_triggers
+
+    db = sqlite3.connect(path, isolation_level=None)
+    db.create_function("bowhead_domain_mutation_v2", 2, lambda table, operation: 1)
+    db.execute("CREATE TABLE user_settings(user_id TEXT,key TEXT,value TEXT,updated_at TEXT,PRIMARY KEY(user_id,key))")
+    if scoped:
+        statements = [statement for statement in mutation_triggers("core") if ' ON "user_settings"' in statement]
+    else:
+        # The 0221 shape: unconditional insert and delete fences, an update fence on any changed column.
+        columns = _AUTHORITY["core"]["user_settings"]
+        names = ",".join(f'"{column}"' for column in columns)
+        changed = " OR ".join(f'OLD."{column}" IS NOT NEW."{column}"' for column in columns)
+        statements = [
+            f'CREATE TRIGGER "trg_domain_mutation_user_settings_{suffix}" BEFORE {operation} ON "user_settings"{condition} '
+            f"BEGIN SELECT bowhead_domain_mutation_v2('user_settings','{suffix}'); END"
+            for suffix, operation, condition in (
+                ("delete", "DELETE", ""),
+                ("insert", "INSERT", ""),
+                ("update", f"UPDATE OF {names}", f" WHEN {changed}"),
+            )
+        ]
+    for statement in statements:
+        db.execute(statement)
+    return db
+
+
+def _settings_triggers(db: sqlite3.Connection) -> list[tuple[str, str]]:
+    return db.execute("SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND tbl_name='user_settings' ORDER BY name").fetchall()
+
+
+def _run_0231(monkeypatch, db: sqlite3.Connection, target: str = "core") -> None:
+    import importlib
+    from types import SimpleNamespace
+
+    migration = importlib.import_module("bowhead_core.migrations.versions.0231_user_settings_key_fence")
+    context = SimpleNamespace(config=SimpleNamespace(attributes={"bowhead_target": target}), get_bind=lambda: _Bind(db))
+    monkeypatch.setattr(migration, "context", context)
+    migration.upgrade()
+
+
+def test_0231_scopes_deployed_fences_and_matches_a_fresh_install(tmp_path, monkeypatch):
+    deployed = _settings_with_fences(tmp_path / "deployed.db", scoped=False)
+    fresh = _settings_with_fences(tmp_path / "fresh.db", scoped=True)
+    fresh_before = _settings_triggers(fresh)
+    with closing(deployed), closing(fresh):
+        assert all('"key" IN' not in sql for _, sql in _settings_triggers(deployed))
+        assert 'WHEN OLD."user_id" IS NOT NEW."user_id"' in dict(_settings_triggers(deployed))["trg_domain_mutation_user_settings_update"]
+        _run_0231(monkeypatch, deployed)
+        _run_0231(monkeypatch, fresh)
+        assert _settings_triggers(deployed) == _settings_triggers(fresh) == fresh_before
+        _run_0231(monkeypatch, deployed, target="execution")
+        assert _settings_triggers(deployed) == fresh_before
+        deployed.execute("INSERT INTO user_settings VALUES('u','kb_file_scope','team','t')")
+        assert deployed.execute("SELECT value FROM user_settings").fetchall() == [("team",)]
+
+
+def test_0231_interrupted_replacement_keeps_the_deployed_fences(tmp_path, monkeypatch):
+    import importlib
+
+    deployed = _settings_with_fences(tmp_path / "deployed.db", scoped=False)
+    with closing(deployed):
+        before = _settings_triggers(deployed)
+        migration = importlib.import_module("bowhead_core.migrations.versions.0231_user_settings_key_fence")
+        original = migration.trigger
+        calls = []
+
+        def interrupted(suffix):
+            calls.append(suffix)
+            if len(calls) == 3:
+                raise RuntimeError("interrupted fence replacement")
+            return original(suffix)
+
+        monkeypatch.setattr(migration, "trigger", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted fence replacement"):
+            _run_0231(monkeypatch, deployed)
+        assert _settings_triggers(deployed) == before

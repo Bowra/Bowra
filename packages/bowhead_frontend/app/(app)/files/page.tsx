@@ -689,28 +689,35 @@ export default function FilesPage() {
                 key={f.file_id}
                 data-file-id={f.file_id}
                 className={clsx("f-row", { "sel-on": on, flash: flashId === f.file_id })}
-                tabIndex={0}
                 onClick={() => setOpenId(f.file_id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") setOpenId(f.file_id);
-                  if (e.key === "Delete" || e.key === "Backspace") {
-                    e.preventDefault();
-                    if (tab === "trash") void doRestore(f);
-                    else askDelete(f);
-                  }
-                }}
               >
-                <button
-                  type="button"
-                  className={clsx("ck", { on })}
-                  aria-label={f.filename}
-                  onClick={(e) => { e.stopPropagation(); toggle(f.file_id); }}
-                >
+                <label className={clsx("ck", { on })} onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    aria-label={t("select_file", { name: f.filename })}
+                    checked={on}
+                    onChange={() => toggle(f.file_id)}
+                  />
                   <CheckIcon />
-                </button>
+                </label>
                 <span className="ficon" aria-hidden><CharIcon ch={FAMILY_ICON[f.mime_family] ?? "📎"} icon={FAMILY_LUCIDE[f.mime_family] ?? Paperclip} aria-hidden /></span>
                 <div className="cellname">
-                  <span className="fname" title={f.filename}>{midTruncate(f.filename)}</span>
+                  <button
+                    type="button"
+                    className="fname"
+                    title={f.filename}
+                    aria-label={t("preview_file", { name: f.filename })}
+                    onClick={(event) => { event.stopPropagation(); setOpenId(f.file_id); }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Delete" && event.key !== "Backspace") return;
+                      event.preventDefault();
+                      if (tab === "trash") void doRestore(f);
+                      else askDelete(f);
+                    }}
+                  >
+                    {midTruncate(f.filename)}
+                  </button>
                   {(f.version_no ?? 1) > 1 ? (
                     <span className="sugchip" title={t("version_title", { n: f.version_no ?? 1, count: f.version_count ?? f.version_no ?? 1 })}>
                       {t("version_badge", { n: f.version_no ?? 1 })}

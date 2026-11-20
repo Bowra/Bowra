@@ -12,6 +12,7 @@ export interface AppRoutePolicy {
 export const DEVELOPMENT_ROUTE_PREFIXES = ["/spike"] as const;
 const STANDALONE_ROUTE_PREFIXES = [
   "/empty-workspace",
+  "/files/view",
   "/onboarding",
 ] as const;
 

@@ -40,19 +40,42 @@ _UNPROTECTED_UPDATES = {
     "team_subagent_app_compatibility": set(_AUTHORITY["core"]["team_subagent_app_compatibility"]),
     "artifacts": {"filename"},
 }
+# Key/value tables whose rows are authority only under some keys: a row is fenced only when its key,
+# before or after the change, is listed. No cross-file trigger or view reads ``user_settings`` and its
+# readers are core-file or single-statement snapshots, so a preference such as the knowledge-base scope
+# filter or the interface language cannot race a revocation; a running Turn's shared core lease starved
+# such a save for 9.7 s on 116 (1.7.59). The kept keys pause memory consolidation (privacy) and disable
+# Plugins for the person (access), so a later cross-file admission reading them stays protected.
+# Revision ``0231_user_settings_key_fence`` applies this to deployed databases.
+_FENCED_KEYS = {
+    "user_settings": ("key", ("builtin_plugins_disabled", "memory_dreaming_paused", "team_plugins_disabled")),
+}
+
+
+def _fenced_key(table: str, row: str) -> str | None:
+    """The condition limiting a key/value table's fence to its authority keys, for the ``OLD`` or ``NEW`` row."""
+    scope = _FENCED_KEYS.get(table)
+    if scope is None:
+        return None
+    column, keys = scope
+    listed = ",".join("'" + key + "'" for key in keys)
+    return f'{row}."{column}" IN ({listed})'
 
 
 def mutation_triggers(domain: str) -> tuple[str, ...]:
     """Install versioned fences without changing historical UDF semantics."""
     statements = []
     for table, original_columns in sorted(_AUTHORITY.get(domain, {}).items()):
-        operations = [("delete", "DELETE", "")]
+        old_key, new_key = _fenced_key(table, "OLD"), _fenced_key(table, "NEW")
+        operations = [("delete", "DELETE", f" WHEN {old_key}" if old_key else "")]
         if table not in _ORDINARY_INSERTS:
-            operations.append(("insert", "INSERT", ""))
+            operations.append(("insert", "INSERT", f" WHEN {new_key}" if new_key else ""))
         columns = [column for column in original_columns if column not in _UNPROTECTED_UPDATES.get(table, set())]
         if columns:
             names = ",".join(f'"{column}"' for column in columns)
             changed = " OR ".join(f'OLD."{column}" IS NOT NEW."{column}"' for column in columns)
+            if old_key:
+                changed = f"({old_key} OR {new_key}) AND ({changed})"
             operations.append(("update", f"UPDATE OF {names}", f" WHEN {changed}"))
         for suffix, operation, condition in operations:
             statements.append(

@@ -178,7 +178,7 @@ test("G5 desktop: IA, Report persistence, Code output and Unsupported actions", 
   await expect(page).toHaveURL(/result=art_unsupported.*mode=details/);
   await expect(page.getByRole("link", { name: "下载", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "更多操作", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: "在 Files 中管理", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "在文件中管理", exact: true })).toBeVisible();
   await page.getByRole("menuitem", { name: "反馈此格式", exact: true }).click();
   await expect(page.getByText("已记录此格式需求", { exact: true })).toBeVisible();
   await page.goBack();
@@ -437,6 +437,8 @@ test("G5 mobile: list to detail keeps 44px targets without horizontal overflow",
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await sendMessage(page, "resultsworkspace");
+  const composer = page.locator(".v2-composer textarea").first();
+  await composer.fill("Keep this draft");
   // The Results tab announces unseen output as `成果，有新内容`.
   await page.getByRole("tab", { name: /^成果(，有新内容)?$/ }).click();
 
@@ -445,19 +447,51 @@ test("G5 mobile: list to detail keeps 44px targets without horizontal overflow",
   await expect(page.getByRole("dialog", { name: "成果导航", exact: true })).toHaveCount(0);
   await mobileNavigator.locator(".results-nav-item", { hasText: "source-notes.txt" }).click();
   await expect(mobileNavigator).toBeHidden();
-  const backButton = page.getByRole("button", { name: "返回成果列表", exact: true });
-  await expect(backButton).toBeVisible();
-  await expect(backButton).toBeFocused();
+  const title = page.getByRole("button", { name: "选择成果，当前文件为source-notes.txt", exact: true });
+  await expect(title).toBeVisible();
+  await expect(title).toBeFocused();
+  const toolbar = page.locator(".result-file-toolbar");
+  const more = toolbar.getByRole("button", { name: "更多操作", exact: true });
 
-  const dimensions = await page.evaluate(() => ({
+  const dimensions = await toolbar.evaluate((element) => ({
     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    backHeight: document.querySelector<HTMLElement>(".results-mobile-back")?.getBoundingClientRect().height ?? 0,
-    modeHeights: Array.from(document.querySelectorAll<HTMLElement>(".data-viewer-tab"))
-      .map((element) => element.getBoundingClientRect().height),
+    targets: [...element.querySelectorAll("button")].map((button) => button.getBoundingClientRect().height),
   }));
   expect(dimensions.overflow).toBe(false);
-  expect(dimensions.backHeight).toBeGreaterThanOrEqual(44);
-  expect(dimensions.modeHeights.every((height) => height >= 44)).toBe(true);
+  expect(dimensions.targets).toHaveLength(3);
+  expect(dimensions.targets.every((height) => height >= 44)).toBe(true);
+
+  for (const [name, mode] of [["原始内容", "raw"], ["详情", "details"], ["预览", "preview"]]) {
+    await more.click();
+    await page.getByRole("menuitemradio", { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`mode=${mode}`));
+  }
+  await more.click();
+  const openedFiles = page.waitForEvent("popup");
+  await page.getByRole("menuitem", { name: "在文件中管理", exact: true }).click();
+  const filesPage = await openedFiles;
+  await expect(filesPage).toHaveURL(/\/files\/?\?focus=art_input$/);
+  await filesPage.close();
+
+  await more.click();
+  await page.getByRole("menuitem", { name: "在对话中引用", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "对话", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(composer).toHaveValue("Keep this draft");
+  await expect(page.locator(".v2-composer-attachments")).toContainText("source-notes.txt");
+  await page.getByRole("tab", { name: /^成果/ }).click();
+  await expect(title).toBeVisible();
+  await title.click();
+  await expect(mobileNavigator).toBeVisible();
+  await mobileNavigator.locator(".results-nav-item", { hasText: "source-bundle.zip" }).click();
+  await expect(page.locator(".artifact-details")).toBeVisible();
+  await more.click();
+  await expect(page.getByRole("menuitemradio")).toHaveCount(1);
+  await expect(page.getByRole("menuitemradio", { name: "详情", exact: true })).toHaveAttribute("aria-checked", "true");
+  const feedback = page.getByRole("menuitem", { name: "反馈此格式", exact: true });
+  await feedback.click();
+  await more.click();
+  await expect(feedback).toHaveAttribute("aria-disabled", "true");
+
 });
 
 test("G5 Safe HTML full view keeps the sandbox frame inside the focus loop", async ({ page }) => {

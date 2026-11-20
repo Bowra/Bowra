@@ -97,6 +97,7 @@ def _effective_status(stored: str, quarantined_count: int) -> str:
 
 #: Sections excluded from report surface (workspace attachments: SQL/code/bare tables), matching frontend selectReportSurfaceSections.
 _REPORT_SURFACE_EXCLUDED_KINDS = frozenset({"code_block", "data_table"})
+_REPORT_AUXILIARY_KINDS_SQL = ", ".join(f"'{kind}'" for kind in sorted(_REPORT_SURFACE_EXCLUDED_KINDS | {"sql_block"}))
 
 #: Terminal done field for report sections saved this turn and visible after refresh; identical across live/persistence/replay.
 REPORT_SECTIONS_SAVED_FIELD = "report_sections_saved"
@@ -2160,6 +2161,7 @@ class CanvasStore:
         session_ids: list[str] | None = None,
         min_sections: int = 0,
         min_visible_sections: int = 0,
+        report_surface: bool = False,
         workspace_ids: list[str] | None = None,
         exclude_user_id: str | None = None,
         after: list[Any] | None = None,
@@ -2214,14 +2216,16 @@ class CanvasStore:
             session_ids=session_ids,
             min_sections=min_sections,
             min_visible_sections=min_visible_sections,
+            report_surface=report_surface,
         )
+        report_kinds = f" AND kind NOT IN ({_REPORT_AUXILIARY_KINDS_SQL})" if report_surface else ""
         keys = _REPORT_LIST_SORT_KEYS[normalize_report_list_sort(sort)]
         inner = f"""
             SELECT c.id, c.session_id, c.workspace_id, c.user_id, c.title,
                    c.status, c.created_at, c.updated_at,
                    COALESCE(c.title, '') AS sort_title,
                    (SELECT COUNT(*) FROM canvas_sections s
-                    WHERE s.canvas_id = c.id AND s.hidden_for_chat_mode = 0) AS sec_count,
+                    WHERE s.canvas_id = c.id AND s.hidden_for_chat_mode = 0{report_kinds}) AS sec_count,
                    (SELECT COUNT(*) FROM canvas_sections sq
                     WHERE sq.canvas_id = c.id AND sq.quarantined = 1) AS quar_count
             FROM canvases c
@@ -2260,7 +2264,7 @@ class CanvasStore:
                 # Around 100 Canvases × a few sections performs well; switch to LATERAL at 1000+ in production.
                 section_sql = (
                     "SELECT canvas_id, payload FROM canvas_sections "
-                    f"WHERE canvas_id IN ({placeholders}) AND hidden_for_chat_mode = 0 "
+                    f"WHERE canvas_id IN ({placeholders}) AND hidden_for_chat_mode = 0{report_kinds} "
                     "ORDER BY canvas_id, seq ASC"
                 )
                 async with db.execute(section_sql, canvas_ids) as cur:
@@ -2314,6 +2318,7 @@ class CanvasStore:
         session_ids: list[str] | None = None,
         min_sections: int = 0,
         min_visible_sections: int = 0,
+        report_surface: bool = False,
         exclude_user_id: str | None = None,
     ) -> dict[str, int]:
         """Count report-library rows per Space with exactly the filters of :meth:`list_for_user`.
@@ -2334,6 +2339,7 @@ class CanvasStore:
             session_ids=session_ids,
             min_sections=min_sections,
             min_visible_sections=min_visible_sections,
+            report_surface=report_surface,
         )
         sql = (
             f"SELECT c.workspace_id, COUNT(*) FROM canvases c WHERE {where_sql} AND {await self._account_visibility_sql('c')} GROUP BY c.workspace_id"
@@ -2383,6 +2389,7 @@ class CanvasStore:
         session_ids: list[str] | None,
         min_sections: int,
         min_visible_sections: int,
+        report_surface: bool = False,
     ) -> tuple[str, list[Any]]:
         """Build the WHERE clause shared by report-library listing and counting."""
         params: list[Any]
@@ -2405,9 +2412,17 @@ class CanvasStore:
             params.append(workspace_id)
         if not include_archived:
             clauses.append("AND c.status != 'archived'")  # R2: archived excluded from retrieval
+        report_kinds = f" AND kind NOT IN ({_REPORT_AUXILIARY_KINDS_SQL})" if report_surface else ""
+        visible = f"FROM canvas_sections sv WHERE sv.canvas_id = c.id AND sv.hidden_for_chat_mode = 0{report_kinds}"
         if min_visible_sections > 0:
-            clauses.append("AND (SELECT COUNT(*) FROM canvas_sections sv WHERE sv.canvas_id = c.id AND sv.hidden_for_chat_mode = 0) >= ?")
+            clauses.append(f"AND (SELECT COUNT(*) {visible}) >= ?")
             params.append(min_visible_sections)
+        elif report_surface:
+            # Keep the explicit empty-report view, while omitting auxiliary-only canvases.
+            clauses.append(
+                f"AND (EXISTS (SELECT 1 {visible}) OR NOT EXISTS ("
+                f"SELECT 1 FROM canvas_sections aux WHERE aux.canvas_id = c.id AND aux.kind IN ({_REPORT_AUXILIARY_KINDS_SQL})))"
+            )
         if min_sections > 0:
             # empty-canvas cleanup: filter before LIMIT so empty shells consume no slots.
             # ★Regression check 1.0.93 P3: count only **visible report content**. All sections in chat-mode turns

@@ -157,6 +157,24 @@ async def test_total_is_the_true_count_not_the_page_size(list_ctx) -> None:
     assert body["next_cursor"]
 
 
+async def test_auxiliary_sections_do_not_create_or_inflate_reports(list_ctx) -> None:
+    ctx = list_ctx
+    file_only = await ctx.canvases.ensure_canvas(
+        session_id="s_file_only", workspace_id=ctx.ws_keep, user_id=ctx.owner.id, title="Standalone document"
+    )
+    trace = {"call_id": "sandbox_call", "output_artifact_ids": ["art_document"]}
+    await ctx.canvases.append_section(canvas_id=file_only.id, kind="code_block", payload=trace)
+    await ctx.canvases.append_section(canvas_id=ctx.keep[0], kind="code_block", payload=trace)
+
+    for include_empty, expected_total in (("false", 5), ("true", 7)):
+        ids, totals = _walk(ctx, ctx.owner, include_empty=include_empty, sort="sections_desc", limit=2)
+        assert file_only.id not in ids
+        assert totals == [expected_total]
+    specific = _get(ctx, ctx.owner, q="Gamma").json()
+    assert specific["items"][0]["sections_count"] == 2
+    assert specific["items"][0]["first_section_title"] == "k0 part 0"
+
+
 @pytest.mark.parametrize(
     ("params", "expected"),
     [

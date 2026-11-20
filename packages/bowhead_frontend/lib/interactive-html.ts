@@ -1,5 +1,5 @@
 import { parse as parseJavaScript } from "acorn";
-import { defaultTreeAdapter, parse, serialize, type DefaultTreeAdapterMap } from "parse5";
+import { defaultTreeAdapter, Parser, serialize, Tokenizer, type DefaultTreeAdapterMap } from "parse5";
 
 import { sha256Hex } from "./sha256-fallback";
 import { randomUuid } from "./random-id";
@@ -56,6 +56,31 @@ async function hash(source: string): Promise<string> {
   return `'sha256-${btoa(hex.match(/../g)!.map((pair) => String.fromCharCode(parseInt(pair, 16))).join(""))}'`;
 }
 
+// In the HTML data state these ASCII characters all produce the same character
+// token type. Leave entities, markup, whitespace and non-ASCII to parse5.
+const plainTextRun = /[\x21-\x25\x27-\x3b\x3d-\x7e]+/y;
+
+class PreviewTokenizer extends Tokenizer {
+  protected override _stateData(codePoint: number): void {
+    if (codePoint < 0x21 || codePoint > 0x7e || codePoint === 0x26 || codePoint === 0x3c) {
+      super._stateData(codePoint);
+      return;
+    }
+
+    plainTextRun.lastIndex = this.preprocessor.pos;
+    const text = plainTextRun.exec(this.preprocessor.html)?.[0];
+    if (!text || text.length < 2) {
+      super._stateData(codePoint);
+      return;
+    }
+
+    // Emitting can discard the already consumed prefix when the token type
+    // changes. Advance relative to the new position after emitting.
+    this._emitChars(text);
+    this.preprocessor.pos += text.length - 1;
+  }
+}
+
 /** Parse inert text only; this function never evaluates authored JavaScript. */
 export function validateHtmlComplexity(raw: string) {
   if (raw.length > HTML_PREVIEW_BUDGET.inputBytes || new TextEncoder().encode(raw).length > HTML_PREVIEW_BUDGET.inputBytes) {
@@ -99,7 +124,10 @@ export function validateHtmlComplexity(raw: string) {
       defaultTreeAdapter.setDocumentType(document, name, publicId, systemId);
     },
   };
-  const tree = parse(raw, { treeAdapter });
+  const parser = new Parser<DefaultTreeAdapterMap>({ treeAdapter });
+  parser.tokenizer = new PreviewTokenizer(parser.options, parser);
+  parser.tokenizer.write(raw, true);
+  const tree = parser.document;
   const pending: Array<{ node: Node; depth: number }> = [{ node: tree, depth: 0 }];
   let nodes = 0;
   let handlers = 0;

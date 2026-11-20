@@ -196,7 +196,7 @@ test("shared report opens from URL when session detail is forbidden", async ({ p
   await expect(page.getByRole("button", { name: "编辑此报告" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "在对话中引用" })).toHaveCount(0);
   await page.getByRole("button", { name: "更多操作", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: "在 Files 中管理" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "在文件中管理" })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "反馈此格式" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "成果", exact: true }).click();

@@ -37,7 +37,7 @@ ChromaDB 仍有未修复的上游依赖安全公告，详见[当前评估和部�
 
 ## 当前源码版本
 
-**Bowra 1.7.54** 改进了对话中续用 Skill、文件版本归组和并发保存。[发布说明](docs/help/release-notes/releases/v1.7.54.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
+**Bowra 1.7.61** 支持 HTML 成果分享、报告库下载 Word，并改进中断后的对话续接。[发布说明](docs/help/release-notes/releases/v1.7.61.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
 
 SQLite 升级统一协调十二个数据库文件。升级前停止全部写入，并备份实例密钥、数据库和存储对象。自动迁移备份只包含登记的 SQLite 文件与布局元数据，完整恢复快照需单独保存。恢复账号删除前的快照可能恢复该账号。Community 保留已审核沙箱源码与基础文档技能，原生模板创作 helper 需要单独验证执行环境。
 

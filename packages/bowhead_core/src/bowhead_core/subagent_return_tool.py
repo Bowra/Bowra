@@ -1967,6 +1967,7 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
             "in exactly one of the two places. A chart named in an insight's evidence (chart_section_id) is shown right after that insight; charts no insight names go at the end. "
             "report: title and supported content matching the user's scope. KPI cards are optional, have no target count, "
             "and appear only when kpis contains supported values. If the user excludes KPI cards, omit kpis or use []. "
+            "The report does not show caveats; when a Lead delegated the task, it receives them with your result. "
             "Long text reads poorly in chat — if it needs sections, multiple dimensions, or will be "
             "re-read/exported, choose 'report'. "
             "After this tool succeeds, the subagent loop ends — DO NOT call more tools.\n"

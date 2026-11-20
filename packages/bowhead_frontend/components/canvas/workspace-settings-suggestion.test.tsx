@@ -40,7 +40,7 @@ function Host() {
 async function open() {
   applyLiteProposal(proposal);
   renderIntl(<WorkspaceSettingsCanvasProvider><Host /></WorkspaceSettingsCanvasProvider>, { locale: "en-US" });
-  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   await waitFor(() => expect(() => bridge.capture(target)).not.toThrow());
   act(() => bridge.acceptTurn("t_1", bridge.capture(target)));
   await waitFor(() => expect(screen.getAllByTestId("lite-propose")).toHaveLength(2));
@@ -63,7 +63,7 @@ it("reviews without saving, then applies from Chat and reads the original mounte
   vi.mocked(getWorkspaceSettings).mockResolvedValue({ week_start_day: "sunday" });
   fireEvent.click(screen.getAllByRole("button", { name: messages.settings.config_copilot_lite.apply }).at(-1)!);
   await waitFor(() => expect(segmentedValue(week)).toBe("sunday"));
-  expect(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).toBe(week);
+  expect(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).toBe(week);
   expect(getWorkspaceSettings).toHaveBeenCalledTimes(2);
   expect(setWorkspaceSetting).not.toHaveBeenCalled();
 });
@@ -100,7 +100,7 @@ it("keeps replayed old proposals detached after closing and reopening the same p
   fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
   await screen.findByText(messages.settings_canvas.review_unavailable);
   fireEvent.click(screen.getByRole("button", { name: "Reopen preferences" }));
-  await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   act(() => applyLiteProposal({ ...proposal }));
   await waitFor(() => expect(screen.queryAllByTestId("lite-propose")).toHaveLength(0));
   expect(setWorkspaceSetting).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ it("keeps replayed old proposals detached after closing and reopening the same p
 it("clears the original page on an authoritative review denial without exposing its proposed values", async () => {
   await open();
   fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
-  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Reopen preferences" }));
   await waitFor(() => expect(() => bridge.capture(target)).not.toThrow());
   vi.mocked(apiJson).mockRejectedValue(new ApiError(403, "Forbidden"));
@@ -119,7 +119,7 @@ it("clears the original page on an authoritative review denial without exposing 
     applyLiteProposal({ ...proposal, proposal_id: "ccd_2", turn_id: "t_2" });
   });
   await screen.findByText(messages.settings_canvas.unavailable);
-  expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).toBeNull();
+  expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).toBeNull();
   expect(setWorkspaceSetting).not.toHaveBeenCalled();
 });
 
@@ -134,11 +134,11 @@ it("preserves the refreshed original page when an old in-flight review loses acc
   await waitFor(() => expect(() => bridge.capture(target)).not.toThrow());
   act(() => bridge.acceptTurn("t_1", bridge.capture(target)));
   await waitFor(() => expect(rejectReview).toBeDefined());
-  const original = screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  const original = screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   fireEvent.click(screen.getByRole("button", { name: messages.settings_canvas.refresh }));
-  await waitFor(() => expect(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).not.toBe(original));
+  await waitFor(() => expect(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).not.toBe(original));
   await act(async () => { rejectReview(new ApiError(403, "Forbidden")); });
-  expect(segmentedValue(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label }))).toBe("monday");
+  expect(segmentedValue(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label }))).toBe("monday");
   expect(screen.queryByText(messages.settings_canvas.unavailable)).toBeNull();
   expect(setWorkspaceSetting).not.toHaveBeenCalled();
 });
@@ -158,9 +158,9 @@ it("removes old suggestion actions from both surfaces when the original page bec
 it("explicitly reviews a persisted suggestion on the reopened page before confirmation", async () => {
   await open();
   fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
-  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Reopen preferences" }));
-  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   await waitFor(() => expect(screen.queryAllByTestId("lite-propose")).toHaveLength(0));
   const readCount = vi.mocked(apiJson).mock.calls.filter(([url]) => String(url).endsWith("/settings-review")).length;
   fireEvent.click(await screen.findByRole("button", { name: messages.settings_canvas.review_saved }));
@@ -183,15 +183,15 @@ it.each(["retained", "reset", "pending"])("recovers an applied preference after 
   vi.mocked(apiJson).mockImplementation(async (url) => ({ ...proposal, owner_user_id: "u_1", status: String(url).endsWith("/apply") ? "applied" : "proposed" }));
   vi.mocked(getWorkspaceSettings).mockResolvedValue({ week_start_day: "sunday" });
   fireEvent.click(screen.getAllByRole("button", { name: messages.settings.config_copilot_lite.apply }).at(-1)!);
-  await waitFor(() => expect(segmentedValue(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label }))).toBe("sunday"));
+  await waitFor(() => expect(segmentedValue(screen.getByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label }))).toBe("sunday"));
   vi.mocked(apiJson).mockResolvedValue({ ...proposal, owner_user_id: "u_1", status: "applied" });
   fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
-  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label })).toBeNull());
   if (cache !== "retained") _dropLiteStateCacheForTests();
   if (cache === "pending") vi.mocked(apiJson).mockImplementation(async (url) => String(url).endsWith("/settings-review")
     ? { ...proposal, owner_user_id: "u_1", status: "applied" } : new Promise((resolve) => { finishHydration = resolve; }));
   fireEvent.click(screen.getByRole("button", { name: "Reopen preferences" }));
-  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.hosted_week_label });
+  const week = await screen.findByRole("radiogroup", { name: messages.settings.workspace_i18n.field_week_label });
   // Before the reopened page reviews the saved suggestion, Undo is hidden rather than shown disabled (D11).
   if (cache !== "pending") await waitFor(() => expect(screen.getAllByTestId("lite-applied").length).toBeGreaterThan(0));
   expect(screen.queryAllByRole("button", { name: messages.settings.config_copilot_lite.undo })).toHaveLength(0);

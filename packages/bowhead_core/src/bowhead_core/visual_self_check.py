@@ -26,6 +26,8 @@ from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import ImageRef, LLMRequest, Message
 from bowhead_router.visual_input import visual_self_check_enabled
 
+from bowhead_core.product_identity import product_name
+
 _LOG = logging.getLogger(__name__)
 
 VIEW_FILE_TOOL = "view_file"
@@ -33,14 +35,31 @@ MAX_IMAGES_PER_REQUEST = 4
 MAX_SHOWN_PER_RUN = 20
 RENDER_WAIT_SECONDS = 30
 _MAX_RUNS = 512
-_IMAGE_MIMES = {"image/png": "image", "image/jpeg": "image", "image/webp": "image", "application/pdf": "pdf"}
-_IMAGE_SUFFIXES = {".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image", ".pdf": "pdf"}
+_IMAGE_MIMES = {
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/webp": "image",
+    "application/pdf": "pdf",
+    "text/html": "html",
+    "application/xhtml+xml": "html",
+    "image/svg+xml": "svg",
+}
+_IMAGE_SUFFIXES = {
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
+    ".pdf": "pdf",
+    ".html": "html",
+    ".htm": "html",
+    ".svg": "svg",
+}
 PRESENTATION_FIX_FIELD = "presentation_fix"
 PRESENTATION_FIX_SCHEMA = {
     "type": "boolean",
     "description": (
         "Set true only when this call fixes the presentation of files you already saw rendered (position, size, font, "
-        "colour, wrapping, chart type) without changing their content. Bowhead then compares each saved file with the "
+        f"colour, wrapping, chart type) without changing their content. {product_name()} then compares each saved file with the "
         "version you last saw and reports any text, number, row or chart value that changed. Omit it for calls that "
         "create or change content."
     ),
@@ -51,6 +70,8 @@ CONTENT_CHANGES_NOTE = (
 )
 _MAX_KEPT_PDFS = 3
 _MAX_KEPT_PDF_BYTES = 8 * 1024 * 1024
+_MAX_KEPT_CAPTURES = 3
+_MAX_KEPT_CAPTURE_BYTES = 8 * 1024 * 1024
 _TRUE = frozenset({"true", "yes", "1"})
 _FALSE = frozenset({"false", "no", "0", ""})
 _CHECK_INSTRUCTIONS = (
@@ -58,7 +79,7 @@ _CHECK_INSTRUCTIONS = (
     "of characters, unreadable text, leftover placeholder text, charts that cannot be read. Fix only presentation: "
     "position, size, font, colour, wrapping, chart type. Do not add, change or remove text, numbers, names, sources or "
     "data. When data is missing or looks wrong, keep it and say so in the file or in your answer. Set presentation_fix "
-    "to true on a call that only fixes presentation, so Bowhead can confirm that no content changed."
+    f"to true on a call that only fixes presentation, so {product_name()} can confirm that no content changed."
 )
 # Renderer outcomes of the layout facts (pptx_result_view._render_pdf) as visual_view reasons.
 _RENDER_REASONS = {
@@ -96,6 +117,9 @@ class VisualRun:
     artifact_identities: dict[str, str] = field(default_factory=dict)
     # Executor PDFs of presentations rendered in this run, by artifact ID, so view_file need not render again.
     pdfs: dict[str, bytes] = field(default_factory=dict)
+    # Sandbox captures of HTML and SVG content in this run, by kind and content digest: unchanged
+    # content is not captured again (view_file, or the same bytes saved under another name).
+    captures: dict[tuple[str, str], Any] = field(default_factory=dict)
 
     def keep_pdf(self, artifact_id: str, pdf: bytes | None) -> None:
         if pdf is None or len(pdf) > _MAX_KEPT_PDF_BYTES:
@@ -104,6 +128,14 @@ class VisualRun:
         while len(self.pdfs) >= _MAX_KEPT_PDFS:
             self.pdfs.pop(next(iter(self.pdfs)))
         self.pdfs[artifact_id] = pdf
+
+    def keep_capture(self, key: tuple[str, str], capture: Any) -> None:
+        if len(capture.png) > _MAX_KEPT_CAPTURE_BYTES:
+            return
+        self.captures.pop(key, None)
+        while len(self.captures) >= _MAX_KEPT_CAPTURES:
+            self.captures.pop(next(iter(self.captures)))
+        self.captures[key] = capture
 
 
 _RUNS: dict[tuple[str, str], VisualRun] = {}
@@ -162,7 +194,7 @@ def normalize_presentation_fix(value: Any) -> tuple[bool, str | None]:
 
 
 def deliverable_kind(mime: str | None, name: str | None) -> str | None:
-    """``pptx``, ``image`` or ``pdf`` for a deliverable slice A renders; None otherwise."""
+    """``pptx``, ``image``, ``pdf`` (slice A), ``html`` or ``svg`` (slice B) for a renderable deliverable; None otherwise."""
     from bowhead_core.pptx_result_view import is_pptx
 
     if is_pptx(mime, name):
@@ -185,7 +217,17 @@ def _identity(run: VisualRun, artifact: Any) -> str:
 
 def _summary(kind: str, view: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {"status": view["status"], "kind": kind}
-    for key in ("reason", "pages", "shown", "not_shown", "substituted_fonts"):
+    for key in (
+        "reason",
+        "pages",
+        "shown",
+        "not_shown",
+        "substituted_fonts",
+        "runtime_issues",
+        "scroll_width",
+        "scroll_height",
+        "external_resources_removed",
+    ):
         if view.get(key) is not None:
             summary[key] = view[key]
     if view["status"] == "shown":
@@ -246,6 +288,11 @@ async def _render(
         return {"status": "skipped", "reason": "turn_limit"}, None
     if run.digests.get(identity) == digest:
         return {"status": "skipped", "reason": "unchanged"}, None
+    if kind in {"html", "svg"}:
+        view, snapshot = await _render_page(run, kind, data, None, "sheet")
+        if view.get("status") == "shown":
+            run.digests[identity] = digest
+        return view, snapshot
     view = await _worker({"op": "pdf_view" if kind == "pdf" else "image_view", "snapshot": kind == "pdf"}, data)
     if view is None:
         return {"status": "not_completed", "reason": "render_failed"}, None
@@ -292,10 +339,16 @@ def _check_presentation_fix(
         output["presentation_check"] = {"status": "not_checked", "reason": missing}
         return None
     if snapshot is None:
-        unchanged = view.get("reason") == "unchanged"
-        output["presentation_check"] = (
-            {"status": "no_content_change"} if unchanged else {"status": "not_checked", "reason": "the saved content could not be read"}
-        )
+        reason = view.get("reason")
+        if reason == "unchanged":
+            output["presentation_check"] = {"status": "no_content_change"}
+        elif reason == "turn_limit":
+            output["presentation_check"] = {
+                "status": "not_checked",
+                "reason": f"this run already showed {MAX_SHOWN_PER_RUN} rendered views, so this save was neither shown nor compared",
+            }
+        else:
+            output["presentation_check"] = {"status": "not_checked", "reason": "the saved content could not be read"}
         return None
     from bowhead_core.visual_view import compare_content
 
@@ -307,6 +360,43 @@ def _check_presentation_fix(
     output["content_changes"] = {"against": baseline["against"], **changes, "note": CONTENT_CHANGES_NOTE}
     _LOG.info("visual_view.content_changes kind=%s %s", kind, " ".join(f"{name}={len(items)}" for name, items in changes.items()))
     return baseline
+
+
+async def _render_page(run: VisualRun, kind: str, data: bytes, pages: list[int] | None, detail: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Slice B: an HTML or SVG file through the product preview's transform in the sandbox Chromium (§6).
+
+    Content captured earlier in the run is not captured again. An SVG's content snapshot is its
+    ``<text>`` elements, read from the file by the worker.
+    """
+    from bowhead_core import html_snapshot
+    from bowhead_core.visual_view import html_content_snapshot
+
+    key = (kind, hashlib.sha256(data).hexdigest())
+    snapshot = run.captures.get(key)
+    if snapshot is None:
+        try:
+            snapshot = await html_snapshot.capture(kind, data)
+        except html_snapshot.HtmlSnapshotUnavailable as exc:
+            return {"status": "not_completed", "reason": exc.reason}, None
+        run.keep_capture(key, snapshot)
+    else:
+        _LOG.info("visual_view.capture_reused kind=%s", kind)
+    view = await _worker(
+        {"op": "screens_view", "kind": kind, "pages": pages, "detail": detail, "text_present": bool(snapshot.text.strip())},
+        snapshot.png,
+        {"svg": data} if kind == "svg" else None,
+    )
+    if not isinstance(view, dict):
+        return {"status": "not_completed", "reason": "render_failed"}, None
+    content = html_content_snapshot(snapshot.text) if kind == "html" else view.pop("snapshot", None)
+    if kind == "html" and view.get("status") == "shown":
+        # Facts go only with the picture: alone they misled the model in the spike (F4).
+        view.update(scroll_width=snapshot.scroll_width, scroll_height=snapshot.scroll_height)
+        if snapshot.issues:
+            view["runtime_issues"] = list(snapshot.issues)
+        if snapshot.external_resources:
+            view["external_resources_removed"] = True
+    return view, content
 
 
 async def attach_visual_view(
@@ -415,6 +505,16 @@ def render_message(renders: list[PendingRender]) -> Message:
                 "  Text smaller than about 10 px at this size cannot be judged; do not report it as unreadable. "
                 f"{VIEW_FILE_TOOL} with detail full shows a page at 1280 px."
             )
+        if view.get("external_resources_removed"):
+            # Facts only: an instruction here made a model merge files the user asked to keep apart (116, 2026-11-19).
+            lines.append(
+                f"  The user's preview in {product_name()} removes external scripts, stylesheets, fonts and images, including linked files "
+                f"saved beside the page, so this view shows the page without them. Opened outside {product_name()} together with those "
+                "files, the page loads them."
+            )
+        if view.get("runtime_issues"):
+            names = {"runtime": "script errors", "blocked": "blocked requests"}
+            lines.append(f"  The page reported {' and '.join(names.get(item, item) for item in view['runtime_issues'])}.")
         fonts = view.get("substituted_fonts")
         if isinstance(fonts, dict) and fonts.get("requested"):
             lines.append(
@@ -543,7 +643,9 @@ def visual_disclosure_calls(invocations: Any) -> dict[str, dict[str, Any]]:
     presented: set[str] = set()
     for invocation in invocations:
         call_id = getattr(invocation, "call_id", None)
-        result = invocation_result(invocation)
+        if not call_id:
+            continue
+        result = invocation_result(invocation) if hasattr(invocation, "result") or hasattr(invocation, "result_full") else None
         arguments = getattr(invocation, "arguments", None)
         if getattr(invocation, "tool_name", None) == "present_artifacts" and isinstance(arguments, dict):
             if getattr(invocation, "error", None) is None and isinstance(result, dict) and result.get("ok"):
@@ -607,11 +709,11 @@ def visual_issue_problem(call_id: str, item: dict[str, Any], issue: dict[str, An
 # ------------------------------------------------------------ look on request (§16)
 
 _VIEW_FILE_DESCRIPTION = (
-    "Look at a PPTX, PNG, JPEG, WebP or PDF file as the user will see it: a file saved in this Turn, a delivered file or "
-    "an attached input such as a template. The rendered view comes with your next request; this result says what was "
-    "rendered. detail sheet (default) shows up to 12 pages per sheet at 400 px each; detail full shows up to 4 pages at "
-    "1280 px, for checking body text. Saved files are rendered automatically after each save; use this for pages that "
-    "were not shown, fine detail, or files you did not save."
+    "Look at a PPTX, PNG, JPEG, WebP, PDF, HTML or SVG file as the user will see it: a file saved in this Turn, a delivered "
+    "file or an attached input such as a template. The rendered view comes with your next request; this result says what "
+    "was rendered. detail sheet (default) shows up to 12 pages per sheet at 400 px each; detail full shows up to 4 pages at "
+    "1280 px, for checking body text and numbers. An HTML page is shown as 1280x800 screens of its preview. Saved files are "
+    "rendered automatically after each save; use this for pages that were not shown, fine detail, or files you did not save."
 )
 _MAX_REQUESTED_PAGES = 24
 
@@ -647,7 +749,7 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return _refusal("file_unavailable", "No readable file has this artifact_id in this Space. Copy the ID from a Tool result.")
     kind = deliverable_kind(artifact.mime, artifact.filename)
     if kind is None:
-        return _refusal("file_kind_not_viewable", f"{VIEW_FILE_TOOL} shows PPTX, PNG, JPEG, WebP and PDF files.")
+        return _refusal("file_kind_not_viewable", f"{VIEW_FILE_TOOL} shows PPTX, PNG, JPEG, WebP, PDF, HTML and SVG files.")
     started = time.perf_counter()
     zero_based = sorted({page - 1 for page in pages}) if pages else None
     try:
@@ -701,6 +803,10 @@ async def _render_on_request(
     elif kind == "pdf":
         view = await _worker({**control, "op": "pdf_view", "snapshot": saved_now}, data)
         snapshot = view.pop("snapshot", None) if isinstance(view, dict) else None
+    elif kind in {"html", "svg"}:
+        view, snapshot = await _render_page(run, kind, data, pages, detail)
+        if view.get("status") != "shown":
+            return view
     else:
         view = await _worker({"op": "image_view"}, data)
     if not isinstance(view, dict):

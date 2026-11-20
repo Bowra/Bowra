@@ -39,6 +39,12 @@ German AI answers may not be enabled yet while they are being rolled out. In tha
 
 AI answers in French are available now. Report labels and source notes also support French.
 
-## Space language defaults
+## Space language and week start
 
-Space administrators can open **Space settings → General** to edit the Space name and description under **Basic information**, and manage data language, the default interface language, and the first day of the week in the language settings below. Name and description changes use the save bar; language settings save immediately. If **Open in Canvas** is available in the page header, save or discard pending changes before opening it.
+Space administrators can open **Space settings → General** and find **Language and week start** below **Basic information**. The language and week-start settings save immediately.
+
+- **Source data language** helps AI match store, product and other names in queries. The original data stays as it is.
+- **Default conversation display language** is used for conversation and channel messages when no interface language is available. Set your web interface language in your account.
+- **Week start** sets the day on which weekly summaries in this Space begin.
+
+Save name and description changes with the save bar before opening the page in Canvas, or discard those changes first.

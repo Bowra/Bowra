@@ -199,3 +199,119 @@ def test_terminal_removal_recovers_after_lost_response(executor, monkeypatch):
     assert runs.get(RUN_ID)["removal_pending"] is True
     monkeypatch.setattr(module, "_docker", original)
     assert not runs.get(RUN_ID).get("removal_pending")
+
+
+GB = 1024**3
+
+
+@pytest.mark.parametrize(
+    ("info", "configured", "slots", "capture_cpus"),
+    [
+        (f"4 {14 * GB}", "", 2, 1),  # 116: as before
+        (f"8 {32 * GB}", "", 6, 1),
+        (f"16 {64 * GB}", "", 8, 1),
+        (f"8 {8 * GB}", "", 2, 2),  # memory-bound: the spare CPUs go to captures
+        (f"2 {4 * GB}", "", 2, 1),  # a small host keeps the earlier two
+        (f"8 {32 * GB}", "3", 3, 2),
+        (f"8 {32 * GB}", "0", 6, 1),
+        (f"8 {32 * GB}", "many", 6, 1),
+        (None, "", 2, 1),
+    ],
+)
+def test_document_capacity_follows_the_host(executor, monkeypatch, capsys, info, configured, slots, capture_cpus):
+    module, *_ = executor
+    original = module._docker
+
+    def docker(*args):
+        if args[0] == "info":
+            if info is None:
+                raise RuntimeError("document_docker_unavailable")
+            return info
+        return original(*args)
+
+    monkeypatch.setattr(module, "_docker", docker)
+    monkeypatch.setenv("BOWHEAD_DOCUMENT_RUN_SLOTS", configured)
+    capacity = module.host_capacity()
+    assert (capacity["slots"], capacity["capture_cpus"]) == (slots, capture_cpus)
+    assert module.host_capacity() is capacity  # measured once per process
+    assert ("BOWHEAD_DOCUMENT_RUN_SLOTS ignored" in capsys.readouterr().err) is (configured in {"0", "many"})
+
+
+def test_runs_take_a_free_slot_and_captures_get_the_spare_cpus(executor, tmp_path, monkeypatch):
+    module, runs, payload, _, _ = executor
+    labels = {
+        "bowhead.document.profile": module.PROFILE,
+        "bowhead.document.authoring": module.AUTHORING_PROFILE,
+        "bowhead.document.authoring.contract": module.AUTHORING_CONTRACT,
+        "bowhead.document.authoring.html-view": "html-view-v1",
+    }
+    active: list[str] = []
+    creates: list[tuple[str, ...]] = []
+    original = module._docker
+
+    def docker(*args):
+        if args[0] == "info":
+            return f"8 {32 * GB}"
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Id": IMAGE_ID, "Config": {"Labels": labels}}])
+        if args[0] == "ps":
+            return "\n".join(active)
+        if args[0] == "create":
+            creates.append(args)
+        return original(*args)
+
+    monkeypatch.setattr(module, "_docker", docker)
+    monkeypatch.setenv("BOWHEAD_DOCUMENT_RUN_SLOTS", "3")
+    assert runs.readiness(module.AUTHORING_PROFILE)["document_slots"] == 3
+
+    def request(run_id: str, operation: str) -> dict:
+        inputs = tmp_path / ("document-" + run_id) / "input"
+        inputs.mkdir(parents=True, exist_ok=True)
+        (inputs.parent / "output").mkdir(exist_ok=True)
+        control = json.dumps({"profile": module.AUTHORING_PROFILE, "operation": operation}).encode()
+        (inputs / "control.json").write_bytes(control)
+        (inputs / "input-0").write_bytes(b"source")
+        return {**payload, "run_id": run_id, "control_sha256": hashlib.sha256(control).hexdigest(), "profile": module.AUTHORING_PROFILE}
+
+    capture = request(RUN_ID, "html_view")
+    active[:] = ["a", "b", "c"]
+    with pytest.raises(RuntimeError, match="document_runtime_busy"):
+        runs.start(capture)
+    active[:] = ["a", "b"]
+    assert runs.start(capture)["status"] == "running"
+    assert runs.start(request("b" * 64, "execute"))["status"] == "running"
+    assert [next(arg for arg in create if arg.startswith("--cpus=")) for create in creates] == ["--cpus=2.0", "--cpus=1.0"]
+
+
+@pytest.mark.parametrize("labelled", [True, False])
+def test_html_view_runs_only_on_an_image_that_declares_it(executor, tmp_path, monkeypatch, labelled):
+    # Visual self-check slice B: the HTML/SVG capture is offered by the image label alone.
+    module, runs, payload, calls, _ = executor
+    labels = {
+        "bowhead.document.profile": module.PROFILE,
+        "bowhead.document.authoring": module.AUTHORING_PROFILE,
+        "bowhead.document.authoring.contract": module.AUTHORING_CONTRACT,
+        **({"bowhead.document.authoring.html-view": "html-view-v1"} if labelled else {}),
+    }
+    original = module._docker
+
+    def docker(*args):
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Id": IMAGE_ID, "Config": {"Labels": labels}}])
+        return original(*args)
+
+    monkeypatch.setattr(module, "_docker", docker)
+    readiness = runs.readiness(module.AUTHORING_PROFILE)
+    assert ("html_view_contract" in readiness) is labelled
+    control = json.dumps({"profile": module.AUTHORING_PROFILE, "operation": "html_view"}).encode()
+    inputs = tmp_path / ("document-" + RUN_ID) / "input"
+    (inputs / "control.json").write_bytes(control)
+    (inputs / "input-1").write_bytes(b"transform")
+    request = {**payload, "control_sha256": hashlib.sha256(control).hexdigest(), "profile": module.AUTHORING_PROFILE}
+    if labelled:
+        assert runs.start(request)["status"] == "running"
+        create = next(args for args in calls if args and args[0] == "create")
+        assert "--network=none" in create and "--read-only" in create and "--pids-limit=128" in create
+    else:
+        with pytest.raises(ValueError, match="document_run_control_invalid"):
+            runs.start(request)

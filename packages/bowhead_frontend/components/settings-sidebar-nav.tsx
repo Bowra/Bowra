@@ -230,6 +230,10 @@ function itemLabel(
   return item.destination.kind === "tab" ? tabT(item.destination.id) : sidebarT(item.destination.id);
 }
 
+function normalizeSearch(value: string): string {
+  return value.normalize("NFKD").replace(/\p{Mark}/gu, "").toLocaleLowerCase();
+}
+
 export function SidebarNavCounter({ counter, value }: { counter: SettingsCounterKey; value: number | undefined }) {
   const t = useTranslations("sidebar.settings_nav");
   if (!value) return null;
@@ -264,13 +268,19 @@ export function SettingsSidebarNav({ model, surface, onNavigate }: SettingsSideb
   const listRef = useRef<HTMLElement | null>(null);
   const backRoute = useMemo(() => lastWorkRoute(), []);
   const rowClass = surface === "drawer" ? "unified-drawer-nav-item" : "unified-sidebar-nav-item";
-  const needle = query.trim().toLocaleLowerCase();
+  const terms = normalizeSearch(query).trim().split(/\s+/).filter(Boolean);
   const groups = model.groups
     .map((group) => ({
       ...group,
       title: groupTitle(group.key, model.activeSpaceName),
-      items: needle
-        ? group.items.filter((item) => itemLabel(item, tabT, sidebarT).toLocaleLowerCase().includes(needle))
+      items: terms.length
+        ? group.items.filter((item) => {
+            const label = itemLabel(item, tabT, sidebarT);
+            const aliasKey = `search_aliases.${item.destination.id}`;
+            const aliases = item.destination.kind === "tab" && t.has(aliasKey) ? t(aliasKey) : "";
+            const searchable = normalizeSearch(`${label} ${aliases}`);
+            return terms.every((term) => searchable.includes(term));
+          })
         : group.items,
     }))
     .filter((group) => group.items.length > 0);

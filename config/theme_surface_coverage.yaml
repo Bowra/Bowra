@@ -327,14 +327,8 @@ surfaces:
       - e2e:packages/bowhead_frontend/e2e/theme-knowledge-surfaces.spec.ts
     exception: null
   - id: content_library_surfaces
-    routes:
-      - /files
-      - /help
-      - /library
-      - /reports
-      - /release-notes
-    owners:
-      - bowhead_frontend
+    routes: [/files, /files/view, /help, /release-notes, /library, /reports]
+    owners: [bowhead_frontend]
     source_roots:
       - packages/bowhead_frontend/app/(app)/files
       - packages/bowhead_frontend/app/(app)/help

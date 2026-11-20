@@ -1,8 +1,7 @@
-"""Gate language-context wiring with Space settings and a global kill switch.
+"""Deployment switches for language-context wiring and the execution paradigm.
 
-Precedence: BOWHEAD_I18N_V1_KILL disables the wiring globally; an explicit
-Space i18n_v1=false disables it locally; otherwise it is enabled. The gate
-controls language directives and does not change interface preferences.
+Language-context wiring is enabled by default in every Space.
+BOWHEAD_I18N_V1_KILL disables language directives at the deployment level.
 When disabled, prompts and deterministic product copy use English defaults.
 Source-data language remains independent and retains its Chinese fallback.
 """
@@ -17,39 +16,17 @@ logger = logging.getLogger(__name__)
 # Environment variable name
 ENV_KILL_SWITCH = "BOWHEAD_I18N_V1_KILL"
 
-# workspace_settings key (matches workspace_settings_store.KEY_I18N_V1_ENABLED).
-WORKSPACE_FLAG_KEY = "i18n_v1"
-
 
 def is_kill_switch_active() -> bool:
-    """全局 kill switch 状态. 环境变量为 truthy 值（'1', 'true' 不区分大小写）."""
+    """Return whether the deployment disabled language-context wiring."""
     raw = os.environ.get(ENV_KILL_SWITCH, "").strip().lower()
     return raw in ("1", "true", "yes", "on")
-
-
-def is_i18n_enabled_for_workspace(
-    workspace_settings: dict[str, str] | None,
-) -> bool:
-    """workspace 级开关检查（**默认开**，2026-08-18 起）.
-
-    - 全局 kill 优先: 任何情况下 kill 开 → return False
-    - workspace_settings.i18n_v1 == "false" → False（显式关掉这一个 workspace）
-    - 其他（缺失 / "true" / 任意值）→ True
-    """
-    if is_kill_switch_active():
-        logger.info("i18n_flag.global_kill_active")
-        return False
-    if not workspace_settings:
-        return True
-    return workspace_settings.get(WORKSPACE_FLAG_KEY, "").strip().lower() != "false"
 
 
 __all__ = [
     "ENV_KILL_SWITCH",
     "PARADIGM_V2_ENV_KILL",
     "PARADIGM_V2_WORKSPACE_KEY",
-    "WORKSPACE_FLAG_KEY",
-    "is_i18n_enabled_for_workspace",
     "is_kill_switch_active",
     "is_paradigm_v2_enabled_for_workspace",
 ]

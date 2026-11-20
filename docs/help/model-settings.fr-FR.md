@@ -2,7 +2,7 @@
 
 Dans **Affectations des modèles → Base de connaissances → Nombre de résultats**, la valeur par défaut est **15 résultats**. Choisissez 5, 10, 15, 20, 30 ou 50. La modification ne reconstruit pas l’index. Davantage de résultats peut améliorer la couverture, mais utilise plus de contexte du modèle. Les contrôles d’accès et de pertinence peuvent réduire le nombre renvoyé. Les valeurs personnalisées existantes de 1 à 50 restent disponibles.
 
-Les propriétaires et administrateurs gèrent les services de modèles dans **Paramètres de l’équipe → Modèles**. La page distingue connexions, affectations de production et preuves de vérification, puis capacités externes et état des index.
+Les propriétaires et administrateurs gèrent les services de modèles dans **Paramètres de l’équipe → Modèles**. La page comporte un onglet pour les connexions et un autre pour les affectations. **Capacités externes** ouvre une page distincte pour la génération d’images et la recherche web.
 
 **Descriptions des sources** est une affectation facultative, désactivée par défaut. Un modèle de texte déclaré traite les nouvelles versions publiées et les demandes explicites. Enregistrer ne traite pas les anciens fichiers ; consulter les sources n’appelle aucun modèle. Retirer l’affectation arrête les nouvelles tâches ; les descriptions encore valides restent utilisables.
 
@@ -52,7 +52,7 @@ Si la connexion est coupée alors que le modèle a commencé à répondre, la r�
 
 ## Capacités externes et index
 
-Configurez les modèles de recherche, génération d’images et autres capacités externes dans leur zone dédiée. Vérifiez les index avant d’utiliser un service de connaissances. Une connexion enregistrée n’est pas nécessairement affectée à la production ou prête à être utilisée.
+Ouvrez **Capacités externes** pour configurer la génération d’images et la recherche web. Depuis les paramètres, revenez à la vue d’ensemble des capacités externes. Choisissez ensuite **Retour à la vue d’ensemble** pour retrouver l’onglet des modèles depuis lequel vous avez ouvert cette page. Consultez l’état des index dans la vue des fichiers de la base de connaissances.
 
 Enregistrez avant de quitter, puis rouvrez la rubrique pour vérifier les valeurs. Le choix de modèles dans une conversation se limite aux options proposées par l’équipe.
 

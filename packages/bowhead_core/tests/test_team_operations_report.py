@@ -72,19 +72,34 @@ async def test_report_uses_complete_local_days_and_scopes_every_source_to_team(m
                 "INSERT INTO llm_usage_events(id,team_id,reason,agent_type,tokens_input,tokens_output,created_at) VALUES (?,?,?,?,?,?,?)",
                 (f"lu_{team}", team, "turn", "lead", 10, 20, "2026-10-11T16:35:00+00:00"),
             )
-            db.execute(
+            db.executemany(
                 "INSERT INTO user_audit_log(id,user_id,team_id,event_type,created_at) VALUES (?,?,?,?,?)",
-                (f"aud_{team}", "usr_1", team, "team_login_success", "2026-10-11T16:20:00+00:00"),
+                (
+                    (f"aud_{team}_browser", "usr_browser", team, "team_active", "2026-10-11T16:20:00+00:00"),
+                    (f"aud_{team}_browser_later", "usr_browser", team, "team_active", "2026-10-11T16:50:00+00:00"),
+                    (f"aud_{team}_login", "usr_signin_only", team, "team_login_success", "2026-10-11T16:20:00+00:00"),
+                ),
             )
+            db.execute(
+                "INSERT INTO chat_turn_user_sources(turn_id,session_id,user_id,workspace_id,user_text,"
+                "attachment_ids_json,attachment_refs_json,created_at) VALUES (?,?,?,?,?,'[]','[]',?)",
+                (turn, session, "usr_1", space, "hello", "2026-10-11T16:30:00+00:00"),
+            )
+        db.execute(
+            "INSERT INTO user_audit_log(id,user_id,team_id,event_type,created_at) VALUES (?,?,?,?,?)",
+            ("aud_other_only", "usr_other", "team_other", "team_active", "2026-10-11T16:30:00+00:00"),
+        )
     await SessionStore(str(migrated_db)).persist_turn_operation_usage(turn_id="t_one", skill_loads=1, tool_loads=2, tool_calls=3)
     report = await get_team_operations_report(migrated_db, team_id="team_one", days=7, now=datetime(2026, 10, 13, tzinfo=UTC))
     day = next(row for row in report["days"] if row["day"] == "2026-10-12")
     assert report["timezone"] == "Asia/Shanghai"
-    assert (day["login_users"], day["sessions"], day["input_tokens"], day["output_tokens"]) == (1, 1, 10, 20)
+    assert (day["active_users"], day["sessions"], day["input_tokens"], day["output_tokens"]) == (2, 1, 10, 20)
     assert (day["skill_loads"], day["tool_loads"], day["tool_calls"]) == (2, 3, 4)
     assert next(row for row in report["days"] if row["day"] == "2026-10-11")["sessions"] == 0
     assert all(value == 0 for row in report["days"] if row["day"] != "2026-10-12" for key, value in row.items() if key != "day")
     await set_team_report_timezone(migrated_db, team_id="team_one", timezone="UTC")
     regrouped = await get_team_operations_report(migrated_db, team_id="team_one", days=7, now=datetime(2026, 10, 13, tzinfo=UTC))
+    assert next(row for row in regrouped["days"] if row["day"] == "2026-10-11")["active_users"] == 2
+    assert next(row for row in regrouped["days"] if row["day"] == "2026-10-12")["active_users"] == 0
     assert next(row for row in regrouped["days"] if row["day"] == "2026-10-11")["sessions"] == 1
     assert next(row for row in regrouped["days"] if row["day"] == "2026-10-12")["sessions"] == 0

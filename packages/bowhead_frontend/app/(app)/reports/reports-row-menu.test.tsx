@@ -59,19 +59,16 @@ function renderWithReport() {
 }
 
 describe("报告库卡片行内操作", () => {
-  it("puts both actions in the row menu; delete is a danger item and confirms first", async () => {
+  it("puts status and delete actions in the row menu and confirms deletion", async () => {
     renderWithReport();
     const menu = await openRowMenu("「季度复盘」的更多操作");
-    // An active report has no status chip; its status transitions sit in the row menu before the link and delete.
-    expect(menuItemNames(menu)).toEqual(["标记为已核对", "归档", "复制权限链接", "删除…"]);
+    // An active report has no status chip. Its row menu provides the status transitions and delete.
+    expect(menuItemNames(menu)).toEqual(["标记为已核对", "归档", "删除…"]);
     expect(screen.queryByText("报告状态：活跃")).toBeNull();
     expect(menuDangerNames(menu)).toEqual(["删除…"]);
     expect(screen.queryByRole("button", { name: "删除报告 季度复盘" })).toBeNull();
 
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制权限链接" }));
-    expect(share.copy).toHaveBeenCalledWith("s_1");
-
-    await chooseRowAction("「季度复盘」的更多操作", /^删除/, { danger: true });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^删除/ }));
     await expectConfirmGate({
       reopen: () => chooseRowAction("「季度复盘」的更多操作", /^删除/),
       dialogName: "删除「季度复盘」？",

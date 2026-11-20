@@ -1706,12 +1706,12 @@ async def list_reports(
     cursor: str | None = None,
     store: CanvasStore = Depends(_store),
 ) -> dict:
-    """P4.2: list 用户跨 session 所有 canvas (reports library).
+    """List Canvas reports across the caller's Sessions.
 
-    content-permissions S5: ``scope=shared`` → "分享给我的"分区（report grants 反查
-    session_id 集 → 同一套 enrich）;条目带 ``shared_by``（owner）。默认 mine 行为不变。
-    ``include_empty=false`` 在 SQL 的 ORDER BY / LIMIT 前过滤零可见 section；默认
-    True 保持既有 API 调用方兼容，报告库默认态显式传 False。
+    Shared reports use the existing report grants. The report surface excludes
+    auxiliary code and raw data sections before filtering, counting and paging.
+    ``include_empty`` also includes empty reports, while auxiliary-only canvases
+    stay in the original conversation's Results.
 
     Pagination: on the first page (no ``cursor``) ``total`` is the number of reports
     matching the same filters and the same Space visibility as ``items`` (not the page
@@ -1751,6 +1751,7 @@ async def list_reports(
         "q": q,
         "session_ids": session_ids,
         "min_visible_sections": 0 if include_empty else 1,
+        "report_surface": True,
         "exclude_user_id": exclude_user_id,
     }
     # Space visibility is decided once per workspace_id with the same predicate as

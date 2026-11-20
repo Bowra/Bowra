@@ -7381,12 +7381,12 @@ class UserStore:
         """G10 active sessions list."""
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = "SELECT id, user_id, expires_at, created_at, last_used_at, revoked_at, user_agent, ip FROM refresh_tokens WHERE user_id = ?"
+            sql = "SELECT id, token_hash, user_id, expires_at, created_at, last_used_at, revoked_at, user_agent, ip FROM refresh_tokens WHERE user_id = ?"
             params: list = [user_id]
             if active_only:
                 sql += " AND revoked_at IS NULL AND expires_at > ?"
                 params.append(_now())
-            sql += " ORDER BY last_used_at DESC NULLS LAST, created_at DESC"
+            sql += " ORDER BY COALESCE(last_used_at, created_at) DESC, id DESC"
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]

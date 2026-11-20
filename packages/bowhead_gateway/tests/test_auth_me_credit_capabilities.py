@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 
 import aiosqlite
 import httpx2
@@ -8,6 +9,7 @@ import jwt
 import pytest
 from bowhead_core.user_store import UserStore, _id, _now
 from bowhead_gateway.main import create_app
+from bowhead_gateway.routes import auth
 from bowhead_gateway.settings import Settings
 
 
@@ -109,6 +111,30 @@ async def test_auth_me_returns_credit_capabilities_for_team_admin(app_ctx) -> No
     assert caps["credit_user_tier_write"] is True
     assert caps["credit_period_reset"] is True
     assert data["capabilities"]["credit"] == caps
+
+
+@pytest.mark.integration
+async def test_auth_me_records_presence_once_for_verified_team(app_ctx, monkeypatch) -> None:
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None) -> datetime:
+            return datetime(2026, 11, 18, 12, tzinfo=UTC)
+
+    monkeypatch.setattr(auth, "datetime", FixedClock)
+    monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1")
+    app, store = app_ctx
+    await _seed_team_and_user(store, role="member")
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        denied_team = await client.get("/api/v1/auth/me", headers={"X-Team-Id": "team_other"})
+        assert denied_team.json()["membership_required"] is True
+        for _ in range(2):
+            assert (await client.get("/api/v1/auth/me")).status_code == 200
+    async with (
+        aiosqlite.connect(store.db_path) as db,
+        db.execute("SELECT team_id,user_id FROM user_audit_log WHERE event_type='team_active'") as cursor,
+    ):
+        assert list(map(tuple, await cursor.fetchall())) == [("team_a", "u_credit_admin")]
 
 
 @pytest.mark.integration

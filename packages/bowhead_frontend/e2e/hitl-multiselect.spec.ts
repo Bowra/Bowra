@@ -42,6 +42,63 @@ async function captureResolve(page: Page): Promise<ResolveCall[]> {
   return calls;
 }
 
+test("a paused document restores selected answers, custom text and progress after reload", async ({ page }) => {
+  await mockAuthedApp(page);
+  const sessionId = "s_document_question";
+  const turnId = "t_document_question";
+  const requestId = "c_document_question";
+  const timestamp = "2026-11-18T04:00:00Z";
+  const calls: ResolveCall[] = [];
+  let settled = false;
+  await page.route(`**/api/v1/sessions/${sessionId}`, (route) => route.fulfill({ json: {
+    session: { id: sessionId, workspace_id: "ws_smoke", title: "Word 草稿", started_at: timestamp, last_active_at: timestamp },
+    turns: [{
+      id: turnId, seq: 1, user_text: "生成一份内部简报", intent: "open_qa", status: settled ? "completed" : "clarification_pending",
+      execution_generation: 1, started_at: timestamp, ended_at: timestamp, agent_type: "lead", attachments: [], trace_steps: [],
+    }],
+  } }));
+  await page.route(`**/api/v1/turns/${turnId}/events`, (route) => route.fulfill({ json: {
+    events: [
+      { seq: 1, event_type: "clarification_required", payload: {
+        turn_id: turnId, clarification_id: requestId, purpose: "document_draft", questions: [
+          { question: "读者是谁？", options: ["内部团队/同事", "客户"], type: "single_select" },
+          { question: "需要补充什么？", options: [], type: "free_text" },
+        ],
+      } },
+      { seq: 2, event_type: "done", payload: { turn_id: turnId, status: settled ? "completed" : "clarification_pending" } },
+    ],
+  } }));
+  await page.route(`**/api/v1/clarifications/turn/${turnId}`, (route) =>
+    route.fulfill({ json: { items: settled ? [] : [{ request_id: requestId }] } }));
+  await page.route(`**/api/v1/clarifications/${requestId}/resolve`, (route) => {
+    calls.push(route.request().postDataJSON() as ResolveCall);
+    settled = true;
+    return route.fulfill({ json: { ok: true, action: "turn_settled", request_id: requestId } });
+  });
+
+  await page.goto(`/?session=${sessionId}`);
+  const card = page.getByTestId("clarification-card");
+  const audience = card.getByRole("radio", { name: "内部团队/同事" });
+  const detail = card.getByRole("textbox", { name: /需要补充什么/ });
+  await audience.click();
+  await page.reload();
+  await expect(audience).toBeChecked();
+  await expect(card).toContainText(/已回答\s*1\s*\/\s*2/);
+  await detail.fill("补上风险和负责人");
+  await detail.press("Enter");
+  await page.reload();
+  await expect(audience).toBeChecked();
+  await expect(detail).toHaveValue("补上风险和负责人");
+  await expect(card).toContainText(/已回答\s*2\s*\/\s*2/);
+  expect(calls).toHaveLength(0);
+  await card.getByRole("button", { name: /继续/ }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  expect(calls[0].answers).toEqual([
+    { question: "读者是谁？", answer: "内部团队/同事", source: "candidate", option_index: 0 },
+    { question: "需要补充什么？", answer: "补上风险和负责人", source: "custom" },
+  ]);
+});
+
 test("multi_select: 多问题分组 + 累积勾选 + 提交计数 + answers/chosen_values", async ({ page }) => {
   await mockAuthedApp(page);
   const calls = await captureResolve(page);

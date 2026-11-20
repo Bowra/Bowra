@@ -85,16 +85,23 @@ async def test_row_factory_is_reset_before_reuse(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reader_left_in_transaction_is_closed_not_reused(tmp_path: Path) -> None:
+async def test_reader_left_in_a_read_transaction_is_rolled_back_and_reused(tmp_path: Path) -> None:
+    # Read paths often open BEGIN for one snapshot and leave without ending it. The pool ends that read
+    # transaction instead of closing the connection, and the next borrower sees later commits.
     db_path = tmp_path / "shared.db"
-    _make_db(db_path, "x")
+    _make_db(db_path, "before")
 
     async with open_pooled_read_ctx(db_path) as db:
         await db.execute("BEGIN")
+        async with db.execute("SELECT v FROM kv WHERE k='a'") as cur:
+            assert await cur.fetchone() == ("before",)
         leaked = db
 
-    other, _value = await _read(db_path)
-    assert other is not leaked
+    _make_db(db_path, "after")
+    other, value = await _read(db_path)
+    assert other is leaked
+    assert value == "after"
+    assert other.in_transaction is False
 
 
 @pytest.mark.asyncio

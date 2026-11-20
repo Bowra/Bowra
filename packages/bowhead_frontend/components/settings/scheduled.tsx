@@ -95,7 +95,7 @@ import { type ConfigDraftResult } from "@/lib/config-drafts-api";
 import { useCopilotFields } from "@/lib/use-copilot-fields";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 
-const MAX_JOBS = 10;
+const LEGACY_JOB_LIMIT = 10;
 const MAX_EMAILS = 5;
 const NAME_MAX = 60;
 const RUNNING_POLL_MS = 6000;
@@ -498,6 +498,7 @@ export function SettingsScheduled() {
   const t = useTranslations("settings.scheduled") as ScheduleT;
   const presentError = useScheduledErrorPresentation();
   const [jobs, setJobs] = useState<ScheduledJobDTO[]>([]);
+  const [quota, setQuota] = useState({ max: LEGACY_JOB_LIMIT, activeOutsideList: 0 });
   const [workspaces, setWorkspaces] = useState<WorkspaceDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] =
@@ -538,6 +539,11 @@ export function SettingsScheduled() {
     try {
       const d = await fetchScheduledJobs();
       setJobs(d.items);
+      const listedActive = d.items.filter((job) => job.status === "active").length;
+      setQuota({
+        max: d.max_active ?? LEGACY_JOB_LIMIT,
+        activeOutsideList: Math.max(0, (d.active_count ?? listedActive) - listedActive),
+      });
     } catch (e) {
       setLoadError(presentError(e, "load"));
     } finally {
@@ -564,10 +570,9 @@ export function SettingsScheduled() {
     if (ref) setDrawer({ mode: "new", bind: ref });
   }, []);
 
-  const activeCount = jobs.filter((j) => j.status === "active").length;
-  // Backend caps ACTIVE jobs only (count_active, status='active'); gate + display on that, not total
-  // (else paused jobs spuriously trip "limit reached" / show a wrong "N / 10").
-  const atLimit = activeCount >= MAX_JOBS;
+  const activeJobs = jobs.filter((job) => job.status === "active");
+  const activeCount = activeJobs.length + quota.activeOutsideList;
+  const atLimit = activeCount >= quota.max;
 
   // ── Inline: enable/pause toggle (optimistic) ──
   const toggleStatus = async (job: ScheduledJobDTO) => {
@@ -580,6 +585,7 @@ export function SettingsScheduled() {
     } catch (e) {
       setJobs((prev) => prev.map((j) => (j.id === job.id ? job : j))); // rollback
       reportError(e, "toggle");
+      if (e instanceof ApiError && e.code === "scheduled_job_limit_reached") void load();
     } finally {
       setBusyId(null);
     }
@@ -621,7 +627,7 @@ export function SettingsScheduled() {
             <h1 className="ui-page-title legacy-scheduled-title">{t("title")}</h1>
             {!loading && !loadError ? (
               <span className="legacy-ai-sched-count ai-sched-count">
-                <b className="legacy-ai-sched-count-n">{activeCount}</b> / {MAX_JOBS}
+                <b className="legacy-ai-sched-count-n">{activeCount}</b> / {quota.max}
               </span>
             ) : null}
           </div>
@@ -631,13 +637,25 @@ export function SettingsScheduled() {
           <Button
             variant="primary"
             disabled={atLimit}
-            title={atLimit ? t("limit_reached", { max: MAX_JOBS }) : undefined}
+            aria-describedby={atLimit ? "scheduled-quota-help" : undefined}
             onClick={() => setDrawer({ mode: "new" })}
           >
             <Plus size={14} /> {t("new")}
           </Button>
         </div>
       </div>
+      {atLimit && !loading && !loadError ? (
+        <Notice tone="muted" className="scheduled-quota-notice">
+          <span id="scheduled-quota-help">
+            {t(activeJobs[0] ? "quota_pause_hint" : "quota_access_hint", { used: activeCount, max: quota.max })}
+          </span>
+          {activeJobs[0] ? (
+            <Button variant="secondary" size="sm" onClick={() => document.getElementById(`scheduled-row-${activeJobs[0].id}`)?.focus()}>
+              {t("quota_manage_active")}
+            </Button>
+          ) : null}
+        </Notice>
+      ) : null}
 
       {msg ? <Notice tone="success">{msg}</Notice> : null}
       {err ? (
@@ -854,6 +872,10 @@ function RoutineRow({
 
   return (
     <div
+      id={`scheduled-row-${job.id}`}
+      tabIndex={-1}
+      role="group"
+      aria-label={job.name}
       className={`routine legacy-ai-sched-routine ai-sched-routine${paused ? " is-paused" : ""}${open ? " is-open" : ""}`}
     >
       {/* desktop grid row */}

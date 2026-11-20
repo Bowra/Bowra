@@ -32,8 +32,9 @@ describe("report-share", () => {
       expect(reportShareUrl("s_123", "https://bowhead.example")).not.toContain("export");
     });
 
-    it("解码只认库页菜单里真有的三种", () => {
+    it("accepts all four formats shown in the report library", () => {
       expect(parseReportExportParam("?export=pdf")).toBe("pdf");
+      expect(parseReportExportParam("?export=docx")).toBe("docx");
       expect(parseReportExportParam("?export=PPTX")).toBe("pptx");
       expect(parseReportExportParam(new URLSearchParams("export=xlsx&session=s_1"))).toBe("xlsx");
     });
@@ -42,12 +43,10 @@ describe("report-share", () => {
       expect(parseReportExportParam("?session=s_1")).toBeNull();
       expect(parseReportExportParam("?export=")).toBeNull();
       expect(parseReportExportParam("?export=exe")).toBeNull();
-      // docx has only the legacy job path (absent from backend parity contract); deliberately exclude it from automatic export
-      expect(parseReportExportParam("?export=docx")).toBeNull();
     });
 
     it("编码出来的 URL 必须能被自己解码回去（两边同源，不许各改一半）", () => {
-      for (const fmt of ["pdf", "pptx", "xlsx"] as const) {
+      for (const fmt of ["pdf", "docx", "pptx", "xlsx"] as const) {
         const href = reportExportHrefForSession("s_round", fmt);
         expect(parseReportExportParam(href.slice(href.indexOf("?")))).toBe(fmt);
       }
@@ -70,14 +69,14 @@ describe("读走 ?export=（顺序不能写反）", () => {
     // Observed on 116: clicking "下载 → XLSX" in the library opens the session, with no export requests and no notice.
     // Source called delete("export") before parseReportExportParam(url.searchParams),
     // so parsing received the cleared object → always null → if (!fmt) return.
-    for (const fmt of ["pdf", "pptx", "xlsx"]) {
+    for (const fmt of ["pdf", "docx", "pptx", "xlsx"]) {
       const url = new URL(`https://x/?export=${fmt}`);
       expect(consumeReportExportParam(url)).toBe(fmt);
     }
   });
 
   it("负对照：不认识的格式返回 null，但参数照样摘掉（免得刷新反复重试）", () => {
-    const url = new URL("https://x/?export=docx");
+    const url = new URL("https://x/?export=exe");
 
     expect(consumeReportExportParam(url)).toBeNull();
     expect(url.searchParams.has("export")).toBe(false);

@@ -36,7 +36,6 @@
 .am-search input::placeholder { color: var(--c-ink-4); }
 
 /* ⌘K hint previously used --c-ink-4 (contrast 4.1–4.3:1); switch to --c-ink-3 for 4.5:1 */
-.am-search kbd { padding: 3px 7px; color: var(--c-ink-3); background: var(--c-surface-2); border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--radius-md); font-size: 0.6875rem; }
 
 .am-notice { width: min(1240px, 100%); margin: 0 auto 24px; padding: 14px 16px; display: flex; align-items: center; gap: 10px; color: var(--c-err-ink); background: var(--c-err-soft); border: var(--border-w, 1px) solid var(--c-err-line); border-radius: var(--radius-xl); font-size: 0.8125rem; }
 
@@ -641,7 +640,6 @@
   .am-topbar { min-height: 54px; }
   .am-topbar > div a { font-size: 0.75rem; }
   .am-search { min-height: 53px; border-radius: var(--radius-2xl); }
-  .am-search kbd { display: none; }
   .am-section-heading { flex-direction: column; gap: 8px; }
   .am-filter-trigger { width: 100%; min-height: 46px; border-radius: 13px; }
   .am-filter-sheet-backdrop { padding: 0; place-items: stretch; }

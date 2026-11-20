@@ -2,6 +2,7 @@
 
 Community-Quellstände haben eine eigene Historie. Eine Anwendungsversion bedeutet nicht, dass Images oder ein gehosteter Dienst veröffentlicht wurden.
 
+- [v1.7.61](releases/v1.7.61.de-DE.md) — Interaktive HTML-Ergebnisse teilen, Berichte als Word laden und nach unterbrochenen Aufgaben fortfahren.
 - [v1.7.54](releases/v1.7.54.de-DE.md) — Gewählte Skills in Folgefragen weiterverwenden, Dateiversionen finden und Einstellungen zuverlässiger speichern.
 - [v1.7.49](releases/v1.7.49.de-DE.md) — Ergänzen Sie Anweisungen während eines Laufs, finden Sie frühere Dateien und verwalten Sie Team-Plugins auf einer eigenen Seite.
 - [v1.7.44](releases/v1.7.44.de-DE.md) — Überarbeiten Sie gelieferte Dateien mit Versionsverlauf und bestätigen Sie Tool-Aufrufe im Gespräch.

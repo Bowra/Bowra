@@ -249,6 +249,24 @@ test("资产 tab 默认打开，运行数据不与资产平铺", async ({ page }
   await expect(page.locator('[data-file-id="art_upload"]')).toHaveCount(0);
 });
 
+test("keyboard selection and preview use separate controls", async ({ page }) => {
+  await mockFilesPage(page);
+  await page.goto("/files/");
+  const row = page.locator('[data-file-id="art_upload"]');
+  const select = row.getByRole("checkbox", { name: `选择 ${ASSET_UPLOAD.filename}` });
+  const preview = row.getByRole("button", { name: `预览 ${ASSET_UPLOAD.filename}` });
+  const drawer = page.locator(".dr[role=complementary]");
+  await select.focus();
+  await select.press("Space");
+  await expect(select).toBeChecked();
+  await expect(drawer).toHaveCount(0);
+  await select.press("Tab");
+  await expect(preview).toBeFocused();
+  await preview.press("Enter");
+  await expect(drawer).toContainText(ASSET_UPLOAD.filename);
+  await expect(select).toBeChecked();
+});
+
 test("知识库文件在此页只能跳转，没有删除入口", async ({ page }) => {
   await mockFilesPage(page);
   await page.goto("/files/");

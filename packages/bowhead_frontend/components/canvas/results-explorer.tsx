@@ -258,6 +258,19 @@ export function ResultsExplorer(props: Props) {
     displayedFilters.technical_only ? "1" : "0",
   ].join("\n");
 
+  const previousSelection = useRef(selectedKey);
+  useEffect(() => {
+    const wasShowingDetail = previousSelection.current !== null;
+    previousSelection.current = selectedKey;
+    if (!wasShowingDetail || selectedKey || !focusKey) return;
+    const frame = requestAnimationFrame(() => {
+      scrollerRef.current?.querySelector<HTMLButtonElement>(
+        `[data-result-key="${CSS.escape(focusKey)}"] > button`,
+      )?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusKey, selectedKey]);
+
   useEffect(() => {
     if (restoredEntryRef.current === entryId) return;
     if (!anchor) {

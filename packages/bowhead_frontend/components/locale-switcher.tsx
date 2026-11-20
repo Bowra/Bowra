@@ -17,10 +17,9 @@ import { ChevronDown, Languages } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
 import { Spinner } from "@/components/icons";
 import { MENU_DESCRIPTION_ATTR, MenuFloating, MenuSubmenu, useMenu, useMenuItem } from "@/components/ui/menu";
-import { setUserSetting, setWorkspaceSetting } from "@/lib/api";
+import { setUserSetting } from "@/lib/api";
 import { browserLocale, type Locale } from "@/lib/locale";
 import { LOCALE_NATIVE_NAME, LOCALE_ORDER, clearLocaleCookie, readLocaleCookie, writeLocaleCookie } from "@/lib/locale-names";
-import { getActiveSpace } from "@/lib/use-space";
 import type { UiLanguagePreference } from "@/lib/use-language-preferences";
 
 /** Maximum language-write wait: never trap users in switching if the network hangs. */
@@ -82,8 +81,6 @@ export function useInterfaceLanguageSwitch({
         Promise.allSettled([setUserSetting("ui_language", next)]),
         new Promise((resolve) => setTimeout(resolve, SETTING_WRITE_TIMEOUT_MS)),
       ]);
-      const wsId = getActiveSpace();
-      if (wsId) void setWorkspaceSetting(wsId, "i18n_v1", "true").catch(() => {});
       onSaved?.(next);
       reload();
     },

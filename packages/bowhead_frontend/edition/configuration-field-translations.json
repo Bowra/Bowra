@@ -192,7 +192,7 @@
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
       "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
       "user_language.output_language": "82b25c439000165cf775",
-      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.default_data_language": "22b6c0d658c3247a6a8e",
       "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
       "workspace_metadata.description": "2b0555a9fc599fabf0f7",
       "workspace_metadata.name": "2e84325382b23bcfd36d",
@@ -395,7 +395,7 @@
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
       "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
       "user_language.output_language": "82b25c439000165cf775",
-      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.default_data_language": "22b6c0d658c3247a6a8e",
       "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
       "workspace_metadata.description": "2b0555a9fc599fabf0f7",
       "workspace_metadata.name": "2e84325382b23bcfd36d",
@@ -598,7 +598,7 @@
       "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
       "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
       "user_language.output_language": "82b25c439000165cf775",
-      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.default_data_language": "22b6c0d658c3247a6a8e",
       "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
       "workspace_metadata.description": "2b0555a9fc599fabf0f7",
       "workspace_metadata.name": "2e84325382b23bcfd36d",
@@ -1400,8 +1400,8 @@
       "revision": "82b25c439000165cf775"
     },
     "workspace_i18n.default_data_language": {
-      "key": "d_6c5e4e24364abbc7af42",
-      "revision": "073c911180d6a3215aeb"
+      "key": "d_eac28081b33dd968b2ab",
+      "revision": "22b6c0d658c3247a6a8e"
     },
     "workspace_i18n.week_start_day": {
       "key": "d_894eae24172ddccf657b",

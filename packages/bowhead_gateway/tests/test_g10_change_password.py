@@ -289,13 +289,32 @@ async def test_list_active_sessions(client, store):
         user_agent="Chrome",
         ip="1.2.3.4",
     )
+    await store.record_refresh_token(
+        user_id="u1",
+        raw_token="same_device",
+        expires_at="2099-01-01T00:00:00+00:00",
+        user_agent="Chrome",
+        ip="1.2.3.4",
+    )
+    await store.record_refresh_token(
+        user_id="u1",
+        raw_token="other_device",
+        expires_at="2099-01-01T00:00:00+00:00",
+        user_agent="Chrome",
+        ip="1.2.3.5",
+    )
     jwt = _jwt("u1", SECRET)
-    r = client.get("/api/v1/auth/sessions/active", cookies={"bowhead_jwt": jwt})
+    r = client.get("/api/v1/auth/sessions/active", cookies={"bowhead_jwt": jwt, "bowhead_refresh": "token_X"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert len(body["items"]) == 1
-    assert body["items"][0]["ip_masked"] == "1.2.3.x"
-    assert body["items"][0]["user_agent"] == "Chrome"
+    assert body["current_identified"] is True
+    assert len(body["items"]) == 3
+    (current,) = [item for item in body["items"] if item["is_current"]]
+    assert current["ip_masked"] == "1.2.3.x"
+    assert current["user_agent"] == "Chrome"
+    assert "token_hash" not in current
+    assert sum(item["device_key"] == current["device_key"] for item in body["items"]) == 2
+    assert all(item["ip_masked"] == current["ip_masked"] for item in body["items"])
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,8 @@ Identity = Annotated[str, Field(min_length=1, max_length=128)]
 AuthorizeExchange = Callable[[aiosqlite.Connection, DocumentTurnOwner, str, str, dict], Awaitable[None]]
 
 #: A collaboration write pins the shared core lease at its first scope read, so it failed at once
-#: beside an authority writer, such as a Space save, and the helper or Lead step failed with it.
+#: beside an authority writer, such as a Space archive or a membership change, and the helper or
+#: Lead step failed with it.
 #: Each write method is one database-only transaction that rechecks the live worker, scope,
 #: participants, duplicates and capacity, and stages its events for the publisher instead of
 #: sending them, so repeating it is safe. A spent wait re-raises the conflict, as before. These are

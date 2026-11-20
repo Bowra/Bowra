@@ -24,6 +24,7 @@ export interface ChangePasswordResp {
 
 export interface SessionRow {
   session_id: string;
+  device_key?: string;
   expires_at: string;
   created_at: string;
   last_used_at: string | null;

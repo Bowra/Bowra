@@ -7,3 +7,5 @@ Ouvrez les tâches planifiées depuis le Centre des capacités si cette entrée 
 3. Choisissez une nouvelle conversation à chaque exécution ou la poursuite de la conversation liée. Configurez si besoin l’envoi par e-mail, puis enregistrez.
 
 Le menu de ligne permet de lancer la tâche, de la modifier, de la mettre en pause ou de la supprimer. L’historique affiche le résultat, le travail associé et l’état de livraison. Répondez aux demandes de précision sur la carte d’origine. Si un accès manquant à un espace, un Agent ou un outil a mis la tâche en pause, rétablissez cet accès avant de la réactiver. [Alertes et livraison des tâches](scheduled-task-alerts.fr-FR.md)
+
+Un compte peut avoir jusqu’à 20 tâches planifiées actives dans l’ensemble de ses espaces. À la limite, choisissez **Accéder à une tâche active** et mettez une tâche en pause pour libérer une place.

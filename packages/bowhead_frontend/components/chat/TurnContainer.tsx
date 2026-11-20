@@ -41,6 +41,8 @@ import {
   projectAnswerValues,
 } from "@/lib/clarification-answers";
 import { buildOptionValueByLabel, relabelQuestions } from "@/lib/clarification-option-labels";
+import { clarificationDraftIdentity, clearClarificationDraft } from "@/lib/clarification-draft";
+import type { ComposerPersistenceScope } from "@/lib/composer-persistence-scope";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -166,6 +168,7 @@ type ExplicitDisclosurePlacement = "inline-open" | "before-answer-open";
 
 interface Props {
   runner: TurnRunnerState;
+  clarificationDraftScope?: ComposerPersistenceScope | null;
   /** HITL continuation — picker option selection. */
   onSend?: (text: string) => void;
   /** Continue button: send the visible "continue" message that resumes these saved helper runs. */
@@ -356,7 +359,7 @@ function buildPlanFirstTurnIndex(
   return first;
 }
 
-export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidifySession, onComposerPrefill, onRetryTurn, retryRestoresDraft = false }: Props) {
+export function TurnContainer({ runner, clarificationDraftScope = null, onSend, onContinue, onSolidify, onSolidifySession, onComposerPrefill, onRetryTurn, retryRestoresDraft = false }: Props) {
   // NOTE: `t` (imported as `tokens`) is the design-token object used throughout
   // this file; the translator is bound to `tr` to avoid shadowing it.
   const tr = useTranslations("chat");
@@ -438,6 +441,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // A failed submission brings the card back with the same choice selected (Chat Cards Spec §1 "error").
   const [restoredAnswers, setRestoredAnswers] = useState<{
     requestId: string;
+    draftFingerprint: string | undefined;
     answers: ClarificationAnswer[];
   } | null>(null);
   // A document task is still saving its pause: the card stays, locked, with the reason, until the pause settles.
@@ -546,6 +550,14 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       documentDraft: cp.purpose === "document_draft",
     };
   }, [runner.clarificationPending, answeredSummary, tr]);
+
+  const draftIdentity = useMemo(() => clarification && clarificationDraftIdentity(
+    clarificationDraftScope, runner.sessionId, runner.turnId, clarification.clarificationId,
+    JSON.stringify([
+      clarification.questions, clarification.valueByLabel, clarification.showRemember,
+      clarification.rememberDefault, clarification.allowCustomAnswers,
+    ]),
+  ), [clarification, clarificationDraftScope, runner.sessionId, runner.turnId]);
 
   // Submit-in-flight flag for the multi-select card spinner. Reset whenever the
   // pending clarification changes (new card) or clears (resume unmounts it).
@@ -999,7 +1011,9 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       onSend?.(fallbackText);
       return;
     }
-    setRestoredAnswers(attempted ? { requestId: clarificationId, answers: attempted } : null);
+    setRestoredAnswers(attempted ? {
+      requestId: clarificationId, draftFingerprint: draftIdentity?.fingerprint, answers: attempted,
+    } : null);
     const optimisticValues = payload.chosen_value
       ? [payload.chosen_value]
       : (payload.chosen_values ?? []);
@@ -1054,6 +1068,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
             const failure = clarificationResumeFailure(authority.resume_failure, turnId, generation);
             if (isCurrent() && authority.resume_failure?.request_id === clarificationId
               && !authority.items.some((item) => item.request_id === clarificationId) && failure) {
+              clearClarificationDraft(clarificationId);
               setBlockedClarification((current) => current?.requestId === clarificationId
                 && current.turnId === turnId && current.generation === generation
                   ? { ...current, answerConfirmed: true } : current);
@@ -1071,6 +1086,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           // The server-side invalidation won the pending CAS.  Keep a
           // dismissed tombstone, remove the stale card, and avoid presenting
           // technical diagnostics or a retry that can never succeed.
+          clearClarificationDraft(clarificationId);
           markClarificationAnswered(clarificationId, {
             values: [],
             dismissed: true,
@@ -1103,6 +1119,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           // Backend has no such row: persistence failed and emitted the card with a local ID (2026-09-04 HITL
           // audit §5; creation fixed, but existing cards and old versions remain). Retrying always returns 404, so
           // dismiss without reviving and ask users to type the answer directly.
+          clearClarificationDraft(clarificationId);
           markClarificationAnswered(clarificationId, {
             values: [],
             dismissed: true,
@@ -1122,7 +1139,8 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
         ));
         return;
       }
-      // Resolve succeeded
+      // The answer is settled even if the separate continuation request fails.
+      clearClarificationDraft(clarificationId);
       if (resolved.action === "plan_reapprove" && resolved.reapprove_plan_id) {
         // planning-mode-audit WP-2: plan-preflight picker automatically reapproves the plan after Datarc workspace selection
         // (same path as plan-card `重试`); neither resume nor new turn (noop would call onSend(fallbackText)
@@ -1240,6 +1258,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
     try {
       const result = await dismissClarification(requestId);
       if (!result.dismissed) throw new ApiError(409, "clarification_not_resolvable", { code: "clarification_not_resolvable" });
+      clearClarificationDraft(requestId);
       markClarificationAnswered(requestId, { values: [], dismissed: true });
       if (!isCurrent()) return;
       runner.clearClarificationPending?.(requestId);
@@ -1253,7 +1272,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
 
   const clarificationSlot = clarification ? (
     <ClarificationCard
-      key={clarification.clarificationId}
+      key={draftIdentity?.fingerprint ?? clarification.clarificationId}
       questions={clarification.questions}
       intro={clarification.intro}
       busy={resolving}
@@ -1262,8 +1281,10 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       allowCustomAnswers={clarification.allowCustomAnswers}
       footHint={clarification.footHint}
       documentDraft={clarification.documentDraft}
+      draftIdentity={draftIdentity}
       restoredAnswers={
-        restoredAnswers?.requestId === clarification.clarificationId ? restoredAnswers.answers : null
+        restoredAnswers?.requestId === clarification.clarificationId
+          && restoredAnswers.draftFingerprint === draftIdentity?.fingerprint ? restoredAnswers.answers : null
       }
       error={clarificationError?.message ?? null}
       errorDiagnostics={clarificationError?.diagnostics}

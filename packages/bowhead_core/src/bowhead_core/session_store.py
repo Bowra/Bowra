@@ -1466,6 +1466,27 @@ class Turn:
     error_kind: str | None = None  # enum-via-app: timeout / network / cap / internal / ν1_unresolvable / llm_failed
 
 
+def _published_tool_failure_texts(result_event: dict[str, Any], step_label: str) -> list[str]:
+    """What events already publish about one failed Tool call, for history.
+
+    First the error messages the Tool itself returned, then the step row's short label, then the
+    failure code. A raised exception's full text is never in events; this does not add it.
+    """
+    from bowhead_core.unfinished_turn_context import returned_error_messages
+
+    texts = returned_error_messages(result_event.get("result_inline"))
+    if not texts:
+        label = step_label.strip()
+        for prefix in ("失败: ", "Failed: "):
+            if label.startswith(prefix):
+                label = label[len(prefix) :]
+        if label:
+            texts.append(label)
+    if not texts:
+        texts.append(str(result_event.get("failure_code") or result_event.get("error") or "failed"))
+    return texts
+
+
 @dataclass(frozen=True)
 class TurnSpawnRecord:
     """一次 Lead 的 `subagent_spawn`（r4：turn 级历史用它把「派了活」渲回历史）。
@@ -1486,6 +1507,10 @@ class TurnSpawnRecord:
     delivery: str = ""
     canvas_mode: str = ""
     synthesized: bool = False
+    # A helper that never returned: its failed Tool calls as (tool, text), from published events.
+    tool_failures: tuple[tuple[str, str], ...] = ()
+    # The task is the 200-character interface preview, the only record of an older unfinished Turn.
+    task_truncated: bool = False
 
 
 @dataclass
@@ -7063,15 +7088,19 @@ class SessionStore:
         tokens_output: int = 0,
         cost_usd: float = 0.0,
         error_kind: str | None = None,
+        context_publication: Any = None,
     ) -> bool:
         """M2.1: 用户 stop 后落库. 跟 mark_completed 类似但 status='cancelled' + 不要求 final_answer.
 
         计费: tokens 已用部分仍累计 (业界 ChatGPT/Claude 都按 used 收费即使 stop).
         见 docs/M157-cancel-turn-design.md §5
+
+        ``context_publication`` applies when this worker itself ends the Turn. After a Stop
+        request has committed the status, this returns False and the transcript is published
+        by ``publish_stopped_turn_context`` instead.
         """
-        async with open_shared_ctx(self._db_path) as db:
-            if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
-                return False
+
+        async def write(db: aiosqlite.Connection) -> bool:
             now = _now()
             cursor = await db.execute(
                 """
@@ -7102,8 +7131,11 @@ class SessionStore:
                     "UPDATE sessions SET last_active_at=? WHERE id=(SELECT session_id FROM turns WHERE id=?) AND last_active_at < ?",
                     (now, turn_id, now),
                 )
-            await db.commit()
-        return transitioned
+            return transitioned
+
+        return await self._end_unfinished_turn(
+            turn_id=turn_id, worker=worker, status="cancelled", error_kind=error_kind, context_publication=context_publication, write=write
+        )
 
     @completion_capacity()
     async def finalize_cancelled_usage(
@@ -7468,16 +7500,19 @@ class SessionStore:
         tokens_input: int = 0,
         tokens_output: int = 0,
         cost_usd: float = 0.0,
+        context_publication: Any = None,
     ) -> bool:
         """Sprint π Phase A — terminal status FAILED.
 
         Writes `error` + `error_kind` (per A-ErrorKind), `ended_at`, optional
         intent / final_answer / tokens / cost. status='failed'. Returns whether
         this call actually transitioned a running Turn.
+
+        ``context_publication`` is the Lead's transcript of the failed Turn; it is stored with
+        the status change when it can be, and never prevents it.
         """
-        async with open_shared_ctx(self._db_path) as db:
-            if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
-                return False
+
+        async def write(db: aiosqlite.Connection) -> bool:
             now = _now()
             cursor = await db.execute(
                 """
@@ -7502,8 +7537,139 @@ class SessionStore:
                     "UPDATE sessions SET last_active_at=? WHERE id=(SELECT session_id FROM turns WHERE id=?) AND last_active_at < ?",
                     (now, turn_id, now),
                 )
+            return transitioned
+
+        return await self._end_unfinished_turn(
+            turn_id=turn_id, worker=worker, status="failed", error_kind=error_kind, context_publication=context_publication, write=write
+        )
+
+    async def _end_unfinished_turn(
+        self,
+        *,
+        turn_id: str,
+        worker: DocumentTurnOwner | None,
+        status: str,
+        error_kind: str | None,
+        context_publication: Any,
+        write: Callable[[aiosqlite.Connection], Awaitable[bool]],
+    ) -> bool:
+        """Commit a worker-owned ending, with the Lead's transcript when one can be published.
+
+        The transcript ends with the marker history already uses for this ending. A publication
+        that cannot be prepared, verified or stored is skipped, and the status change is written
+        on its own: the next Turn then reads the Turn rebuilt from events.
+        """
+        from bowhead_core.context_assembly import incomplete_turn_marker
+        from bowhead_core.context_publication import ContextPublication
+
+        if isinstance(context_publication, ContextPublication) and worker is not None and await self.worker_owns_running_turn(turn_id, worker):
+            marker = incomplete_turn_marker(status, error_kind if status == "failed" else None)
+            started = datetime.now(tz=UTC)
+            try:
+                prepared = await context_publication.prepare_for_answer(marker)
+                async with prepared.open_adoption_readers() as publication:
+                    # Authority is rechecked before the writer lock, as for a completed Turn.
+                    publication = await publication.verify_authority(marker)
+                    prepared_at = datetime.now(tz=UTC)
+                    async with open_shared_ctx(self._db_path) as db:
+                        if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
+                            return False
+                        try:
+                            await publication(db, marker)
+                            transitioned = await write(db)
+                            if transitioned:
+                                await db.commit()
+                            else:
+                                await db.rollback()
+                        except BaseException:
+                            await db.rollback()
+                            raise
+                    elapsed_ms = (datetime.now(tz=UTC) - prepared_at).total_seconds() * 1000
+                    _record_completion_write(turn_id, elapsed_ms, context=True, transitioned=transitioned)
+                    logging.getLogger(__name__).info(
+                        "context_publication.unfinished_turn turn=%s status=%s prepare_ms=%d",
+                        turn_id,
+                        status,
+                        (prepared_at - started).total_seconds() * 1000,
+                    )
+                    return transitioned
+            except Exception as failure:  # noqa: BLE001 - the ending must be written either way
+                logging.getLogger(__name__).warning(
+                    "context_publication.unfinished_turn_skipped turn=%s status=%s condition=%s",
+                    turn_id,
+                    status,
+                    str(failure)[:120] or type(failure).__name__,
+                )
+        async with open_shared_ctx(self._db_path) as db:
+            if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
+                return False
+            transitioned = await write(db)
             await db.commit()
         return transitioned
+
+    async def worker_owns_running_turn(self, turn_id: str, worker: DocumentTurnOwner) -> bool:
+        """Whether this worker is still the live owner of the running Turn.
+
+        A read-only look, taken before a publication is built or prepared that only the live
+        owner can write. The terminal write checks again inside its transaction.
+        """
+        from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, require_current_worker_in_tx
+
+        if worker.turn_id != turn_id:
+            return False
+        async with open_shared_ctx(self._db_path) as db:
+            await db.execute("BEGIN")
+            try:
+                await require_current_worker_in_tx(db, worker=worker)
+                return True
+            except OrdinaryContinuationUnavailable:
+                return False
+            finally:
+                await db.rollback()
+
+    @completion_capacity()
+    async def publish_stopped_turn_context(self, *, turn_id: str, context_publication: Any) -> bool:
+        """Publish the Lead's transcript of a Turn the user stopped.
+
+        The Stop request has already committed the cancelled status, so this is a write of its
+        own, admitted for the stopped owner only (``require_stopped_worker_in_tx``). It is
+        refused once a later Turn exists. Returns whether the transcript was published.
+        """
+        from bowhead_core.context_assembly import incomplete_turn_marker
+        from bowhead_core.context_ownership import StoppedTurnOwner
+        from bowhead_core.context_publication import ContextPublication
+
+        if not isinstance(context_publication, ContextPublication) or not isinstance(context_publication.worker, StoppedTurnOwner):
+            return False
+        if context_publication.worker.turn_id != turn_id:
+            return False
+        marker = incomplete_turn_marker("cancelled")
+        started = datetime.now(tz=UTC)
+        try:
+            prepared = await context_publication.prepare_for_answer(marker)
+            async with prepared.open_adoption_readers() as publication:
+                publication = await publication.verify_authority(marker)
+                prepared_at = datetime.now(tz=UTC)
+                async with open_shared_ctx(self._db_path) as db:
+                    await db.execute("BEGIN IMMEDIATE")
+                    try:
+                        await publication(db, marker)
+                        await db.commit()
+                    except BaseException:
+                        await db.rollback()
+                        raise
+        except Exception as failure:  # noqa: BLE001 - a stopped Turn stays stopped without it
+            logging.getLogger(__name__).warning(
+                "context_publication.unfinished_turn_skipped turn=%s status=cancelled condition=%s",
+                turn_id,
+                str(failure)[:120] or type(failure).__name__,
+            )
+            return False
+        _record_completion_write(turn_id, (datetime.now(tz=UTC) - prepared_at).total_seconds() * 1000, context=True, transitioned=True)
+        logging.getLogger(__name__).info(
+            "context_publication.unfinished_turn turn=%s status=cancelled prepare_ms=%d", turn_id, (prepared_at - started).total_seconds() * 1000
+        )
+        return True
 
     async def mark_clarification_pending(
         self,
@@ -7551,6 +7717,7 @@ class SessionStore:
             await db.commit()
         return transitioned
 
+    @completion_capacity()
     async def mark_aborted(
         self,
         *,
@@ -7562,14 +7729,15 @@ class SessionStore:
         tokens_output: int = 0,
         cost_usd: float = 0.0,
         error_kind: str | None = "aborted",
+        context_publication: Any = None,
     ) -> bool:
         """Sprint π Phase A — terminal status ABORTED.
 
         Default error_kind='aborted' (user/system cancelled mid-turn).
+        ``context_publication`` is stored with the status change when it can be, as for a failed Turn.
         """
-        async with open_shared_ctx(self._db_path) as db:
-            if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
-                return False
+
+        async def write(db: aiosqlite.Connection) -> bool:
             now = _now()
             cursor = await db.execute(
                 """
@@ -7593,8 +7761,11 @@ class SessionStore:
                     "UPDATE sessions SET last_active_at=? WHERE id=(SELECT session_id FROM turns WHERE id=?) AND last_active_at < ?",
                     (now, turn_id, now),
                 )
-            await db.commit()
-        return transitioned
+            return transitioned
+
+        return await self._end_unfinished_turn(
+            turn_id=turn_id, worker=worker, status="aborted", error_kind=error_kind, context_publication=context_publication, write=write
+        )
 
     # ─── Rollback compatibility (remove in D6b) ─────────────────────────
     async def complete_turn(
@@ -7690,7 +7861,14 @@ class SessionStore:
         退回 `peer_dispatched`（call_id / profile / rationale / spawn_id）+ `agent_spawned`（task）合成记录（``synthesized=True``，
         status 记**轮**状态，子工具数按该 peer 的 `tool_result` 条数——`json_extract` 不拉 payload，坏行按 `json_valid` 跳过）。
         与 `load_prior_peer_run` 退回 `agent_spawned` 同一思路。三类事件读一遍，记录按事件 seq 合并排序。
+
+        The task is the full text from `peer_dispatched.task` when the event carries it, for returned
+        and unreturned helpers alike. A synthesized record also lists the helper's failed Tool calls
+        as events publish them (``tool_failures``), and marks a task known only from the
+        200-character `agent_spawned` preview (``task_truncated``).
         """
+        from bowhead_core.context_assembly import TASK_PREVIEW_CHARS
+
         ids = [str(t) for t in dict.fromkeys(turn_ids) if t]
         if not ids:
             return {}
@@ -7708,6 +7886,10 @@ class SessionStore:
                 ) as cur:
                     rows.extend(await cur.fetchall())
             tasks: dict[tuple[str, str], str] = {}
+            # Helpers whose `agent_spawned` task filled the whole interface preview, so it was cut.
+            cut_previews: set[tuple[str, str]] = set()
+            # The full task the Lead wrote, by call (`peer_dispatched.task`; absent on older Turns).
+            dispatched_tasks: dict[tuple[str, str], str] = {}
             summaries: list[tuple[str, int, dict[str, Any]]] = []
             dispatched: dict[str, list[tuple[int, dict[str, Any]]]] = {}
             for r in rows:
@@ -7723,7 +7905,12 @@ class SessionStore:
                     task = payload.get("task")
                     if sid and isinstance(task, str) and task.strip() and (tid, sid) not in tasks:
                         tasks[(tid, sid)] = task.strip()
+                        if len(task) >= TASK_PREVIEW_CHARS:
+                            cut_previews.add((tid, sid))
                 elif r["event_type"] == "peer_dispatched":
+                    full_task = payload.get("task")
+                    if payload.get("call_id") and isinstance(full_task, str) and full_task.strip():
+                        dispatched_tasks.setdefault((tid, str(payload["call_id"])), full_task.strip())
                     if tid in fallback_status and payload.get("call_id"):
                         dispatched.setdefault(tid, []).append((int(r["seq"]), payload))
                 else:
@@ -7735,6 +7922,7 @@ class SessionStore:
                     if (tid, str(p.get("call_id") or "")) not in summarised_calls:
                         orphans.setdefault(tid, []).append((seq, p))
             tool_counts: dict[tuple[str, str], int] = {}
+            tool_failures: dict[tuple[str, str], list[tuple[str, str]]] = {}
             for tid in orphans:
                 async with db.execute(
                     "SELECT json_extract(payload_json, '$.subagent_id') AS sid, COUNT(*) AS n FROM turn_events "
@@ -7744,11 +7932,39 @@ class SessionStore:
                     for c in await cur.fetchall():
                         if c["sid"]:
                             tool_counts[(tid, str(c["sid"]))] = int(c["n"] or 0)
+                # Only failed calls are read in full; their step rows carry the short label the interface shows.
+                async with db.execute(
+                    "SELECT event_type, payload_json FROM turn_events WHERE turn_id=? AND event_type IN ('tool_result','step_done') "
+                    "AND json_valid(payload_json) AND json_extract(payload_json, '$.ok')=0 ORDER BY seq",
+                    (tid,),
+                ) as cur:
+                    failed_rows = await cur.fetchall()
+                labels: dict[str, str] = {}
+                failed_results: list[dict[str, Any]] = []
+                for failed in failed_rows:
+                    try:
+                        failed_payload = json.loads(str(failed["payload_json"]))
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(failed_payload, dict):
+                        continue
+                    if failed["event_type"] == "step_done":
+                        labels[str(failed_payload.get("call_id") or "")] = str(failed_payload.get("output_preview") or "")
+                    else:
+                        failed_results.append(failed_payload)
+                for failed_payload in failed_results:
+                    sid = str(failed_payload.get("subagent_id") or "")
+                    if not sid:
+                        continue
+                    texts = _published_tool_failure_texts(failed_payload, labels.get(str(failed_payload.get("call_id") or ""), ""))
+                    tool_failures.setdefault((tid, sid), []).extend((str(failed_payload.get("tool_name") or ""), text) for text in texts)
         # (turn_id, seq, record): merge summaries and synthetic records by event seq to preserve spawn order within a turn.
         ordered: list[tuple[str, int, TurnSpawnRecord]] = []
         for tid, items in orphans.items():
             for seq, p in items:
                 sid = str(p.get("spawn_id") or p.get("subagent_id") or "")
+                full_task = dispatched_tasks.get((tid, str(p.get("call_id") or "")))
+                preview = tasks.get((tid, sid), "")
                 ordered.append(
                     (
                         tid,
@@ -7756,7 +7972,7 @@ class SessionStore:
                         TurnSpawnRecord(
                             call_id=str(p.get("call_id") or ""),
                             profile=str(p.get("profile") or p.get("peer_name") or ""),
-                            task=tasks.get((tid, sid), ""),
+                            task=full_task or preview,
                             rationale=str(p.get("rationale") or ""),
                             status=fallback_status[tid],
                             failure_reason=None,
@@ -7766,6 +7982,8 @@ class SessionStore:
                             delivery="",
                             canvas_mode="",
                             synthesized=True,
+                            tool_failures=tuple(tool_failures.get((tid, sid), ())),
+                            task_truncated=full_task is None and (tid, sid) in cut_previews,
                         ),
                     )
                 )
@@ -7786,7 +8004,8 @@ class SessionStore:
                     TurnSpawnRecord(
                         call_id=call_id,
                         profile=str(payload.get("profile") or ""),
-                        task=(_task_full.strip() if isinstance(_task_full, str) and _task_full.strip() else tasks.get((tid, sid), "")),
+                        task=dispatched_tasks.get((tid, call_id))
+                        or (_task_full.strip() if isinstance(_task_full, str) and _task_full.strip() else tasks.get((tid, sid), "")),
                         rationale=str(payload.get("rationale") or ""),
                         status=str(payload.get("status") or "unknown"),
                         failure_reason=(str(payload["failure_reason"]) if payload.get("failure_reason") else None),

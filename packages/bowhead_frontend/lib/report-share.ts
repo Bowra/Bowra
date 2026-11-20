@@ -1,9 +1,8 @@
 "use client";
 
-import { toast } from "@/lib/use-toast";
 import { staticTranslator } from "@/lib/locale-messages";
-import { copyTextWithFallback } from "@/lib/clipboard";
 import { appPath } from "@/lib/base-path";
+import { copyShareLink } from "@/lib/share-link";
 
 // Internal <Link>/router paths omit the public-entry prefix (browser history/fetch patches outside Next
 // add it; prefixed paths passed to Link would fail route matching).
@@ -11,21 +10,8 @@ export function reportHrefForSession(sessionId: string): string {
   return `/?session=${encodeURIComponent(sessionId)}&report=1`;
 }
 
-/** Address for report-library "下载": open report surface + automatically export once after arrival.
- *
- * Why this round trip: V2 export requires a **client receipt** contract, with backend enforcing
- * expected_projection_token / expected_surface_token / client_surface_receipt_sha256
- * (routes/canvas.py, 400 if any missing), produced only by a **mounted, fully rendered report**
- * (validateAndBuildRenderedSurfaceReceipt uses renderStateOf to inspect each section's DOM markers).
- * Library has only cards, no rendering, so previously used legacy; same measured content yielded
- * xlsx three sheets/29 rows versus V2 nine sheets/426 rows, pdf one page/no figures/3.8KB versus six pages/143KB with figures.
- * Send it to the already-rendering workspace to export, rather than add another renderer in library.
- *
- * ⚠ **Do not** use for sharing (use reportHrefForSession), or recipients download automatically on opening.
- */
-/** Formats automatically triggered by ?export=, matching report-library menu.
- *  Deliberately exclude docx: backend _EXPORT_PARITY_CONTRACTS has none, only legacy job path. */
-export const AUTO_EXPORT_FMTS = ["pdf", "pptx", "xlsx"] as const;
+/** The report library and its one-time export intent share the same format list. Word uses the workbench's existing DOCX job. */
+export const AUTO_EXPORT_FMTS = ["pdf", "docx", "pptx", "xlsx"] as const;
 export type AutoExportFmt = (typeof AUTO_EXPORT_FMTS)[number];
 
 /** Decode ?export=. **Keep encoding/decoding in one file** to avoid independent drift. */
@@ -68,7 +54,8 @@ export function reportAutoExportReadiness(
   return canvasId ? "ready" : "empty";
 }
 
-export function reportExportHrefForSession(sessionId: string, fmt: string): string {
+/** Opens the workbench to run a one-time export after the report can supply the rendered surface receipt. Sharing uses reportHrefForSession. */
+export function reportExportHrefForSession(sessionId: string, fmt: AutoExportFmt): string {
   return `${reportHrefForSession(sessionId)}&export=${encodeURIComponent(fmt)}`;
 }
 
@@ -83,9 +70,5 @@ export async function copyPermissionedReportLink(sessionId: string): Promise<boo
   if (typeof window === "undefined") return false;
   const href = reportShareUrl(sessionId, window.location.origin);
   const t = staticTranslator("report_share_link");
-  const ok = await copyTextWithFallback(href, t("copy_prompt"));
-  if (ok) {
-    toast({ kind: "success", text: t("copied_toast") });
-  }
-  return ok;
+  return copyShareLink(href, t("copied_toast"));
 }

@@ -288,3 +288,48 @@ def test_space_metadata_and_grant_usage_skip_the_core_fence(mutation_files):
                 core.execute(sql).close()
             core.rollback()
         execution.rollback()
+
+
+def test_user_settings_fence_only_privacy_and_access_keys(mutation_files):
+    # 116, 1.7.59: a knowledge-base scope filter save waited 9.7 s for the exclusive core lease behind running Turns.
+    core_path = mutation_files.with_name(DOMAIN_TARGET_FILES["core"])
+    with closing(sqlite3.connect(core_path)) as db:
+        db.execute("CREATE TABLE user_settings(user_id TEXT,key TEXT,value TEXT,updated_at TEXT,PRIMARY KEY(user_id,key))")
+        for statement in mutation_triggers("core"):
+            if ' ON "user_settings"' in statement:
+                db.execute(statement)
+        db.commit()
+    with managed(mutation_files, "core") as core:
+        core.execute(
+            "INSERT INTO user_settings VALUES('u','memory_dreaming_paused','false','t'),('u','team_plugins_disabled','[]','t'),"
+            "('u','answer_style','concise','t')"
+        ).close()
+        core.commit()
+    upsert = (
+        "INSERT INTO user_settings VALUES('u',?,?,'t2') ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at"
+    )
+    with managed(mutation_files, "execution") as execution, managed(mutation_files, "core") as core:
+        execution.execute("BEGIN").close()
+        with execution.execute("SELECT status FROM workspaces WHERE id='w'") as cursor:
+            cursor.fetchall()
+        assert execution._leases
+
+        core.execute("BEGIN IMMEDIATE").close()
+        core.execute(upsert, ("kb_file_scope", "team")).close()
+        core.execute(upsert, ("kb_file_scope", "personal")).close()
+        core.execute("DELETE FROM user_settings WHERE key='kb_file_scope'").close()
+        core.commit()
+
+        for sql, values in (
+            (upsert, ("memory_dreaming_paused", "true")),
+            (upsert, ("builtin_plugins_disabled", '["p"]')),
+            ("UPDATE user_settings SET value='[\"p\"]' WHERE key='team_plugins_disabled'", ()),
+            ("DELETE FROM user_settings WHERE key='memory_dreaming_paused'", ()),
+            # Renaming an ordinary row into a fenced key is a fenced write too.
+            ("UPDATE user_settings SET key='builtin_plugins_disabled' WHERE key='answer_style'", ()),
+        ):
+            core.execute("BEGIN IMMEDIATE").close()
+            with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+                core.execute(sql, values).close()
+            core.rollback()
+        execution.rollback()

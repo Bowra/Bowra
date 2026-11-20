@@ -132,7 +132,10 @@ for (const width of [412, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await mockSettings(page);
     await page.goto(routePath("/team/settings/models/"));
-    await page.getByRole("tab", { name: "外部能力", exact: true }).click();
+    const assignments = page.getByRole("tab", { name: "模型分工", exact: true });
+    await assignments.click();
+    await page.getByRole("link", { name: "外部能力", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBe("assignments");
     await expectSettingsPath(page, "/team/settings/models/external/");
     await expect(page.getByRole("heading", { name: "外部能力", exact: true, level: 1 })).toBeVisible();
     await page.reload();
@@ -149,5 +152,8 @@ for (const width of [412, 1440]) {
       await expectSettingsPath(page, "/team/settings/models/external/");
       await expect(page.getByRole("heading", { name: "外部能力", exact: true, level: 1 })).toBeVisible();
     }
+    await page.getByRole("button", { name: "返回概览", exact: true }).click();
+    await expectSettingsPath(page, "/team/settings/models/");
+    await expect(assignments).toHaveAttribute("aria-selected", "true");
   });
 }

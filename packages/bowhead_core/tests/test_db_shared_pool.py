@@ -227,6 +227,63 @@ async def test_connection_left_in_transaction_is_closed_and_rolled_back(tmp_path
     assert value == "1"
 
 
+@pytest.mark.parametrize("begin", ["BEGIN", "BEGIN IMMEDIATE"])
+async def test_a_transaction_left_without_changes_is_rolled_back_and_the_connection_reused(tmp_path: Path, begin: str) -> None:
+    # On 116 (1.7.56) read paths that open BEGIN and never end it closed about 50 execution connections a
+    # minute. Rolling back such a transaction has the same effect as closing the connection.
+    db_path = tmp_path / "bowhead.db"
+    _make_db(db_path)
+    async with open_shared_ctx(str(db_path)) as db:
+        await db.execute(begin)
+        async with db.execute("SELECT v FROM kv WHERE k='a'") as cur:
+            assert await cur.fetchone() == ("1",)
+        leaked = db
+    _write_elsewhere(db_path, "later")
+    other, value = await _value(db_path)
+    assert other is leaked
+    assert value == "later"
+    async with open_shared_ctx(str(db_path)) as db:  # The old snapshot is gone: a write lock can be taken.
+        assert db is leaked
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute("UPDATE kv SET v='after' WHERE k='b'")
+        await db.commit()
+
+
+async def test_a_kept_connection_is_scrubbed_after_its_leftover_transaction_is_rolled_back(tmp_path: Path) -> None:
+    db_path = tmp_path / "bowhead.db"
+    _make_db(db_path)
+    async with open_shared_ctx(str(db_path)) as db:
+        await db.execute("PRAGMA busy_timeout=1")
+        await db.execute("PRAGMA query_only=ON")
+        await db.execute("BEGIN")
+        db.row_factory = aiosqlite.Row
+        leaked = db
+    async with open_shared_ctx(str(db_path)) as db:
+        assert db is leaked
+        async with db.execute("PRAGMA busy_timeout") as cur:
+            assert await cur.fetchone() == (60000,)
+        async with db.execute("PRAGMA query_only") as cur:
+            assert await cur.fetchone() == (0,)
+        await db.execute("UPDATE kv SET v='writable' WHERE k='c'")
+        await db.commit()
+
+
+async def test_a_transaction_left_after_committed_changes_is_still_closed(tmp_path: Path) -> None:
+    # Only a borrow that changed no rows at all is ended in place; anything else keeps the old rule.
+    db_path = tmp_path / "bowhead.db"
+    _make_db(db_path)
+    async with open_shared_ctx(str(db_path)) as db:
+        await db.execute("UPDATE kv SET v='committed' WHERE k='b'")
+        await db.commit()
+        await db.execute("BEGIN")
+        async with db.execute("SELECT v FROM kv WHERE k='a'") as cur:
+            await cur.fetchone()
+        leaked = db
+    other, value = await _value(db_path, "b")
+    assert other is not leaked
+    assert value == "committed"
+
+
 async def test_pragmas_changed_by_a_borrower_are_reset(tmp_path: Path) -> None:
     db_path = tmp_path / "bowhead.db"
     _make_db(db_path)

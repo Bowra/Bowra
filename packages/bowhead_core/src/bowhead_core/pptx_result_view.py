@@ -993,6 +993,8 @@ async def attach_result_views(result: Any, ctx: Any, *, presentation_fix: Any = 
             elif html:
                 if "html_static_check" not in output and (inspection := await inspect_retained_html(store, artifact)) is not None:
                     output["html_static_check"] = inspection
+                # Visual self-check slice B: the page as the user's preview shows it.
+                await attach_visual_view(output, ctx, artifact, kind="html", presentation_fix=presentation_fix, inputs=read_ids)
             elif kind is not None:
                 await attach_visual_view(output, ctx, artifact, kind=kind, presentation_fix=presentation_fix, inputs=read_ids)
         except Exception as exc:

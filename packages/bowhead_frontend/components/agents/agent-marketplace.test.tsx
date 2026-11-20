@@ -213,15 +213,6 @@ describe("AgentMarketplace", () => {
     expect(screen.getByRole("link", { name: "管理已聘用智能体" })).toBeTruthy();
   });
 
-  it("focuses marketplace search from the displayed keyboard shortcut", async () => {
-    renderIntl(<AgentMarketplace />);
-    const search = await screen.findByRole("textbox", { name: /搜索智能体/ });
-
-    fireEvent.keyDown(window, { key: "k", metaKey: true });
-
-    expect(document.activeElement).toBe(search);
-  });
-
   it("opens a complete filter dialog and applies its draft state", async () => {
     renderIntl(<AgentMarketplace />);
     await screen.findAllByRole("heading", { name: "Finance Partner" });

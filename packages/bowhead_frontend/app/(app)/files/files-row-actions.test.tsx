@@ -31,7 +31,7 @@ vi.mock("@/lib/kb-ingestion-readiness", () => ({
 }));
 vi.mock("@/components/shell/AppShell", () => ({ AppShell: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock("@/components/shell/Topbar", () => ({ Topbar: () => null }));
-vi.mock("@/components/files/file-drawer", () => ({ FileDrawer: () => null }));
+vi.mock("@/components/files/file-drawer", () => ({ FileDrawer: () => <div data-testid="file-preview" /> }));
 
 import { ToastContainer } from "@/components/chat/toast-container";
 import { _clearAllToasts } from "@/lib/use-toast";
@@ -175,8 +175,8 @@ describe("文件页删除后撤销（行为批 B）", () => {
     });
     renderIntl(<><FilesPage /><ToastContainer /></>);
     await screen.findByText("十月销售.pdf");
-    fireEvent.click(screen.getByRole("button", { name: "九月销售.pdf" }));
-    fireEvent.click(screen.getByRole("button", { name: "十月销售.pdf" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 九月销售.pdf" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 十月销售.pdf" }));
     fireEvent.click(screen.getByRole("button", { name: "批量删除" }));
     // Bulk deletion likewise needs no confirmation.
     await waitFor(() => expect(api.deleteFile).toHaveBeenCalledTimes(2));
@@ -190,6 +190,18 @@ describe("文件页删除后撤销（行为批 B）", () => {
     await waitFor(() => expect(api.restoreFile).toHaveBeenCalledTimes(3));
     expect(api.restoreFile.mock.calls.map((c) => c[0])).toEqual(["f_plain", "f_other", "f_other"]);
     expect(await screen.findByText("已撤销删除")).toBeTruthy();
+  });
+
+  it("exposes selection and preview as separate controls", async () => {
+    renderIntl(<FilesPage />);
+    const select = await screen.findByRole("checkbox", { name: "选择 九月销售.pdf" }) as HTMLInputElement;
+    expect(select.checked).toBe(false);
+    fireEvent.click(select);
+    expect(select.checked).toBe(true);
+    expect(screen.queryByTestId("file-preview")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "预览 九月销售.pdf" }));
+    expect(screen.getByTestId("file-preview")).toBeTruthy();
+    expect(select.checked).toBe(true);
   });
 });
 

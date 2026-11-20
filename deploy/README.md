@@ -48,6 +48,7 @@ Workflows that invoke sandbox execution also require `BOWHEAD_SKILL_WORKDIR_ROOT
 ```sh
 make typecheck-frontend
 make build-frontend
+cd packages/bowhead_frontend && npm run build:html-preview-transform && cd ../..
 make lint
 make run-gateway
 ```
@@ -83,7 +84,7 @@ The application Dockerfile can build an application image from this source with 
 
 Stop every Gateway, worker and other writer before the first upgraded start. Preserve the complete persistent data root, all existing SQLite files and adjunct vector data, object files, instance configuration and both instance keys. Account state follows the recovery snapshot; a snapshot taken before deletion can restore that account. Test the upgrade on an isolated recovery copy first.
 
-This release advances the complete immutable migration chain through `0230_unfence_routine_metadata`. For installations already on 1.6.80, the coordinator upgrades the existing twelve-file SQLite layout in place. Earlier installations still go through the coordinated split, retaining the seven knowledge files and separating execution, content, notifications and observability from core. It creates a persistent automatic backup of the registered SQLite databases and available layout metadata before pending upgrades and resumes interrupted work forward. Keep complete recovery snapshots separately, including external Chroma storage, stored objects and instance configuration. All writers must remain stopped until it completes. Ensure enough disk space for the full archive and staged copies.
+This release advances the complete immutable migration chain through `0231_user_settings_key_fence`. For installations already on 1.6.80, the coordinator upgrades the existing twelve-file SQLite layout in place. Earlier installations still go through the coordinated split, retaining the seven knowledge files and separating execution, content, notifications and observability from core. It creates a persistent automatic backup of the registered SQLite databases and available layout metadata before pending upgrades and resumes interrupted work forward. Keep complete recovery snapshots separately, including external Chroma storage, stored objects and instance configuration. All writers must remain stopped until it completes. Ensure enough disk space for the full archive and staged copies.
 
 Use `make run-gateway` with the configured source installation. Its installation preparation admits the original provenance, runs the complete migration coordinator and records the edition before Gateway startup. For an offline preparation, use `uv run python -m bowhead_gateway.installation prepare --migration-command "$PWD/.venv/bin/bowhead"` with the same environment. Do not stamp a revision, migrate one file in isolation, issue manual SQL, or run an older application against the new layout. Keep the original complete backup. Rollback restores its matching application, all database/layout files and stored objects together, with the account state from that recovery point. Also preserve an independently configured external Chroma directory with its matching recovery point.
 
@@ -92,3 +93,7 @@ The application build uses Node.js 24.22.1 and the frozen frontend lock. Sandbox
 ## Development checks
 
 See [Contributing](../CONTRIBUTING.md). Use focused tests for the component you change; keep the generated theme registry consistent with `config/theme_surface_coverage.yaml` and retain third-party notices. Back up the original recovery set before upgrading an initialized installation.
+
+## HTML and SVG visual self-check
+
+When the selected model accepts images, visual self-check can inspect saved HTML and SVG files. Build the preview transform with the command above. The operator-provided document executor must advertise `html-view-v1` and supply the Chromium worker under its isolated runtime. A runtime without that capability returns `renderer_unavailable`. Verify actual captures against that runtime before relying on visual review.

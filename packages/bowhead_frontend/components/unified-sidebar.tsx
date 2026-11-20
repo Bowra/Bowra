@@ -1290,7 +1290,7 @@ function ExpandedNavigation({
               {item.expandOnly ? (
                 <button
                   type="button"
-                  className="unified-sidebar-nav-item is-group-link"
+                  className="unified-sidebar-nav-item is-group-link unified-nav-disclosure"
                   onClick={() => onToggleGroup(item.id)}
                   aria-expanded={open}
                   aria-controls={`unified-sidebar-expanded-group-${item.id}`}
@@ -1298,6 +1298,7 @@ function ExpandedNavigation({
                 >
                   <Icon size={20} aria-hidden />
                   <span>{translate(item.labelKey)}</span>
+                  <Caret className="unified-nav-disclosure-caret" aria-hidden />
                 </button>
               ) : (
                 <a
@@ -1313,20 +1314,22 @@ function ExpandedNavigation({
                   <span>{translate(item.labelKey)}</span>
                 </a>
               )}
-              <button
-                type="button"
-                className="unified-sidebar-group-toggle"
-                onClick={() => onToggleGroup(item.id)}
-                aria-label={translate(
-                  open ? "collapse_group" : "expand_group",
-                  { name: translate(item.labelKey) },
-                )}
-                aria-expanded={open}
-                aria-controls={`unified-sidebar-expanded-group-${item.id}`}
-                data-testid={`unified-nav-${item.id}-toggle`}
-              >
-                <Caret className="unified-sidebar-caret" aria-hidden />
-              </button>
+              {item.expandOnly ? null : (
+                <button
+                  type="button"
+                  className="unified-sidebar-group-toggle"
+                  onClick={() => onToggleGroup(item.id)}
+                  aria-label={translate(
+                    open ? "collapse_group" : "expand_group",
+                    { name: translate(item.labelKey) },
+                  )}
+                  aria-expanded={open}
+                  aria-controls={`unified-sidebar-expanded-group-${item.id}`}
+                  data-testid={`unified-nav-${item.id}-toggle`}
+                >
+                  <Caret className="unified-sidebar-caret" aria-hidden />
+                </button>
+              )}
             </div>
             {open ? (
               <div

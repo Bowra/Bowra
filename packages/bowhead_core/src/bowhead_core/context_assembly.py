@@ -409,6 +409,40 @@ def incomplete_turn_marker(status: str, error_kind: str | None = None) -> str:
     return base
 
 
+def has_incomplete_turn_marker(content: str) -> bool:
+    """Whether text carries an unfinished-Turn marker, with or without a failure code.
+
+    A failed marker with a code ends ``...completion: <code>]``, so the fixed text is
+    matched without its closing bracket.
+    """
+    return any(marker[:-1] in content for marker in INCOMPLETE_TURN_MARKERS.values())
+
+
+# A helper that never returned reports its failed Tool calls in at most this many UTF-8 bytes.
+TOOL_FAILURES_MAX_BYTES = 4096
+TOOL_FAILURES_LABEL = "Helper tool failures: "
+# `agent_spawned` keeps a 200-character preview of the task for the interface's Agent card.
+TASK_PREVIEW_CHARS = 200
+TASK_TRUNCATION_NOTE = "…[history keeps only the first 200 characters of this task]"
+
+
+def render_tool_failures(failures: Sequence[tuple[str, str]], *, limit: int = TOOL_FAILURES_MAX_BYTES) -> str:
+    """One line for a helper's failed Tool calls: ``<tool> ×<count>: <text>`` joined by ``; ``.
+
+    Identical failures of one Tool are counted once, in first-seen order. The line is cut at a
+    character boundary and ends with ``…`` when it exceeds ``limit`` bytes; no failures give ``""``.
+    """
+    counts: dict[tuple[str, str], int] = {}
+    for tool, text in failures:
+        key = (str(tool), " ".join(str(text).split()))
+        counts[key] = counts.get(key, 0) + 1
+    line = "; ".join(f"{tool} ×{count}: {text}" if text else f"{tool} ×{count}" for (tool, text), count in counts.items())
+    encoded = line.encode()
+    if len(encoded) <= limit:
+        return line
+    return encoded[: max(0, limit - len("…".encode()))].decode(errors="ignore") + "…"
+
+
 def history_call_id(turn_seq: Any, call_id: str) -> str:
     """历史里 tool_call 的 id（r4 review 修）：按轮加前缀。
 
@@ -449,6 +483,9 @@ def render_spawn_arguments(rec: Any, *, strip: Callable[[str], str] | None = Non
     if rationale:
         out["rationale"] = rationale
     out["task"] = st(str(getattr(rec, "task", "") or "")).strip()
+    if getattr(rec, "task_truncated", False):
+        # Only the interface preview was recorded. Say so: an unmarked cut reads as a broken dispatch.
+        out["task"] += TASK_TRUNCATION_NOTE
     return out
 
 
@@ -475,6 +512,10 @@ def render_spawn_result(rec: Any, *, strip: Callable[[str], str] | None = None) 
         from bowhead_core.result_materials import recovery_enabled
 
         parts.append("No figure receipt is listed; other saved content is unknown." if recovery_enabled() else "画布写入 0 节")
+    # A helper that never returned: what it had run into before the Turn ended.
+    failures = st(render_tool_failures(getattr(rec, "tool_failures", ()) or (), limit=TOOL_FAILURES_MAX_BYTES - len(TOOL_FAILURES_LABEL))).strip()
+    if failures:
+        parts.append(TOOL_FAILURES_LABEL + failures)
     reason = st(str(getattr(rec, "failure_reason", "") or "")).strip()
     if reason:
         parts.append(f"失败原因：{reason}")
@@ -618,6 +659,11 @@ __all__ = [
     "WINDOW_GUARD_HYSTERESIS",
     "WINDOW_GUARD_RATIO",
     "INCOMPLETE_TURN_MARKERS",
+    "TASK_PREVIEW_CHARS",
+    "TASK_TRUNCATION_NOTE",
+    "TOOL_FAILURES_LABEL",
+    "TOOL_FAILURES_MAX_BYTES",
+    "has_incomplete_turn_marker",
     "incomplete_turn_marker",
     "SPAWN_TOOL_NAME",
     "TurnHistory",
@@ -626,6 +672,7 @@ __all__ = [
     "history_call_id",
     "render_spawn_arguments",
     "render_spawn_result",
+    "render_tool_failures",
     "turn_sizes_from_messages",
     "SystemSplit",
     "cleared_marker",

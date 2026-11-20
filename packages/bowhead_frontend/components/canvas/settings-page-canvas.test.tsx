@@ -75,7 +75,7 @@ it("hosts all original manual controls and saves through the existing exact-Spac
     { locale: "en-US" },
   );
   const week = await screen.findByRole("radiogroup", {
-    name: labels.hosted_week_label,
+    name: labels.field_week_label,
   });
   expect(screen.getAllByRole("radiogroup")).toHaveLength(2);
   // The rollout switch stays on the full settings page; Canvas shows the user-facing preferences only.
@@ -98,7 +98,7 @@ it("hosts all original manual controls and saves through the existing exact-Spac
     expect(
       segmentedValue(
         screen.getByRole("radiogroup", {
-          name: labels.hosted_week_label,
+          name: labels.field_week_label,
         }),
       ),
     ).toBe("sunday"),
@@ -124,7 +124,7 @@ it("disables original manual controls for a read-only caller and closes only the
     locale: "en-US",
   });
   const week = await screen.findByRole("radiogroup", {
-    name: labels.hosted_week_label,
+    name: labels.field_week_label,
   });
   expect(segmentDisabled(week)).toBe(true);
   fireEvent.click(
@@ -180,7 +180,7 @@ it("retains an Agent's input and routes a late settings save to the hidden origi
   }
   renderIntl(<Host />, { locale: "en-US" });
   const week = await screen.findByRole("radiogroup", {
-    name: labels.hosted_week_label,
+    name: labels.field_week_label,
   });
   chooseSegment(week, "sunday");
   await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledTimes(1));
@@ -194,7 +194,7 @@ it("retains an Agent's input and routes a late settings save to the hidden origi
       .getAttribute("aria-selected"),
   ).toBe("true");
   fireEvent.click(screen.getByRole("tab", { name: "Space preferences" }));
-  expect(screen.getByRole("radiogroup", { name: labels.hosted_week_label })).toBe(
+  expect(screen.getByRole("radiogroup", { name: labels.field_week_label })).toBe(
     week,
   );
   expect(segmentedValue(week)).toBe("sunday");
@@ -214,8 +214,8 @@ it("keeps the original page mounted while a manual save is pending", async () =>
   vi.mocked(setWorkspaceSetting).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   const close = vi.fn();
   renderIntl(<ClosableSettings target={target} readOnly={false} onClose={close} />, { locale: "en-US" });
-  await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.hosted_week_label }))).toBe(false));
-  const week = screen.getByRole("radiogroup", { name: labels.hosted_week_label });
+  await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.field_week_label }))).toBe(false));
+  const week = screen.getByRole("radiogroup", { name: labels.field_week_label });
   const reads = vi.mocked(getWorkspaceSettings).mock.calls.length;
   chooseSegment(week, "sunday");
   await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledOnce());
@@ -224,7 +224,7 @@ it("keeps the original page mounted while a manual save is pending", async () =>
   await screen.findByText(messages.settings_canvas.save_before_close, { exact: false });
   expect(getWorkspaceSettings).toHaveBeenCalledTimes(reads);
   expect(close).not.toHaveBeenCalled();
-  expect(screen.getByRole("radiogroup", { name: labels.hosted_week_label })).toBe(week);
+  expect(screen.getByRole("radiogroup", { name: labels.field_week_label })).toBe(week);
   // The object closes by itself once the pending write settles; no second click and no dialog.
   await act(async () => finish());
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
@@ -235,8 +235,8 @@ it("reveals the original busy settings object when aggregate navigation is block
   vi.mocked(setWorkspaceSetting).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   const activate = vi.fn();
   renderIntl(<SettingsPageCanvas target={target} readOnly={false} onClose={vi.fn()} onActivate={activate} />, { locale: "en-US" });
-  await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.hosted_week_label }))).toBe(false));
-  chooseSegment(screen.getByRole("radiogroup", { name: labels.hosted_week_label }), "sunday");
+  await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.field_week_label }))).toBe(false));
+  chooseSegment(screen.getByRole("radiogroup", { name: labels.field_week_label }), "sunday");
   await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledOnce());
   await act(async () => { expect(await confirmCanvasNavigation()).toBe(false); });
   expect(activate).toHaveBeenCalledOnce();
@@ -251,18 +251,18 @@ it("rejects an old discard decision after a newer manual edit", async () => {
     vi.mocked(setWorkspaceSetting).mockRejectedValue(new Error("Save failed"));
     const close = vi.fn();
     renderIntl(<ClosableSettings target={target} readOnly={false} onClose={close} />, { locale: "en-US" });
-    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.hosted_week_label }))).toBe(false));
-    const week = screen.getByRole("radiogroup", { name: labels.hosted_week_label });
+    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.field_week_label }))).toBe(false));
+    const week = screen.getByRole("radiogroup", { name: labels.field_week_label });
     chooseSegment(week, "sunday");
     await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledOnce());
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
     await waitFor(() => expect(decisionId).toBeGreaterThan(0));
-    chooseSegment(screen.getByRole("radiogroup", { name: labels.hosted_data_lang_label }), "zh-CN");
+    chooseSegment(screen.getByRole("radiogroup", { name: labels.field_data_lang_label }), "zh-CN");
     await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledTimes(2));
     await act(async () => settleConfirm(decisionId, true));
     expect(close).not.toHaveBeenCalled();
-    expect(screen.getByRole("radiogroup", { name: labels.hosted_week_label })).toBe(week);
+    expect(screen.getByRole("radiogroup", { name: labels.field_week_label })).toBe(week);
   } finally { unsubscribe(); }
 });
 
@@ -280,7 +280,7 @@ it("retains newer manual input while an Agent confirmation awaits its authorized
   try {
     vi.mocked(setWorkspaceSetting).mockRejectedValue(new Error("Save failed"));
     renderIntl(<WorkspaceSettingsCanvasProvider><CaptureBridge /><ClosableSettings target={target} readOnly={false} onClose={close} /></WorkspaceSettingsCanvasProvider>, { locale: "en-US" });
-    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.hosted_week_label }))).toBe(false));
+    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.field_week_label }))).toBe(false));
     const binding = bridge.capture(target);
     bridge.acceptTurn("t_pending", binding);
     const proposal: ConfigLiteProposePayload = {
@@ -293,7 +293,7 @@ it("retains newer manual input while an Agent confirmation awaits its authorized
     let action!: Promise<unknown>;
     act(() => { action = bridge.perform(proposal, "apply").catch((error: unknown) => error); });
     expect(bridge.hasPendingAction(binding.controllerId)).toBe(true);
-    const week = screen.getByRole("radiogroup", { name: labels.hosted_week_label });
+    const week = screen.getByRole("radiogroup", { name: labels.field_week_label });
     chooseSegment(week, "sunday");
     await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledOnce());
     await act(async () => {});
@@ -301,7 +301,7 @@ it("retains newer manual input while an Agent confirmation awaits its authorized
     await screen.findByText(messages.settings_canvas.save_before_close, { exact: false });
     expect(close).not.toHaveBeenCalled();
     expect(decisionId).toBe(0);
-    expect(screen.getByRole("radiogroup", { name: labels.hosted_week_label })).toBe(week);
+    expect(screen.getByRole("radiogroup", { name: labels.field_week_label })).toBe(week);
     await act(async () => {
       finishReview({ ...proposal, owner_user_id: target.userId, status: "proposed" });
       expect(await action).toMatchObject({ code: "local_changes" });
@@ -322,8 +322,8 @@ it("asks with refresh wording, not the close copy, before refreshing over unsave
   try {
     vi.mocked(setWorkspaceSetting).mockRejectedValue(new Error("Save failed"));
     renderIntl(<ClosableSettings target={target} readOnly={false} onClose={vi.fn()} />, { locale: "en-US" });
-    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.hosted_week_label }))).toBe(false));
-    chooseSegment(screen.getByRole("radiogroup", { name: labels.hosted_week_label }), "sunday");
+    await waitFor(() => expect(segmentDisabled(screen.getByRole("radiogroup", { name: labels.field_week_label }))).toBe(false));
+    chooseSegment(screen.getByRole("radiogroup", { name: labels.field_week_label }), "sunday");
     await waitFor(() => expect(setWorkspaceSetting).toHaveBeenCalledOnce());
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: messages.settings_canvas.refresh }));

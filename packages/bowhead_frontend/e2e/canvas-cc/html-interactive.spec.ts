@@ -123,6 +123,7 @@ for (const width of [1280, 390]) {
     try {
       await page.setViewportSize({ width, height });
       await page.request.post(`http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? "18080"}/api/v1/_test/reset`);
+      await page.route("**/api/v1/chat/sessions/*/reference-queue?*", (route) => route.fulfill({ json: { items: [] } }));
       await page.route("**/api/v1/results/capabilities", (route) => route.fulfill({ json: {
         dto_version: 1, workspace: true, complete_list: false, scale_nav: false, max_page_size: 50, interactive_html: true,
       } }));
@@ -155,11 +156,39 @@ for (const width of [1280, 390]) {
       await expect(frame.locator("#total")).toHaveText("14");
       await frame.locator("#tab").click();
       await expect(frame.locator("#detail")).toBeVisible();
+      const mobile = width < 640;
+      const more = page.locator(".result-file-toolbar").getByRole("button", { name: "更多操作", exact: true });
+      const choose = async (name: string, radio = false) => {
+        if (mobile) await more.click();
+        await page.getByRole(mobile ? radio ? "menuitemradio" : "menuitem" : radio ? "radio" : "button", {
+          name,
+          exact: true,
+        }).click();
+      };
+      const outerFrame = page.locator('iframe[title="executive-brief.html"]');
+      const originalFrame = await outerFrame.elementHandle();
+      if (mobile) {
+        await expect(page.locator(".result-file-toolbar")).toHaveCount(1);
+        await expect.poll(async () => (await outerFrame.boundingBox())?.y ?? Infinity).toBeLessThanOrEqual(160);
+        await page.getByRole("tab", { name: "对话", exact: true }).click();
+        await page.getByRole("tab", { name: /^成果/ }).click();
+        expect(await originalFrame!.evaluate((node) => node.isConnected)).toBe(true);
+        await expect(frame.locator("#count")).toHaveText("1");
+        await expect(frame.locator("#total")).toHaveText("14");
+      }
       const trigger = page.getByRole("button", { name: "全屏查看", exact: true });
       await trigger.click();
       const dialog = page.getByRole("dialog", { name: "executive-brief.html", exact: true });
       await expect.poll(() => dialog.boundingBox()).toEqual({ x: 0, y: 0, width, height });
       await expect(frame.locator("#count")).toHaveText("1");
+      if (mobile) {
+        await more.click();
+        await expect(page.getByRole("menuitem", { name: "停止交互", exact: true })).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("menu", { name: "更多操作", exact: true })).toHaveCount(0);
+        await expect(dialog).toBeVisible();
+        await expect(more).toBeFocused();
+      }
       const hostUrl = page.url();
       await frame.getByRole("link", { name: "Jump to section", exact: true }).click();
       await expect(frame.locator("#destination")).toBeInViewport();
@@ -177,30 +206,34 @@ for (const width of [1280, 390]) {
       await frame.locator("#fail").click();
       await expect(page.getByRole("status").filter({ hasText: "页面脚本运行出错" })).toBeVisible();
       await expect(page.locator(".safe-html-preview")).not.toContainText("synthetic-private-detail");
-      await page.getByRole("radio", { name: "静态阅读", exact: true }).click();
+      await choose("静态阅读", true);
       await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveAttribute("sandbox", "");
       const reading = page.frameLocator('iframe[title="executive-brief.html"]');
       await reading.getByRole("link", { name: "Jump to section", exact: true }).click();
       await expect(reading.locator("#destination")).toBeInViewport();
       expect(await reading.locator("body").evaluate((body) => body.ownerDocument.URL)).toBe("about:srcdoc#destination");
       expect(page.url()).toBe(hostUrl);
-      await page.getByRole("radio", { name: "交互", exact: true }).click();
+      await choose("交互", true);
       await expect(frame.locator("#count")).toHaveText("0");
-      await page.getByRole("button", { name: "停止交互", exact: true }).click();
+      await choose("停止交互");
       await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveCount(0);
-      await page.getByRole("button", { name: "重新启动交互", exact: true }).click();
+      await choose("重新启动交互");
       await expect(frame.locator("#count")).toHaveText("0");
       const complex = "<div>".repeat(150) + "Complex fixture" + "</div>".repeat(150);
       await page.route("**/api/v1/sessions/*/artifacts/art_delivery/content", (route) => route.fulfill({ contentType: "text/html", body: complex }));
-      await page.getByRole("button", { name: "重新加载", exact: true }).click();
+      await choose("重新加载");
       await expect(page.getByRole("alert").filter({ hasText: "超出预览复杂度" })).toBeVisible({ timeout: 15000 });
       await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveCount(0);
-      const downloaded = page.waitForEvent("download");
-      const downloadHref = await page.locator("a.result-object-action-primary").getAttribute("href");
+      if (mobile) await more.click();
+      const downloadAction = mobile
+        ? page.getByRole("menuitem", { name: "下载", exact: true })
+        : page.locator("a.result-object-action-primary");
+      const downloadHref = await downloadAction.getAttribute("href");
       expect(downloadHref).not.toBeNull();
-      await page.goto(new URL(downloadHref!, page.url()).href).catch((error: Error) => {
-        if (!/download|aborted|interrupted/i.test(error.message)) throw error;
-      });
+      const downloaded = page.waitForEvent("download");
+      // WebKit may deliver target=_blank downloads on a popup rather than the opener.
+      await downloadAction.evaluate((node) => node.removeAttribute("target"));
+      await downloadAction.click();
       const path = await (await downloaded).path();
       expect(path).not.toBeNull();
       expect(await readFile(path!, "utf8")).toBe(fixture);

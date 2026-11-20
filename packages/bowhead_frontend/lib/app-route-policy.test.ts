@@ -18,7 +18,7 @@ describe("appRoutePolicy", () => {
     },
   );
 
-  it.each(["/empty-workspace/", "/onboarding/profile/"])(
+  it.each(["/empty-workspace/", "/files/view/", "/onboarding/profile/"])(
     "uses the protected standalone surface for %s",
     (pathname) => {
       expect(appRoutePolicy(pathname)).toEqual({

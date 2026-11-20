@@ -509,14 +509,6 @@
 .personal-mcp-server > header > div {
   min-width: 0;
 }
-.personal-mcp-server > header span {
-  display: block;
-  color: var(--c-accent);
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
 .personal-mcp-server h4 {
   margin: 2px 0 0;
   font-size: 0.8125rem;
@@ -562,12 +554,61 @@
   margin-top: 2px;
 }
 .personal-mcp-binding-empty {
-  padding: 12px;
-  color: var(--c-ink-3);
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 18px 0;
+  max-width: 48rem;
+  border-block: 1px solid var(--c-line);
+}
+.personal-mcp-binding-empty h3 {
+  margin: 0 0 4px;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.personal-mcp-binding-empty p {
+  max-width: 52ch;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root .personal-mcp-agent-bindings .personal-mcp-binding-empty .settings-button,
+.personal-mcp-binding-list summary {
+  min-height: 44px;
+}
+.personal-mcp-binding-list {
+  border-top: 1px solid var(--c-line);
+}
+.personal-mcp-binding-list > details {
+  border-bottom: 1px solid var(--c-line);
+}
+.personal-mcp-binding-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 6px;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.personal-mcp-binding-list summary::-webkit-details-marker {
+  display: none;
+}
+.personal-mcp-binding-list summary:hover {
   background: var(--c-surface-2);
-  border: var(--border-w, 1px) dashed var(--c-line);
-  border-radius: var(--r-1);
-  font-size: 0.75rem;
+}
+.personal-mcp-binding-list summary:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: -2px;
+}
+.personal-mcp-binding-list details[open] > summary svg {
+  transform: rotate(180deg);
+}
+.personal-mcp-binding-list details > fieldset {
+  margin-block: 4px 16px;
 }
 .personal-mcp-missing-tools {
   display: grid;

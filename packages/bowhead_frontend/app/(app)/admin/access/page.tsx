@@ -3,6 +3,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { AccessField as Field, RESOURCE_KINDS, ResourceGrantForm, permissionsForResource } from "@/components/admin/access/resource-grant-form";
 import { AdminShell } from "@/components/admin-shell";
 import { ErrorDiagnosticsInline, type ShownError, shownError } from "@/components/error-notice";
 import { AdminRouteState } from "@/components/shell/AdminRouteState";
@@ -19,7 +20,6 @@ import {
   type ResourceGrant,
   addGroupMember,
   createAccessGroup,
-  createResourceGrant,
   explainPermission,
   fetchAccessGroups,
   fetchGroupMembers,
@@ -29,29 +29,6 @@ import {
 } from "@/lib/admin-access-api";
 import { useAuthRedirect } from "@/lib/auth/use-auth-redirect";
 import { keepFocusAfterRemoval } from "@/lib/focus-after-removal";
-
-const RESOURCE_KINDS = [
-  "kb_scope",
-  "kb_file",
-  "skill",
-  "team_skill",
-  "team_tool_source",
-  "team_tool_op",
-  "builtin_capability",
-  "tool",
-];
-const PRINCIPAL_TYPES = ["user", "group", "workspace", "team"];
-const PERMISSIONS = ["view", "read", "use", "invoke", "edit", "write", "manage", "share", "admin"];
-const SKILL_RESOURCE_KINDS = new Set(["skill", "team_skill"]);
-const BUILTIN_CAPABILITIES = [
-  "kb_search",
-  "skill_invoke",
-  "web_search",
-  "web_fetch",
-  "export",
-  "python_sandbox",
-  "subagent",
-];
 
 // Original inline compactInput / actionButton styles moved to legacy classes (styles/ui-controls-legacy.css “逐页验收 B”);
 // Inputs and buttons use the batch-1 appearance (styles/ui-refresh-pages-admin.css).
@@ -116,25 +93,6 @@ function resourcePlaceholder(kind: string, t: TFn): string {
   return t("ph_resource_id");
 }
 
-function permissionsForResource(kind: string): string[] {
-  return SKILL_RESOURCE_KINDS.has(kind) ? PERMISSIONS : PERMISSIONS.filter((permission) => permission !== "invoke");
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="access-field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
 export default function AdminAccessPage() {
   const t = useTranslations("admin.access");
   // Localize reasons from status and known backend detail; status/error codes and request ID go only into diagnostics.
@@ -182,15 +140,6 @@ export default function AdminAccessPage() {
     workspace_id: "",
   });
   const [memberForm, setMemberForm] = useState({ user_id: "", role: "member" });
-  const [grantForm, setGrantForm] = useState({
-    resource_kind: "kb_scope",
-    resource_id: "",
-    principal_type: "group",
-    principal_id: "",
-    permission: "read",
-    effect: "allow",
-    expires_at: "",
-  });
   const [explainForm, setExplainForm] = useState({
     workspace_id: "",
     resource_kind: "kb_scope",
@@ -273,23 +222,6 @@ export default function AdminAccessPage() {
         role: memberForm.role,
       });
       setMemberForm({ user_id: "", role: "member" });
-      reload();
-    } catch (err) {
-      showFailure(err);
-    }
-  }
-
-  async function onCreateGrant(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await createResourceGrant({
-        ...grantForm,
-        resource_id: grantForm.resource_id.trim(),
-        principal_id: grantForm.principal_id.trim(),
-        expires_at: grantForm.expires_at.trim() || null,
-      });
-      setGrantForm((f) => ({ ...f, resource_id: "", principal_id: "", expires_at: "" }));
       reload();
     } catch (err) {
       showFailure(err);
@@ -487,72 +419,8 @@ export default function AdminAccessPage() {
             <h2 ref={grantsHeadingRef} tabIndex={-1}>{t("resource_grants")}</h2>
             <span>{grants.length}</span>
           </div>
-          <form className="grant-form" onSubmit={onCreateGrant}>
-            <select
-              className={INPUT_CLASS}
-              value={grantForm.resource_kind}
-              onChange={(e) => {
-                const resourceKind = e.target.value;
-                setGrantForm((f) => ({
-                  ...f,
-                  resource_kind: resourceKind,
-                  permission: f.permission === "invoke" && !SKILL_RESOURCE_KINDS.has(resourceKind) ? "use" : f.permission,
-                }));
-              }}
-            >
-              {RESOURCE_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-            <input
-              required
-              className={INPUT_CLASS}
-              placeholder="resource_id"
-              title={resourcePlaceholder(grantForm.resource_kind, t)}
-              list={grantForm.resource_kind === "builtin_capability" ? "builtin-capability-options" : undefined}
-              value={grantForm.resource_id}
-              onChange={(e) => setGrantForm((f) => ({ ...f, resource_id: e.target.value }))}
-            />
-            <datalist id="builtin-capability-options">
-              {BUILTIN_CAPABILITIES.map((capability) => (
-                <option key={capability} value={capability} />
-              ))}
-            </datalist>
-            <select
-              className={INPUT_CLASS}
-              value={grantForm.principal_type}
-              onChange={(e) => setGrantForm((f) => ({ ...f, principal_type: e.target.value }))}
-            >
-              {PRINCIPAL_TYPES.map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-            <input
-              required
-              className={INPUT_CLASS}
-              placeholder="principal_id"
-              value={grantForm.principal_id}
-              onChange={(e) => setGrantForm((f) => ({ ...f, principal_id: e.target.value }))}
-            />
-            <select
-              className={INPUT_CLASS}
-              value={grantForm.permission}
-              onChange={(e) => setGrantForm((f) => ({ ...f, permission: e.target.value }))}
-            >
-              {permissionsForResource(grantForm.resource_kind).map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-            <select
-              className={INPUT_CLASS}
-              value={grantForm.effect}
-              onChange={(e) => setGrantForm((f) => ({ ...f, effect: e.target.value }))}
-            >
-              <option value="allow">{t("effect_allow")}</option>
-              <option value="deny">{t("effect_deny")}</option>
-            </select>
-            <input
-              className={INPUT_CLASS}
-              placeholder="expires_at"
-              value={grantForm.expires_at}
-              onChange={(e) => setGrantForm((f) => ({ ...f, expires_at: e.target.value }))}
-            />
-            <button type="submit" className={BUTTON_CLASS}>{t("save")}</button>
-          </form>
+          {auth.me ? <ResourceGrantForm key={`${auth.me.team_id}:${auth.me.id}`} me={auth.me} groups={groups}
+            onStart={() => setError(null)} onSaved={reload} onError={showFailure} /> : null}
           <div className="access-table-wrap ui-table-frame">
             {listLayout ? (
               <ListRows label={t("resource_grants")} className="access-list-rows">
@@ -649,7 +517,7 @@ export default function AdminAccessPage() {
                 setExplainForm((f) => ({
                   ...f,
                   resource_kind: resourceKind,
-                  permission: f.permission === "invoke" && !SKILL_RESOURCE_KINDS.has(resourceKind) ? "use" : f.permission,
+                  permission: f.permission === "invoke" && !permissionsForResource(resourceKind).includes("invoke") ? "use" : f.permission,
                 }));
               }}
             >

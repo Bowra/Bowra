@@ -211,6 +211,21 @@ class _ResponsesStreamState:
     upstream_finish_reason: str | None = None
     incomplete_reason: str | None = None
     reasoning_tokens: int | None = None
+    # `phase` of each message item, from `output_item.done`; replaced by the terminal frame's full output.
+    output_phases: list[str] = field(default_factory=list)
+
+
+def _output_message_phases(items: object) -> list[str]:
+    """Phase of every assistant message item; `unlabeled` when the provider sent none."""
+
+    if not isinstance(items, list):
+        return []
+    return [_output_message_phase(item) for item in items if isinstance(item, dict) and item.get("type") == "message"]
+
+
+def _output_message_phase(item: dict[str, Any]) -> str:
+    phase = item.get("phase")
+    return phase if phase in {"commentary", "final_answer"} else "unlabeled"
 
 
 @dataclass
@@ -969,6 +984,7 @@ class OpenAICompatibleAdapter:
                             incomplete_reason=responses_state.incomplete_reason if responses_surface else None,
                             reasoning_tokens=responses_state.reasoning_tokens if responses_surface else reasoning_tokens,
                             output_token_limit=_output_token_limit(body),
+                            output_phases=tuple(responses_state.output_phases) if responses_surface else None,
                         ),
                     )
                     return  # χ-1.1: stream consumed OK, don't retry the outer for
@@ -1680,6 +1696,8 @@ class OpenAICompatibleAdapter:
             return []
         if etype == "response.output_item.done":
             item = obj.get("item")
+            if isinstance(item, dict) and item.get("type") == "message":
+                state.output_phases.append(_output_message_phase(item))
             if not (isinstance(item, dict) and item.get("type") == "function_call"):
                 return []
             item_id = str(item.get("id") or "")
@@ -1729,6 +1747,9 @@ class OpenAICompatibleAdapter:
                     **upstream_error_fields_from_payload(payload),
                 )
             state.upstream_finish_reason = resp_obj.get("status") or etype.removeprefix("response.")
+            if isinstance(resp_obj.get("output"), list) and resp_obj["output"]:
+                # The terminal frame carries the full output; it outranks per-item frames a provider may omit.
+                state.output_phases = _output_message_phases(resp_obj["output"])
             usage_raw = resp_obj.get("usage")
             state.reasoning_tokens = _reasoning_tokens(usage_raw, "output_tokens_details")
             if durable_usage and isinstance(usage_raw, dict):
@@ -1876,6 +1897,7 @@ class OpenAICompatibleAdapter:
                 upstream_finish_reason=status,
                 incomplete_reason=incomplete_reason or None,
                 reasoning_tokens=_reasoning_tokens(usage_raw, "output_tokens_details"),
+                output_phases=tuple(_output_message_phases(output)),
             ),
         )
 

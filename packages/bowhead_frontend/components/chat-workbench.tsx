@@ -758,6 +758,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   });
   // Export records also open from the export-progress notice (without the export menu); closing returns focus to `导出`.
   const exportButtonRef = useRef<HTMLButtonElement>(null);
+  const artifactHistoryTriggerRef = useRef<HTMLElement | null>(null);
   const exportTriggerRef = useMergeRefs([exportButtonRef, exportMenu.refs.setReference]);
   useEffect(() => {
     if (selectedTab === "report") return;
@@ -2798,7 +2799,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     });
     navigateToResult(item.route);
     if (isResultsMobile) {
-      requestAnimationFrame(() => resultsMobileBackRef.current?.focus());
+      requestAnimationFrame(() => (resultsMobileBackRef.current ?? resultsCurrentTitleRef.current)?.focus());
     }
   }, [isResultsMobile, navigateToResult]);
   const recordResultOpenFailure = useCallback((errorClass: ResultsWorkspaceErrorClass) => {
@@ -2881,6 +2882,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             resultsWorkspaceEnabled
             && !resultsCapabilities.scaleNav
             && isResultsMobile
+            && !(selectedTab === "data" && dataFocusArtifactId)
             && !(resultsChooserAvailable && selectedTab === "report")
           ) {
             trackResultsWorkspace({
@@ -2973,6 +2975,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                   the composer, OUTSIDE the BotTurn scroll body. */}
               <TurnStream
                 runner={runner}
+                clarificationDraftScope={readOnly || reportOnly ? null : draftPersistenceScope}
                 onSend={sendAndFollow}
                 onContinue={readOnly || reportOnly ? undefined : onContinue}
                 onSolidify={onSolidify}
@@ -3188,6 +3191,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   };
   const reportCanEditFromMenu = reportPhoneReading && Boolean(canvas.canvasId) && !readOnly && !reportOnly;
   const reportWritingHintId = useId();
+  const openExportsHistory = (trigger?: HTMLElement) => {
+    artifactHistoryTriggerRef.current = trigger ?? null;
+    setExportsDrawerOpen(true);
+  };
   const reportExportAction = (
     <div className="ws-menu-wrap">
       <button
@@ -3207,13 +3214,11 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         menu={exportMenu}
         busy={exportBusy}
         onPick={triggerExport}
-        onOpenHistory={() => setExportsDrawerOpen(true)}
+        onOpenHistory={openExportsHistory}
       />
     </div>
   );
-  // Report Canvas Chrome Spec §§1,2: standalone toolbar share icon opens the existing share dialog;
-  // `复制权限链接` stays in `更多`. Visibility matches that action (report conversation present, not shared read-only);
-  // the sharing API determines audience-edit permission from resource ownership and Team governance.
+  // The share dialog manages access and copies the report link. Read-only owners can copy from More.
   const reportShareAction = canvas.canvasId && reportSessionId && !reportOnly && !readOnly ? (
     <button
       ref={reportShareButtonRef}
@@ -3262,7 +3267,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                 <ExportMenuItems
                   busy={exportBusy}
                   onPick={triggerExport}
-                  onOpenHistory={() => setExportsDrawerOpen(true)}
+                  onOpenHistory={openExportsHistory}
                 />
               </MenuSubmenu>
             )
@@ -3277,7 +3282,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               {t("edit_this_report")}
             </WorkbenchMenuItem>
           ) : null}
-          {reportSessionId && !reportOnly ? (
+          {reportSessionId && readOnly ? (
             <WorkbenchMenuItem onSelect={shareCurrentReport}>
               {t("hdr_copy_perm_link")}
             </WorkbenchMenuItem>
@@ -3455,6 +3460,163 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             ariaLabel: resultsT("back_to_chat"),
           }
         : null;
+  const viewerArtifactError = completeResultsActive
+    ? completeResults.unavailable ? "unavailable" : null
+    : resultArtifactsError;
+  const compactArtifact = resultsWorkspaceEnabled
+    && isResultsMobile
+    && !reportOnly
+    && !canvasObjectOpener
+    && selectedTab === "data"
+    && dataFocusArtifactId
+    && !resultsCapabilityUnresolved
+    && !resultsRouteUnavailable
+    && !resultsMobileListOpen
+    && !viewerArtifactError
+    && (resultsSurface === "viewer" || resultsExplorerDetailOpen)
+    ? viewerArtifactItems?.find((item) => item.id === dataFocusArtifactId)
+    : undefined;
+  const resultsHeadContext = resultsWorkspaceShellEnabled ? (
+    <div className="results-head-context">
+      <button
+        ref={(node) => {
+          resultsTriggerRef.current = node;
+          if (reportUnifiedBar || compactArtifact) resultsCurrentTitleRef.current = node;
+        }}
+        type="button"
+        className={clsx("results-trigger", { "result-file-title": compactArtifact })}
+        disabled={resultsCapabilityUnresolved}
+        title={compactArtifact?.filename ?? (reportUnifiedBar ? resultsCurrentTitle : undefined)}
+        aria-label={compactArtifact ? resultsT("artifact_picker_label", { filename: compactArtifact.filename }) : undefined}
+        aria-haspopup={
+          resultsCapabilities.scaleNav
+            ? "dialog"
+            : isResultsMobile || resultsNavigatorPinned
+              ? undefined
+              : "dialog"
+        }
+        aria-expanded={
+          resultsCapabilities.scaleNav
+            ? resultsNavigatorOpen
+            : isResultsMobile
+            ? resultsMobileListOpen
+            : resultsNavigatorPinned || resultsNavigatorOpen
+        }
+        onClick={() => {
+          if (resultsCapabilityUnresolved) return;
+          resultsInteractionEpochRef.current += 1;
+          setExportMenuOpen(false);
+          setMoreMenuOpen(false);
+          if (resultsCapabilities.scaleNav) {
+            if (resultsNavigatorOpen) closeResultsNavigator();
+            else openResultsQuick();
+            return;
+          }
+          if (isResultsMobile) {
+            if (!resultsMobileListOpen) {
+              trackResultsWorkspace({
+                action: "navigator_opened",
+                entryPoint: "header",
+              });
+            }
+            setResultsMobileListOpen(true);
+          } else if (resultsNavigatorPinned) {
+            setResultsNavigatorPin(false);
+          } else {
+            if (!resultsNavigatorOpen) {
+              trackResultsWorkspace({
+                action: "navigator_opened",
+                entryPoint: "header",
+              });
+            }
+            setResultsNavigatorOpen((open) => !open);
+          }
+        }}
+      >
+        <span>{compactArtifact?.filename ?? resultsT("title")}</span>
+        <Caret aria-hidden />
+      </button>
+      {!resultsCapabilityUnresolved
+      && !resultsCapabilities.scaleNav
+      && isResultsMobile
+      && !resultsMobileListOpen
+      && !reportPhoneBar
+      && !compactArtifact
+      && !resultsChooserSelected ? (
+        <button
+          ref={resultsMobileBackRef}
+          type="button"
+          className="results-mobile-back"
+          onClick={() => {
+            trackResultsWorkspace({
+              action: "navigator_opened",
+              entryPoint: "header",
+            });
+            setResultsMobileListOpen(true);
+          }}
+        >
+          <span aria-hidden><CharIcon ch="←" aria-hidden /></span>
+          {resultsT("back_to_results")}
+        </button>
+      ) : null}
+      {reportPhoneBar || reportUnifiedBar || resultsChooserSelected || compactArtifact ? null : (
+        <strong
+          ref={resultsCurrentTitleRef}
+          className="results-current-title"
+          title={resultsCurrentTitle}
+          tabIndex={-1}
+        >
+          {resultsCurrentTitle}
+        </strong>
+      )}
+      {resultsCapabilities.scaleNav ? (
+        <ResultsQuickSwitcher
+          activeKey={selectedResultKey}
+          authorizedTotal={quickResults.authorizedTotal}
+          compact={
+            isResultsMobile
+            || (resultsPaneWidth > 0 && resultsPaneWidth < 640)
+          }
+          currentKey={selectedResultKey}
+          error={quickResults.error}
+          hasMore={quickResults.hasMore}
+          items={quickResults.items}
+          loading={quickResults.loading}
+          matchedTotal={quickResults.matchedTotal}
+          open={resultsNavigatorOpen}
+          query={resultsQuickQuery}
+          recentKeys={resultsRecentKeys}
+          triggerRef={resultsTriggerRef}
+          onBrowseAll={browseAllResults}
+          onClose={closeResultsNavigator}
+          onQueryChange={setResultsQuickQuery}
+          onRetry={() => { void quickResults.retry(); }}
+          onSelect={selectQuickResult}
+        />
+      ) : !resultsCapabilityUnresolved
+        && !isResultsMobile
+        && !resultsNavigatorPinned ? (
+        <ResultsNavigator
+          items={resultsNavigatorItems}
+          open={resultsNavigatorOpen}
+          query={resultsNavigatorQuery}
+          selection={resultsLookupSelection}
+          canPin={resultsCanPin}
+          listState={resultsNavigatorListState}
+          onPinnedChange={setResultsNavigatorPin}
+          onClose={closeResultsNavigator}
+          onQueryChange={setResultsNavigatorQuery}
+          onSelect={selectResultsObject}
+          onLoadMore={completeResultsActive
+            ? () => { void completeResults.loadMore(); }
+            : undefined}
+          onRetry={completeResultsActive
+            ? () => { void completeResults.retry(); }
+            : retryResultArtifacts}
+        />
+      ) : null}
+    </div>
+  ) : null;
   const dataSurface = (
     <DataTabFiles
       sessionId={reportOnly ? reportSessionId : runner.sessionId}
@@ -3509,11 +3671,21 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       }}
       viewerOnly={resultsWorkspaceEnabled && Boolean(dataFocusArtifactId)}
       artifactItems={resultsWorkspaceEnabled ? viewerArtifactItems : undefined}
-      artifactItemsError={resultsWorkspaceEnabled
-        ? completeResultsActive
-          ? completeResults.unavailable ? "unavailable" : null
-          : resultArtifactsError
-        : undefined}
+      artifactItemsError={resultsWorkspaceEnabled ? viewerArtifactError : undefined}
+      compactToolbar={compactArtifact ? {
+        title: resultsHeadContext,
+        returnActions: [
+          ...(resultsSurface === "explorer" ? [{
+            label: resultsT("explorer_back"),
+            onSelect: returnToExplorer,
+          }] : []),
+          ...(activeSourceReturn ? [{
+            label: activeSourceReturn.label,
+            ariaLabel: activeSourceReturn.ariaLabel,
+            onSelect: returnToOpeningSource,
+          }] : []),
+        ],
+      } : undefined}
       onArtifactItemsRetry={retryViewerArtifactItems}
       onRegenerateExport={readOnly || reportOnly ? undefined : triggerExport}
       onReferenceArtifact={
@@ -3532,9 +3704,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             : "download_current_version")
         : undefined}
       onOpenArtifactHistory={selectedResult?.version
-        ? () => setExportsDrawerOpen(true)
+        ? openExportsHistory
         : selectedResult?.lineage && selectedResult.lineage.count > 1 && selectedResult.stableId && !reportOnly
-          ? () => setFileVersionsArtifactId(selectedResult.stableId)
+          ? (trigger) => {
+              artifactHistoryTriggerRef.current = trigger ?? null;
+              setFileVersionsArtifactId(selectedResult.stableId);
+            }
           : undefined}
       onOpenFailed={recordResultOpenFailure}
     />
@@ -3562,7 +3737,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       </div>
       {!resultsRouteUnavailable && selectedTab === "data" ? (
         <div className="results-object-surface results-object-surface--artifact">
-          {activeSourceReturn ? (
+          {activeSourceReturn && !compactArtifact ? (
             <div className="results-return-context">
               <button
                 type="button"
@@ -3621,146 +3796,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             segmented tabs · export dropdown (folds PDF/PPT/XLS) · fullscreen toggle ·
             collapse-to-chat (desktop) · "更多" menu (history / clear / delete).
             Chrome only — every export/clear/delete/history handler below is verbatim. */}
-        <div className={clsx("v2-ws-right-head", { "results-report-object-toolbar results-report-unified-toolbar": reportUnifiedBar })}>
+        {compactArtifact ? null : <div className={clsx("v2-ws-right-head", { "results-report-object-toolbar results-report-unified-toolbar": reportUnifiedBar })}>
           {canvasObjectOpener ? <span ref={documentOpenerRef}>{canvasObjectOpener}</span> : null}
           {resultsWorkspaceShellEnabled ? (
-            <div className="results-head-context">
-              <button
-                ref={(node) => {
-                  resultsTriggerRef.current = node;
-                  if (reportUnifiedBar) resultsCurrentTitleRef.current = node;
-                }}
-                type="button"
-                className="results-trigger"
-                disabled={resultsCapabilityUnresolved}
-                title={reportUnifiedBar ? resultsCurrentTitle : undefined}
-                aria-haspopup={
-                  resultsCapabilities.scaleNav
-                    ? "dialog"
-                    : isResultsMobile || resultsNavigatorPinned
-                      ? undefined
-                      : "dialog"
-                }
-                aria-expanded={
-                  resultsCapabilities.scaleNav
-                    ? resultsNavigatorOpen
-                    : isResultsMobile
-                    ? resultsMobileListOpen
-                    : resultsNavigatorPinned || resultsNavigatorOpen
-                }
-                onClick={() => {
-                  if (resultsCapabilityUnresolved) return;
-                  resultsInteractionEpochRef.current += 1;
-                  setExportMenuOpen(false);
-                  setMoreMenuOpen(false);
-                  if (resultsCapabilities.scaleNav) {
-                    if (resultsNavigatorOpen) closeResultsNavigator();
-                    else openResultsQuick();
-                    return;
-                  }
-                  if (isResultsMobile) {
-                    if (!resultsMobileListOpen) {
-                      trackResultsWorkspace({
-                        action: "navigator_opened",
-                        entryPoint: "header",
-                      });
-                    }
-                    setResultsMobileListOpen(true);
-                  } else if (resultsNavigatorPinned) {
-                    setResultsNavigatorPin(false);
-                  } else {
-                    if (!resultsNavigatorOpen) {
-                      trackResultsWorkspace({
-                        action: "navigator_opened",
-                        entryPoint: "header",
-                      });
-                    }
-                    setResultsNavigatorOpen((open) => !open);
-                  }
-                }}
-              >
-                <span>{resultsT("title")}</span>
-                <Caret aria-hidden />
-              </button>
-              {!resultsCapabilityUnresolved
-              && !resultsCapabilities.scaleNav
-              && isResultsMobile
-              && !resultsMobileListOpen
-              && !reportPhoneBar
-              && !resultsChooserSelected ? (
-                <button
-                  ref={resultsMobileBackRef}
-                  type="button"
-                  className="results-mobile-back"
-                  onClick={() => {
-                    trackResultsWorkspace({
-                      action: "navigator_opened",
-                      entryPoint: "header",
-                    });
-                    setResultsMobileListOpen(true);
-                  }}
-                >
-                  <span aria-hidden><CharIcon ch="←" aria-hidden /></span>
-                  {resultsT("back_to_results")}
-                </button>
-              ) : null}
-              {reportPhoneBar || reportUnifiedBar || resultsChooserSelected ? null : (
-                <strong
-                  ref={resultsCurrentTitleRef}
-                  className="results-current-title"
-                  title={resultsCurrentTitle}
-                  tabIndex={-1}
-                >
-                  {resultsCurrentTitle}
-                </strong>
-              )}
-              {resultsCapabilities.scaleNav ? (
-                <ResultsQuickSwitcher
-                  activeKey={selectedResultKey}
-                  authorizedTotal={quickResults.authorizedTotal}
-                  compact={
-                    isResultsMobile
-                    || (resultsPaneWidth > 0 && resultsPaneWidth < 640)
-                  }
-                  currentKey={selectedResultKey}
-                  error={quickResults.error}
-                  hasMore={quickResults.hasMore}
-                  items={quickResults.items}
-                  loading={quickResults.loading}
-                  matchedTotal={quickResults.matchedTotal}
-                  open={resultsNavigatorOpen}
-                  query={resultsQuickQuery}
-                  recentKeys={resultsRecentKeys}
-                  triggerRef={resultsTriggerRef}
-                  onBrowseAll={browseAllResults}
-                  onClose={closeResultsNavigator}
-                  onQueryChange={setResultsQuickQuery}
-                  onRetry={() => { void quickResults.retry(); }}
-                  onSelect={selectQuickResult}
-                />
-              ) : !resultsCapabilityUnresolved
-                && !isResultsMobile
-                && !resultsNavigatorPinned ? (
-                <ResultsNavigator
-                  items={resultsNavigatorItems}
-                  open={resultsNavigatorOpen}
-                  query={resultsNavigatorQuery}
-                  selection={resultsLookupSelection}
-                  canPin={resultsCanPin}
-                  listState={resultsNavigatorListState}
-                  onPinnedChange={setResultsNavigatorPin}
-                  onClose={closeResultsNavigator}
-                  onQueryChange={setResultsNavigatorQuery}
-                  onSelect={selectResultsObject}
-                  onLoadMore={completeResultsActive
-                    ? () => { void completeResults.loadMore(); }
-                    : undefined}
-                  onRetry={completeResultsActive
-                    ? () => { void completeResults.retry(); }
-                    : retryResultArtifacts}
-                />
-              ) : null}
-            </div>
+            resultsHeadContext
            ) : (
              <Tabs value={selectedTab} onValueChange={setTab}>
                <TabList appearance="segmented" className="tabs" aria-label={t("tabs_aria")}>
@@ -3819,7 +3858,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           </div>
           {reportUnifiedBar ? reportWritingHint : null}
           {/* click-away: closes whichever header menu is open */}
-        </div>
+        </div>}
         {reportConfirmDialog}
         {reportShareOpen && reportSessionId ? (
           <ShareDialog
@@ -3835,20 +3874,21 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           onDismiss={exportCtl.dismiss}
           onRetry={exportCtl.retry}
           onRetryDefaultTheme={exportCtl.retryWithDefaultTheme}
-          onOpenHistory={() => setExportsDrawerOpen(true)}
+          onOpenHistory={openExportsHistory}
         />
         <FileVersionsDrawer
           sessionId={reportOnly ? null : runner.sessionId}
           artifactId={fileVersionsArtifactId}
           open={fileVersionsArtifactId !== null}
           onClose={() => setFileVersionsArtifactId(null)}
+          returnFocusRef={artifactHistoryTriggerRef.current ? artifactHistoryTriggerRef : undefined}
         />
         <ExportsDrawer
           canvasId={canvas.canvasId}
           open={exportsDrawerOpen}
           onClose={() => setExportsDrawerOpen(false)}
           onRegenerate={readOnly || reportOnly ? undefined : triggerExport}
-          returnFocusRef={exportButtonRef}
+          returnFocusRef={artifactHistoryTriggerRef.current ? artifactHistoryTriggerRef : exportButtonRef}
         />
         <div ref={resultsWorkspaceBodyRef} className="results-workspace-body">
         {resultsWorkspaceEnabled
@@ -3885,7 +3925,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             selection={resultsLookupSelection}
             presentation="mobile"
             listState={resultsNavigatorListState}
-            onClose={() => setResultsMobileListOpen(false)}
+            onClose={() => {
+              setResultsMobileListOpen(false);
+              requestAnimationFrame(() => resultsTriggerRef.current?.focus());
+            }}
             onQueryChange={setResultsNavigatorQuery}
             onSelect={selectResultsObject}
             onLoadMore={completeResultsActive
@@ -3993,9 +4036,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               onSelect={selectExplorerResult}
             />
             <div className="results-explorer-detail" aria-hidden={!resultsExplorerDetailOpen}>
-              <button type="button" className="results-explorer-back" onClick={returnToExplorer}>
+              {compactArtifact ? null : <button type="button" className="results-explorer-back" onClick={returnToExplorer}>
                 <CharIcon ch="←" /> {resultsT("explorer_back")}
-              </button>
+              </button>}
               <div
                 className={resultsViewerBodyClass}
                 ref={reportBodyRef}
@@ -4251,9 +4294,10 @@ export function CodeRunCard({
               type="button"
               className="primary"
               data-results-focus-token={run.outputs[0]!.artifactId}
-              onClick={() => requestCanvasDataFocus(run.outputs[0]!.artifactId, {
-                entryPoint: "code",
-              })}
+              onClick={(event) => {
+                event.currentTarget.focus({ preventScroll: true });
+                requestCanvasDataFocus(run.outputs[0]!.artifactId, { entryPoint: "code" });
+              }}
             >
               {t("code_open_output")}
             </button>
@@ -4275,9 +4319,10 @@ export function CodeRunCard({
               key={output.artifactId}
               type="button"
               data-results-focus-token={output.artifactId}
-              onClick={() => requestCanvasDataFocus(output.artifactId, {
-                entryPoint: "code",
-              })}
+              onClick={(event) => {
+                event.currentTarget.focus({ preventScroll: true });
+                requestCanvasDataFocus(output.artifactId, { entryPoint: "code" });
+              }}
               title={output.filename ?? t("code_output_n", { index: index + 1 })}
             >
               {output.filename ?? t("code_output_n", { index: index + 1 })}

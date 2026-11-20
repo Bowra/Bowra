@@ -15,7 +15,7 @@ from bowhead_router.types import Message, ToolCall
 from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_reference_storage import ReferenceCipher
-from bowhead_core.context_assembly import INCOMPLETE_TURN_MARKERS, build_turn_history
+from bowhead_core.context_assembly import INCOMPLETE_TURN_MARKERS, build_turn_history, has_incomplete_turn_marker
 from bowhead_core.context_dependencies import ContextSourceValidator, validate_context_dependencies
 from bowhead_core.context_ownership import TerminalContextOwner, context_owner, require_context_owner_in_tx
 from bowhead_core.context_segments import MAX_CONTEXT_BYTES
@@ -190,10 +190,7 @@ async def load_conversation_context(ctx) -> ConversationContext:
             else:
                 messages.extend(graph[generation].messages)
         await db.rollback()
-    incomplete = sum(
-        "[clarification_pending:" in message.content or any(marker in message.content for marker in INCOMPLETE_TURN_MARKERS.values())
-        for message in messages
-    )
+    incomplete = sum("[clarification_pending:" in message.content or has_incomplete_turn_marker(message.content) for message in messages)
     byte_count = len(json.dumps([message_record(message) for message in messages], ensure_ascii=False).encode())
     while through < before - 1:
         turns = await store.list_context_history_page(session_id=worker.session_id, after_seq=through, before_seq=before)

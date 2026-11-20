@@ -10,7 +10,7 @@ Edit your display name and save. The email row shows whether the address is veri
 
 Open **Security → Change password** and enter your current and new passwords. A successful change signs out your other devices. Use the reset link if you forgot the password. If your account signs in only through an external provider, manage its password there.
 
-In **Active sessions**, review the signed-in devices and revoke an unfamiliar session from its row menu. **Log out everywhere** signs out the current device too.
+Under **Active sessions**, review the latest recorded activity for each listed device. Logins with the same browser details and network address share a row. Use the row menu to revoke the listed sessions. On the current device, the menu can revoke its other sessions while keeping this session open. **Log out everywhere** signs out the current session too.
 
 ## Appearance
 

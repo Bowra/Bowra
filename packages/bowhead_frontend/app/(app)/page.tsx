@@ -97,9 +97,12 @@ import { SendInitErrorBanner } from "@/components/chat/send-init-error-banner";
 import { SessionLoadingSkeleton } from "@/components/chat/session-loading-skeleton";
 import { useEntitlement } from "@/lib/entitlement-store";
 import {
+  clarificationId,
   resolveLiveClarifications,
   readHydratedClarificationAuthority,
+  TERMINAL_DONE_STATUSES,
 } from "@/lib/hydrate-clarifications";
+import { clearClarificationDraft } from "@/lib/clarification-draft";
 import {
   reconcileHydratedErrorAfterDone,
   resolveHydratedTurnError,
@@ -441,6 +444,10 @@ async function _fetchLastFromTurn(
           if (rid) resolvedClarIds.add(rid);
           break;
         }
+        case "turn.resumed": {
+          clearClarificationDraft(String((p as Record<string, unknown>).request_id ?? ""));
+          break;
+        }
         case "done": {
           // ν2 v2: response_kind is stamped on the done payload by gateway/Lead
           // (use-turn-runner.ts:748). Backfill here so TurnContainer's chat-shape gate
@@ -540,6 +547,10 @@ async function _fetchLastFromTurn(
     const eventCandidates = resolveLiveClarifications({
       clarifications, resolvedClarIds, final, responseKind, lastDoneStatus,
     });
+    for (const requestId of resolvedClarIds) clearClarificationDraft(requestId);
+    if (lastDoneStatus && TERMINAL_DONE_STATUSES.has(lastDoneStatus)) {
+      for (const card of clarifications) clearClarificationDraft(clarificationId(card));
+    }
     let liveClarifications = eventCandidates;
     {
       try {

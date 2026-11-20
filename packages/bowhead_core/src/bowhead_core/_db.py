@@ -59,7 +59,7 @@ from typing import TYPE_CHECKING, Literal
 import aiosqlite
 import anyio
 
-from bowhead_core import sqlite_capacity
+from bowhead_core import sqlite_capacity, sqlite_pool_summary
 from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
 from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_connection
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
@@ -432,8 +432,9 @@ async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[a
 # (and later close) their own. A connection is reused only after its release check
 # passes; a block that raised or was cancelled always closes its connection.
 
-# Idle readers kept per database file.
-_READ_POOL_MAX_IDLE = 4
+# Idle readers kept per database file. Raised from 4 after the hot reads moved onto this pool: on 116
+# (1.7.56, four concurrent Turns) core peaked at 5 readers borrowed at once.
+_READ_POOL_MAX_IDLE = 8
 # Idle read-write connections kept per database file. Must exceed the number of blocks in
 # flight at once: 116 benchmark (real schema) with 16 concurrent blocks and a cap of 8 still
 # paid 53ms CPU per block; with a cap of 32, 32 concurrent blocks cost 0.66ms each.
@@ -506,27 +507,67 @@ async def _open_pooled_reader(path: str) -> aiosqlite.Connection:
     try:
         await execute_and_close(conn, "PRAGMA busy_timeout=5000")
         await execute_and_close(conn, "PRAGMA query_only=ON")
+        await conn._execute(_mark_clean, conn._conn)  # noqa: SLF001 -- on the connection's own thread
     except BaseException:
         await conn.close()
         raise
     return conn
 
 
-def _is_clean_reader(conn: aiosqlite.Connection) -> bool:
-    try:
-        return not conn.in_transaction
-    except ValueError:  # already closed
+def _end_unchanged_transaction(raw: sqlite3.Connection) -> bool:
+    """Runs on the connection's worker. True ⇒ no transaction is left open.
+
+    Many read paths open ``BEGIN`` for one consistent snapshot and leave the block without ending it.
+    Closing the connection would roll that transaction back; when it changed no rows since the connection
+    was last clean, rolling it back here has the same effect on the database and keeps the connection.
+    A transaction that changed rows is never ended here: the connection is closed, as before. On 116
+    (1.7.56) such leftovers closed about 50 execution connections a minute under four Turns.
+    """
+    if not raw.in_transaction:
+        return True
+    if raw.total_changes != getattr(raw, "bowhead_clean_changes", 0):
         return False
+    raw.rollback()
+    return not raw.in_transaction
+
+
+def _holds_authority_state(raw: sqlite3.Connection) -> bool:
+    """Runs on the connection's worker. True ⇒ the connection still holds a cross-file lease or read state.
+
+    A kept connection must hold no authority lease: an idle connection holding core's shared lease would refuse
+    every core writer (Space saves, Plugin writes) until it was borrowed again. Before a leftover transaction was
+    rolled back in place, closing the connection released its leases.
+    """
+    if not isinstance(raw, DomainConnection) or raw._domain is None:  # noqa: SLF001 -- runtime state check
+        return False
+    return bool(raw._leases or raw._lost_lease or raw._active_readers)  # noqa: SLF001 -- runtime state check
+
+
+def _mark_clean(raw: sqlite3.Connection) -> None:
+    """Runs on the connection's worker: the change count a clean connection starts its next borrow with."""
+    raw.bowhead_clean_changes = raw.total_changes
+
+
+def _reader_reset_raw(raw: sqlite3.Connection) -> bool:
+    """Runs on the connection's worker. True ⇒ the read-only connection is as good as fresh."""
+    if not _end_unchanged_transaction(raw):
+        return False
+    raw.row_factory = None
+    raw.text_factory = str
+    reset_domain_connection(raw)  # Release domain snapshots before metadata reuse.
+    clear_diagnostics(raw)
+    if _holds_authority_state(raw):
+        raw.bowhead_not_kept = "held_lease"
+        return False
+    _mark_clean(raw)
+    return True
 
 
 async def _reader_reusable(conn: aiosqlite.Connection) -> bool:
-    if not _is_clean_reader(conn):
+    try:
+        return bool(await conn._execute(_reader_reset_raw, conn._conn))  # noqa: SLF001 -- must run on the connection's own thread
+    except Exception:  # noqa: BLE001 -- a closed reader, or one we cannot reset, is closed instead of reused
         return False
-    conn.row_factory = None
-    conn.text_factory = str
-    await conn._execute(reset_domain_connection, conn._conn)  # noqa: SLF001 -- Release domain snapshots before metadata reuse.
-    await conn._execute(clear_diagnostics, conn._conn)  # noqa: SLF001 -- Reset metadata on the connection worker.
-    return True
 
 
 class _TrackedConnection(DomainConnection):
@@ -580,7 +621,7 @@ def _scrub_raw(raw: sqlite3.Connection) -> bool:
     raw.set_trace_callback(None)
     for cur in list(getattr(raw, "bowhead_cursors", ())):
         cur.close()
-    if raw.in_transaction:
+    if not _end_unchanged_transaction(raw):
         return False
     probe = raw.execute("SELECT 1 FROM temp.sqlite_master LIMIT 1")
     has_temp_objects = probe.fetchone() is not None
@@ -597,6 +638,10 @@ def _scrub_raw(raw: sqlite3.Connection) -> bool:
     raw.isolation_level = ""
     reset_domain_connection(raw)
     clear_diagnostics(raw)
+    if _holds_authority_state(raw):
+        raw.bowhead_not_kept = "held_lease"
+        return False
+    _mark_clean(raw)
     return True
 
 
@@ -617,10 +662,19 @@ async def _open_pooled_shared(path: str) -> aiosqlite.Connection:
         await execute_and_close(conn, "PRAGMA main.synchronous=NORMAL")
         await execute_and_close(conn, "PRAGMA foreign_keys=ON")
         await execute_and_close(conn, "PRAGMA main.secure_delete=ON")
+        await conn._execute(_mark_clean, conn._conn)  # noqa: SLF001 -- on the connection's own thread
     except BaseException:
         await conn.close()
         raise
     return conn
+
+
+def _raw_or_none(conn: aiosqlite.Connection) -> sqlite3.Connection | None:
+    """The wrapped sqlite3 connection, or None once closed. Reads a Python attribute only, never SQLite."""
+    try:
+        return conn._conn  # noqa: SLF001
+    except ValueError:
+        return None
 
 
 @asynccontextmanager
@@ -642,31 +696,65 @@ async def _borrow(
     conn = pool.idle.pop() if pool is not None and pool.idle else None
     if stale:
         await sqlite_capacity.finish_cleanup(_close_all(stale))
+    opened = conn is None
     if conn is None:
         conn = await opener(key)  # type: ignore[misc]
         identity = _file_identity(key)
+    pool_kind = "read" if pools is _read_pools else "shared"
     conn.open_slot.track("borrowed")
     stop_watch = _watch_shared_transaction(conn) if pools is _shared_pools else None
     completed = False
+    # Counted last before the block, so every counted borrow reaches the ``finally`` that counts its return.
+    sqlite_pool_summary.note_borrow(pool_kind, key, opened=opened, max_idle=max_idle)
     try:
         yield conn
         completed = True
     finally:
-        if stop_watch is not None:
-            stop_watch()
+        # Why the connection was not kept idle; None once it went back to the pool. For ``closed_other``,
+        # ``other_reason`` names which release check failed.
+        closed_reason: list[str | None] = ["closed_other"]
+        other_reason: list[str | None] = ["failed_block"]
+        try:
+            if stop_watch is not None:
+                stop_watch()
 
-        async def release() -> None:
-            try:
-                keep = completed and identity is not None and await reusable(conn) and generation == _pool_generation  # type: ignore[misc]
-            except BaseException:
-                await _close_quietly(conn)
-                raise
-            to_close = _release(pools, max_idle, key, identity, conn) if keep else [conn]
-            for old in to_close:
-                await _close_quietly(old)
+            async def release() -> None:
+                try:
+                    if not completed:
+                        other_reason[0] = "failed_block"
+                    elif identity is None:
+                        other_reason[0] = "file_replaced"
+                    elif not await reusable(conn):  # type: ignore[misc]
+                        other_reason[0] = "held_lease" if getattr(_raw_or_none(conn), "bowhead_not_kept", None) == "held_lease" else "not_reusable"
+                    elif generation != _pool_generation:
+                        other_reason[0] = "pools_reset"
+                    else:
+                        other_reason[0] = None
+                except BaseException:
+                    other_reason[0] = "not_reusable"
+                    await _close_quietly(conn)
+                    raise
+                if other_reason[0] is None:
+                    other_reason[0] = "not_reusable"  # Stays only if ``_release`` itself raises.
+                    to_close, closed_reason[0] = _release(pools, max_idle, key, identity, conn)
+                    other_reason[0] = "file_replaced" if closed_reason[0] == "closed_other" else None
+                else:
+                    to_close, closed_reason[0] = [conn], "closed_other"
+                for old in to_close:
+                    await _close_quietly(old)
 
-        # Drain cleanup before propagating either deadline or direct Task cancellation.
-        await sqlite_capacity.finish_cleanup(release())
+            # Drain cleanup before propagating either deadline or direct Task cancellation.
+            await sqlite_capacity.finish_cleanup(release())
+        finally:
+            # Exactly one return per counted borrow, whatever happened above: cancellation inside the
+            # block, a failed release check or a failed release. A connection whose setup failed was
+            # closed by its opener and never counted as borrowed.
+            sqlite_pool_summary.note_return(
+                pool_kind,
+                key,
+                closed_reason=closed_reason[0],
+                other_reason=other_reason[0] if closed_reason[0] == "closed_other" else None,
+            )
 
 
 def _release(
@@ -675,10 +763,13 @@ def _release(
     key: str,
     identity: tuple[int, int] | None,
     conn: aiosqlite.Connection,
-) -> list[aiosqlite.Connection]:
-    """Put ``conn`` back into its pool; list what must be closed instead."""
+) -> tuple[list[aiosqlite.Connection], str | None]:
+    """Put ``conn`` back into its pool; list what must be closed instead, and why ``conn`` was not kept.
+
+    The reason is None when ``conn`` went back to idle, else one of ``sqlite_pool_summary``'s close reasons.
+    """
     if identity is None or _file_identity(key) != identity:
-        return [conn]
+        return [conn], "closed_other"
     to_close: list[aiosqlite.Connection] = []
     pool = pools.get(key)
     if pool is None or pool.identity != identity:
@@ -689,7 +780,14 @@ def _release(
     pools.move_to_end(key)
     combined_idle = sum(len(entry.idle) for registry in (_read_pools, _shared_pools) for entry in registry.values())
     slot = getattr(conn, "open_slot", None)
-    if (slot and slot.reserve_only) or len(pool.idle) >= max_idle or combined_idle >= min(32, max(1, sqlite_capacity.LIMIT // 8)):
+    closed_reason = None
+    if slot and slot.reserve_only:
+        closed_reason = "closed_reserve"
+    elif len(pool.idle) >= max_idle:
+        closed_reason = "closed_per_file_cap"
+    elif combined_idle >= sqlite_capacity.combined_idle_cap():
+        closed_reason = "closed_combined_cap"
+    if closed_reason is not None:
         to_close.append(conn)
     else:
         pool.idle.append(conn)
@@ -697,7 +795,7 @@ def _release(
     while len(pools) > _POOL_MAX_FILES[id(pools)]:
         _evicted_key, evicted = pools.popitem(last=False)
         to_close.extend(evicted.idle)
-    return to_close
+    return to_close, closed_reason
 
 
 @asynccontextmanager

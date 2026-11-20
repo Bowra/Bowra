@@ -48,6 +48,7 @@ import { TurnContainer } from "./TurnContainer";
 afterEach(() => cleanup());
 beforeEach(() => {
   _resetClarificationTombstonesForTest();
+  sessionStorage.clear();
   resolveMock.mockReset();
   resumeMock.mockReset();
   listMock.mockReset();
@@ -118,7 +119,79 @@ const PENDING_MULTI_RELABELED = {
   ],
 };
 
+const DRAFT_SCOPE = {
+  userId: "u_owner", teamId: "team_owner", workspaceId: "ws_owner",
+  requestedSessionId: "s_document", authSessionGeneration: "signed-in-browser",
+};
+
+const DOCUMENT_PAUSE = runner({
+  sessionId: "s_document", turnId: "t_document", terminalStatus: "clarification_pending",
+  clarificationPending: {
+    clarificationId: "c_document", candidates: [], purpose: "document_draft",
+    questions: [
+      { question: "Who is the audience?", options: ["Internal team", "Customers"], type: "single_select" },
+      { question: "What should it cover?", options: [], type: "free_text" },
+    ],
+  },
+});
+
 describe("TurnContainer clarification orchestration", () => {
+  it("restores partial answers and exact custom text after remount, then submits only through Continue", async () => {
+    resolveMock.mockRejectedValueOnce(new TypeError("Network disconnected"))
+      .mockResolvedValueOnce({ action: "turn_settled" });
+    const host = () => <TurnContainer runner={DOCUMENT_PAUSE} clarificationDraftScope={DRAFT_SCOPE} />;
+    const first = render(host());
+    fireEvent.click(screen.getByRole("radio", { name: "Internal team" }));
+    fireEvent.change(screen.getAllByRole("textbox")[1], { target: { value: "  Risks and owners " } });
+    fireEvent.keyDown(screen.getAllByRole("textbox")[1], { key: "Enter" });
+    expect(resolveMock).not.toHaveBeenCalled();
+    first.unmount();
+
+    const reopened = render(host());
+    expect(screen.getByRole("radio", { name: "Internal team" })).toBeChecked();
+    expect(screen.getAllByRole("textbox")[1]).toHaveValue("  Risks and owners ");
+    expect(screen.getByRole("button", { name: "document_continue" })).toBeEnabled();
+    expect(screen.getByTestId("clarification-card")).not.toHaveTextContent("group_unanswered");
+    expect(resolveMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "document_continue" }));
+    await screen.findByRole("button", { name: "retry" });
+    expect(screen.getAllByRole("textbox")[1]).toHaveValue("  Risks and owners ");
+    expect(sessionStorage.length).toBe(1);
+    expect(resumeMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(resolveMock).toHaveBeenLastCalledWith("c_document", {
+      chosen_values: ["Who is the audience?: Internal team", "What should it cover?: Risks and owners"],
+      answers: [
+        { question: "Who is the audience?", answer: "Internal team", source: "candidate", option_index: 0 },
+        { question: "What should it cover?", answer: "Risks and owners", source: "custom" },
+      ],
+    });
+    reopened.unmount();
+  });
+
+  it("keeps the draft private to the original sign-in and form, and clears it after confirmed cancellation", async () => {
+    dismissMock.mockResolvedValue({ dismissed: true });
+    const first = render(<TurnContainer runner={DOCUMENT_PAUSE} clarificationDraftScope={DRAFT_SCOPE} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Internal team" }));
+    first.unmount();
+
+    const other = render(<TurnContainer runner={DOCUMENT_PAUSE} clarificationDraftScope={{
+      ...DRAFT_SCOPE, authSessionGeneration: "other-login",
+    }} />);
+    expect(screen.getByRole("radio", { name: "Internal team" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "document_continue" })).toBeDisabled();
+    other.unmount();
+
+    render(<TurnContainer runner={DOCUMENT_PAUSE} clarificationDraftScope={DRAFT_SCOPE} />);
+    expect(screen.getByRole("radio", { name: "Internal team" })).toBeChecked();
+    expect(screen.getByTestId("clarification-card")).toHaveTextContent("group_unanswered");
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(resolveMock).not.toHaveBeenCalled();
+  });
+
   it("dismisses the native card without resolving or resuming it", async () => {
     dismissMock.mockResolvedValue({ dismissed: true });
     const clear = vi.fn();

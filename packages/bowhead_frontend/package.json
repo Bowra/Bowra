@@ -22,7 +22,8 @@
     "test:e2e:all": "BOWHEAD_E2E_PROFILE=all playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
     "assemble": "node scripts/assemble-edition.mjs",
-    "predev": "npm run assemble",
+    "build:html-preview-transform": "rolldown lib/html-preview-sandbox-entry.ts --format iife --platform browser --minify --file dist/html-preview-transform.js",
+    "predev": "npm run assemble && npm run build:html-preview-transform",
     "pretypecheck": "npm run assemble",
     "pretest": "npm run assemble",
     "pretest:watch": "npm run assemble",
@@ -93,6 +94,7 @@
     "eslint": "^9.16.0",
     "eslint-config-next": "~15.5.28",
     "jsdom": "^29.1.1",
+    "rolldown": "1.2.15",
     "tailwindcss": "^4.0.0-beta.6",
     "typescript": "^5.6.3",
     "vitest": "^4.1.12"

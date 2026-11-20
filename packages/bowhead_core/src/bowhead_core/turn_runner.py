@@ -1745,6 +1745,7 @@ class TurnRunner:
             # Lead emits status="aborted" on asyncio.CancelledError; the
             # legacy turn_runner._finish_cancelled path emits status="cancelled".
             # Both flow through mark_aborted vs. mark_cancelled respectively.
+            unfinished = await self._unfinished_publication(status, turn_id=turn_id)
             if status == "cancelled":
                 return bool(
                     await store.mark_cancelled(
@@ -1755,6 +1756,7 @@ class TurnRunner:
                         tokens_output=int(tokens_output or 0),
                         cost_usd=float(cost_usd or 0.0),
                         error_kind=error_kind,
+                        context_publication=unfinished,
                     )
                 )
             return bool(
@@ -1767,6 +1769,7 @@ class TurnRunner:
                     tokens_output=int(tokens_output or 0),
                     cost_usd=float(cost_usd or 0.0),
                     error_kind=error_kind or "aborted",
+                    context_publication=unfinished,
                 )
             )
         # error / failed / unknown → mark_failed (terminal sink).
@@ -1781,8 +1784,64 @@ class TurnRunner:
                 tokens_input=int(tokens_input or 0),
                 tokens_output=int(tokens_output or 0),
                 cost_usd=float(cost_usd or 0.0),
+                context_publication=await self._unfinished_publication("failed", turn_id=turn_id),
             )
         )
+
+    async def _unfinished_publication(self, status: str, *, turn_id: str, bus: Any = None, owner: Any = None) -> Any:
+        """The Lead's transcript for a Turn that ends without completing, or None.
+
+        Without it the Turn still ends, and the next Turn reads it rebuilt from events.
+        ``owner`` is the stopped owner after a user Stop.
+        """
+        state = getattr(bus if bus is not None else getattr(self, "_summary_bus", None), "__dict__", {})
+        if owner is None:
+            built = state.get("_context_publication")
+            # The Runner returned and the Turn ended afterwards. A maintenance publication has no closing message.
+            if built is not None and getattr(built, "append_answer", True):
+                return built
+        build = state.get("_unfinished_context_publication")
+        if build is None:
+            return None
+        try:
+            return await build(status, owner=owner)
+        except Exception as failure:  # noqa: BLE001 - the ending is written without it
+            logger.warning(
+                "context_publication.unfinished_turn_unavailable turn=%s status=%s condition=%s",
+                turn_id,
+                status,
+                str(failure)[:120] or type(failure).__name__,
+            )
+            return None
+
+    async def _worker_ends_turn(self, turn_id: str) -> bool:
+        """Whether this worker still owns the running Turn, so its own write will end it."""
+        from bowhead_core.document_chat_continuation import DocumentTurnOwner
+
+        worker = getattr(self, "_execution_worker", None)
+        owns = getattr(getattr(self._orch, "session_store", None), "worker_owns_running_turn", None)
+        if not isinstance(worker, DocumentTurnOwner) or not callable(owns):
+            return False
+        try:
+            return bool(await owns(turn_id, worker))
+        except Exception:  # noqa: BLE001 - without the answer the Turn ends without a publication
+            return False
+
+    async def _publish_stopped_turn(self, bus: Any, turn_id: str) -> None:
+        """After a Stop request ended the Turn, publish what the Lead had done. Never raises."""
+        from bowhead_core.context_ownership import StoppedTurnOwner
+        from bowhead_core.document_chat_continuation import DocumentTurnOwner
+
+        worker = getattr(self, "_execution_worker", None)
+        publish = getattr(getattr(self._orch, "session_store", None), "publish_stopped_turn_context", None)
+        if not isinstance(worker, DocumentTurnOwner) or not callable(publish):
+            return
+        try:
+            publication = await self._unfinished_publication("cancelled", turn_id=turn_id, bus=bus, owner=StoppedTurnOwner(**worker.model_dump()))
+            if publication is not None:
+                await publish(turn_id=turn_id, context_publication=publication)
+        except Exception as failure:  # noqa: BLE001 - a stopped Turn stays stopped without it
+            logger.warning("context_publication.unfinished_turn_unavailable turn=%s status=cancelled condition=%s", turn_id, str(failure)[:120])
 
     async def run(self, request: TurnRequest) -> TurnResult:
         """执行一个 turn，emit 事件到 bus，返回聚合结果.
@@ -3254,6 +3313,9 @@ class TurnRunner:
         if orch.session_store is not None and request.session_id:
             try:
                 if terminal_runtime is None:
+                    # A Stop request has usually ended the Turn already; only a worker that
+                    # still ends it itself publishes with the status change.
+                    worker_ends_turn = await self._worker_ends_turn(request.turn_id)
                     terminal_confirmed = bool(
                         await orch.session_store.mark_cancelled(
                             worker=getattr(self, "_execution_worker", None),
@@ -3263,6 +3325,9 @@ class TurnRunner:
                             tokens_output=partial_tokens_out,
                             cost_usd=partial_cost,
                             error_kind="user_cancel",
+                            context_publication=await self._unfinished_publication("cancelled", turn_id=request.turn_id, bus=bus)
+                            if worker_ends_turn
+                            else None,
                         )
                     )
                     if not terminal_confirmed:
@@ -3270,6 +3335,8 @@ class TurnRunner:
                             request.turn_id,
                         )
                         terminal_confirmed = bool(current_turn is not None and current_turn.status == TurnStatus.CANCELLED.value)
+                        if terminal_confirmed:
+                            await self._publish_stopped_turn(bus, request.turn_id)
                         finalize_usage = getattr(
                             orch.session_store,
                             "finalize_cancelled_usage",

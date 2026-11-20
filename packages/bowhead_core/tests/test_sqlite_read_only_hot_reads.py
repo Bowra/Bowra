@@ -57,7 +57,11 @@ async def _hot_reads(artifacts: ArtifactStore, canvases: CanvasStore, artifact_i
 
 @contextmanager
 def _core_lease_held(core: str):
-    """Hold core's exclusive authority lease the way a Space save does (a fenced ``revision`` update)."""
+    """Hold core's exclusive authority lease with a fenced core update (a Space ``status`` change).
+
+    0230 unfenced ``workspaces.revision``/name/description, so a metadata save no longer takes the lease; the
+    holder asserts it really holds core exclusively, so this helper cannot silently stop contending.
+    """
     held, release = threading.Event(), threading.Event()
     failure: list[BaseException] = []
 
@@ -65,7 +69,8 @@ def _core_lease_held(core: str):
         try:
             with connect_sync(core) as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                conn.execute("UPDATE workspaces SET revision=revision+1 WHERE id='ws_1'").close()
+                conn.execute("UPDATE workspaces SET status=CASE status WHEN 'active' THEN 'archived' ELSE 'active' END WHERE id='ws_1'").close()
+                assert conn._leases.get("core") == 2, conn._leases
                 held.set()
                 release.wait(30)
                 conn.rollback()

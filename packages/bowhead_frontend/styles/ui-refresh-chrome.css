@@ -220,6 +220,25 @@
 :root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle)[aria-expanded="true"] > svg {
   transform: none;
 }
+:root:root :is(.unified-sidebar-nav-item, .unified-drawer-nav-item).unified-nav-disclosure {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+:root:root .unified-nav-disclosure-caret {
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-inline-start: auto;
+  margin-inline-end: 5px;
+  color: var(--c-ink-3);
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast, 120ms) var(--ease-standard, ease);
+}
+:root:root [aria-expanded="true"] > .unified-nav-disclosure-caret {
+  transform: none;
+}
 /* Child rows: no guide line; text aligns with the parent's label (8 padding + 16 icon + 8 gap = 32) */
 :root:root :is(.unified-sidebar-subnav, .unified-drawer-subnav) {
   margin: 1px 0 0;

@@ -10,7 +10,7 @@
 
 Wählen Sie **Sicherheit → Passwort ändern** und geben Sie das aktuelle und das neue Passwort ein. Die Änderung meldet andere Geräte ab. Wenn Sie das Passwort vergessen haben, verwenden Sie den Link zum Zurücksetzen. Bei reiner Anmeldung über einen externen Anbieter verwalten Sie das Passwort dort.
 
-Unter **Aktive Sitzungen** können Sie angemeldete Geräte prüfen und eine unbekannte Sitzung über ihr Zeilenmenü widerrufen. Beim Abmelden auf allen Geräten wird auch das aktuelle Gerät abgemeldet.
+Unter **Aktive Sitzungen** sehen Sie die letzte erfasste Aktivität je Gerät. Anmeldungen mit gleichen Browserdaten und gleicher Netzwerkadresse teilen eine Zeile. Im Zeilenmenü können Sie diese Sitzungen widerrufen. Auf dem aktuellen Gerät bleibt die aktuelle Sitzung dabei geöffnet. Eine Abmeldung auf allen Geräten schließt sie ebenfalls.
 
 ## Darstellung
 

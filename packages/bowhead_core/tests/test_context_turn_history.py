@@ -1720,3 +1720,43 @@ async def test_gate_ignores_handler_rejected_spawns_and_has_a_kill_switch(
     out = await gate(claim, "lead", [rejected, failed])
     # `_req` carries no language context → English directive.
     assert out and "delivered nothing" in out, "rejected spawns do not count as dispatched; the rest all failed ⇒ bounce"
+
+
+def test_tool_failures_are_grouped_in_first_seen_order_and_cut_at_a_character_boundary() -> None:
+    from bowhead_core.context_assembly import TOOL_FAILURES_LABEL, TOOL_FAILURES_MAX_BYTES, render_spawn_result, render_tool_failures
+
+    assert render_tool_failures([]) == ""
+    assert render_tool_failures([("bi_query", "boom"), ("web_fetch", "timeout"), ("bi_query", "boom"), ("bi_query", "other")]) == (
+        "bi_query ×2: boom; web_fetch ×1: timeout; bi_query ×1: other"
+    )
+    # Line breaks inside one error do not split the line.
+    assert render_tool_failures([("python_sandbox", "Traceback:\n  File x\nValueError")]) == "python_sandbox ×1: Traceback: File x ValueError"
+    long = render_tool_failures([("bi_query", "下载数据失败" * 2000)])
+    assert len(long.encode()) <= TOOL_FAILURES_MAX_BYTES and long.endswith("…")
+    long.encode().decode()  # a cut inside a character would not round-trip
+    record = SimpleNamespace(status="failed", child_tool_count=3, synthesized=True, tool_failures=(("bi_query", "下载数据失败" * 2000),))
+    part = render_spawn_result(record).split("｜")[-1]
+    assert part.startswith(TOOL_FAILURES_LABEL) and len(part.encode()) <= TOOL_FAILURES_MAX_BYTES
+    # No failed call, no part.
+    assert "Helper tool failures" not in render_spawn_result(SimpleNamespace(status="cancelled", child_tool_count=1, synthesized=True))
+
+
+def test_a_task_known_only_from_its_preview_says_so() -> None:
+    from bowhead_core.context_assembly import TASK_TRUNCATION_NOTE, render_spawn_arguments
+
+    preview = "t" * 200
+    assert (
+        render_spawn_arguments(SimpleNamespace(profile="compute", rationale="", task=preview, task_truncated=True))["task"]
+        == preview + TASK_TRUNCATION_NOTE
+    )
+    assert render_spawn_arguments(SimpleNamespace(profile="compute", rationale="", task=preview))["task"] == preview
+
+
+def test_an_unfinished_marker_is_recognized_with_and_without_a_failure_code() -> None:
+    from bowhead_core.context_assembly import has_incomplete_turn_marker, incomplete_turn_marker
+
+    assert has_incomplete_turn_marker(incomplete_turn_marker("failed", "lead_internal_error"))
+    assert has_incomplete_turn_marker(incomplete_turn_marker("failed"))
+    assert has_incomplete_turn_marker(incomplete_turn_marker("cancelled"))
+    assert has_incomplete_turn_marker(incomplete_turn_marker("aborted"))
+    assert not has_incomplete_turn_marker("The Turn completed.")

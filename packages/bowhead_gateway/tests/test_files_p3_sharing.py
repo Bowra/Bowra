@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING
 import pytest
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+from bowhead_core.notification_service import NotificationService
+from bowhead_core.notification_store import NotificationStore
 from bowhead_core.session_store import SessionStore
+from bowhead_core.share_service import reset_content_sharing_cache
+from bowhead_core.user_store import UserStore
 from bowhead_gateway.files_sharing import (
     ARTIFACT_RESOURCE_KIND,
     ShareRejected,
@@ -455,7 +459,7 @@ async def test_disabled_file_sharing_suspends_reads_and_preserves_owner_revocati
     assert client.get(path, headers=_H_PEER).status_code == 404
 
 
-async def _versioned_file(store: ArtifactStore):
+async def _versioned_file(store: ArtifactStore, *, owner_id: str = _OWNER, workspace_id: str = _WS):
     """A deliverable with the 0228 version columns (the frozen legacy layout lacks them)."""
     from importlib import import_module
 
@@ -471,7 +475,7 @@ async def _versioned_file(store: ArtifactStore):
         await db.commit()
     store._version_cols_present = None
     sessions = SessionStore(store.db_path)
-    await sessions.ensure_session(session_id="s_v", workspace_id=_WS, user_id=_OWNER)
+    await sessions.ensure_session(session_id="s_v", workspace_id=workspace_id, user_id=owner_id)
     for turn in ("t1", "t2", "t3", "t4", "t5", "t6", "t7"):
         await sessions.record_turn(turn_id=turn, session_id="s_v", user_text="revise the report")
         await sessions.mark_completed(turn_id=turn, intent=None, final_answer="done", tokens_input=0, tokens_output=0, cost_usd=0.0)
@@ -480,10 +484,163 @@ async def _versioned_file(store: ArtifactStore):
     async def version(turn: str, target: str | None = None):
         return await store.put_bytes(
             content=f"<html>{turn}</html>".encode(), filename="report.html", mime="text/html", source="python_sandbox",
-            kind="deliverable", created_by=_OWNER, created_by_turn=turn, session_id="s_v", workspace_id=_WS, version_of_target=target,
+            kind="deliverable", created_by=owner_id, created_by_turn=turn, session_id="s_v", workspace_id=workspace_id, version_of_target=target,
         )  # fmt: skip
 
     return version
+
+
+async def test_html_share_is_file_scoped_and_tracks_version_and_audience(app_client, monkeypatch) -> None:
+    client, store, access = app_client
+    users = UserStore(store.db_path)
+    await users.initialize()
+    team = await users.create_team(name="File Sharing Team", max_seats=6)
+    foreign_team = await users.create_team(name="Foreign Team", max_seats=6)
+    owner = await users.create_user(team_id=team.id, email="owner@example.test", password="Passw0rd!")
+    recipient = await users.create_user(team_id=team.id, email="reader@example.test", password="Passw0rd!")
+    stranger = await users.create_user(team_id=foreign_team.id, email="stranger@example.test", password="Passw0rd!")
+    workspace = await users.create_local_workspace(team_id=team.id, name="Source", creator_user_id=owner.id)
+
+    class EmptyKnowledgeBase:
+        async def artifact_ids_in_kb(self, artifact_ids: list[str]) -> set[str]:
+            return set()
+
+    client.app.state.user_store = users
+    client.app.state.session_store = SessionStore(store.db_path)
+    client.app.state.kb_files_store = EmptyKnowledgeBase()
+    notifications = NotificationStore(db_path=store.db_path)
+    await notifications.initialize()
+    client.app.state.notification_service = NotificationService(store=notifications, user_store=users)
+    version = await _versioned_file(store, owner_id=owner.id, workspace_id=workspace)
+    first = await version("t1")
+    files = "/api/v1/files"
+    manage = f"{files}/{first.id}/share"
+    view = f"{files}/shared/{first.lineage_root}/view"
+    content = f"{files}/shared/{first.lineage_root}/content"
+    owner_headers = {"X-Bowhead-User-Id": owner.id, "X-Space-Id": workspace}
+    recipient_headers = {"X-Bowhead-User-Id": recipient.id}
+    stranger_headers = {"X-Bowhead-User-Id": stranger.id}
+    member = {"subject_kind": "user", "subject_id": recipient.id}
+
+    assert client.get(view, headers=recipient_headers).status_code == 404
+    assert client.post(manage, json=member, headers=recipient_headers).status_code == 404
+    assert client.post(manage, json={"subject_kind": "user"}, headers=owner_headers).status_code == 422
+    assert client.post(manage, json={**member, "subject_id": stranger.id}, headers=owner_headers).status_code == 422
+    assert (await notifications.list_for_user(user_id=recipient.id))[0] == []
+    granted = client.post(manage, json=member, headers=owner_headers)
+    assert granted.status_code == 201, granted.text
+    recipient_items, _ = await notifications.list_for_user(user_id=recipient.id)
+    [notice] = recipient_items
+    assert notice.type == "content_shared"
+    assert notice.action_url == f"/files/view/?file={first.lineage_root}"
+    assert notice.metadata["resourceLabel"] == first.filename
+    assert (await notifications.list_for_user(user_id=owner.id))[0] == []
+    assert (await notifications.list_for_user(user_id=stranger.id))[0] == []
+    await notifications.mark_read(notification_id=notice.id, user_id=recipient.id)
+    assert client.get(view, headers=recipient_headers).json()["version_id"] == first.id
+    assert client.get(view, headers=stranger_headers).status_code == 404
+    assert client.get(f"{files}/{first.id}", headers=recipient_headers).status_code == 404
+
+    second = await version("t2", first.id)
+    assert client.post(f"{files}/{second.id}/share", json=member, headers=owner_headers).status_code == 201
+    assert len(await access.list_resource_grants(team.id, resource_kind=ARTIFACT_RESOURCE_KIND)) == 1
+    [same_notice], _ = await notifications.list_for_user(user_id=recipient.id)
+    assert same_notice.id == notice.id and same_notice.read_at is not None
+    manifest = client.get(view, headers=recipient_headers)
+    assert manifest.headers["cache-control"] == "private, no-store"
+    assert manifest.json()["version_id"] == second.id
+    assert client.get(content, params={"version_id": first.id}, headers=recipient_headers).status_code == 409
+    loaded = client.get(content, params={"version_id": second.id}, headers=recipient_headers)
+    assert loaded.content == b"<html>t2</html>"
+    assert loaded.headers["content-disposition"].startswith("attachment")
+    assert loaded.headers["content-security-policy"].startswith("sandbox;")
+
+    with monkeypatch.context() as disabled:
+        disabled.setenv("BOWHEAD_CONTENT_SHARING", "0")
+        reset_content_sharing_cache()
+        try:
+            assert client.get(view, headers=recipient_headers).status_code == 404
+            assert client.get(view, headers=owner_headers).status_code == 200
+            owner_state = client.get(f"{files}/{second.id}/shares?html=true", headers=owner_headers).json()
+            assert owner_state["sharing_enabled"] is False
+            assert owner_state["shares"][0]["subject_id"] == recipient.id
+            assert client.delete(f"{files}/{second.id}/share/user/{recipient.id}", headers=owner_headers).status_code == 204
+        finally:
+            reset_content_sharing_cache()
+
+    revoked = client.get(content, params={"version_id": second.id}, headers={**recipient_headers, "Range": "bytes=0-1"})
+    assert revoked.status_code == 404
+    assert revoked.headers["cache-control"] == "private, no-store"
+    assert len((await notifications.list_for_user(user_id=recipient.id))[0]) == 1
+    assert client.post(f"{files}/{second.id}/share", json=member, headers=owner_headers).status_code == 201
+    notifications_after_reshare, _ = await notifications.list_for_user(user_id=recipient.id)
+    assert len(notifications_after_reshare) == 2
+    assert {item.action_url for item in notifications_after_reshare} == {notice.action_url}
+
+    other = await users.create_user(team_id=team.id, email="another-reader@example.test", password="Passw0rd!")
+    late = await users.create_user(team_id=team.id, email="late-reader@example.test", password="Passw0rd!")
+    other_headers = {"X-Bowhead-User-Id": other.id}
+    late_headers = {"X-Bowhead-User-Id": late.id}
+    audience = f"{files}/{second.id}/shares/audience"
+    roster = f"{files}/{first.id}/shares?html=true"
+    group = await access.create_group(team_id=team.id, name="Analysis Readers", created_by=owner.id)
+    foreign_group = await access.create_group(team_id=foreign_team.id, name="Foreign Readers", created_by=stranger.id)
+    local_group = await access.create_group(team_id=team.id, workspace_id=workspace, name="Space Readers", created_by=owner.id)
+    target = {"subject_kind": "group", "subject_id": group.id}
+    await access.add_group_member(team_id=team.id, group_id=group.id, user_id=other.id)
+    await access.add_group_member(team_id=team.id, group_id=group.id, user_id=owner.id)
+
+    assert client.put(audience, json={"audience": "team_wide"}, headers=recipient_headers).status_code == 404
+    assert client.get(view, headers=other_headers).status_code == 404
+    for ineligible_group in (foreign_group, local_group):
+        assert client.post(manage, json={**target, "subject_id": ineligible_group.id}, headers=owner_headers).status_code == 422
+    assert client.post(manage, json=target, headers=owner_headers).status_code == 201
+    assert client.post(f"{files}/{second.id}/share", json=target, headers=owner_headers).status_code == 201
+    group_notices, _ = await notifications.list_for_user(user_id=other.id)
+    assert [item.action_url for item in group_notices] == [notice.action_url]
+    assert not (await notifications.list_for_user(user_id=owner.id))[0]
+    assert client.get(view, headers=other_headers).json()["version_id"] == second.id
+    assert {"subject_kind": "group", "subject_id": group.id, "subject_name": group.name} in client.get(roster, headers=owner_headers).json()["shares"]
+
+    assert await access.remove_group_member(team.id, group.id, other.id)
+    assert client.get(view, headers=other_headers).status_code == 404
+    await access.add_group_member(team_id=team.id, group_id=group.id, user_id=late.id)
+    assert client.get(view, headers=late_headers).status_code == 200
+    assert not (await notifications.list_for_user(user_id=late.id))[0]
+    assert client.put(audience, json={"audience": "team_wide"}, headers=owner_headers).status_code == 204
+    assert client.get(roster, headers=owner_headers).json()["audience"] == "team_wide"
+    assert client.get(view, headers=other_headers).status_code == 200
+    assert client.get(view, headers=stranger_headers).status_code == 404
+    assert len((await notifications.list_for_user(user_id=other.id))[0]) == 1
+    assert client.put(audience, json={"audience": "custom"}, headers=owner_headers).status_code == 204
+    assert client.get(roster, headers=owner_headers).json()["audience"] == "custom"
+    assert client.get(view, headers=other_headers).status_code == 404
+    assert client.get(view, headers=recipient_headers).status_code == 200
+    assert client.get(view, headers=late_headers).status_code == 200
+
+    assert client.delete(f"{files}/{second.id}/share/group/{group.id}", headers=owner_headers).status_code == 204
+    assert client.get(view, headers=late_headers).status_code == 404
+    assert client.post(manage, json=target, headers=owner_headers).status_code == 201
+    assert client.put(audience, json={"audience": "team_wide"}, headers=owner_headers).status_code == 204
+    await access.create_or_update_resource_grant(
+        team_id=team.id, resource_kind=ARTIFACT_RESOURCE_KIND, resource_id=second.id,
+        principal_type="workspace", principal_id=workspace, permission="read", created_by=owner.id,
+    )  # fmt: skip
+
+    with monkeypatch.context() as disabled:
+        disabled.setenv("BOWHEAD_CONTENT_SHARING", "0")
+        reset_content_sharing_cache()
+        try:
+            assert client.get(view, headers=late_headers).status_code == 404
+            assert client.put(audience, json={"audience": "team_wide"}, headers=owner_headers).status_code == 403
+            assert client.put(audience, json={"audience": "private"}, headers=owner_headers).status_code == 204
+        finally:
+            reset_content_sharing_cache()
+    assert client.put(audience, json={"audience": "private"}, headers=owner_headers).status_code == 204
+    private = client.get(roster, headers=owner_headers).json()
+    assert private["audience"] == "private" and private["shares"] == []
+    for headers in (recipient_headers, late_headers, other_headers, stranger_headers):
+        assert client.get(view, headers=headers).status_code == 404
 
 
 async def test_a_share_follows_the_file_and_recipients_read_only_its_latest_version(app_client) -> None:

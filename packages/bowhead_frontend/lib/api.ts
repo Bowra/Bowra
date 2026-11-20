@@ -1356,7 +1356,6 @@ export async function deleteUserSetting(key: string): Promise<void> {
 
 // ─── i18n v1 · workspace settings ───────────────────────────
 // Key fields:
-//   i18n_v1               "true" | "false"
 //   default_ui_language   "zh-CN" | "en-US" | "de-DE" | "fr-FR"
 //   default_data_language "zh-CN" | "en-US"
 //   week_start_day        "monday" | "sunday"
@@ -3468,10 +3467,14 @@ export interface BindableWorkflowDTO {
 }
 
 /** GET /scheduled/jobs — all scheduled jobs for the current user (backend filters by user). */
-export async function fetchScheduledJobs(): Promise<{
+interface ScheduledJobsResponse {
   items: ScheduledJobDTO[];
-}> {
-  return apiJson<{ items: ScheduledJobDTO[] }>("/api/v1/scheduled/jobs", {
+  active_count?: number;
+  max_active?: number;
+}
+
+export async function fetchScheduledJobs(): Promise<ScheduledJobsResponse> {
+  return apiJson<ScheduledJobsResponse>("/api/v1/scheduled/jobs", {
     headers: workspaceHeaders(),
   });
 }

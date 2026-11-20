@@ -63,3 +63,5 @@ public/legal/
 /e2e/identity-public.spec.ts
 out-de-DE/
 out-fr-FR/
+# Visual self-check: the preview transform sent to the sandbox (npm run build:html-preview-transform).
+/dist/

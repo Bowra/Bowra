@@ -2,12 +2,19 @@
 
 import { useTranslations } from "next-intl";
 import { Check, Clock, Info, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { LucideGlyph } from "@/components/icon-refresh";
 import { ChatCard, ChatCardButton, ChatCardHint } from "@/components/ui/card";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
 import { projectAnswerValues } from "@/lib/clarification-answers";
+import {
+  CLARIFICATION_ANSWER_MAX_LENGTH,
+  readClarificationDraft,
+  saveClarificationDraft,
+  type ClarificationDraft,
+  type ClarificationDraftIdentity,
+} from "@/lib/clarification-draft";
 import type { ErrorDiagnostics } from "@/lib/error-presentation";
 import type { ClarificationAnswer, ThetaClarificationQuestion } from "@/lib/types";
 
@@ -146,6 +153,8 @@ export interface ClarificationCardProps {
   footHint?: string | null;
   /** Answers of a failed submission: the card comes back with the same choice selected. */
   restoredAnswers?: ClarificationAnswer[] | null;
+  /** Draft storage is available only for a scoped pending question. */
+  draftIdentity?: ClarificationDraftIdentity | null;
   /** Submission failed; shown inside the card above the footer (the selection is kept). */
   error?: string | null;
   /** Diagnostics of that failure: collapsed "Technical details" with "Copy diagnostic information". */
@@ -181,7 +190,7 @@ function initialSelection(
 /**
  * Clarification card (Chat Cards Spec §1, decision D2): the "needs your input" card with radio / checkbox
  * options, an "Other, type your own" field, and one primary action. Picking an option only selects it;
- * "Continue" (or Enter) submits, so a mis-click can be corrected. A single question is the title; several
+ * "Continue" submits, so a mis-click can be corrected. A single question is the title; several
  * questions are grouped under "Question N". Until something is answered the primary action is unavailable
  * and "Skip and let the model decide" is the way forward.
  *
@@ -200,6 +209,7 @@ export function ClarificationCard({
   allowCustomAnswers = true,
   footHint = null,
   restoredAnswers = null,
+  draftIdentity = null,
   error = null,
   errorDiagnostics,
   unavailableReason = null,
@@ -207,11 +217,16 @@ export function ClarificationCard({
 }: ClarificationCardProps) {
   const common = useTranslations("common");
   const t = useTranslations("clarification");
-  // Unchecked keeps the workspace choice scoped to this session.
-  const [remember, setRemember] = useState(rememberDefault);
-  const [initial] = useState(() => initialSelection(questions, allowCustomAnswers ? restoredAnswers : restoredAnswers?.filter((answer) => answer.source !== "custom")));
-  const [sel, setSel] = useState<number[][]>(initial.sel);
-  const [customAnswers, setCustomAnswers] = useState<string[]>(initial.custom);
+  const [draft, setDraft] = useState<ClarificationDraft>(() => {
+    const saved = draftIdentity && readClarificationDraft(draftIdentity, questions, allowCustomAnswers);
+    if (saved) return saved;
+    const { sel, custom } = initialSelection(
+      questions, allowCustomAnswers ? restoredAnswers : restoredAnswers?.filter((answer) => answer.source !== "custom"),
+    );
+    return { selections: sel, customAnswers: custom, remember: rememberDefault };
+  });
+  const { selections: sel, customAnswers, remember } = draft;
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const slotRef = useRef<HTMLDivElement>(null);
   // A failed submission brings the card back: focus its primary action (Retry), right under the error, when
   // focus was lost with the card.
@@ -233,27 +248,35 @@ export function ClarificationCard({
 
   const isQuestionSingle = (q: ThetaClarificationQuestion) => q.type === "single_select";
 
+  const updateDraft = (next: ClarificationDraft) => {
+    setDraft(next);
+    if (draftIdentity) {
+      const hasDraft = next.selections.some((choices) => choices.length > 0)
+        || next.customAnswers.some(Boolean) || next.remember !== rememberDefault;
+      setDraftSaveFailed(!saveClarificationDraft(draftIdentity, hasDraft ? next : null));
+    }
+  };
+
   const selectOption = (qi: number, oi: number) => {
     if (locked) return;
     const single = isQuestionSingle(questions[qi]);
-    setSel((prev) =>
-      prev.map((arr, i) => {
-        if (i !== qi) return arr;
-        if (single) return [oi];
-        return arr.includes(oi) ? arr.filter((x) => x !== oi) : [...arr, oi];
-      }),
-    );
+    const selections = sel.slice();
+    const previous = selections[qi];
+    selections[qi] = single ? [oi] : previous.includes(oi) ? previous.filter((x) => x !== oi) : [...previous, oi];
     // A single-choice question has one answer: picking an option replaces typed text.
-    if (single) setCustomAnswers((prev) => prev.map((v, i) => (i === qi ? "" : v)));
+    const custom = customAnswers.slice();
+    if (single) custom[qi] = "";
+    updateDraft({ ...draft, selections, customAnswers: custom });
   };
 
   const setCustomAnswer = (qi: number, value: string) => {
     if (locked) return;
-    setCustomAnswers((prev) => prev.map((v, i) => (i === qi ? value : v)));
+    const custom = customAnswers.slice();
+    custom[qi] = value.slice(0, CLARIFICATION_ANSWER_MAX_LENGTH);
+    const selections = sel.slice();
     // Typing selects "Other": a single-choice question drops its option selection.
-    if (value.trim() && isQuestionSingle(questions[qi])) {
-      setSel((prev) => prev.map((arr, i) => (i === qi ? [] : arr)));
-    }
+    if (custom[qi].trim() && isQuestionSingle(questions[qi])) selections[qi] = [];
+    updateDraft({ ...draft, selections, customAnswers: custom });
   };
 
   const submit = () => {
@@ -286,14 +309,6 @@ export function ClarificationCard({
     onSubmitMulti({ values, answers });
   };
 
-  // Enter submits (D2); Space and arrows only select.
-  const onOptionsKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    // keyCode 229: Safari ends an IME composition with an Enter whose isComposing is already false.
-    if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) return;
-    event.preventDefault();
-    submit();
-  };
-
   const firstUnansweredIndex = questions.findIndex((_q, qi) => !answeredAt(qi));
   const showGroupHint = !oneQuestion && answeredCount > 0 && firstUnansweredIndex >= 0;
   const typeHint = (q: ThetaClarificationQuestion) =>
@@ -308,13 +323,9 @@ export function ClarificationCard({
         value={custom}
         placeholder={t("custom_answer_placeholder")}
         disabled={locked}
-        maxLength={240}
+        maxLength={CLARIFICATION_ANSWER_MAX_LENGTH}
         aria-label={t("custom_answer_aria", { question: q.question })}
-        onChange={(e) => setCustomAnswer(qi, e.target.value.slice(0, 240))}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          onOptionsKeyDown(event);
-        }}
+        onChange={(e) => setCustomAnswer(qi, e.target.value)}
       />
     ) : null;
     if (isQuestionSingle(q)) {
@@ -330,7 +341,6 @@ export function ClarificationCard({
               aria-label={q.question}
               value={value === undefined ? null : String(value)}
               onValueChange={(v) => selectOption(qi, Number(v))}
-              onKeyDown={onOptionsKeyDown}
             >
               {q.options.map((label, oi) => {
                 const on = sel[qi]?.includes(oi) ?? false;
@@ -357,7 +367,7 @@ export function ClarificationCard({
       );
     }
     return (
-      <div className="ui-card-options" role="group" aria-label={q.question} onKeyDown={onOptionsKeyDown}>
+      <div className="ui-card-options" role="group" aria-label={q.question}>
         {q.options.map((label, oi) => {
           const on = sel[qi]?.includes(oi) ?? false;
           return (
@@ -407,7 +417,7 @@ export function ClarificationCard({
                 type="checkbox"
                 checked={remember}
                 disabled={locked}
-                onChange={(e) => setRemember(e.target.checked)}
+                onChange={(e) => updateDraft({ ...draft, remember: e.target.checked })}
               />
               <span>{t("remember_choice")}</span>
             </label>
@@ -446,6 +456,7 @@ export function ClarificationCard({
           <ChatCardHint>{t("group_unanswered", { index: firstUnansweredIndex + 1 })}</ChatCardHint>
         ) : null}
         {footHint ? <ChatCardHint>{footHint}</ChatCardHint> : null}
+        {draftSaveFailed ? <ChatCardHint><span role="status">{t("draft_save_failed")}</span></ChatCardHint> : null}
         {documentDraft ? <ChatCardHint>{t("document_note")}</ChatCardHint> : null}
       </ChatCard>
     </div>
