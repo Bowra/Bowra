@@ -54,7 +54,7 @@ class _CaptureRuntime:
         self._result = result or _FakeResult()
         self.calls: list[dict] = []
 
-    async def run(self, spec, *, entry_script, input_data, extra_args):  # noqa: ANN001
+    async def run(self, spec, *, entry_script, input_data):  # noqa: ANN001
         self.calls.append({"spec_name": spec.name, "entry_script": entry_script, "input_data": dict(input_data)})
         return self._result
 

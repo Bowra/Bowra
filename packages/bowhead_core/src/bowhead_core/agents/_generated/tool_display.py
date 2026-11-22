@@ -339,6 +339,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "🧪",
         "category": "orchestrate",
     },
+    "agent_message": {
+        "display_zh": "给智能体发消息",
+        "display_en": "Message an agent",
+        "blurb_zh": "在协作中给另一个智能体发送说明或问题。",
+        "blurb_en": "Send another agent a note or a question during collaboration.",
+        "display_de": "Agent benachrichtigen",
+        "blurb_de": "Einem anderen Agent während der Zusammenarbeit eine Notiz oder Frage senden.",
+        "display_fr": "Écrire à un agent",
+        "blurb_fr": "Envoyer une note ou une question à un autre agent pendant la collaboration.",
+        "sigil": "💬",
+        "category": "orchestrate",
+    },
     "agent_operation_get": {
         "display_zh": "读取原 Coach 操作",
         "display_en": "Read original Coach operation",
@@ -987,6 +999,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "📚",
         "category": "kb",
     },
+    "plan_propose": {
+        "display_zh": "提出计划",
+        "display_en": "Propose a plan",
+        "blurb_zh": "把多步任务拆成计划，交给你确认。",
+        "blurb_en": "Split a multi-step task into a plan for you to confirm.",
+        "display_de": "Plan vorschlagen",
+        "blurb_de": "Eine mehrstufige Aufgabe in einen Plan zur Bestätigung aufteilen.",
+        "display_fr": "Proposer un plan",
+        "blurb_fr": "Découper une tâche en plusieurs étapes en un plan à confirmer.",
+        "sigil": "🗺",
+        "category": "orchestrate",
+    },
     "present_artifacts": {
         "display_zh": "交付已有文件",
         "display_en": "Present Retained Files",
@@ -1094,6 +1118,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "blurb_fr": "Créer un nouveau PPTX modifiable à partir du contenu fourni, sans modifier les diapositives d’une présentation importée.",
         "sigil": "📊",
         "category": "compute",
+    },
+    "review_delivery": {
+        "display_zh": "核对交付",
+        "display_en": "Review delivery",
+        "blurb_zh": "交付前核对每一步的结果是否满足要求。",
+        "blurb_en": "Check that each step's result meets the request before delivering.",
+        "display_de": "Lieferung prüfen",
+        "blurb_de": "Vor der Lieferung prüfen, ob jedes Ergebnis die Anfrage erfüllt.",
+        "display_fr": "Vérifier la livraison",
+        "blurb_fr": "Vérifier avant la livraison que chaque résultat répond à la demande.",
+        "sigil": "☑",
+        "category": "orchestrate",
     },
     "routine_notify": {
         "display_zh": "提醒任务所有者",
@@ -1227,6 +1263,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "🔀",
         "category": "bi",
     },
+    "view_file": {
+        "display_zh": "查看渲染效果",
+        "display_en": "View rendered file",
+        "blurb_zh": "查看文件渲染后的样子，用于检查版面。",
+        "blurb_en": "Look at how a file renders to check its layout.",
+        "display_de": "Darstellung ansehen",
+        "blurb_de": "Ansehen, wie eine Datei dargestellt wird, um das Layout zu prüfen.",
+        "display_fr": "Voir le rendu",
+        "blurb_fr": "Voir le rendu d’un fichier pour vérifier sa mise en page.",
+        "sigil": "👁",
+        "category": "orchestrate",
+    },
     "web_crawl": {
         "display_zh": "抓取站点页面",
         "display_en": "Crawl Website",
@@ -1311,4 +1359,11 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "✍️",
         "category": "canvas",
     },
+}
+
+
+#: The language each code-running Tool executes (`code_language`); its code streams while written (turn visibility E4).
+TOOL_CODE_LANGUAGE: dict[str, str] = {
+    "python_exec": "python",
+    "python_sandbox": "python",
 }

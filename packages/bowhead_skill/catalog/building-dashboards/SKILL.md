@@ -105,8 +105,8 @@ See `analyst-framework §0.1` data source decision table. Pick **one** source an
 ### Step 3 · Schema detection (attachment only)
 
 If the user uploaded a file, run the standard detection snippet from
-[../analyst-framework/references/schema_detection.md](../analyst-framework/references/schema_detection.md)
-first. Stdout comes back in your next iteration so you know which column is
+the analyst-framework Skill
+(`skill_read(name="analyst-framework", file="schema_detection.md")`) first. Stdout comes back in your next iteration so you know which column is
 what. Do not proceed to Layer 1 without detecting.
 
 ### Step 4 · Layer 1 — Overview KPIs（**目标厚度**：≥ 6 个 KPI，分主题展示）
@@ -158,7 +158,7 @@ Narrative should call out **top** and **bottom** groups with the delta between t
 ### Step 6 · Layer 3 — Business-rule compliance
 
 This is the **distinguishing layer** vs other SOPs. Encode the user's rules into pandas masks (see
-[../analyst-framework/references/business_rule_patterns.md](../analyst-framework/references/business_rule_patterns.md)) and produce:
+`skill_read(name="analyst-framework", file="business_rule_patterns.md")`) and produce:
 
 - Per-rule compliance rate (`print(f'rule X compliance: {mask[domain].mean():.1%}')`)
 - Violation sample CSV (≤ 20 rows from the worst-violating group)
@@ -297,8 +297,7 @@ Output: kpi_row (4 cells) + rank chart + violations table + narrative ~800 chars
 ## References
 
 - [layer_templates.md](references/layer_templates.md) — 三层每层的代码模板
-- [../analyst-framework/references/schema_detection.md](../analyst-framework/references/schema_detection.md)
-- [../analyst-framework/references/business_rule_patterns.md](../analyst-framework/references/business_rule_patterns.md)
+- Skill analyst-framework: `schema_detection.md` and `business_rule_patterns.md`, read with `skill_read(name="analyst-framework", file=...)`
 
 ## Related skills
 

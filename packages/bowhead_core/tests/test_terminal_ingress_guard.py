@@ -538,12 +538,12 @@ def test_auth_mutator_inventory_calls_transaction_local_epoch_helpers() -> None:
     )
     assert _method_calls(
         user_tree,
-        "archive_governed_workspace",
+        "_write_archived_workspace",
         "_bump_team_membership_epoch_conn",
     )
     assert _method_calls(
         user_tree,
-        "restore_governed_workspace",
+        "_write_restored_workspace",
         "_bump_team_membership_epoch_conn",
     )
     assert _method_calls(
@@ -553,7 +553,7 @@ def test_auth_mutator_inventory_calls_transaction_local_epoch_helpers() -> None:
     )
     assert _method_calls(
         access_tree,
-        "add_group_member",
+        "_write_group_member",
         "_bump_membership_epoch_conn",
     )
     assert _method_calls(

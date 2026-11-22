@@ -281,6 +281,7 @@ async def test_inject_no_op_when_no_artifacts(store: CanvasStore) -> None:
     count = await _inject_inline_artifacts(payload, ctx, "t_inj2_no_arts")
     assert count == 0
     assert "inline_artifacts" not in payload
+    assert "outputs" not in payload, "a Turn that produced nothing keeps the old finished line"
 
 
 async def test_inject_missing_canvas_store_no_op() -> None:
@@ -430,6 +431,8 @@ async def test_final_files_show_only_the_newest_copy_a_helper_rewrote(store: Can
     payload: dict = {}
     await _inject_inline_artifacts(payload, ctx, "t_rewrite")
     assert {item["id"] for item in payload["inline_artifacts"]} == {copies[-1].id, other_helper.id}
+    # The output count reads the same list as the file items (turn visibility FR12).
+    assert payload["outputs"] == [{"kind": "web_page", "count": 2}]
     for copy in copies:
         assert await art_store.get(copy.id) is not None
     assert len(await log.list_events("t_rewrite")) == 8
@@ -627,3 +630,47 @@ async def test_collect_no_artifact_store_still_works(store: CanvasStore) -> None
     ctx = SimpleNamespace(canvas_store=store)  # no artifact_store
     arts = await _collect_inline_artifacts(ctx, "t_noart")
     assert [a["id"] for a in arts] == [chart.id]
+
+
+# ─── Turn visibility FR12: the finished line's output count ─────────────────
+
+
+async def test_outputs_count_a_report_and_its_charts(store: CanvasStore) -> None:
+    c = await store.ensure_canvas(session_id="s_out_report", workspace_id="w", user_id="u")
+    for spec in ({}, {"kind": "bar"}):
+        await store.append_section(canvas_id=c.id, kind="chart", payload={"spec": spec}, by_turn_id="t_out_report")
+    await store.append_section(canvas_id=c.id, kind="insight_card", payload={"title": "x"}, by_turn_id="t_out_report")
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, SimpleNamespace(canvas_store=store), "t_out_report")
+    assert payload["outputs"] == [{"kind": "report", "count": 1}, {"kind": "chart", "count": 2}]
+
+
+async def test_outputs_count_chat_charts_without_a_report(store: CanvasStore) -> None:
+    c = await store.ensure_canvas(session_id="s_out_chat", workspace_id="w", user_id="u")
+    await store.append_section(canvas_id=c.id, kind="chart", payload={"spec": {"kind": "line"}}, by_turn_id="t_out_chat")
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, SimpleNamespace(canvas_store=store), "t_out_chat")
+    assert payload["outputs"] == [{"kind": "chart", "count": 1}]
+
+
+async def test_outputs_count_delivered_files_by_type(store: CanvasStore, art_store: ArtifactStore) -> None:
+    await store.ensure_canvas(session_id="s_deck", workspace_id="w", user_id="u")
+    for filename, mime in [
+        ("dashboard.html", "text/html"),
+        ("deck.pptx", _PPTX_MIME),
+        ("chart.png", "image/png"),
+        ("summary.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ("app.js", "text/javascript"),
+        ("report.pdf", "application/pdf"),
+    ]:
+        await _put_deliverable(art_store, turn="t_out_files", filename=filename, mime=mime, content=filename.encode())
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, SimpleNamespace(canvas_store=store, artifact_store=art_store), "t_out_files")
+    assert payload["outputs"] == [
+        {"kind": "web_page", "count": 1},
+        {"kind": "presentation", "count": 1},
+        {"kind": "pdf", "count": 1},
+        {"kind": "spreadsheet", "count": 1},
+        {"kind": "image", "count": 1},
+        {"kind": "file", "count": 1},
+    ]

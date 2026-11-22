@@ -137,6 +137,43 @@ def test_personal_file_guards(tmp_path, monkeypatch):
     assert r.status_code == 415 and r.json()["detail"]["code"] == "skill_file_not_text"
 
 
+def test_personal_detail_lists_every_package_file_and_each_is_viewable(tmp_path, monkeypatch):
+    """The settings page sees what the model sees: every file by its path from the Skill root."""
+    client, source_dir = _personal_client(tmp_path, monkeypatch)
+    (source_dir / "SKILL.md").write_text("---\nname: forecast\ndescription: d\n---\nbody\n", encoding="utf-8")
+    (source_dir / "assets").mkdir()
+    (source_dir / "assets" / "logo.png").write_bytes(b"\x89PNG\x00\x01")
+    (source_dir / "input-schema.json").write_text('{"type": "object"}', encoding="utf-8")
+    (source_dir / "references" / ".notes.md").write_text("hidden", encoding="utf-8")
+    (source_dir / "templates").mkdir()
+    (source_dir / "templates" / "big.txt").write_text("x" * (1024 * 1024 + 1), encoding="utf-8")
+    (source_dir / "scripts" / "__pycache__").mkdir(parents=True)
+    (source_dir / "scripts" / "__pycache__" / "run.cpython-312.pyc").write_bytes(b"pyc")
+    (tmp_path / "outside.md").write_text("leak", encoding="utf-8")
+
+    listed = [entry["path"] for entry in client.get("/api/v1/skills/forecast").json()["package_files"]]
+    # A built-in's generated Python cache is not part of the package.
+    assert listed == ["SKILL.md", "assets/logo.png", "input-schema.json", "references/.notes.md", "references/metrics.md", "templates/big.txt"]
+
+    root = client.get("/api/v1/skills/forecast/package-files/input-schema.json").json()
+    assert root == {
+        "path": "input-schema.json",
+        "content": '{"type": "object"}',
+        "unavailable": None,
+        "size": 18,
+        "mime": "application/json",
+        "content_sha256": None,
+    }
+    assert client.get("/api/v1/skills/forecast/package-files/references/.notes.md").json()["content"] == "hidden"
+    image = client.get("/api/v1/skills/forecast/package-files/assets/logo.png").json()
+    assert (image["content"], image["unavailable"], image["mime"], image["size"]) == (None, "binary", "image/png", 6)
+    big = client.get("/api/v1/skills/forecast/package-files/templates/big.txt").json()
+    assert (big["content"], big["unavailable"]) == (None, "too_large")
+    for path in ("nope.md", "scripts/__pycache__/run.cpython-312.pyc", "..%2F..%2Foutside.md", "references/..%2F..%2F..%2Foutside.md"):
+        r = client.get(f"/api/v1/skills/forecast/package-files/{path}")
+        assert r.status_code == 404 and "leak" not in r.text, (path, r.text)
+
+
 # ─────────────────────────── Team side ──────────────────────
 
 
@@ -187,6 +224,26 @@ def test_team_single_file_read(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["content"] == "x = 1\n"
 
 
+def test_team_detail_lists_every_package_file_and_each_is_viewable(tmp_path, monkeypatch):
+    client, sid, sk_dir = _seed_team_skill(tmp_path, monkeypatch)
+    (sk_dir / "assets").mkdir()
+    (sk_dir / "assets" / "deck.pptx").write_bytes(b"PK\x03\x04\x00")
+    (sk_dir / "README.md").write_text("read me", encoding="utf-8")
+    d = client.get(f"{_BASE}/{sid}").json()
+    assert [entry["path"] for entry in d["package_files"]] == [
+        "README.md",
+        "SKILL.md",
+        "assets/deck.pptx",
+        "references/metrics.md",
+        "scripts/step_1.py",
+    ]
+    r = client.get(f"{_BASE}/{sid}/package-files/README.md")
+    assert r.status_code == 200 and r.json()["content"] == "read me" and r.json()["content_sha256"] == d["content_sha256"]
+    deck = client.get(f"{_BASE}/{sid}/package-files/assets/deck.pptx").json()
+    assert deck["content"] is None and deck["unavailable"] == "binary"
+    assert client.get(f"{_BASE}/{sid}/package-files/assets/missing.pptx").status_code == 404
+
+
 def test_team_file_guards_and_idor(tmp_path, monkeypatch):
     client, sid, _ = _seed_team_skill(tmp_path, monkeypatch)
     r = client.get(f"{_BASE}/{sid}/files/secrets/metrics.md")
@@ -217,6 +274,9 @@ def test_team_file_read_is_team_scoped(tmp_path, monkeypatch):
 
     client = _team_client(store, User(id="u_a", team_id="team_a", email="a@x.com"), monkeypatch, tmp_path)
     r = client.get(f"{_BASE}/{other.id}/files/references/metrics.md")
+    assert r.status_code == 404 and r.json()["detail"]["code"] == "team_skill_not_found"
+    assert "机密" not in r.text
+    r = client.get(f"{_BASE}/{other.id}/package-files/references/metrics.md")
     assert r.status_code == 404 and r.json()["detail"]["code"] == "team_skill_not_found"
     assert "机密" not in r.text
 

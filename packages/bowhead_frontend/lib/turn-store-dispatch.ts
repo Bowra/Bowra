@@ -42,6 +42,7 @@ import {
   type ErrorDiagnostics,
 } from "./error-presentation";
 import { prettifyStepLabel } from "./prettify-step-label";
+import { readStepFacts, stepFactsHeader, stepFactsLabel, stepFactsSummary } from "./step-facts";
 import { isLegacyFailureAnswerReason, parseStepOutcome } from "./turn-feedback";
 import {
   applyApprovalExecuted,
@@ -393,6 +394,9 @@ export function dispatchToTurnStore(
         ev.input_preview,
         ev.tool_name ?? null,
       );
+      // Turn visibility FR4: facts are worded here in the current language; stored text is the fallback.
+      const startedFacts = readStepFacts(payload.facts);
+      const factsLabel = stepFactsLabel(startedFacts);
       applyStepStarted({
         turnId: ev.card_id,
         stepId: ev.step_id,
@@ -400,12 +404,13 @@ export function dispatchToTurnStore(
         concurrencyGroupId: ev.concurrency_group_id ?? null,
         stepType: ev.step_type as StepKind,
         toolName: (ev.tool_name as ToolName | null | undefined) ?? null,
-        headerZh: ev.header_zh,
+        headerZh: stepFactsHeader(startedFacts) ?? ev.header_zh,
         // Phase 1.7-A — coerced label per tech-design §2.3 (never raw JSON).
-        label: prettifiedLabel || null,
+        label: (factsLabel ?? prettifiedLabel) || null,
         startedAt: ev.started_at,
         callId: ev.call_id ?? null,
         subagentId: ev.subagent_id ?? null,
+        codeLanguage: typeof payload.code_language === "string" && payload.code_language ? payload.code_language : null,
         codeInput: mapCodeInput(ev.code_input, ev.tool_name === "python_sandbox" ? payload.arguments_preview : undefined),
         evtSeq: readEvtSeq(payload),
       });
@@ -448,7 +453,7 @@ export function dispatchToTurnStore(
         turnId: ev.card_id,
         stepId: ev.step_id,
         state: normalizeStepState(ev.state) as Extract<StepState, "done" | "failed" | "partial">,
-        summary: ev.output_preview ?? null,
+        summary: stepFactsSummary(readStepFacts(payload.facts)) ?? ev.output_preview ?? null,
         detail,
         subSteps: mapSubSteps(ev.sub_steps),
         outputArtifacts: mapOutputArtifacts(payload),

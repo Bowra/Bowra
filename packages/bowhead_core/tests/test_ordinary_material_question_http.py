@@ -114,7 +114,7 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
     attachment = uploaded.json()
     case.client.headers["Content-Type"] = "application/json"
 
-    async def run(spec, *, entry_script, input_data, extra_args):
+    async def run(spec, *, entry_script, input_data):
         executions.append(input_data["code"])
         assert spec.name == "python_sandbox" and entry_script == "runner.py"
         input_evidence = []
@@ -435,7 +435,7 @@ async def test_native_materials_survive_original_question_without_reexecuting_he
         # guard rejects before invocation and supplies only model feedback.
         denied = [message for message in helper_calls[1]["messages"] if message.get("tool_call_id") == "denied-original"]
         assert len(denied) == 1
-        assert ("skill_file_kind_invalid" if boundary == "bundle_rejection" else "isn't included in this Agent") in denied[0]["content"]
+        assert ("skill_file_not_found" if boundary == "bundle_rejection" else "isn't included in this Agent") in denied[0]["content"]
         helpers = checkpoint.helper_materials()
         assert checkpoint.contract == "ordinary-lead-loop.v15"
         if boundary in {"settled_failure", "settled_failure_recreated", "mixed_failure"}:

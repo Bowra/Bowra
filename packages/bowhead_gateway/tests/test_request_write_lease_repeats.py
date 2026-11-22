@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from bowhead_core.access_control import AccessControlStore
 from bowhead_core.agent_revision_store import AgentRevisionStore
 from bowhead_core.personal_appearance_store import PersonalAppearanceStore
 from bowhead_core.reference_retention_policy import set_retention_policy
@@ -105,6 +106,29 @@ async def test_space_member_and_model_config_writes_repeat(tmp_path: Path, monke
 
 
 @pytest.mark.asyncio
+async def test_group_member_writes_repeat_and_write_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 (1.7.61): with Turns running, group member add and remove answered 500 on a lost lease."""
+    users = UserStore(tmp_path / "core.db")
+    await users.initialize()
+    team = await users.create_team(name="Lease Team", max_seats=5)
+    member = await users.create_user(team_id=team.id, email="member@example.com", password="Passw0rd!")
+    access = AccessControlStore(tmp_path / "core.db")
+    await access.initialize()
+    group = await access.create_group(team_id=team.id, name="Analysts")
+
+    added = _lose_lease(monkeypatch, "group_memberships", 1)
+    record = await access.add_group_member(team_id=team.id, group_id=group.id, user_id=member.id)
+    assert added == [1, 2]
+    assert record.principal_id == member.id
+
+    removed = _lose_lease(monkeypatch, "group_memberships", 1)
+    assert await access.remove_group_member(team.id, group.id, member.id)
+    # The failed attempt rolled back, so the repeat found the active row and removed it once.
+    assert removed == [1, 2]
+    assert await access.get_group_member(team.id, group.id, member.id) is None
+
+
+@pytest.mark.asyncio
 async def test_a_spent_wait_raises_store_busy_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = UserSettingsStore(tmp_path / "core.db")
     await store.init()
@@ -147,6 +171,10 @@ def _standard_wrapper_code() -> object:
         UserStore.update_team_llm_config_if_version,
         UserStore.update_team_tool_source_auth,
         UserStore._write_governed_workspace_metadata,
+        UserStore._write_archived_workspace,
+        UserStore._write_restored_workspace,
+        AccessControlStore._write_group_member,
+        AccessControlStore.remove_group_member,
         apply_team_llm_v2,
         AgentRevisionStore.save_working_copy,
         TeamSubagentStore.compare_and_update_team_subagent,

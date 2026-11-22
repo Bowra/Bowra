@@ -35,6 +35,12 @@ _ALLOWED_DEFAULT_KIND: frozenset[str] = frozenset(
         "remember",
         # Display metadata registration preserves the existing document submission finding policy.
         "template_document_submit",
+        # Turn visibility G2: four parts joined tool_aliases.yaml for display names only
+        # (`role_binding: false`); their finding behavior (default kind) is unchanged.
+        "agent_message",
+        "plan_propose",
+        "review_delivery",
+        "view_file",
     }
 )
 

@@ -14,7 +14,7 @@ category: platform
 先复用用户本轮要求和已有对话中的信息：要解决的问题、触发场景、输入、输出、可用工具。
 只有缺少影响实现的必要信息时才提问；不要把已经明确的需求重新拆成固定四轮问答。
 
-修改已有 Skill 时先调用 `skill_read(name="目标名称")`，查看 `origin`、`body_raw`、`scripts`、`files`、`references` 和 `edit_hint`。
+修改已有 Skill 时先调用 `skill_read(name="目标名称")`，查看 `origin`、`body_raw`、`scripts`、`package_files`（整包文件）和 `edit_hint`。
 目录名称来自 `skill_list` 或用户明确指定，不凭空猜测。个人版优先于同名团队版，修改前必须确认读到的是用户要改的来源。
 团队版先在设置中「复制为我的」，完整保留正文、脚本和参考资料，再改个人版并提交更新；保存个人 Skill 不会直接修改团队版本。
 
@@ -73,6 +73,7 @@ skill_save_generated(body_md="完整 SKILL.md", overwrite=true)
 }
 ```
 
+`path` 是相对技能根目录的完整路径，任何文件夹或根目录文件都可以（如 `assets/theme.json`、`README.md`），SKILL.md 用 `body_md` 修改。
 未列出的文件保留。`content: null` 明确删除该文件，仅在用户要求删除时使用。
 不要同时通过 scripts 和 files 改脚本。未开放 files 时，配置页仍可编辑已有文件；不调用未暴露参数或虚构文件写入工具。
 校验失败先修复提示中的问题，再保存；权限失败不能换接口绕过。

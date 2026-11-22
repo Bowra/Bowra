@@ -6,7 +6,10 @@
  * Replaces centered SkillPreviewModal. Visuals verbatim from Claude Design handoff:
  * header (title + switch + close; slug·source·version·size·creation time) → "使用的工具" chips
  * (⚠ declaration only, not enforced; never label as "允许") → reverse "被子代理使用" rows →
- * 4 tabs (Markdown description / trigger examples / files [references+scripts, click for nested content view] / evaluation).
+ * 4 tabs (Markdown description / trigger examples / files [every package file, click for nested content view] / evaluation).
+ * Files in references/, scripts/ and evals/ are edited through .../files/{kind}/{f}; every other file of the package
+ * (other folders, root files, hidden names) through .../package-files/{path}. A file that is not text is renamed or
+ * deleted there, never edited.
  * Team-shared skills use the same tabs (GET /team-skills/{id}, files via .../files/{kind}/{f});
  * team data has no trigger_examples field, so that tab is naturally absent.
  * Must render within .sset scope (styles/skills-settings.css).
@@ -17,15 +20,21 @@ import { useLocale, useTranslations } from "next-intl";
 
 import {
   changeSkillFile,
+  changeSkillPackageFile,
+  putSkillPackageFile,
   type SkillFileChange,
+  type SkillPackageFileChange,
   fetchSkillDetail,
   overrideSkillImport,
   fetchSkillFile,
+  fetchSkillPackageFile,
   fetchSkillUsage,
   putSkillBody,
   putSkillFile,
   type SkillDetailDTO,
   type SkillFileContentDTO,
+  type SkillPackageFileContentDTO,
+  type SkillPackageFileInfo,
   type SkillSummaryDTO,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -36,6 +45,9 @@ import {
   copyTeamSkillToPersonal,
   getTeamSkill,
   getTeamSkillFile,
+  getTeamSkillPackageFile,
+  changeTeamSkillPackageFile,
+  putTeamSkillPackageFile,
   getTeamSkillUsage,
   promoteSkill,
   putTeamSkillBody,
@@ -125,6 +137,37 @@ function SkillErrorNotice({ error }: { error: ErrorPresentation }) {
   return <ErrorNotice message={error.message} diagnostics={error.diagnostics} surface="settings" diagnosticsEnabled />;
 }
 
+const EDITABLE_FILE_KINDS = ["references", "scripts", "evals"] as const;
+
+/** A file view. `packageFile` files are addressed by their path from the Skill root and may have no previewable text. */
+type FileView = SkillFileContentDTO & { packageFile?: boolean; unavailable?: SkillPackageFileContentDTO["unavailable"] };
+
+function packageFileView(file: SkillPackageFileContentDTO): FileView {
+  return { ...file, content: file.content ?? "", packageFile: true, unavailable: file.unavailable ?? null };
+}
+
+/**
+ * Package files the three folder lists do not show (other folders, root files, hidden names), grouped by top-level
+ * folder ("" for the package root, last). SKILL.md is the description tab, so it is not listed again.
+ */
+function packageFileGroups(
+  packageFiles: SkillPackageFileInfo[],
+  editable: Record<(typeof EDITABLE_FILE_KINDS)[number], { name: string }[]>,
+): Map<string, { name: string; path: string; size: number }[]> {
+  const shown = new Set(EDITABLE_FILE_KINDS.flatMap((kind) => editable[kind].map((file) => `${kind}/${file.name}`)));
+  const groups = new Map<string, { name: string; path: string; size: number }[]>();
+  for (const file of packageFiles) {
+    if (file.path === "SKILL.md" || shown.has(file.path)) continue;
+    const slash = file.path.indexOf("/");
+    const folder = slash < 0 ? "" : file.path.slice(0, slash);
+    const list = groups.get(folder) ?? [];
+    list.push({ name: slash < 0 ? file.path : file.path.slice(slash + 1), path: file.path, size: file.size });
+    groups.set(folder, list);
+  }
+  const folders = [...groups.keys()].filter((folder) => folder).sort();
+  return new Map([...folders, ...(groups.has("") ? [""] : [])].map((folder) => [folder, groups.get(folder) ?? []]));
+}
+
 export function SkillDrawer(props: Props) {
   const { target, meId } = props;
   const key = JSON.stringify([meId, target.kind, target.skill.id, target.skill.name,
@@ -193,7 +236,7 @@ function SkillDrawerInstance({
   const [detail, setDetail] = useState<SkillDetailDTO | null>(null);
   const [teamDetail, setTeamDetail] = useState<TeamSkillDetail | null>(null);
   const [err, setErr] = useState<ErrorPresentation | null>(null);
-  const [fileView, setFileView] = useState<SkillFileContentDTO | null>(null);
+  const [fileView, setFileView] = useState<FileView | null>(null);
   const [fileErr, setFileErr] = useState<ErrorPresentation | null>(null);
   const [evalsContent, setEvalsContent] = useState<string | null>(null);
   const [evalsErr, setEvalsErr] = useState<ErrorPresentation | null>(null);
@@ -211,7 +254,8 @@ function SkillDrawerInstance({
   const [saveErr, setSaveErr] = useState<ErrorPresentation | null>(null);
   const [savedAt, setSavedAt] = useState(0);
   const [creating, setCreating] = useState(false);
-  const [newKind, setNewKind] = useState<SkillFileChange["kind"]>("references");
+  // "other": a path from the Skill root, in any other folder or at the root.
+  const [newKind, setNewKind] = useState<SkillFileChange["kind"] | "other">("references");
   const [newFilename, setNewFilename] = useState("");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const editState = { editingPath, initialDraft, draft, creating, renameTarget, newKind, newFilename, editRevision };
@@ -435,6 +479,24 @@ function SkillDrawerInstance({
     [loadFile, presentError],
   );
 
+  // A file outside the three folder lists, addressed by its path from the Skill root.
+  const openPackageFile = useCallback(
+    async (path: string) => {
+      const requestId = ++fileRequest.current;
+      setFileErr(null);
+      setEditingPath(null);
+      setSaveErr(null);
+      setSavedAt(0);
+      try {
+        const file: SkillPackageFileContentDTO = isTeam ? await getTeamSkillPackageFile(teamId, path) : await fetchSkillPackageFile(skillName, path);
+        if (requestId === fileRequest.current) setFileView(packageFileView(file));
+      } catch (e) {
+        if (requestId === fileRequest.current) setFileErr(presentError(e));
+      }
+    },
+    [isTeam, teamId, skillName, presentError],
+  );
+
   const hasEvals = (isTeam ? teamDetail?.has_evals : detail?.has_evals) ?? false;
   useEffect(() => {
     if (tab !== "evals" || evalsContent !== null || !hasEvals) return;
@@ -596,6 +658,15 @@ function SkillDrawerInstance({
     (change: SkillFileChange) => (isTeam ? changeTeamSkillFile(teamId, change) : changeSkillFile(skillName, { ...change, ...(target.skill.id ? { expected_instance_id: target.skill.id } : {}) })),
     [isTeam, teamId, skillName, target.skill.id],
   );
+  const changePackageFile = useCallback(
+    async (change: SkillPackageFileChange) =>
+      packageFileView(
+        isTeam
+          ? await changeTeamSkillPackageFile(teamId, change)
+          : await changeSkillPackageFile(skillName, { ...change, ...(target.skill.id ? { expected_instance_id: target.skill.id } : {}) }),
+      ),
+    [isTeam, teamId, skillName, target.skill.id],
+  );
   const refreshDetail = useCallback(async () => {
     if (isTeam) setTeamDetail(await getTeamSkill(teamId));
     else setDetail(await loadPersonalDetail());
@@ -618,13 +689,20 @@ function SkillDrawerInstance({
     const [kind, ...parts] = fileView.path.split("/");
     void runSave(
       () =>
-        changeFile({
-          operation,
-          kind: kind as SkillFileChange["kind"],
-          filename: parts.join("/"),
-          target: renameTarget ?? undefined,
-          expected_content_sha256: fileView.content_sha256 ?? undefined,
-        }),
+        fileView.packageFile
+          ? changePackageFile({
+              operation,
+              path: fileView.path,
+              target: renameTarget ?? undefined,
+              expected_content_sha256: fileView.content_sha256 ?? undefined,
+            })
+          : changeFile({
+              operation,
+              kind: kind as SkillFileChange["kind"],
+              filename: parts.join("/"),
+              target: renameTarget ?? undefined,
+              expected_content_sha256: fileView.content_sha256 ?? undefined,
+            }),
       async (saved) => {
         setFileView(operation === "delete" ? null : saved);
         await refreshDetail();
@@ -640,6 +718,22 @@ function SkillDrawerInstance({
     const slash = editingPath.indexOf("/");
     const kind = editingPath.slice(0, slash) as "references" | "scripts" | "evals";
     const filename = editingPath.slice(slash + 1);
+    if (fileView?.packageFile) {
+      return runSave(
+        async () =>
+          creating
+            ? changePackageFile({ operation: "create", path: editingPath, content: draft, expected_content_sha256: editRevision })
+            : packageFileView(
+                isTeam
+                  ? await putTeamSkillPackageFile(teamId, editingPath, draft, editRevision)
+                  : await putSkillPackageFile(skillName, editingPath, draft, editRevision, ...(target.skill.id ? [target.skill.id] : [])),
+              ),
+        async (saved) => {
+          setFileView(saved);
+          await refreshDetail();
+        },
+      );
+    }
     return runSave(
       () =>
         creating
@@ -654,7 +748,7 @@ function SkillDrawerInstance({
         if (kind === "evals" && filename === "evals.json") setEvalsContent(saved.content);
       },
     );
-  }, [editingPath, isTeam, teamId, skillName, draft, runSave, creating, changeFile, editRevision, t, target.skill.id, loadPersonalDetail]);
+  }, [editingPath, isTeam, teamId, skillName, draft, runSave, creating, changeFile, changePackageFile, refreshDetail, fileView, editRevision, t, target.skill.id, loadPersonalDetail]);
   const saveBody = useCallback(
     () => {
       if (!editRevision) {
@@ -735,7 +829,10 @@ function SkillDrawerInstance({
   const triggerExamples = (isTeam ? undefined : detail?.trigger_examples) ?? [];
   const authoringEnabled = canEdit && !!(isTeam ? teamDetail?.authoring_enabled : detail?.authoring_enabled);
   const evalFiles = (isTeam ? teamDetail?.eval_files : detail?.eval_files) ?? [];
-  const fileCount = references.length + scriptFiles.length + evalFiles.length;
+  const packageFiles = (isTeam ? teamDetail?.package_files : detail?.package_files) ?? [];
+  const otherGroups = packageFileGroups(packageFiles, { references, scripts: scriptFiles, evals: evalFiles });
+  const otherCount = [...otherGroups.values()].reduce((sum, files) => sum + files.length, 0);
+  const fileCount = references.length + scriptFiles.length + evalFiles.length + otherCount;
   const tabs: { id: Tab; label: string }[] = [];
   if (loaded) {
     tabs.push({ id: "desc", label: t("drawer.tab_desc") });
@@ -749,6 +846,35 @@ function SkillDrawerInstance({
       });
     if (hasEvals || hosted) tabs.push({ id: "evals", label: t("drawer.tab_evals") });
   }
+
+  /* One folder of the Files tab: its folder-list files, then the files addressed by path. The package root is "". */
+  const fileSection = (folder: string, listed: { name: string; size: number }[], open: (name: string) => void, Icon: typeof FileText) => {
+    const others = otherGroups.get(folder) ?? [];
+    if (!listed.length && !others.length) return null;
+    const row = (key: string, name: string, size: number, onClick: () => void, RowIcon: typeof FileText) => (
+      <button key={key} type="button" className="file-row" onClick={onClick}>
+        <span className="fi">
+          <RowIcon size={15} />
+        </span>
+        <span className="fn">{name}</span>
+        <span className="fz">{formatByteSize(size)}</span>
+        <span className="fchev">
+          <ChevronRight size={14} />
+        </span>
+      </button>
+    );
+    return (
+      <div className="fsec" key={`files-${folder}`}>
+        <div className="fsec-lab">
+          {folder || t("drawer.group_root")} · {listed.length + others.length}
+        </div>
+        <div className="file-list">
+          {listed.map((f) => row(`list-${f.name}`, f.name, f.size, () => open(f.name), Icon))}
+          {others.map((f) => row(`path-${f.path}`, f.name, f.size, () => void openPackageFile(f.path), f.path.endsWith(".py") ? FileCode : FileText))}
+        </div>
+      </div>
+    );
+  };
 
   /* ── Switch region (same semantics as inline) ── */
   let headSwitch: ReactNode = null;
@@ -1007,7 +1133,7 @@ function SkillDrawerInstance({
           <span className="fi">{isCode ? <FileCode size={15} /> : <FileText size={15} />}</span>
           <span className="fileview-name">{fileView.path}</span>
           <span className="fileview-size">{formatByteSize(fileView.size)}</span>
-          {canEdit && !editing ? (
+          {canEdit && !editing && !fileView.unavailable ? (
             <button type="button" className="btn ghost sm" disabled={saving} onClick={() => beginEdit(fileView.path, fileView.content, fileView.content_sha256 ?? undefined)}>
               {t("drawer.edit")}
             </button>
@@ -1021,14 +1147,15 @@ function SkillDrawerInstance({
                 type="button"
                 className="btn ghost sm"
                 disabled={saving}
-                onClick={() => setRenameTarget(fileView.path.slice(fileView.path.indexOf("/") + 1))}
+                // A folder-list file renames within its folder; a package file takes a new path from the Skill root.
+                onClick={() => setRenameTarget(fileView.packageFile ? fileView.path : fileView.path.slice(fileView.path.indexOf("/") + 1))}
               >
                 {t("drawer.rename_file")}
               </button>
             ) : (
               <>
                 <label>
-                  {t("drawer.filename")}
+                  {fileView.packageFile ? t("drawer.file_path") : t("drawer.filename")}
                   <input value={renameTarget} disabled={saving} onChange={(e) => setRenameTarget(e.target.value)} />
                 </label>
                 <button type="button" className="btn sec sm" disabled={saving || !renameTarget.trim()} onClick={() => void manageFile("rename")}>
@@ -1057,6 +1184,10 @@ function SkillDrawerInstance({
             />
             {editBar(() => void saveFile())}
           </>
+        ) : fileView.unavailable === "binary" ? (
+          <div className="drawer-note">{t("drawer.file_not_text", { mime: fileView.mime })}</div>
+        ) : fileView.unavailable === "too_large" ? (
+          <div className="drawer-note">{t("drawer.file_too_large")}</div>
         ) : (
           <pre className="fileview-body">{fileView.content}</pre>
         )}
@@ -1148,23 +1279,29 @@ function SkillDrawerInstance({
             className="fileview-actions"
             onSubmit={(event) => {
               event.preventDefault();
-              const path = `${newKind}/${newFilename.trim()}`;
+              const path = newKind === "other" ? newFilename.trim() : `${newKind}/${newFilename.trim()}`;
               setCreating(true);
-              setFileView({ path, content: "", size: 0, mime: "text/plain" });
+              setFileView({ path, content: "", size: 0, mime: "text/plain", packageFile: newKind === "other" });
               beginEdit(path, "", detailRevision);
             }}
           >
             <label>
               {t("drawer.file_kind")}
-              <select value={newKind} onChange={(e) => setNewKind(e.target.value as SkillFileChange["kind"])}>
+              <select value={newKind} onChange={(e) => setNewKind(e.target.value as SkillFileChange["kind"] | "other")}>
                 <option value="references">{t("drawer.group_references")}</option>
                 <option value="scripts">{t("drawer.group_scripts")}</option>
                 <option value="evals">{t("drawer.group_evals")}</option>
+                <option value="other">{t("drawer.file_kind_other")}</option>
               </select>
             </label>
             <label>
-              {t("drawer.filename")}
-              <input required value={newFilename} placeholder="nested/example.md" onChange={(e) => setNewFilename(e.target.value)} />
+              {newKind === "other" ? t("drawer.file_path") : t("drawer.filename")}
+              <input
+                required
+                value={newFilename}
+                placeholder={newKind === "other" ? "assets/example.json" : "nested/example.md"}
+                onChange={(e) => setNewFilename(e.target.value)}
+              />
             </label>
             <button type="submit" className="btn sec sm" disabled={saving || !newFilename.trim()}>
               {t("drawer.create_file")}
@@ -1172,63 +1309,12 @@ function SkillDrawerInstance({
           </form>
         ) : null}
         {fileErr ? <SkillErrorNotice error={fileErr} /> : null}
-        {references.length ? (
-          <div className="fsec">
-            <div className="fsec-lab">references · {references.length}</div>
-            <div className="file-list">
-              {references.map((f) => (
-                <button key={f.name} type="button" className="file-row" onClick={() => void openFile("references", f.name)}>
-                  <span className="fi">
-                    <FileText size={15} />
-                  </span>
-                  <span className="fn">{f.name}</span>
-                  <span className="fz">{formatByteSize(f.size)}</span>
-                  <span className="fchev">
-                    <ChevronRight size={14} />
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {scriptFiles.length ? (
-          <div className="fsec">
-            <div className="fsec-lab">scripts · {scriptFiles.length}</div>
-            <div className="file-list">
-              {scriptFiles.map((f) => (
-                <button key={f.name} type="button" className="file-row" onClick={() => void openFile("scripts", f.name)}>
-                  <span className="fi">
-                    <FileCode size={15} />
-                  </span>
-                  <span className="fn">{f.name}</span>
-                  <span className="fz">{formatByteSize(f.size)}</span>
-                  <span className="fchev">
-                    <ChevronRight size={14} />
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {evalFiles.length ? (
-          <div className="fsec">
-            <div className="fsec-lab">evals · {evalFiles.length}</div>
-            <div className="file-list">
-              {evalFiles.map((file) => (
-                <button key={file.name} type="button" className="file-row" onClick={() => void openFile("evals", file.name)}>
-                  <span className="fi">
-                    <FileText size={15} />
-                  </span>
-                  <span className="fn">{file.name}</span>
-                  <span className="fz">{formatByteSize(file.size)}</span>
-                  <span className="fchev">
-                    <ChevronRight size={14} />
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
+        {fileSection("references", references, (name) => void openFile("references", name), FileText)}
+        {fileSection("scripts", scriptFiles, (name) => void openFile("scripts", name), FileCode)}
+        {fileSection("evals", evalFiles, (name) => void openFile("evals", name), FileText)}
+        {[...otherGroups.keys()]
+          .filter((folder) => !EDITABLE_FILE_KINDS.includes(folder as (typeof EDITABLE_FILE_KINDS)[number]))
+          .map((folder) => fileSection(folder, [], () => undefined, FileText))}
       </>
     );
   } else if (tab === "evals") {

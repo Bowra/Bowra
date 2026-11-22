@@ -637,11 +637,11 @@
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version Counted since 2026-09-30 (occurrences=3): the function holds 3 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
       "occurrences": 3
     },
-    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_aborted|turn_status": {
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_aborted.write|turn_status": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
     },
-    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_cancelled|turn_status": {
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_cancelled.write|turn_status": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
     },
@@ -653,7 +653,7 @@
       "owner": "terminal-protocol-reviewers",
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version Moved on 2026-11-16 review: 41f6f9e01 moved the unchanged running->completed UPDATE from mark_completed into its private _complete_in_tx helper, called only by mark_completed inside the same fenced completion transaction."
     },
-    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_failed|turn_status": {
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_failed.write|turn_status": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
     },

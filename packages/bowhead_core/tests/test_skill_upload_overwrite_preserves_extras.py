@@ -161,7 +161,8 @@ def test_new_skill_path_unchanged(tmp_path):
     [
         ([{"name": "../outside.py", "content": "print(1)"}], None, "skill_filename_invalid"),
         (None, [{"path": "references/../outside.md", "content": "private"}], "skill_filename_invalid"),
-        (None, [{"path": "unknown/file.md", "content": "private"}], "skill_file_kind_invalid"),
+        (None, [{"path": "SKILL.md", "content": "private"}], "skill_filename_invalid"),
+        (None, [{"path": "a//b.md", "content": "private"}], "skill_filename_invalid"),
     ],
 )
 def test_generated_bundle_path_errors_are_finite_and_keep_existing(tmp_path, monkeypatch, scripts, files, code):
@@ -188,6 +189,7 @@ def test_generated_bundle_does_not_publish_unknown_provider_error(tmp_path, monk
         raise BundleFileError("private-provider-code")
 
     monkeypatch.setattr(skill_upload, "bundle_file_path", fail_provider)
+    monkeypatch.setattr(skill_upload, "package_file_path", fail_provider)
     kwargs = (
         {"scripts": [{"name": "run.py", "content": "print(1)"}]}
         if path_kind == "scripts"
@@ -197,3 +199,28 @@ def test_generated_bundle_does_not_publish_unknown_provider_error(tmp_path, monk
         validate_and_save_generated(body_md=_body("bounded", "new"), user_id="u1", dest_root=tmp_path, existing_user_skills={}, **kwargs)
     assert error.value.code == "skill_filename_invalid"
     assert "private-provider-code" not in str(error.value)
+
+
+@pytest.mark.unit
+def test_file_patches_reach_any_path_of_the_package(tmp_path):
+    """Patches name any file by its path from the Skill root, as reads do (skill-bundle-read tech-design §12.4)."""
+    d = _seed(tmp_path)
+    (d / "assets").mkdir()
+    (d / "assets" / "old.json").write_text("{}", encoding="utf-8")
+    validate_and_save_generated(
+        body_md=_body("gm-recipe", "v2"),
+        scripts=None,
+        files=[
+            {"path": "assets/theme.json", "content": '{"color": "blue"}'},
+            {"path": "README.md", "content": "root file"},
+            {"path": "assets/old.json", "content": None},
+        ],
+        user_id="alice",
+        dest_root=tmp_path,
+        existing_user_skills={"gm-recipe": 100},
+        overwrite=True,
+    )
+    assert (d / "assets" / "theme.json").read_text(encoding="utf-8") == '{"color": "blue"}'
+    assert (d / "README.md").read_text(encoding="utf-8") == "root file"
+    assert not (d / "assets" / "old.json").exists()
+    assert (d / "references" / "notes.md").read_text(encoding="utf-8") == "口径备注"

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-from bowhead_skill.bundle_files import bundle_file_path
+from bowhead_skill.bundle_files import package_file_path, validate_package_write_path
 
 from bowhead_core._db import is_authority_busy, open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
@@ -96,10 +96,8 @@ def _patch(stage: Path, changes: list[dict]) -> None:
             if content is None:
                 raise ValueError("skill_manifest_required")
         else:
-            kind, separator, filename = name.partition("/")
-            if not separator:
-                raise ValueError("skill_patch_path_unsupported")
-            path = bundle_file_path(stage, kind, filename)
+            # Any file by its path from the Skill root, as reading allows (skill-bundle-read tech-design §12.4).
+            path = package_file_path(stage, validate_package_write_path(name))
         if content is None:
             if not path.is_file():
                 raise ValueError("skill_file_not_found")
@@ -180,7 +178,7 @@ class CoachSkillAuthoring:
             "import_status": instance.import_status if instance else None,
             "authoring": {
                 "scope": "personal",
-                "text_patch_roots": ["SKILL.md", "references/", "scripts/", "evals/"],
+                "text_patch_paths": "SKILL.md or any other file by its exact path from the Skill root",
                 "preserves_other_files": True,
                 "max_patch_bytes": 512 * 1024,
             },

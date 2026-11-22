@@ -104,16 +104,26 @@ async def test_load_prepares_each_skill_again_and_renders_it(monkeypatch):
     }
     calls = []
 
+    package = {"SKILL.md": b"---\nname: business-review\n---\nbody", "references/data-queries.md": b"Q" * 12, "assets/logo.png": b"\x89PNG"}
+
     class Sources:
         async def prepare(self, resource, *, scope):
             calls.append((resource, scope.session_id))
             return SimpleNamespace(proof=SimpleNamespace(name="business-review"), material=SimpleNamespace(content=json.dumps(material).encode()))
 
+        async def prepare_runtime_package(self, resource, *, scope):
+            calls.append(("package", resource))
+            return SimpleNamespace(material=SimpleNamespace(files=lambda: dict(package)))
+
     monkeypatch.setattr(ordinary_lead_material, "_sources", lambda ctx, resource, name: Sources())
     [selected] = await load_selected_skills(_ctx((SKILL,)), turn_id="t_1")
-    assert calls == [(SKILL, "s_1")]
+    assert calls == [(SKILL, "s_1"), ("package", SKILL)]
     assert selected.name == "business-review" and "## 执行步骤\n- 营业额" in selected.text and '<skill_file path="refs/a.md">' in selected.text
     assert "sha256" not in selected.text
+    # The selection is the whole package: every file is listed after the method, by path from the Skill root.
+    listing = selected.text.split("<skill_files>", 1)[1]
+    assert 'skill_read(name="business-review", file="<path>")' in listing
+    assert "assets/logo.png (4 bytes)\nreferences/data-queries.md (12 bytes)" in listing and listing.endswith("</skill_files>\n</skill_content>")
 
 
 @pytest.mark.asyncio

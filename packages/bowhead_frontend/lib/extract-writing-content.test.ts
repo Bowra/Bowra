@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { extractWritingContent } from "./extract-writing-content";
+import { extractWritingContent, extractWritingIntent } from "./extract-writing-content";
 
 describe("extractWritingContent", () => {
   it("strips the trailing python_sandbox `inputs` field (the reported bug)", () => {
@@ -69,3 +69,19 @@ describe("extractWritingContent", () => {
     );
   });
 });
+
+describe("turn visibility FR5: code writing", () => {
+  it("reads the purpose once it streams, at the top level or inside a dispatcher's input", () => {
+    expect(extractWritingIntent('{"intent": "生成  看板", "co')).toBe("生成 看板");
+    expect(extractWritingIntent('{"name": "python_sandbox", "input": {"intent": "画图')).toBe("画图");
+    expect(extractWritingIntent('{"code": "print(1)"')).toBeNull();
+    expect(extractWritingIntent('{"intent": "')).toBeNull();
+  });
+
+  it("shows nothing instead of the arguments' JSON until the code starts, when asked", () => {
+    expect(extractWritingContent('{"intent": "画图", "co', "python_sandbox", { fallbackToRaw: false })).toBe("");
+    expect(extractWritingContent('{"intent": "画图", "code": "import', "python_sandbox", { fallbackToRaw: false })).toBe("import");
+    expect(extractWritingContent('{"name": "python_sandbox", "input": {"code": "x = 1', "python_sandbox", { fallbackToRaw: false })).toBe("x = 1");
+  });
+});
+

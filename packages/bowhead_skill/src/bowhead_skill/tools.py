@@ -15,7 +15,18 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bowhead_skill.bundle_files import BUNDLE_FILE_KINDS, BundleFileError, bundle_file_path, is_python_cache_path, list_bundle_files, read_bundle_text
+from bowhead_skill.bundle_files import (
+    BUNDLE_FILE_KINDS,
+    BundleFileError,
+    is_python_cache_path,
+    list_bundle_files,
+    list_package_files,
+    package_file_listing,
+    package_miss,
+    package_read_result,
+    read_package_file,
+    resolve_package_path,
+)
 from bowhead_skill.effective import (
     description_for,
     list_effective_skills,
@@ -30,7 +41,7 @@ from bowhead_skill.effective import (
 from bowhead_skill.execution_policy import sandbox_default_timeout_s, sandbox_max_timeout_s
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.index import substitute_args
-from bowhead_skill.loader import SkillSpec
+from bowhead_skill.loader import SkillSpec, decode_skill_markdown
 from bowhead_skill.sandbox_call_shape import (
     FLAT_SANDBOX_TOOL,
     sandbox_call_skeleton,
@@ -109,18 +120,22 @@ def _list_references(spec: SkillSpec, *, builtin: bool = False) -> list[str]:
     return [name for name, _size in list_bundle_files(spec.source_dir, "references") if not builtin or not is_python_cache_path(name)]
 
 
-def _read_reference(spec: SkillSpec, ref: str, *, builtin: bool = False) -> dict[str, Any]:
+def _read_package_file(spec: SkillSpec, requested: str, *, prefer_references: bool, builtin: bool = False) -> dict[str, Any]:
+    """Read one file of the package by the path the model passed (tech-design §1–§3).
+
+    `ref` keeps its legacy reading under references/ first; `file` starts at the
+    Skill root. Either finds a link exactly as SKILL.md writes it.
+    """
+    files = list_package_files(spec.source_dir, builtin=builtin)
     try:
-        if builtin and is_python_cache_path(ref):
-            raise BundleFileError("builtin_cache_file_unavailable")
-        path = bundle_file_path(spec.source_dir, "references", ref)
-        if not path.is_file() and not Path(ref).suffix:
-            ref += ".md"  # Support legacy calls omitting .md; read other extensions by their original names.
-        body = read_bundle_text(spec.source_dir, "references", ref)
+        path = resolve_package_path(requested, [name for name, _size in files], prefer_references=prefer_references)
+        if path is None:
+            return package_miss(spec.name, requested, files)
+        data, size = read_package_file(spec.source_dir, path)
     except BundleFileError as exc:
-        error = f"reference '{ref}' not found" if exc.code == "skill_file_not_found" else f"invalid ref: {ref!r} ({exc.code})"
-        return {"error": error, "available": _list_references(spec, builtin=builtin)}
-    return {"name": spec.name, "ref": ref, "body": body}
+        # Only a classified path outcome becomes a miss; a storage error stays an error.
+        return package_miss(spec.name, requested, files, reason=exc.code)
+    return package_read_result(spec.name, path, data, size=size, ref_requested=prefer_references)
 
 
 # follow-up② grounding (design D4): return the skill's invocation contract file to the model as **read-only documentation**
@@ -165,6 +180,7 @@ class SkillToolDef:
 
 
 _REVISES_LIMIT = 8
+_EXTRA_ARGS_IGNORED = "Not passed: the script command line is fixed. Pass values in input instead."
 _VERSION_REFUSAL_HINTS = {
     "version_target_not_found": "The file to revise was not found among your files.",
     "version_target_out_of_scope": (
@@ -577,6 +593,7 @@ def build_skill_tools(
     authorize_invoke: Callable[[str, Any], Awaitable[dict[str, Any] | None]] | None = None,
     authorize_read: Callable[[SkillSpec, Any], dict[str, Any] | None] | None = None,
     material_observer: Any | None = None,
+    resolve_selected: Callable[[Any, str], Awaitable[Any]] | None = None,
 ) -> list[SkillToolDef]:
     """Build handlers with an optional host-owned final authorization check.
 
@@ -595,6 +612,11 @@ def build_skill_tools(
         skill_script_runtime_denial,
     )
 
+    def _selected(ctx: Any, name: str) -> bool:
+        """The user selected this name with `/`: the host resolves its exact source (resolve_selected)."""
+        resources = getattr(ctx, "selected_skill_resources", None)
+        return resolve_selected is not None and isinstance(resources, dict) and name in resources
+
     def _is_catalog(name: str, ctx: Any) -> bool:
         if assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None:
             return ctx.assigned_skill_material.source_kind == "builtin"
@@ -603,6 +625,8 @@ def build_skill_tools(
     async def _import_pending(ctx: Any, spec_name: str) -> bool:
         if assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None:
             return False  # The exact source gate checked import state.
+        if _selected(ctx, spec_name):
+            return False  # The selected source was checked when it was resolved.
         return await user_import_pending(ctx, spec_name)
 
     def _import_pending_error(spec_name: str) -> dict[str, Any]:
@@ -621,6 +645,8 @@ def build_skill_tools(
         """查 ctx.skill_instance_store，判断当前 user 是否启用此 skill（权威在 effective.py）."""
         if assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None:
             return True  # Do not substitute a same-name source preference.
+        if _selected(ctx, spec_name):
+            return True  # A same-name personal preference belongs to another source.
         return await _effective_user_enabled(ctx, catalog, spec_name)
 
     async def _resolve(name: str, ctx: Any) -> SkillSpec | None:
@@ -633,17 +659,23 @@ def build_skill_tools(
         """
         if assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None:
             return ctx.assigned_skill_material.spec
-        spec = await resolve_skill(
-            name,
-            catalog=catalog,
-            user_id=getattr(ctx, "user_id", None),
-            team_id=getattr(ctx, "team_id", None),
-            user_skill_store=getattr(ctx, "skill_instance_store", None),
-            team_skill_store=getattr(ctx, "team_skill_store", None),
-            # content-permissions S4: team_skill IDs shared with the user, prefetched for the turn
-            # (turn_runner injects them into ctx); default None → visibility alone (fail-safe).
-            granted_team_skill_ids=getattr(ctx, "granted_team_skill_ids", None),
-        )
+        if _selected(ctx, name):
+            # The source the user selected, at its selected version, or a refusal dict.
+            spec = await resolve_selected(ctx, name)
+            if not isinstance(spec, SkillSpec):
+                return spec
+        else:
+            spec = await resolve_skill(
+                name,
+                catalog=catalog,
+                user_id=getattr(ctx, "user_id", None),
+                team_id=getattr(ctx, "team_id", None),
+                user_skill_store=getattr(ctx, "skill_instance_store", None),
+                team_skill_store=getattr(ctx, "team_skill_store", None),
+                # content-permissions S4: team_skill IDs shared with the user, prefetched for the turn
+                # (turn_runner injects them into ctx); default None → visibility alone (fail-safe).
+                granted_team_skill_ids=getattr(ctx, "granted_team_skill_ids", None),
+            )
         if spec is not None and catalog.get(name) is not None:
             scripts = [path for path in spec.scripts if not is_python_cache_path(path.relative_to(spec.source_dir))]
             if scripts != spec.scripts:
@@ -694,6 +726,8 @@ def build_skill_tools(
         spec = await _resolve(name, ctx)  # Per-request ownership resolution (catalog→user→team, §1.2).
         if spec is None:
             return {"error": f"skill '{name}' not found"}
+        if isinstance(spec, dict):
+            return spec  # A selected Skill that changed after the selection.
         if await _import_pending(ctx, name):
             return _import_pending_error(name)
         if not await _user_enabled(ctx, name):
@@ -718,17 +752,12 @@ def build_skill_tools(
         # M137 follow-up: `ref` lets the LLM fetch .md files from the references/ subdirectory
         # (keep them outside the SKILL.md body to keep it concise; read subdocuments on demand).
         if file:
-            kind, _, filename = file.partition("/")
-            try:
-                body = read_bundle_text(spec.source_dir, kind, filename)
-            except BundleFileError as exc:
-                result = {"error": str(exc), "error_kind": "invalid_args"}
-                if material_observer is not None:
-                    await material_observer.read_rejected(args, result, ctx)
-                return result
-            return {"name": spec.name, "file": file, "body": body}
+            result = _read_package_file(spec, file, prefer_references=False, builtin=live_builtin)
+            if "error" in result and material_observer is not None:
+                await material_observer.read_rejected(args, result, ctx)
+            return result
         if ref is not None and str(ref).strip():
-            return _read_reference(spec, str(ref).strip(), builtin=live_builtin)
+            return _read_package_file(spec, str(ref).strip(), prefer_references=True, builtin=live_builtin)
 
         body = spec.body_md
         raw_args = args.get("args") or ""
@@ -749,6 +778,8 @@ def build_skill_tools(
             ),
             "references": references_available,
             "body": body,
+            # Every file of the package by its path from the Skill root; any of them is readable with `file`.
+            **package_file_listing(list_package_files(spec.source_dir, builtin=live_builtin)),
         }
         # Editing a skill through conversation needs **the full original SKILL.md on disk**: `body` is a display form with frontmatter removed
         # and substitute_args applied. Saving it back loses every frontmatter field except
@@ -760,7 +791,7 @@ def build_skill_tools(
             manifest = spec.source_dir / "SKILL.md"
             try:
                 if manifest.is_file():
-                    result["body_raw"] = manifest.read_text(encoding="utf-8")
+                    result["body_raw"] = decode_skill_markdown(manifest.read_bytes())
                     store = getattr(ctx, "skill_instance_store", None)
                     uid = getattr(ctx, "user_id", None)
                     personal = await store.get(user_id=uid, name=name) if store is not None and uid else None
@@ -769,6 +800,7 @@ def build_skill_tools(
                     result["files"] = {kind: [n for n, _size in list_bundle_files(spec.source_dir, kind)] for kind in BUNDLE_FILE_KINDS}
                     result["edit_hint"] = (
                         "在 body_raw（完整 SKILL.md）上修改，再用 skill_save_generated(body_md=<修改后的原文>, overwrite=true) 保存个人版；只改正文时省略 scripts。"
+                        "改其他文件时用 files 逐文件补丁，path 取 package_files 里的路径（任何文件夹或根目录文件都可以）。"
                         if is_personal
                         else "这是团队版。修改前必须在设置 → Skills 中使用「复制为我的」复制完整 bundle，再修改个人版并提交团队审批；不要直接调用 skill_save_generated 冒充修改团队版。"
                     )
@@ -985,6 +1017,8 @@ def build_skill_tools(
         spec = await _resolve(name, ctx)  # Per-request ownership resolution (catalog→user→team, §1.2).
         if spec is None:
             return {"error": f"skill '{name}' not found"}
+        if isinstance(spec, dict):
+            return spec  # A selected Skill that changed after the selection.
         _origin = _spec_origin(catalog, name, spec)
         if assigned_skill_active(ctx):
             _kind = ctx.assigned_skill_material.source_kind
@@ -1063,9 +1097,10 @@ def build_skill_tools(
                     "available": spec.script_names,
                 }
 
-        extra_args = args.get("extra_args") or []
-        if not isinstance(extra_args, list):
-            extra_args = [str(extra_args)]
+        # The server fixes the script command line (`--input <workdir>/input.json --workdir <workdir>`).
+        # Model arguments used to follow it, and argparse keeps the last value, so they could replace
+        # both paths on the host. They are never passed; the result says so.
+        extra_args_ignored = args.get("extra_args") not in (None, "", [])
 
         # skill-audit batch C (security review P0-conditional): when the multiruntime flag is OFF, user/team
         # skill execution fails closed. Previously it fell back to unisolated execution on the gateway host (.py directly via
@@ -1093,8 +1128,6 @@ def build_skill_tools(
         # The built-in compiler handles executable document input. Always use
         # the isolated runner, independently of uploaded-Skill runtime switches.
         _latex_report = name == "latex-report" and _is_catalog(name, ctx)
-        if _latex_report and extra_args:
-            return {"error_kind": "invalid_args", "error": "latex-report accepts input.source, not extra_args. The sandbox invocation is fixed."}
         if _latex_report or (multiruntime_enabled() and not _is_catalog(name, ctx)):
             _entry_names = set(spec.script_names)
             # Command mode does not validate a single entry (argv contains the script path; the runner host side guards paths);
@@ -1267,12 +1300,7 @@ def build_skill_tools(
         ):
             return denial
 
-        result = await runtime.run(
-            spec,
-            entry_script=script,
-            input_data=input_data,
-            extra_args=[str(x) for x in extra_args],
-        )
+        result = await runtime.run(spec, entry_script=script, input_data=input_data)
         if material_observer is not None:
             await material_observer.executed(result, ctx)
 
@@ -1366,6 +1394,7 @@ def build_skill_tools(
                 else {}
             ),
             "exit_code": result.exit_code,
+            **({"ignored_arguments": {"extra_args": _EXTRA_ARGS_IGNORED}} if extra_args_ignored else {}),
             **(
                 {
                     "download_filename": _download_name,
@@ -1486,7 +1515,6 @@ def build_skill_tools(
                 "deliverable_outputs 列出代码实际写出的顶层文件名；计算中间文件保持默认 analysis"
             ),
         },
-        "extra_args": {"type": "array", "items": {"type": "string"}},
     }
     _invoke_desc = (
         "在沙箱里跑 skill 的一个 script。**必传 name**（skill 名）+ script（脚本文件名）。"
@@ -1540,8 +1568,8 @@ def build_skill_tools(
             description=(
                 "加载指定 skill 的完整 SKILL.md 指引（含 `$ARGUMENTS / $0` 替换）。"
                 "当 system prompt 的 skill 索引显示某 skill 可能可用时，调这个拿详细指令再决定是否 invoke。"
-                "返回值含 `references` 字段列出可深读的子文档（如 'payload-schema.md'）；"
-                "想读子文档传 `ref=<filename>` 再调一次 skill_read."
+                "The result lists every file of the Skill in `package_files`, by path from the Skill root. "
+                "Read any of them with `file=<path>`, exactly as SKILL.md links it or as package_files lists it."
             ),
             input_schema={
                 "type": "object",
@@ -1550,14 +1578,17 @@ def build_skill_tools(
                     "args": {"description": "（可选）$ARGUMENTS / $N 替换实参，string 或 array"},
                     "file": {
                         "type": "string",
-                        "description": "读取 bundle 内的文本文件，传完整相对路径，如 scripts/nested/run.py、references/rules.json、evals/evals.json；修改脚本前先读取源码。",
+                        "description": (
+                            "A file of this Skill by its path from the Skill root, as SKILL.md links it or package_files lists it "
+                            "(e.g. references/rules.md, assets/theme.json, forms.md). Text returns its content; other files return "
+                            "their type and size. Read a script's source before changing it."
+                        ),
                     },
                     "ref": {
                         "type": "string",
                         "description": (
-                            "（可选）references/ 下的相对文件路径，支持嵌套与 Markdown/JSON/YAML/TXT 文本；Markdown 可省 .md 后缀。"
-                            "传了就只返这个 ref 文件内容，不返主体. "
-                            "先不传调一次拿到 references 列表，再决定要读哪个 ref."
+                            "(Optional, older form of file) A file under references/; a missing .md suffix is added. "
+                            "Returns only that file, not the body. file reads any file of the Skill."
                         ),
                     },
                 },

@@ -237,7 +237,7 @@ def test_unsaved_notice_is_capped(runner, tmp_path) -> None:
 
 
 def test_skill_mode_build_folders_are_not_reported(runner, tmp_path, monkeypatch) -> None:
-    """A Skill keeps intermediate files in nested build folders on purpose (LaTeX); only direct code runs get the notice."""
+    """A Skill that saves its output keeps intermediate files in nested build folders on purpose (LaTeX); they are not reported."""
     from bowhead_skill.catalog import builtin_catalog_dir
 
     monkeypatch.setenv("BOWHEAD_SANDBOX_BACKEND", "executor")
@@ -265,6 +265,76 @@ def test_skill_mode_build_folders_are_not_reported(runner, tmp_path, monkeypatch
     monkeypatch.setattr(sys, "argv", ["runner.py", "--input", str(tmp_path / "in.json"), "--workdir", str(workdir)])
     runner.main()
     result = json.loads((workdir / "result.json").read_text())
+    assert "not_saved" not in result
+    assert "were not saved" not in (result.get("stderr") or "")
+
+
+def _run_uploaded_skill(runner, tmp_path, monkeypatch, write, *, command: list[str] | None = None) -> dict:
+    """Run an uploaded Skill through main() with the executor mocked; `write(workdir)` is what the run writes."""
+    skill = tmp_path / ".data" / "user_skills" / "u_1" / "deck"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: deck\ndescription: d\n---\nbody\n")
+    (skill / "scripts/build.py").write_text("print('build')\n")
+    monkeypatch.setenv("BOWHEAD_SANDBOX_BACKEND", "executor")
+
+    def execute(_url, _token, **kwargs):
+        write(kwargs["workdir"])
+        return {"ok": True, "exit_code": 0, "stdout": "built", "stderr": "", "duration_ms": 1}
+
+    monkeypatch.setattr(runner, "_run_via_executor", execute)
+    monkeypatch.setattr(runner, "_upload_artifact", lambda path, *_a, **_k: {"name": Path(path).name, "artifact_id": "art_000000000001", "size": 1})
+    payload = {
+        "_skill_dir": str(skill),
+        "_skill_entry": "" if command else "build.py",
+        "_sandbox_executor_url": "http://executor.test",
+        "_sandbox_executor_token": "secret",
+    }
+    if command:
+        payload.update(_skill_command=command, _skill_command_enabled=True, _skill_argv0_allowlist=["python3"])
+    (tmp_path / "in.json").write_text(json.dumps(payload))
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    monkeypatch.setattr(sys, "argv", ["runner.py", "--input", str(tmp_path / "in.json"), "--workdir", str(workdir)])
+    runner.main()
+    return json.loads((workdir / "result.json").read_text())
+
+
+def test_uploaded_skill_script_that_saved_nothing_names_what_it_wrote(runner, tmp_path, monkeypatch) -> None:
+    def write(workdir: Path) -> None:
+        (workdir / "output").mkdir()
+        (workdir / "output/deck.pptx").write_bytes(b"pptx")
+        (workdir / "skill/scripts/__pycache__").mkdir()
+        (workdir / "skill/scripts/__pycache__/build.cpython-312.pyc").write_bytes(b"pyc")
+
+    result = _run_uploaded_skill(runner, tmp_path, monkeypatch, write)
+    assert result["not_saved"] == ["output/deck.pptx"]
+    # The script ran; it may answer through stdout or skill_result.json, so ok is unchanged.
+    assert result["ok"] is True
+    assert "[runner] These files were written below the top level of the working directory and were not saved: output/deck.pptx." in result["stderr"]
+    assert "directly into the working directory" in result["stderr"]
+
+
+def test_uploaded_skill_command_names_files_written_inside_the_skill_folder(runner, tmp_path, monkeypatch) -> None:
+    # A command runs from /workdir/skill, so a relative output folder lands inside the staged copy.
+    def write(workdir: Path) -> None:
+        (workdir / "skill/output").mkdir()
+        (workdir / "skill/output/deck.pptx").write_bytes(b"pptx")
+
+    result = _run_uploaded_skill(runner, tmp_path, monkeypatch, write, command=["python3", "scripts/build.py"])
+    assert result["not_saved"] == ["skill/output/deck.pptx"]
+    assert result["ok"] is False  # The command-mode guard: nothing saved.
+
+
+@pytest.mark.parametrize("shape", ["top_level_output", "stdout_only"])
+def test_uploaded_skill_that_saved_output_or_wrote_nothing_is_unchanged(runner, tmp_path, monkeypatch, shape) -> None:
+    def write(workdir: Path) -> None:
+        if shape == "top_level_output":
+            (workdir / "deck.pptx").write_bytes(b"pptx")
+            (workdir / "build").mkdir()
+            (workdir / "build/slide1.xml").write_text("<p/>")
+
+    result = _run_uploaded_skill(runner, tmp_path, monkeypatch, write)
+    assert result["ok"] is True
     assert "not_saved" not in result
     assert "were not saved" not in (result.get("stderr") or "")
 
@@ -355,8 +425,10 @@ def test_refused_file_type_is_named_with_how_to_deliver_it(runner, tmp_path, mon
     assert "Data artifact upload failed" not in result["error"]
 
 
-@pytest.mark.parametrize(("status", "code", "expected"), [(415, "file_type_unsupported", True), (415, "other", False), (500, None, False)])
-def test_upload_reports_a_refused_type_only_for_the_coded_refusal(runner, tmp_path, monkeypatch, status, code, expected) -> None:
+@pytest.mark.parametrize(
+    ("status", "code", "expected"), [(415, "file_type_unsupported", "type"), (415, "file_office_duplicate_part", "refused"), (500, None, None)]
+)
+def test_upload_names_a_coded_refusal(runner, tmp_path, monkeypatch, status, code, expected) -> None:
     import urllib.error
 
     source = tmp_path / "chk.js"
@@ -368,4 +440,9 @@ def test_upload_reports_a_refused_type_only_for_the_coded_refusal(runner, tmp_pa
 
     monkeypatch.setattr(runner.urllib.request, "urlopen", refuse)
     record = runner._upload_artifact(source, "http://gateway")
-    assert record == ({"name": "chk.js", "type_error": runner._guess_upload_mime("chk.js")} if expected else None)
+    if expected == "type":
+        assert record == {"name": "chk.js", "type_error": runner._guess_upload_mime("chk.js")}
+    elif expected == "refused":
+        assert record == {"name": "chk.js", "refused": code}
+    else:
+        assert record is None

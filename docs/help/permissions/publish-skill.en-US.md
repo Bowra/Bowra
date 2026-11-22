@@ -29,6 +29,8 @@ Reading a Skill on its own does not grant permission to run its scripts; adding 
 
 Edit your published Skill, save, and submit the update. Until the update is approved and released, colleagues normally continue using the existing published version. Do not assume saving an author draft changes the team's version.
 
+To change a supporting file, open **Files**, open the file, edit it and save. **Files** lists every file in the Skill package, which is what Agents can read, and any text file can be edited, in any folder or at the package root. To add one elsewhere, choose **Other folder or root** and enter its path from the Skill root (for example `assets/theme.json`). Files that are not text, such as images or templates, can be renamed or deleted but not edited there; to replace one, upload a new version of the Skill package.
+
 After the update is approved, Agents that use the Skill pick up the new version at their next run; their owners see that a Skill the Agent uses was updated, with a recommendation to evaluate the Agent again. If the team version itself is edited directly and returned to review, Agents that include it can't use it, and can't be saved or released with it, until a team owner or administrator approves it again.
 
 ## Rejection, cancellation, and direct administration

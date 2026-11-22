@@ -1033,7 +1033,7 @@ DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
             disclosure=ErrorDisclosure.AUTHENTICATED,
             publisher_name="publish_tool_failure",
             allowed_parent_codes=TOOL_FAILURE_CODES,
-            facts=("field=<safe>", "exception=<identifier>", "missing_key=<safe>", "exit_code=<integer>"),
+            facts=("field=<safe>", "exception=<identifier>", "missing_key=<safe>", "file=<safe>", "exit_code=<integer>"),
         ),
         "chat_llm_failed": DiagnosticPolicy(
             diagnostic_code="chat_llm_failed",
@@ -1634,7 +1634,7 @@ def publish_tool_failure(outcome: ToolOutcome) -> PublishedDiagnostic | None:
     if outcome.state != "failure" or outcome.code not in TOOL_FAILURE_CODES:
         return None
     facts: list[str] = []
-    for name, value in (("field", outcome.field), ("exception", outcome.exception), ("missing_key", outcome.missing_key)):
+    for name, value in (("field", outcome.field), ("exception", outcome.exception), ("missing_key", outcome.missing_key), ("file", outcome.file)):
         if not isinstance(value, str) or not value or len(value) > 80:
             continue
         # Field paths are schema paths, not host filesystem paths. Only this

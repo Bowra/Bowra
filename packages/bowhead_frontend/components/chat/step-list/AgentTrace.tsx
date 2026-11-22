@@ -31,6 +31,7 @@ import {
   type PeerFailureReasonCode,
 } from "@/lib/error-messages";
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
+import { codeLanguageTag, lastCodeLines } from "@/lib/code-languages";
 import { extractWritingContent } from "@/lib/extract-writing-content";
 import { SKILL_UNAVAILABLE_CODE_PREFIX } from "@/lib/sse-events";
 import { TOOL_FAILURE_CODES } from "@/lib/tool-failure";
@@ -247,6 +248,9 @@ export interface AgentTraceProps {
   /** Acknowledge a failed step (UI-only dismiss). O5: removed fake retry/skip buttons (stub endpoints do not actually rerun). */
 }
 
+/** Lines of code shown while it is being written (turn visibility FR5). */
+const LIVE_CODE_LINES = 12;
+
 /** Map a StepView's detail / subSteps onto the v2 tool-result renderers. */
 function renderStepDetail(
   s: StepView,
@@ -256,12 +260,19 @@ function renderStepDetail(
   // `detail` lands. Preserves the s_3e854 ④ anti-dead-air reveal that the
   // flat→block swap had dropped (the body stayed empty until the step completed).
   if (s.isStreaming && s.partialContent) {
+    // Turn visibility FR5: the tag comes from the declared language; code being written shows its last
+    // LIVE_CODE_LINES lines, so the box follows the newest line and keeps its height.
     const lang =
-      s.detail?.kind === "sql" ? "SQL" : s.detail?.kind === "python" ? "Python" : undefined;
+      codeLanguageTag(s.codeLanguage) ??
+      (s.detail?.kind === "sql" ? "SQL" : s.detail?.kind === "python" ? "Python" : undefined);
     // #5 (chat-solidify follow-up): partialContent is the accumulated raw
     // tool-args JSON; project it to the code/query being written so the <Code>
     // block drops the `{"code":…}` scaffold + sibling fields (python_sandbox's
     // trailing `"inputs":{…}` tail — dogfood 0.72.8).
+    if (s.codeLanguage) {
+      const code = extractWritingContent(s.partialContent, s.toolName, { fallbackToRaw: false });
+      return code ? <Code code={lastCodeLines(code, LIVE_CODE_LINES)} lang={lang} caret /> : null;
+    }
     const code = extractWritingContent(s.partialContent, s.toolName);
     return <Code code={code} lang={lang} caret />;
   }

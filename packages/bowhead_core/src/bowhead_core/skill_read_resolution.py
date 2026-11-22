@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -19,7 +21,7 @@ from pathlib import Path, PurePosixPath
 import aiosqlite
 import anyio
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, writer_busy
 from bowhead_core.access_control import AccessContext, AccessControlStore
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef
@@ -73,6 +75,11 @@ class SkillReadResolutionError(ValueError):
 
 
 def _fail(code: str = "reference_skill_source_unavailable", *, reason: str | None = None, cause: str | None = None) -> None:
+    # A busy SQLite lock says nothing about the source: re-raise it so the caller repeats the whole check.
+    # 116 (1.7.62) lost a finished Turn when a busy lease in the completion check became "source unavailable".
+    in_flight = sys.exception()
+    if isinstance(in_flight, sqlite3.OperationalError) and writer_busy(in_flight):
+        raise in_flight
     raise SkillReadResolutionError(code, reason=reason, cause=cause) from None
 
 
@@ -106,6 +113,9 @@ class ResolvedSkillPackage:
 class ResolvedSkillRuntimePackage:
     proof: SkillReadSourceProof
     material: CapturedSkillPackage = field(repr=False)
+    # The resolved source folder whose bytes match `material`; a selected Skill
+    # reads and runs from it after this check (skill-bundle-read tech-design §6).
+    path: Path | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +227,7 @@ class SkillReadSourceResolver:
             after = await self._resolve(resource, scope)
             if before != after:
                 _fail("reference_skill_source_changed")
-            return ResolvedSkillRuntimePackage(before.proof, material)
+            return ResolvedSkillRuntimePackage(before.proof, material, before.path)
         except (SkillReadResolutionError, SkillPackageMaterialError):
             raise
         except Exception:

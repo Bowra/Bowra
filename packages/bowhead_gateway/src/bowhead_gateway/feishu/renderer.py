@@ -350,6 +350,10 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
         step_id = str(payload.get("step_id") or "")
         if not step_id:
             return False
+        # Code being written streams into the browser's code box; a card has none, so it would show the raw
+        # streamed arguments. The run step that follows keeps the card's "run code" row (turn visibility FR5).
+        if payload.get("step_type") == "lead_thinking_writing" and payload.get("code_language"):
+            return False
         # A step between deltas starts a new narrative beat (the clarification hand-off is no step).
         if payload.get("tool_name") != "clarification_ask":
             state.narrative_break_pending = True

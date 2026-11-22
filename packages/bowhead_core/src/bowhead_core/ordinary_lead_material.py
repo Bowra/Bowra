@@ -528,7 +528,13 @@ class OrdinarySkillObserver:
                     raise OrdinaryContinuationUnavailable()
                 retained = _proof_json(proof)
             else:
-                if self.catalog.get(spec.name) is spec:
+                from bowhead_core.selected_skill_runtime import selected_resource
+
+                selected = selected_resource(ctx, spec.name)
+                if selected is not None:
+                    # The tool resolved the selected source and checked its version.
+                    kind, identity, root = selected.source_kind, selected.id, spec.source_dir
+                elif self.catalog.get(spec.name) is spec:
                     kind, identity, root = "builtin", "builtin:" + spec.name, spec.source_dir
                 else:
                     record = await ctx.skill_instance_store.get(user_id=ctx.user_id, name=spec.name)
@@ -671,17 +677,27 @@ class OrdinarySkillObserver:
                 proof, files, actual_arguments = pending
                 if actual_arguments != arguments:
                     raise OrdinaryContinuationUnavailable()
-                from bowhead_skill.loader import split_skill_markdown
+                from bowhead_skill.bundle_files import decode_package_text
+                from bowhead_skill.loader import decode_skill_markdown, split_skill_markdown
 
-                _, body = split_skill_markdown(files["SKILL.md"].decode())
+                # The handler's SKILL.md text went through the loader, which reads universal newlines.
+                manifest = decode_skill_markdown(files["SKILL.md"])
+                _, body = split_skill_markdown(manifest)
                 if result.get("file"):
-                    body = files[result["file"]].decode()
+                    data = files[result["file"]]
+                    if result.get("binary") is True:
+                        # A file that is not text is reported by size and type, never by content.
+                        if result.get("size") != len(data) or decode_package_text(data) is not None:
+                            raise OrdinaryContinuationUnavailable()
+                        body = None
+                    else:
+                        body = data.decode()
                 elif result.get("ref"):
                     body = files["references/" + result["ref"]].decode()
                 else:
                     raw = arguments.get("args") or ""
                     body = substitute_args(body, raw if isinstance(raw, list) else str(raw))
-                if result.get("body") != body or ("body_raw" in result and result["body_raw"] != files["SKILL.md"].decode()):
+                if result.get("body") != body or ("body_raw" in result and result["body_raw"] != manifest):
                     raise OrdinaryContinuationUnavailable()
                 state.tool_materials[key] = {
                     "kind": "skill_read",

@@ -918,6 +918,8 @@ export interface SkillDetailDTO extends SkillSummaryDTO {
   source_turn_id: string | null;
   trigger_examples: string[];
   references: { name: string; size: number }[];
+  /** Every file of the package by its path from the Skill root (what Agents can read). Older backends omit it. */
+  package_files?: SkillPackageFileInfo[];
   evals_count: number;
   has_evals: boolean;
   /** Custom subagents referencing this skill (always empty with subagent_creator flag off). */
@@ -933,6 +935,21 @@ export interface SkillFileContentDTO {
   content_sha256?: string | null;
   path: string;
   content: string;
+  size: number;
+  mime: string;
+}
+
+export interface SkillPackageFileInfo {
+  path: string;
+  size: number;
+}
+
+/** Any package file, for viewing: `content` is null for a file that is not previewable text. */
+export interface SkillPackageFileContentDTO {
+  content_sha256?: string | null;
+  path: string;
+  content: string | null;
+  unavailable?: "binary" | "too_large" | null;
   size: number;
   mime: string;
 }
@@ -955,6 +972,13 @@ export async function fetchSkillFile(
     personalSkillsQuery(
       `/api/v1/skills/${encodeURIComponent(name)}/files/${kind}/${encodeURIComponent(filename)}`,
     ),
+    {},
+  );
+}
+
+export async function fetchSkillPackageFile(name: string, path: string): Promise<SkillPackageFileContentDTO> {
+  return apiJson<SkillPackageFileContentDTO>(
+    personalSkillsQuery(packageFileUrl(`/api/v1/skills/${encodeURIComponent(name)}`, path)),
     {},
   );
 }
@@ -1008,6 +1032,47 @@ export async function changeSkillFile(
       body: JSON.stringify(change),
     },
   );
+  _dispatchSkillsChanged();
+  return result;
+}
+
+/** Create, rename or delete any file of a personal skill by its path from the Skill root (not SKILL.md). */
+export interface SkillPackageFileChange {
+  expected_instance_id?: string;
+  expected_content_sha256?: string;
+  operation: "create" | "rename" | "delete";
+  path: string;
+  target?: string;
+  content?: string;
+}
+
+function packageFileUrl(base: string, path: string): string {
+  return `${base}/package-files/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+export async function changeSkillPackageFile(name: string, change: SkillPackageFileChange): Promise<SkillPackageFileContentDTO> {
+  const result = await apiJson<SkillPackageFileContentDTO>(personalSkillsQuery(`/api/v1/skills/${encodeURIComponent(name)}/package-files`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  _dispatchSkillsChanged();
+  return result;
+}
+
+/** Overwrite an existing file of a personal skill with text, by its path from the Skill root. */
+export async function putSkillPackageFile(
+  name: string,
+  path: string,
+  content: string,
+  expectedContentSha256?: string,
+  expectedInstanceId?: string,
+): Promise<SkillPackageFileContentDTO> {
+  const result = await apiJson<SkillPackageFileContentDTO>(personalSkillsQuery(packageFileUrl(`/api/v1/skills/${encodeURIComponent(name)}`, path)), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, expected_content_sha256: expectedContentSha256, expected_instance_id: expectedInstanceId }),
+  });
   _dispatchSkillsChanged();
   return result;
 }

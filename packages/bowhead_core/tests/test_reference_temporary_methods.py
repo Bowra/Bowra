@@ -16,6 +16,8 @@ from test_reference_http_start import receiver_case as receiver_case
 from test_reference_http_start import start_case as start_case
 from test_skill_read_receiver_integration import package
 
+from bowhead_skill import SkillCatalog
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
@@ -106,6 +108,71 @@ async def test_unconfigured_standalone_method_reaches_the_exact_agent_without_as
         with sqlite3.connect(case.path) as db:
             (definition_after,) = db.execute("SELECT definition_json FROM team_subagent_revision WHERE id=?", (agent["version"],)).fetchone()
         assert definition_after == definition_before
+
+
+@pytest.mark.parametrize("receiver_case", ["admission"], indirect=True)
+@pytest.mark.parametrize("edited", [False, True])
+async def test_system_receiver_reads_the_selected_version_of_its_method(http_start, edited, monkeypatch):
+    """A context-only system receiver reads the selected package, not whatever has that name now."""
+    from types import SimpleNamespace
+
+    from bowhead_core.system_agent_reference_metadata import build_system_agent_reference_metadata
+    from test_skill_extension_runtime import tool_response
+
+    case = http_start
+    # The fixture's installed Skills stand in for the built-in catalog, which the orchestrator
+    # hands to every Turn context as the Skill tools see it (main.py).
+    monkeypatch.setattr("bowhead_core.ordinary_lead_material.builtin_catalog_dir", lambda: case.fixture.root)
+    name = "temporary_method"
+    method = package(case.fixture.root, name, ordinary=True, executable=True)
+    monkeypatch.setattr(case.app.state.orchestrator, "skill_catalog", SkillCatalog(roots=[case.fixture.root]), raising=False)
+    index = build_builtin_skill_metadata(builtin_root=case.fixture.root)
+    case.fixture.sources.builtin_index = lambda: index
+    case.app.state.builtin_skill_reference_metadata = index
+    await case.fixture.sources.prepare(method, scope=case.fixture.scope)
+    body = payload(case, skills=False)
+    system_index = await build_system_agent_reference_metadata(case.path, case.app.state.orchestrator.subagent_runner)
+    case.app.state.system_agent_reference_metadata = SimpleNamespace(current=lambda: system_index)
+    discovered = await case.client.post(
+        "/api/v1/chat/references/catalog",
+        headers={"Content-Type": "application/json"},
+        json={"workspace_id": case.fixture.scope.workspace_id, "trigger": "@"},
+    )
+    agent = next(
+        item["resource"]
+        for group in discovered.json()["groups"]
+        if group["id"] == "system_agents"
+        for item in group["items"]
+        if item["id"] == "system:compute"
+    )
+    next(node for node in body["input_document"]["nodes"] if node["type"] == "reference")["resource"] = agent
+    body["input_document"]["nodes"].append(
+        {"type": "reference", "node_id": str(uuid4()), "resource": method.model_dump(mode="json"), "label": "Temporary method", "parameters": {}}
+    )
+    body["message"] = InputDocument.model_validate(body["input_document"]).display_text()
+    requests = []
+
+    def respond(request):
+        sent = json.loads(request.content)
+        requests.append(sent)
+        if len(requests) == 1:
+            if edited:
+                # The package changes after the selection was admitted, before the receiver reads it.
+                (case.fixture.root / name / "references/guide.md").write_text("CHANGED_GUIDE")
+            return tool_response("skill_read", {"name": name, "file": "references/guide.md"}, stream=bool(sent.get("stream")))
+        return answer_response(request)
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post("/api/v1/chat/send", json=body)
+        assert accepted.status_code == 200, accepted.text
+        await settled(accepted.json()["turn_id"])
+    assert (await case.fixture.case.store.get_turn(accepted.json()["turn_id"])).status == "completed"
+    (tool_message,) = [message for message in requests[1]["messages"] if message.get("role") == "tool"]
+    if edited:
+        assert "selected_skill_changed" in tool_message["content"] and "CHANGED_GUIDE" not in tool_message["content"]
+    else:
+        assert "BASELINE_GUIDE_" + name in tool_message["content"]
 
 
 def standalone_request(case, *, ordinary=True, children=()):

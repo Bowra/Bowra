@@ -66,6 +66,7 @@ const TURN_REASON_CODES = [
   "token_cap_exhausted",
   "tool_arguments_invalid",
   "tool_code_failed",
+  "tool_output_not_saved",
   "tool_delivery_review_required",
   "tool_execution_failed",
   "tool_execution_timeout",

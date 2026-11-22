@@ -9329,6 +9329,7 @@
       "file_in_knowledge_base": "Diese Datei befindet sich noch in der Wissensdatenbank. Entfernen Sie sie dort, bevor Sie sie löschen.",
       "office_type_mismatch": "Die Dateiendung stimmt nicht mit dem Office-Format überein. Speichern Sie mit Word oder PowerPoint eine Kopie im passenden Format und versuchen Sie es erneut.",
       "office_invalid_package": "Diese Office-Datei konnte nicht gelesen werden. Ihre Struktur ist möglicherweise beschädigt oder wird nicht unterstützt. Prüfen Sie das Original und versuchen Sie es erneut.",
+      "office_duplicate_part": "Diese Office-Datei enthält zwei Teile mit demselben Namen und ist daher beschädigt. Öffnen Sie sie in PowerPoint oder Word, speichern Sie eine neue Kopie und laden Sie diese Kopie hoch.",
       "office_active_content_unsupported": "Makros oder digitale Signaturen in dieser Datei werden noch nicht unterstützt. Verwenden Sie eine Kopie ohne diese Inhalte.",
       "office_package_limit": "Diese Office-Datei überschreitet die aktuellen Größen- oder Strukturgrenzen (Dateigröße höchstens 32 MiB). Reduzieren Sie eingebettete Inhalte oder teilen Sie die Datei auf und versuchen Sie es erneut.",
       "office_multipart_required": "Diese Office-Datei muss vollständig validiert werden. Aktualisieren Sie die Seite und laden Sie sie erneut hoch.",
@@ -10358,6 +10359,11 @@
       "group_references": "Referenzen",
       "group_scripts": "Skripte",
       "group_evals": "Evaluierungsfälle",
+      "group_root": "Paketstamm",
+      "file_kind_other": "Anderer Ordner oder Stammverzeichnis",
+      "file_path": "Pfad ab dem Skill-Stammverzeichnis",
+      "file_not_text": "Diese Datei ist kein Text ({mime}), daher wird ihr Inhalt hier weder angezeigt noch bearbeitet. Um sie zu ersetzen, laden Sie eine neue Version des Skill-Pakets hoch.",
+      "file_too_large": "Diese Datei ist größer als 1 MB, daher wird ihr Inhalt hier weder angezeigt noch bearbeitet.",
       "body_label": "Schritte",
       "trig_empty": "Noch keine Auslösebeispiele.",
       "evals_empty": "Noch keine Evaluierungsfälle."
@@ -12326,12 +12332,24 @@
     "cite_kb_page": "Seite {page}",
     "cite_kb_paragraph": "Absatz {n}",
     "summary_agents": "{count, plural, one {# Agent genutzt} other {# Agents genutzt}}",
+    "summary_output": {
+      "report": "{count, plural, =1 {{count} Bericht} other {{count} Berichte}}",
+      "chart": "{count, plural, =1 {{count} Diagramm} other {{count} Diagramme}}",
+      "web_page": "{count, plural, =1 {{count} Webseite} other {{count} Webseiten}}",
+      "presentation": "{count, plural, =1 {{count} Präsentation} other {{count} Präsentationen}}",
+      "pdf": "{count, plural, =1 {{count} PDF} other {{count} PDFs}}",
+      "document": "{count, plural, =1 {{count} Dokument} other {{count} Dokumente}}",
+      "spreadsheet": "{count, plural, =1 {{count} Tabelle} other {{count} Tabellen}}",
+      "image": "{count, plural, =1 {{count} Bild} other {{count} Bilder}}",
+      "file": "{count, plural, =1 {{count} Datei} other {{count} Dateien}}"
+    },
     "step_failed_generic": "Dieser Schritt ist fehlgeschlagen, ohne dass ein konkreter Fehler sicher angezeigt werden kann. Prüfen Sie die angezeigten Schrittinformationen und wenden Sie sich bei erneutem Auftreten an Ihre Administration.",
     "failure_detail": {
       "reason": {
         "tool_arguments_invalid": "Die Eingaben wurden abgelehnt.",
         "tool_resource_unavailable": "Etwas Benötigtes war nicht verfügbar.",
         "tool_code_failed": "Der Code brach mit einem Fehler ab.",
+        "tool_output_not_saved": "Der Code lief, aber eine von ihm erzeugte Datei wurde nicht gespeichert.",
         "tool_execution_timeout": "Der Schritt hat das Zeitlimit überschritten.",
         "tool_execution_unknown": "Das Ergebnis ist unbestätigt.",
         "tool_execution_failed": "Das Tool konnte den Schritt nicht abschließen.",
@@ -12340,6 +12358,7 @@
       "fact_field": "Eingabe: {value}.",
       "fact_missing_key": "Fehlender Schlüssel: {value}.",
       "fact_exception": "Fehlertyp: {value}.",
+      "fact_file": "Datei: {value}.",
       "fact_exit_code": "Exit-Code: {value}.",
       "action_recovered": "Ein neuer Versuch war erfolgreich; nichts zu tun.",
       "action_check_source": "Prüfen Sie den Zugriff auf die Quelle und fragen Sie erneut.",
@@ -14181,6 +14200,39 @@
     "run_error": "Ausführung fehlgeschlagen",
     "search": "Suche: {q}"
   },
+  "step_facts": {
+    "attachment_header": "Anhang lesen",
+    "attachment_truncated": "Erste {n} Zeichen gelesen",
+    "attachment_complete": "Vollständig gelesen",
+    "canvas_added": "Hinzugefügt · {name}",
+    "canvas_not_added": "Nicht hinzugefügt · {reason}",
+    "code_done": "Erfolgreich ausgeführt",
+    "code_outputs": "Erfolgreich · {count, plural, =1 {{count} Ausgabe} other {{count} Ausgaben}}",
+    "code_outputs_typed": "Erfolgreich · {count, plural, =1 {{count} Ausgabe} other {{count} Ausgaben}} ({types})",
+    "type_separator": ", ",
+    "arguments_retry": "Ungültige Argumente, neuer Versuch",
+    "section": {
+      "image": "Bild",
+      "kpi_row": "KPI-Zeile",
+      "table": "Tabelle",
+      "data_table": "Datentabelle",
+      "narrative": "Text",
+      "recommendations": "Empfehlungen",
+      "chart": "Diagramm"
+    },
+    "result_kind": {
+      "delivered_file": "Gelieferte Dateien",
+      "uploaded_file": "Hochgeladene Dateien",
+      "data_file": "Datendateien",
+      "image": "Bilder",
+      "design": "Entwürfe"
+    },
+    "not_added_reason": {
+      "invalid_artifact_id_format": "ungültige Daten-ID",
+      "not_an_image": "kein Bild",
+      "design_v2a_disabled": "Layout deaktiviert"
+    }
+  },
   "citation_aria": {
     "cite_labeled": "Quellenverweis {n}: {label}",
     "numbered": "Quellenverweis {n}",
@@ -14405,6 +14457,7 @@
       "tool_arguments_invalid": "Eingabeformat oder Datenfelder passen nicht zu diesem Schritt. Der Agent muss die Eingaben vor einem neuen Versuch korrigieren.",
       "tool_resource_unavailable": "Die gewählte Quelle ist nicht verfügbar. Prüfen Sie den Zugriff oder wählen Sie eine verfügbare Quelle.",
       "tool_code_failed": "Das Skript ist fehlgeschlagen. Prüfen Sie die Ausnahme, die angegebenen Eingaben und die tatsächlichen Spaltennamen vor einer korrigierten Ausführung.",
+      "tool_output_not_saved": "Eine vom Skript erzeugte Datei wurde nicht gespeichert: Der Dateispeicher hat sie abgelehnt oder konnte sie nicht speichern. Der Agent erhält den Grund und muss die Datei korrigieren und erneut ausführen.",
       "tool_execution_timeout": "Der Vorgang hat das Zeitlimit überschritten; das Ergebnis ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob Änderungen wirksam wurden.",
       "tool_execution_unknown": "Das Ergebnis des Vorgangs ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob er wirksam wurde.",
       "tool_execution_failed": "Das Tool konnte diesen Schritt nicht abschließen. Prüfen Sie das Ergebnis oder kopieren Sie die Diagnose für Ihren Administrator.",

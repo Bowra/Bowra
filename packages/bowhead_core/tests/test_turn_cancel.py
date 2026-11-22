@@ -315,3 +315,21 @@ def test_get_executing_plan_roundtrip():
     # Unregistered again →None (turn-end cleanup).
     orch._executing_plans.pop("t_exec", None)
     assert orch.get_executing_plan("t_exec") is None
+
+
+def test_an_exception_group_is_the_stop_only_when_the_stop_is_all_it_holds() -> None:
+    """A task group the run holds open wraps the Stop; the runner must still finish the Turn as stopped."""
+    from bowhead_core.turn_runner import _holds_only_a_stop
+
+    stop = TurnCancelledError("turn cancelled by durable request")
+    durable = asyncio.CancelledError("durable_user_cancel")
+    assert _holds_only_a_stop(ExceptionGroup("unhandled errors in a TaskGroup", [stop]))
+    # Each connection held open adds a level.
+    assert _holds_only_a_stop(ExceptionGroup("outer", [ExceptionGroup("inner", [stop])]))
+    assert _holds_only_a_stop(BaseExceptionGroup("with the worker's cancellation", [stop, durable]))
+    # Another error beside the Stop, or a cancellation that is not the user's, is not the Stop.
+    assert not _holds_only_a_stop(ExceptionGroup("mixed", [stop, RuntimeError("connection closed")]))
+    assert not _holds_only_a_stop(ExceptionGroup("nested mixed", [ExceptionGroup("inner", [stop]), ValueError("x")]))
+    assert not _holds_only_a_stop(BaseExceptionGroup("owner lost", [asyncio.CancelledError("dispatch_owner_lost")]))
+    assert not _holds_only_a_stop(BaseExceptionGroup("bare", [asyncio.CancelledError()]))
+    assert not _holds_only_a_stop(ExceptionGroup("failure", [RuntimeError("boom")]))

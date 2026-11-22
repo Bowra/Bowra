@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -22,7 +23,18 @@ from typing import Any, Final, Literal, NoReturn
 
 from bowhead_core.skill_bundle_lock import skill_bundle_lock
 from bowhead_core.skill_upload import ValidatedSkill, _split_frontmatter, _validate_skill_dir, bundle_sha256
-from bowhead_skill.bundle_files import BUNDLE_FILE_KINDS, MAX_TEXT_BYTES, BundleFileError, bundle_file_path, read_bundle_text
+from bowhead_skill.bundle_files import (
+    BUNDLE_FILE_KINDS,
+    MAX_TEXT_BYTES,
+    BundleFileError,
+    bundle_file_path,
+    decode_package_text,
+    list_package_files,
+    package_file_path,
+    read_bundle_text,
+    read_package_file,
+    validate_package_write_path,
+)
 from bowhead_skill.bundle_files import (
     list_bundle_files as _list_bundle_files,
 )
@@ -123,14 +135,20 @@ def read_bundle_file(skill_dir: Path, kind: str, filename: str) -> dict[str, Any
     }
 
 
-def read_bundle_snapshot(skill_dir: Path, *, editable: bool) -> dict[str, Any]:
-    """Read editable bytes and their precondition under the existing package lock."""
+def read_bundle_snapshot(skill_dir: Path, *, editable: bool, builtin: bool = False) -> dict[str, Any]:
+    """Read editable bytes and their precondition under the existing package lock.
+
+    ``package_files`` lists every file of the package by its path from the Skill
+    root, as the model's ``skill_read`` lists it; the three folder lists remain
+    the editing contract.
+    """
     with skill_bundle_lock(skill_dir, shared=True) if editable else nullcontext():
         body = read_bundle_manifest(skill_dir)
         count, has_evals = evals_summary(skill_dir)
         return {
             "body_raw": body,
             "body_md": display_body(body),
+            "package_files": [{"path": path, "size": size} for path, size in list_package_files(skill_dir, builtin=builtin)],
             **{
                 kind if kind != "evals" else "eval_files": [{"name": name, "size": size} for name, size in list_bundle_files(skill_dir, kind)]
                 for kind in BUNDLE_FILE_KINDS
@@ -146,6 +164,127 @@ def read_bundle_file_snapshot(skill_dir: Path, kind: str, filename: str, *, edit
         payload = read_bundle_file(skill_dir, kind, filename)
         payload["content_sha256"] = bundle_sha256(skill_dir) if editable else None
         return payload
+
+
+def read_package_file_snapshot(skill_dir: Path, path: str, *, editable: bool, builtin: bool = False) -> dict[str, Any]:
+    """One file of the package by its path from the Skill root, for viewing.
+
+    Only a path that ``package_files`` lists is read, so nothing outside the
+    package can be named. Text up to the preview limit returns its content.
+    Other files return their size and type with ``content`` null and
+    ``unavailable`` set to ``binary`` or ``too_large``; they are not errors.
+    """
+    with skill_bundle_lock(skill_dir, shared=True) if editable else nullcontext():
+        if path not in dict(list_package_files(skill_dir, builtin=builtin)):
+            raise skill_workflow_http_error(404, "skill_file_not_found")
+        try:
+            data, size = read_package_file(skill_dir, path)
+        except BundleFileError as exc:
+            _file_error(exc)
+        return {**_package_file_payload(path, data, size), "content_sha256": bundle_sha256(skill_dir) if editable else None}
+
+
+def _package_file_payload(path: str, data: bytes, size: int) -> dict[str, Any]:
+    content = None if size > MAX_PREVIEW_BYTES or len(data) > MAX_PREVIEW_BYTES else decode_package_text(data)
+    unavailable = None if content is not None else ("too_large" if size > MAX_PREVIEW_BYTES or len(data) > MAX_PREVIEW_BYTES else "binary")
+    suffix = Path(path).suffix.lower()
+    mime = _MIME_BY_SUFFIX.get(suffix) or mimetypes.guess_type(path)[0] or ("text/plain" if content is not None else "application/octet-stream")
+    return {"path": path, "content": content, "unavailable": unavailable, "size": size, "mime": mime}
+
+
+def _package_write_path(skill_dir: Path, path: str) -> Path:
+    try:
+        return package_file_path(skill_dir, validate_package_write_path(path))
+    except BundleFileError as exc:
+        _file_error(exc)
+
+
+class PackageFileChange(BaseModel):
+    """Create, rename or delete any file of the package by its path from the Skill root (not SKILL.md)."""
+
+    operation: Literal["create", "rename", "delete"]
+    path: str = Field(min_length=1, max_length=512)
+    target: str | None = Field(None, max_length=512)
+    content: str = Field("", max_length=MAX_TEXT_BYTES)
+    expected_content_sha256: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
+
+
+def change_package_file(
+    skill_dir: Path,
+    path: str,
+    *,
+    operation: str,
+    content: str = "",
+    target: str | None = None,
+    check: Callable[[ValidatedSkill], None] | None = None,
+    expected_content_sha256: str | None = None,
+) -> tuple[dict[str, Any], ValidatedSkill]:
+    """The three-folder ``change_bundle_file`` for any path of the package.
+
+    A rename may move a file to any other path. A file that is not text can be
+    renamed and deleted; it is created and overwritten only by a new upload.
+    """
+    fp = _package_write_path(skill_dir, path)
+    if operation == "create":
+        _validate_text(content)
+    if operation == "rename" and not target:
+        raise skill_workflow_http_error(409, "skill_file_exists")
+    destination = _package_write_path(skill_dir, target) if operation == "rename" and target else fp
+    if operation not in {"create", "delete", "rename"}:
+        raise skill_workflow_http_error(400, "skill_filename_invalid")
+    final = destination.relative_to(skill_dir).as_posix()
+    payload: dict[str, Any] = {"path": path, "content": "", "unavailable": None, "size": 0, "mime": "text/plain"}
+
+    def mutate(staged: Path) -> None:
+        source = staged / fp.relative_to(skill_dir)
+        dest = staged / final
+        if operation == "create" and source.exists() or operation == "rename" and dest.exists():
+            raise skill_workflow_http_error(409, "skill_file_exists")
+        if operation != "create" and not source.is_file():
+            raise skill_workflow_http_error(404, "skill_file_not_found")
+        if operation == "create":
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(content, encoding="utf-8")
+        elif operation == "delete":
+            source.unlink()
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            source.replace(dest)
+        if operation != "delete":
+            data, size = read_package_file(staged, final)
+            payload.update(_package_file_payload(final, data, size))
+
+    def publish(staged: Path) -> None:
+        if operation == "delete":
+            fp.unlink()
+        elif operation == "rename":
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fp.replace(destination)
+        else:
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            (staged / fp.relative_to(skill_dir)).replace(fp)
+
+    validated = _mutate_and_validate(skill_dir, mutate, publish, check=check, expected_content_sha256=expected_content_sha256)
+    payload["content_sha256"] = validated.content_hash.removeprefix("sha256:")
+    return payload, validated
+
+
+def write_package_file(
+    skill_dir: Path,
+    path: str,
+    content: str,
+    *,
+    check: Callable[[ValidatedSkill], None] | None = None,
+    expected_content_sha256: str | None = None,
+) -> tuple[dict[str, Any], ValidatedSkill]:
+    """Overwrite an existing file of the package with text, by its path from the Skill root (not SKILL.md)."""
+    fp = _package_write_path(skill_dir, path)
+    if not fp.is_file():
+        raise skill_workflow_http_error(status.HTTP_404_NOT_FOUND, "skill_file_not_found")
+    _validate_text(content)
+    validated = _write_and_validate(skill_dir, fp, content, check=check, expected_content_sha256=expected_content_sha256)
+    data = content.encode("utf-8")
+    return {**_package_file_payload(path, data, len(data)), "content_sha256": validated.content_hash.removeprefix("sha256:")}, validated
 
 
 class BundleFileChange(BaseModel):

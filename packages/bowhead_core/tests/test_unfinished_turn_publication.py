@@ -7,6 +7,7 @@ batch ended the run.
 
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from bowhead_core._db import open_shared_ctx
@@ -78,6 +79,8 @@ class LeadRun:
 
         monkeypatch.setattr(adapter, "invoke", invoke)
         self.bus = TurnEventBus(log_sink=OrderedTurnLogSink(TurnLogStore(collab.path)))
+        # What the user has seen of the Lead's narrative: both replies made Tool calls, so the transcript holds them.
+        self.bus._shown_lead_narrative = lambda: "".join(reply.content for reply in replies[: len(self.sent)])
         self.runner = SubagentRunner(router=case.router, tool_registry=ToolRegistry(), backend="legacy")
         bus = self.bus
 
@@ -223,6 +226,25 @@ async def test_a_turn_the_worker_ends_publishes_its_repaired_transcript(collab, 
     assert (await run.store.get_turn(run.worker.turn_id)).status == status
     await run.store.finalize_turn(session_id=run.worker.session_id, current_turn_id=run.worker.turn_id, next_turn_id=None)
     run.assert_native(await run.next_turn_history(), status=status, marker=marker)
+
+
+async def test_a_turn_the_worker_ends_keeps_the_reply_it_had_shown_before_its_marker(collab, context_case, monkeypatch):
+    run = await lead_run(collab, context_case, monkeypatch, fail=True)
+    await run.fail()
+    # A reply that made Tool calls is not repeated as the reply the ending cut off.
+    publication = await run.publication("failed")
+    assert publication.unfinished_reply == ""
+    shown = "Region A earned 7.\n\nRegion B earned 9, and"
+    assert await run.store.mark_failed(
+        turn_id=run.worker.turn_id,
+        worker=run.worker,
+        error="lead_internal_error",
+        error_kind="lead_internal_error",
+        context_publication=replace(publication, unfinished_reply=f"\n{shown}  "),
+    )
+    await run.store.finalize_turn(session_id=run.worker.session_id, current_turn_id=run.worker.turn_id, next_turn_id=None)
+    marker = incomplete_turn_marker("failed", "lead_internal_error")
+    run.assert_native(await run.next_turn_history(), status="failed", marker=f"{shown}\n\n{marker}")
 
 
 async def test_a_publication_that_cannot_be_stored_never_blocks_the_failed_status(collab, context_case, monkeypatch):

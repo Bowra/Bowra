@@ -68,6 +68,9 @@ class ContextPublication:
     # Set by ``verify_authority``: the validator the write transaction uses once current authority
     # has been checked outside it.
     adoption_validator: Callable[[list[Message]], Awaitable[None]] | None = None
+    # For a Turn that ends unfinished: what the user saw of the reply that was cut off. It
+    # precedes the unfinished marker in the closing message.
+    unfinished_reply: str = ""
 
     @asynccontextmanager
     async def open_adoption_readers(self) -> AsyncIterator[ContextPublication]:

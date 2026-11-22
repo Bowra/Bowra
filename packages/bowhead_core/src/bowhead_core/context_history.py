@@ -210,10 +210,13 @@ async def load_conversation_context(ctx) -> ConversationContext:
 
         materials = await load_material_history(ctx, [turn.id for turn in turns])
         applied = getattr(store, "list_turn_applied_instructions", None)
+        replies = getattr(store, "list_unfinished_replies", None)
+        unfinished = [turn.id for turn in turns if turn.status in INCOMPLETE_TURN_MARKERS]
         history = build_turn_history(
             turns,
             exclude_turn_id=worker.turn_id,
             instructions=await applied([turn.id for turn in turns]) if callable(applied) else None,
+            unfinished_replies=await replies(unfinished) if callable(replies) and unfinished else None,
             budget_tokens=0,
             make_message=lambda role, content: Message(role=role, content=content),
             strip=_strip_markers,

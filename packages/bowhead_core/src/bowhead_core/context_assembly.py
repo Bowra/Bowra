@@ -409,6 +409,12 @@ def incomplete_turn_marker(status: str, error_kind: str | None = None) -> str:
     return base
 
 
+def unfinished_turn_answer(marker: str, reply: str = "") -> str:
+    """The closing assistant message of an unfinished Turn: what it had shown of its reply, then the marker."""
+    reply = reply.strip()
+    return f"{reply}\n\n{marker}" if reply else marker
+
+
 def has_incomplete_turn_marker(content: str) -> bool:
     """Whether text carries an unfinished-Turn marker, with or without a failure code.
 
@@ -540,6 +546,7 @@ def build_turn_history(
     make_tool_calls_message: Callable[[list[tuple[str, str, dict[str, Any]]]], Any] | None = None,
     make_tool_result_message: Callable[[str, str, str], Any] | None = None,
     instructions: Mapping[str, Sequence[str]] | None = None,
+    unfinished_replies: Mapping[str, str] | None = None,
 ) -> TurnHistory:
     """Render prior visible Turns as native history within a whole-Turn budget.
 
@@ -554,6 +561,9 @@ def build_turn_history(
     ``instructions`` maps a Turn to the instructions it took while it was running
     (mid-run steering). They follow the Turn's request in its user message, separated
     by a blank line, as merged follow-up instructions are.
+
+    ``unfinished_replies`` maps an unfinished Turn to what it had shown of the reply its
+    ending cut off. That text precedes the Turn's marker.
     """
     mk = make_message or (lambda role, content: {"role": role, "content": content})
     mk_calls = make_tool_calls_message or (
@@ -586,7 +596,9 @@ def build_turn_history(
             if not answer:
                 continue
         elif status in INCOMPLETE_TURN_MARKERS:
-            answer = incomplete_turn_marker(str(status), getattr(t, "error_kind", None))
+            answer = unfinished_turn_answer(
+                incomplete_turn_marker(str(status), getattr(t, "error_kind", None)), st((unfinished_replies or {}).get(turn_id) or "")
+            )
             incomplete += 1
         elif status == "clarification_pending":
             cards = list((clarifications or {}).get(turn_id) or [])
@@ -664,6 +676,7 @@ __all__ = [
     "TOOL_FAILURES_LABEL",
     "TOOL_FAILURES_MAX_BYTES",
     "has_incomplete_turn_marker",
+    "unfinished_turn_answer",
     "incomplete_turn_marker",
     "SPAWN_TOOL_NAME",
     "TurnHistory",

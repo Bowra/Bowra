@@ -72,6 +72,13 @@
 #     Agent has and that cannot be turned off. It is still never selected or disabled.
 #   risk: required for `kind: tool`; one of read / compute / artifact_write / external_write / destructive.
 #     A part may carry the risk the authoring catalog already gave it, so that catalog stays unchanged.
+#   role_binding: optional, default true. `false` keeps the entry out of the role map: it only names a
+#     part that its own admission rules add to a run (run-local Tools such as `view_file`), so naming it
+#     neither restricts nor widens who can call it, nor lists it among natives a custom Agent may be granted.
+#   code_language: optional. The language a code-running Tool executes (`python`). Its code streams into the
+#     running band while the model writes it, tagged with this language; the language is declared, never guessed
+#     from the code (turn visibility E4). A Tool that can run several languages takes a `language` argument instead.
+#     A dispatcher (`skill_invoke`) declares none: its call streams when the inner skill it names declares one.
 
 version: 1
 
@@ -1515,6 +1522,7 @@ tools:
     sigil: "🐍"
     category: compute
     kind: tool
+    code_language: python
     risk: compute
     pseudo: true
 
@@ -1537,6 +1545,7 @@ tools:
     sigil: "🐍"
     category: compute
     kind: part
+    code_language: python
     risk: compute
     allowed_roles: [analyst]
 
@@ -1695,11 +1704,70 @@ tools:
     risk: artifact_write
     allowed_roles: [analyst, lead]
 
-# ─── Retired (removed together with registration points) ──────────────
-# Sole purpose: keep reserving RESERVED_TOOL_NAMES so a user skill cannot replace a name seen
-# in a historical trace (skill_upload.py G5). **Exclude** from ALL_TOOL_NAMES / role bindings /
-# TOOL_RENAMES: there are no equivalent current names, so normalization would silently change dispatch targets.
-# Difference from renamed_from: see Field semantics above.
+  # ─── Retired (removed together with registration points) ──────────────
+  # Sole purpose: keep reserving RESERVED_TOOL_NAMES so a user skill cannot replace a name seen
+  # in a historical trace (skill_upload.py G5). **Exclude** from ALL_TOOL_NAMES / role bindings /
+  # TOOL_RENAMES: there are no equivalent current names, so normalization would silently change dispatch targets.
+  # Difference from renamed_from: see Field semantics above.
+  # Turn visibility G2 (docs/sprints/turn-visibility-2026-11-20/tech-design.md §3.2): parts that reached the
+  # step list under their code names ("view_file · full"). Display only: `role_binding: false` keeps their
+  # runtime admission exactly as it was.
+  - canonical: view_file
+    display_zh: 查看渲染效果
+    display_en: View rendered file
+    display_de: "Darstellung ansehen"
+    display_fr: "Voir le rendu"
+    blurb_zh: "查看文件渲染后的样子，用于检查版面。"
+    blurb_en: "Look at how a file renders to check its layout."
+    blurb_de: "Ansehen, wie eine Datei dargestellt wird, um das Layout zu prüfen."
+    blurb_fr: "Voir le rendu d’un fichier pour vérifier sa mise en page."
+    sigil: "👁"
+    category: orchestrate
+    kind: part
+    role_binding: false
+
+  - canonical: review_delivery
+    display_zh: 核对交付
+    display_en: Review delivery
+    display_de: "Lieferung prüfen"
+    display_fr: "Vérifier la livraison"
+    blurb_zh: "交付前核对每一步的结果是否满足要求。"
+    blurb_en: "Check that each step's result meets the request before delivering."
+    blurb_de: "Vor der Lieferung prüfen, ob jedes Ergebnis die Anfrage erfüllt."
+    blurb_fr: "Vérifier avant la livraison que chaque résultat répond à la demande."
+    sigil: "☑"
+    category: orchestrate
+    kind: part
+    role_binding: false
+
+  - canonical: agent_message
+    display_zh: 给智能体发消息
+    display_en: Message an agent
+    display_de: "Agent benachrichtigen"
+    display_fr: "Écrire à un agent"
+    blurb_zh: "在协作中给另一个智能体发送说明或问题。"
+    blurb_en: "Send another agent a note or a question during collaboration."
+    blurb_de: "Einem anderen Agent während der Zusammenarbeit eine Notiz oder Frage senden."
+    blurb_fr: "Envoyer une note ou une question à un autre agent pendant la collaboration."
+    sigil: "💬"
+    category: orchestrate
+    kind: part
+    role_binding: false
+
+  - canonical: plan_propose
+    display_zh: 提出计划
+    display_en: Propose a plan
+    display_de: "Plan vorschlagen"
+    display_fr: "Proposer un plan"
+    blurb_zh: "把多步任务拆成计划，交给你确认。"
+    blurb_en: "Split a multi-step task into a plan for you to confirm."
+    blurb_de: "Eine mehrstufige Aufgabe in einen Plan zur Bestätigung aufteilen."
+    blurb_fr: "Découper une tâche en plusieurs étapes en un plan à confirmer."
+    sigil: "🗺"
+    category: orchestrate
+    kind: part
+    role_binding: false
+
 retired:
   # 2026-09-30: three section-editing tools dedicated to Canvas Writer (removed in c4d50b03b) have no remaining manifest holders
   # or Gateway registrations; their implementations are removed too. Keep names here only to reserve RESERVED_TOOL_NAMES.

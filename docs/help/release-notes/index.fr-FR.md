@@ -2,6 +2,7 @@
 
 Les instantanés Community ont leur propre historique. Une version de l’application ne signifie pas que des images ou un service hébergé ont été publiés.
 
+- [v1.7.63](releases/v1.7.63.fr-FR.md) — Suivez le code pendant sa rédaction, modifiez les fichiers des Skills et enregistrez les présentations plus sûrement.
 - [v1.7.61](releases/v1.7.61.fr-FR.md) — Partagez des résultats HTML interactifs, téléchargez les rapports en Word et reprenez les tâches interrompues.
 - [v1.7.54](releases/v1.7.54.fr-FR.md) — Réutilisez des Skills, retrouvez la dernière version des fichiers et enregistrez les réglages plus sûrement.
 - [v1.7.49](releases/v1.7.49.fr-FR.md) — Ajoutez des instructions pendant une exécution, retrouvez des fichiers et gérez les Plugins d’équipe sur leur propre page.

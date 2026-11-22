@@ -121,7 +121,7 @@ COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend-builder /build/node_modules/playwright ./export-visual-runtime/node_modules/playwright
 COPY --from=frontend-builder /build/node_modules/playwright-core ./export-visual-runtime/node_modules/playwright-core
 COPY --from=frontend-builder /build/scripts/render-export-visual.mjs ./export-visual-runtime/scripts/render-export-visual.mjs
-# Visual self-check slice B (FEATURE_VISUAL_SELF_CHECK): the product preview's HTML transform,
+# Visual self-check of HTML and SVG: the product preview's HTML transform,
 # sent with each HTML file to the sandbox document worker, which captures it. Not served.
 COPY --from=frontend-builder /build/dist/html-preview-transform.js ./export-visual-runtime/dist/html-preview-transform.js
 COPY --from=frontend-builder /ms-playwright /ms-playwright

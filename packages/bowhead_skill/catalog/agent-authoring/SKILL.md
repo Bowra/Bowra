@@ -1,7 +1,7 @@
 ---
 name: agent-authoring
 description: Create or improve Agents, maintain personal Skills and shared Plugins, and inspect evaluation evidence through the admitted Coach tools.
-version: 1.39.0
+version: 1.39.1
 title: Agent authoring
 title_zh: 智能体创作
 category: platform

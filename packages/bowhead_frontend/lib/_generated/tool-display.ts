@@ -191,6 +191,13 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     category: "orchestrate",
     kind: "part",
   },
+  agent_message: {
+    label: { "zh-CN": "给智能体发消息", "en-US": "Message an agent", "de-DE": "Agent benachrichtigen", "fr-FR": "Écrire à un agent" },
+    blurb: { "zh-CN": "在协作中给另一个智能体发送说明或问题。", "en-US": "Send another agent a note or a question during collaboration.", "de-DE": "Einem anderen Agent während der Zusammenarbeit eine Notiz oder Frage senden.", "fr-FR": "Envoyer une note ou une question à un autre agent pendant la collaboration." },
+    sigil: "💬",
+    category: "orchestrate",
+    kind: "part",
+  },
   agent_operation_get: {
     label: { "zh-CN": "读取原 Coach 操作", "en-US": "Read original Coach operation", "de-DE": "Ursprünglichen Coach-Vorgang lesen", "fr-FR": "Lire l’opération Coach d’origine" },
     blurb: { "zh-CN": "读取原回执，不启动或重试工作。", "en-US": "Read the original receipt without starting or retrying work.", "de-DE": "Ursprünglichen Beleg ohne Start oder Wiederholung lesen.", "fr-FR": "Lire le reçu d’origine sans lancer ni répéter le travail." },
@@ -595,6 +602,13 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     kind: "tool",
     risk: "read",
   },
+  plan_propose: {
+    label: { "zh-CN": "提出计划", "en-US": "Propose a plan", "de-DE": "Plan vorschlagen", "fr-FR": "Proposer un plan" },
+    blurb: { "zh-CN": "把多步任务拆成计划，交给你确认。", "en-US": "Split a multi-step task into a plan for you to confirm.", "de-DE": "Eine mehrstufige Aufgabe in einen Plan zur Bestätigung aufteilen.", "fr-FR": "Découper une tâche en plusieurs étapes en un plan à confirmer." },
+    sigil: "🗺",
+    category: "orchestrate",
+    kind: "part",
+  },
   present_artifacts: {
     label: { "zh-CN": "交付已有文件", "en-US": "Present Retained Files", "de-DE": "Vorhandene Dateien bereitstellen", "fr-FR": "Présenter des fichiers existants" },
     blurb: { "zh-CN": "将当前空间中可访问的已有文件交付到对话，无需重新生成。", "en-US": "Present accessible retained files in the conversation without regenerating them.", "de-DE": "Zugängliche vorhandene Dateien im Chat bereitstellen, ohne sie erneut zu erstellen.", "fr-FR": "Présenter les fichiers existants accessibles dans la conversation sans les régénérer." },
@@ -662,6 +676,13 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     blurb: { "zh-CN": "从提供的内容新建可编辑 PPTX，不修改上传 PPT 的原页面。", "en-US": "Create a new editable PPTX from supplied content, without editing an uploaded presentation's existing slides.", "de-DE": "Eine neue bearbeitbare PPTX aus bereitgestellten Inhalten erstellen, ohne vorhandene Folien einer hochgeladenen Präsentation zu ändern.", "fr-FR": "Créer un nouveau PPTX modifiable à partir du contenu fourni, sans modifier les diapositives d’une présentation importée." },
     sigil: "📊",
     category: "compute",
+    kind: "part",
+  },
+  review_delivery: {
+    label: { "zh-CN": "核对交付", "en-US": "Review delivery", "de-DE": "Lieferung prüfen", "fr-FR": "Vérifier la livraison" },
+    blurb: { "zh-CN": "交付前核对每一步的结果是否满足要求。", "en-US": "Check that each step's result meets the request before delivering.", "de-DE": "Vor der Lieferung prüfen, ob jedes Ergebnis die Anfrage erfüllt.", "fr-FR": "Vérifier avant la livraison que chaque résultat répond à la demande." },
+    sigil: "☑",
+    category: "orchestrate",
     kind: "part",
   },
   routine_notify: {
@@ -746,6 +767,13 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     blurb: { "zh-CN": "把后续取数切换到另一个北极九章工作区。", "en-US": "Switch subsequent queries to another Datarc workspace.", "de-DE": "Nachfolgende Abfragen in einem anderen Datarc-Arbeitsbereich ausführen.", "fr-FR": "Utiliser un autre espace de travail Datarc pour les prochaines requêtes." },
     sigil: "🔀",
     category: "bi",
+    kind: "part",
+  },
+  view_file: {
+    label: { "zh-CN": "查看渲染效果", "en-US": "View rendered file", "de-DE": "Darstellung ansehen", "fr-FR": "Voir le rendu" },
+    blurb: { "zh-CN": "查看文件渲染后的样子，用于检查版面。", "en-US": "Look at how a file renders to check its layout.", "de-DE": "Ansehen, wie eine Datei dargestellt wird, um das Layout zu prüfen.", "fr-FR": "Voir le rendu d’un fichier pour vérifier sa mise en page." },
+    sigil: "👁",
+    category: "orchestrate",
     kind: "part",
   },
   web_crawl: {

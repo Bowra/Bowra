@@ -734,6 +734,7 @@
   "tool_arguments_invalid": "Le format des entrées ou les champs de données ne conviennent pas à cette étape. L’agent doit corriger les entrées avant de réessayer.",
   "tool_resource_unavailable": "La source sélectionnée est indisponible. Vérifiez l’accès ou choisissez une source disponible.",
   "tool_code_failed": "Le script a échoué. Vérifiez l’exception, les entrées déclarées et les noms réels des colonnes avant d’exécuter le code corrigé.",
+  "tool_output_not_saved": "Un fichier créé par le script n’a pas été enregistré : le stockage de fichiers l’a refusé ou n’a pas pu l’enregistrer. L’agent reçoit la raison et doit corriger le fichier puis relancer.",
   "tool_execution_timeout": "Le délai de l’opération a expiré et son résultat n’est pas confirmé. Vérifiez les effets avant de répéter une opération qui modifie des données.",
   "tool_execution_unknown": "Le résultat de l’opération n’est pas confirmé. Vérifiez si elle a pris effet avant de la répéter.",
   "tool_execution_failed": "L’outil n’a pas terminé cette étape. Consultez le résultat ou copiez le diagnostic pour votre administrateur.",

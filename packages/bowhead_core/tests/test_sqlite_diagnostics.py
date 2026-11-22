@@ -371,3 +371,54 @@ def test_registered_authority_table_is_attributed_during_contention(tmp_path: Pa
         owner.rollback()
         owner.close()
         contender.close()
+
+
+def test_a_busy_failure_inside_a_repeat_logs_at_info_with_its_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """On 116 one fenced setting save that repeated for 3.4 s left 77 error lines although it succeeded."""
+    levels: list[tuple[str, object]] = []
+
+    class Recorder:
+        def info(self, event: str, **fields: object) -> None:
+            levels.append(("info", fields["retry_attempt"]))
+
+        def error(self, event: str, **fields: object) -> None:
+            levels.append(("error", fields["retry_attempt"]))
+
+    monkeypatch.setattr(diagnostics, "log", Recorder())
+    path = tmp_path / "bowhead.db"
+    holder = database(path)
+    holder.execute("PRAGMA journal_mode=WAL")
+    waiter = database(path)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        token = diagnostics.enter_retry_attempt(2)
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                waiter.execute("BEGIN IMMEDIATE")
+        finally:
+            diagnostics.leave_retry_attempt(token)
+        # The same failure outside a repeat is still an error.
+        with pytest.raises(sqlite3.OperationalError):
+            waiter.execute("BEGIN IMMEDIATE")
+    finally:
+        holder.rollback()
+        holder.close()
+        waiter.close()
+    assert levels == [("info", 2), ("error", None)]
+
+
+@pytest.mark.asyncio
+async def test_repeat_while_busy_numbers_each_attempt() -> None:
+    from bowhead_core import _db
+
+    seen: list[int | None] = []
+
+    async def attempt() -> str:
+        seen.append(diagnostics._operation_context().retry_attempt)
+        if len(seen) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "written"
+
+    result = await _db.repeat_while_busy(attempt, retry=lambda _error: True, seconds_left=lambda: 1.0, first_delay=0.001, max_delay=0.001)
+    assert (result, seen) == ("written", [1, 2, 3])
+    assert diagnostics._operation_context().retry_attempt is None

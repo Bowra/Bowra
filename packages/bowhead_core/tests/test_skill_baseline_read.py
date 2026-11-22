@@ -51,21 +51,41 @@ def test_manifest_and_script_are_readable_text_without_execution(package):
 
 
 @pytest.mark.parametrize(
-    "file",
+    ("requested", "path", "text"),
     [
-        "../SKILL.md",
-        "/SKILL.md",
-        "references/../SKILL.md",
-        "references/.hidden",
-        "references//method.md",
-        "references/binary.bin",
-        "private.txt",
-        "references/missing.md",
+        ({"file": "private.txt"}, "private.txt", "UNSELECTED_PRIVATE_FILE"),
+        ({"file": "./references/method.md"}, "references/method.md", "stays literal"),
+        ({"file": "references//method.md"}, "references/method.md", "stays literal"),
+        ({"ref": "references/method.md"}, "references/method.md", "stays literal"),
+        ({"file": "method"}, "references/method.md", "stays literal"),
+        ({"file": "../SKILL.md"}, "SKILL.md", "name: dupont"),
+        ({"file": "references/../scripts/run.py"}, "scripts/run.py", "MUST_NOT_EXECUTE"),
     ],
 )
-def test_only_safe_retained_text_selectors_are_readable(package, file):
-    with pytest.raises(ValueError, match="reference_skill_baseline_read_unavailable"):
-        read_baseline_package(package, {"name": "dupont", "file": file})
+def test_any_package_file_is_readable_by_its_path_from_the_skill_root(package, requested, path, text):
+    """A whole-package grant reads every file, as SKILL.md links it (skill-bundle-read tech-design §1)."""
+    result = read_baseline_package(package, {"name": "dupont", **requested})
+    assert result["file"] == path and text in result["body"]
+
+
+def test_files_that_cannot_be_shown_name_the_reason_and_the_package_files(package):
+    binary = read_baseline_package(package, {"name": "dupont", "file": "references/binary.bin"})
+    assert binary["binary"] is True and binary["size"] == 2 and "body" not in binary
+    for requested, kind in (
+        ("references/missing.md", "skill_file_not_found"),
+        ("references/.hidden", "skill_file_not_found"),
+        ("/SKILL.md", "invalid_args"),
+    ):
+        miss = read_baseline_package(package, {"name": "dupont", "file": requested})
+        assert miss["error_kind"] == kind and miss["requested"] == requested
+        assert {entry["path"] for entry in miss["package_files"]} >= {"SKILL.md", "private.txt", "references/method.md", "scripts/run.py"}
+
+
+def test_null_optionals_read_as_omitted(package):
+    """The ordinary handler accepts these shapes; exact packages must not answer with a generic refusal (R4)."""
+    snapshot = snapshot_skill_read_arguments({"name": "dupont", "ref": None, "file": "", "args": None})
+    assert snapshot == {"name": "dupont", "args": ""}
+    assert read_baseline_package(package, {"name": "dupont", "ref": None, "file": None})["body"].startswith("Original SOP")
 
 
 def test_argument_snapshot_is_detached_before_await_and_bounded():

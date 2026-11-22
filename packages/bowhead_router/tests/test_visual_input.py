@@ -109,8 +109,7 @@ def test_withhold_images_keeps_other_messages_identical() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fallback_without_vision_gets_the_notice_for_renders_only(monkeypatch) -> None:
-    monkeypatch.delenv("FEATURE_VISUAL_SELF_CHECK", raising=False)  # on by default (D13)
+async def test_fallback_without_vision_gets_the_notice_for_renders_only() -> None:
     flash, pro = _Recorder(fail=1), _Recorder()
     router = _router(("deepseek", "deepseek-flash"), [("deepseek_pro", "deepseek-v4-pro")], {"deepseek": flash, "deepseek_pro": pro})
     router.set_image_input_targets({("deepseek", "deepseek-flash")})
@@ -124,18 +123,7 @@ async def test_fallback_without_vision_gets_the_notice_for_renders_only(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_switch_off_sends_images_unchanged(monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", "0")
-    pro = _Recorder()
-    router = _router(("deepseek_pro", "deepseek-v4-pro"), [], {"deepseek_pro": pro})
-    response = await router.invoke("lead", _request())
-    assert pro.requests[0].messages[1].images
-    assert response.diagnostics is None or "images_withheld" not in response.diagnostics.trace_fields()
-
-
-@pytest.mark.asyncio
-async def test_stream_withholds_for_a_target_without_vision(monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", "1")
+async def test_stream_withholds_for_a_target_without_vision() -> None:
     pro = _Recorder()
     router = _router(("deepseek_pro", "deepseek-v4-pro"), [], {"deepseek_pro": pro})
     chunks = [chunk async for chunk in router.stream("lead", _request())]
@@ -208,14 +196,3 @@ def test_openai_compatible_sends_the_render_as_a_user_item_after_the_tool_output
     serialized = _flatten(render["content"])
     assert RUNTIME_NOTE_PREFIX.strip() in serialized and "data:image/png;base64,AAAA" in serialized
     assert "bowhead_visual_view_v1" not in _flatten(body)
-
-
-@pytest.mark.parametrize(("value", "enabled"), [(None, True), ("1", True), ("on", True), ("0", False), ("false", False), (" OFF ", False)])
-def test_switch_is_on_by_default_and_zero_turns_it_off(monkeypatch, value, enabled) -> None:
-    from bowhead_router.visual_input import visual_self_check_enabled
-
-    if value is None:
-        monkeypatch.delenv("FEATURE_VISUAL_SELF_CHECK", raising=False)
-    else:
-        monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", value)
-    assert visual_self_check_enabled() is enabled

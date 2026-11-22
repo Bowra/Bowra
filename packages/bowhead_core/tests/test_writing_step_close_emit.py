@@ -100,9 +100,9 @@ async def test_writing_step_done_close_fires_when_started() -> None:
     )
 
     # bus tracking set should now include call_X.
-    wset = getattr(bus, "_lead_writing_call_ids", None)
-    assert isinstance(wset, set)
-    assert "call_X" in wset
+    wset = getattr(bus, "_writing_call_ids", None)
+    assert isinstance(wset, dict)
+    assert wset["call_X"] is None, "Lead's writing step has no writer agent"
 
 
 @pytest.mark.unit
@@ -112,15 +112,15 @@ async def test_writing_step_close_skipped_when_bus_has_no_record() -> None:
     bus tracking set is empty, so the guard returns and no extra step_done
     pollutes the event stream. Pin from test_subagent_step_emit_contract."""
     bus = TurnEventBus()
-    # Bus has no `_lead_writing_call_ids` attr — guard short-circuits.
-    wset = getattr(bus, "_lead_writing_call_ids", None)
+    # Bus has no `_writing_call_ids` attr — guard short-circuits.
+    wset = getattr(bus, "_writing_call_ids", None)
     assert wset is None  # confirms initial state
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_writing_call_ids_set_initialized_per_stream() -> None:
-    """First slow-tool partial chunk creates the bus._lead_writing_call_ids
+    """First slow-tool partial chunk creates the bus._writing_call_ids
     set. Subsequent calls reuse the same set."""
     router = _FakeRouter(
         stream_chunks=[
@@ -157,5 +157,5 @@ async def test_writing_call_ids_set_initialized_per_stream() -> None:
         subagent_id="lead_root",
         profile_name="lead",
     )
-    wset = getattr(bus, "_lead_writing_call_ids", None)
-    assert wset == {"call_1", "call_2"}
+    wset = getattr(bus, "_writing_call_ids", None)
+    assert wset == {"call_1": None, "call_2": None}

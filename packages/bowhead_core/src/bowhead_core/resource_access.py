@@ -203,13 +203,37 @@ async def resolve_skill_grant_target(
         # Malformed/missing exact grants must never fall back to the name resolver.
         parsed = parse_exact_skill_grants([grant.to_canonical_dict() for grant in grants])
         grant = next((item for item in parsed if item.name == skill_name), None)
-        if grant is None:
-            raise ValueError("assigned_skill_unavailable")
-        if grant.kind == "team":
+        if grant is not None:
+            kind, identity = grant.kind, grant.id
+        else:
+            # A Skill the user selected for this run beside the Agent's own is read
+            # through the exact reference access; key it by that source.
+            from bowhead_core.skill_read_access import reference_extension_resource
+
+            resource = reference_extension_resource(ctx, skill_name)
+            if resource is None:
+                raise ValueError("assigned_skill_unavailable")
+            kind, identity = resource.source_kind, resource.id
+        if kind == "team":
             users = UserStore(ctx.access_control_store.db_path)
-            record = await users.get_team_skill(ctx.team_id, grant.id, only_enabled=False)
-            return ("team_skill", grant.id, permission), record.created_by if record else None
+            record = await users.get_team_skill(ctx.team_id, identity, only_enabled=False)
+            return ("team_skill", identity, permission), record.created_by if record else None
         return default_target, None
+    from bowhead_core.selected_skill_runtime import selected_resource
+
+    selected = selected_resource(ctx, skill_name)
+    if selected is not None:
+        # A Skill the user selected with / is keyed by its selected source, never by
+        # same-name priority: a personal copy must not answer for a selected team
+        # Skill (skill-bundle-read tech-design §6, §12.3).
+        if selected.source_kind != "team":
+            return default_target, None
+        try:
+            record = await ctx.team_skill_store.get_team_skill(ctx.team_id, selected.id, only_enabled=False)
+        except Exception:
+            logger.warning("resource_grant.selected_team_skill_lookup_failed skill=%s", skill_name)
+            record = None
+        return ("team_skill", selected.id, permission), getattr(record, "created_by", None)
     try:
         catalog = getattr(ctx, "skill_catalog", None)
         if catalog is not None and catalog.get(skill_name) is not None:

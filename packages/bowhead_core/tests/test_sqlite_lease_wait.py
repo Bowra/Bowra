@@ -371,3 +371,32 @@ async def test_a_wait_inside_a_request_deadline_times_out_with_the_deadline(
     assert event["outcome"] == "timed_out"
     assert isinstance(event["busy_timeout_ms"], int) and event["busy_timeout_ms"] <= 400
     assert isinstance(event["waited_ms"], float) and 200 <= event["waited_ms"] <= 1200
+
+
+def _hold_shared_core(reader: DomainConnection, seconds: float) -> None:
+    reader.execute("BEGIN")
+    try:
+        _read_core_from(reader)
+        time.sleep(seconds)
+    finally:
+        reader.rollback()
+
+
+def test_a_long_lease_hold_is_logged_with_the_code_that_took_it(domain_files: Path, recorded: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shared lease blocks every exclusive writer of its domain while held; holds over the threshold are named."""
+    monkeypatch.setattr(sqlite_lease_wait, "HOLD_LOG_THRESHOLD_MS", 50.0)
+    _seed(domain_files)
+    reader = managed(domain_files, "content")
+    try:
+        _hold_shared_core(reader, 0.12)
+        [event] = recorded.named("sqlite.lease_held_long")
+        assert (event["lease_domain"], event["lease_mode"]) == ("core", "shared")
+        assert float(str(event["held_ms"])) >= 100
+        # The statement that took the lease, not the code that later released it.
+        assert "_read_core_from" in str(event["callsite"])
+
+        recorded.events.clear()
+        _hold_shared_core(reader, 0)
+        assert not recorded.named("sqlite.lease_held_long")
+    finally:
+        reader.close()

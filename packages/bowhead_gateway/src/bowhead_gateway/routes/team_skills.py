@@ -84,16 +84,20 @@ from bowhead_gateway.resource_impact_http import (
 from bowhead_gateway.routes.auth import _current_user, _store
 from bowhead_gateway.skill_bundle_files import (
     BundleFileChange,
+    PackageFileChange,
     change_bundle_file,
+    change_package_file,
     display_body,
     evals_summary,
     list_bundle_files,
     read_bundle_file_snapshot,
     read_bundle_snapshot,
+    read_package_file_snapshot,
     require_bundle_authoring,
     validate_file_ref,
     write_bundle_body,
     write_bundle_file,
+    write_package_file,
 )
 from bowhead_gateway.skill_import_sources import build_resolution_sources
 from bowhead_gateway.skill_workflow_errors import skill_workflow_http_error
@@ -781,6 +785,24 @@ async def get_team_skill_route(
         return d
 
 
+@router.get("/{skill_id}/package-files/{path:path}")
+async def get_team_skill_package_file_route(
+    skill_id: str,
+    path: str,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Any file of the approved live copy by its path from the Skill root; the same visibility gate as the detail."""
+    initial, _ = await _visible_or_404(request, store, user, skill_id)
+    async with team_skill_lock(initial.team_id, initial.name):
+        sk, _is_admin = await _visible_or_404(request, store, user, skill_id)
+        skill_dir = _team_dir(sk.team_id, sk.source_path)
+        if skill_dir is None:
+            raise skill_workflow_http_error(404, "skill_file_not_found")
+        return read_package_file_snapshot(skill_dir, path, editable=True)
+
+
 @router.get("/{skill_id}/files/{kind}/{filename:path}")
 async def get_team_skill_file_route(
     skill_id: str,
@@ -911,6 +933,46 @@ async def put_team_skill_file_route(
         skill_id,
         label=f"{kind}/{filename}",
         write=lambda skill_dir, _sk: write_bundle_file(skill_dir, kind, filename, body.content, expected_content_sha256=body.expected_content_sha256),
+    )
+
+
+@router.post("/{skill_id}/package-files", dependencies=_WRITE_DEPS)
+async def change_team_skill_package_file_route(
+    skill_id: str,
+    body: PackageFileChange,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Create, rename or delete any file of the team Skill's live copy by its path from the Skill root."""
+    require_bundle_authoring()
+    return await _edit_team_bundle(
+        request,
+        store,
+        user,
+        skill_id,
+        label=f"{body.operation}:{body.path}",
+        write=lambda skill_dir, _sk: change_package_file(skill_dir, **body.model_dump()),
+    )
+
+
+@router.put("/{skill_id}/package-files/{path:path}", dependencies=_WRITE_DEPS)
+async def put_team_skill_package_file_route(
+    skill_id: str,
+    path: str,
+    body: FileWriteBody,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Overwrite any existing file of the team Skill's live copy with text, by its path from the Skill root."""
+    return await _edit_team_bundle(
+        request,
+        store,
+        user,
+        skill_id,
+        label=path,
+        write=lambda skill_dir, _sk: write_package_file(skill_dir, path, body.content, expected_content_sha256=body.expected_content_sha256),
     )
 
 

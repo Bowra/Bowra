@@ -237,17 +237,17 @@ async def build_user_skill_surface(
 ) -> UserSkillSurface:
     """本人 ∧ import_status ∈ {pending, overridden} 才成立，否则 404（不存在与无权同码）。
 
-    读三样：`body_raw`（整份 SKILL.md，`read_bundle_manifest`）、包内文件清单（`list_bundle_files` 给 basename，
-    这里拼成 `kind/name`，上限 200）、`import_report`（`import_report_json`；可能 truncated，喂教练前只说「至少 N 条」）。
+    读三样：`body_raw`（整份 SKILL.md，`read_bundle_manifest`）、包内文件清单（`list_package_files`，相对技能根目录的完整路径，
+    不含 SKILL.md，上限 200）、`import_report`（`import_report_json`；可能 truncated，喂教练前只说「至少 N 条」）。
     ``sources``＝skill-import 线的 `ResolutionSources`（本平台真实存在的工具/skill 名）——教练换名只能从这里选。
     findings 只走 evidence 一个通道（消毒），配置面只放计数与 id。基线指纹对正文算（详情 DTO 的 `content_sha256` 是整包指纹）。
     """
 
     from pathlib import Path
 
-    from bowhead_skill.bundle_files import BUNDLE_FILE_KINDS
+    from bowhead_skill.bundle_files import list_package_files
 
-    from bowhead_gateway.skill_bundle_files import list_bundle_files, read_bundle_manifest
+    from bowhead_gateway.skill_bundle_files import read_bundle_manifest
 
     inst = await skill_instance_store.get(user_id=user_id, name=skill_name)
     if inst is None or (inst.import_status or "") not in USER_SKILL_COACHABLE_STATUSES:
@@ -256,13 +256,11 @@ async def build_user_skill_surface(
     body_raw = read_bundle_manifest(skill_dir).replace("\r\n", "\n")
     if not body_raw:
         raise SurfaceError("user_skill_body_missing", http_status=409)
-    files: list[dict[str, Any]] = []
-    for kind in BUNDLE_FILE_KINDS:
-        try:
-            for name, size in list_bundle_files(skill_dir, kind):
-                files.append({"path": f"{kind}/{name}", "size": int(size)})
-        except OSError:
-            continue
+    # Every file of the package by its path from the Skill root, as the model reads it.
+    try:
+        files: list[dict[str, Any]] = [{"path": path, "size": int(size)} for path, size in list_package_files(skill_dir) if path != "SKILL.md"]
+    except OSError:
+        files = []
     report = _parse_import_report(inst.import_report_json)
     raw_findings = report.get("findings")
     findings = [f for f in (raw_findings if isinstance(raw_findings, list) else []) if isinstance(f, dict)][:_IMPORT_REPORT_MAX_FINDINGS]

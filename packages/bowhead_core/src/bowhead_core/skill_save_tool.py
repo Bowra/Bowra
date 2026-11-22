@@ -269,7 +269,7 @@ def register_skill_save_tool(tool_registry: ToolRegistry) -> None:
                         },
                         "files": {
                             "type": "array",
-                            "description": "逐文件补丁：path 为 references/、scripts/ 或 evals/ 下的完整相对路径；content 为新文本，null 明确删除。未列出的文件保留。不可同时用 scripts 和 files 修改脚本。先 skill_read(file=path) 读取原文件。",
+                            "description": "逐文件补丁：path 为相对技能根目录的完整路径，任何文件夹或根目录文件都可以（SKILL.md 除外，用 body_md）；content 为新文本，null 明确删除。未列出的文件保留。不可同时用 scripts 和 files 修改脚本。先 skill_read(file=path) 读取原文件。",
                             "items": {
                                 "type": "object",
                                 "properties": {"path": {"type": "string"}, "content": {"type": ["string", "null"]}},

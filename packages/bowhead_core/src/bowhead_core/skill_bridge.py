@@ -60,6 +60,11 @@ def _wrap_skill_read_with_cache(
         if reference_skill_active(ctx) or assigned_skill_active(ctx):
             # A legacy name-keyed body is not an exact reference snapshot.
             return await handler(args, ctx)
+        from bowhead_core.selected_skill_runtime import selected_resource
+
+        if selected_resource(ctx, str(args.get("name") or "")) is not None:
+            # Helpers share this name-keyed cache; a selected source is never served from it.
+            return await handler(args, ctx)
         from bowhead_core.ordinary_lead_material import collecting
 
         if collecting(ctx):
@@ -228,15 +233,25 @@ def _wrap_skill_execution_gate(tool_name: str, handler: Any, catalog: SkillCatal
             name = "python_sandbox"
         else:
             name = str(args.get("name") or "").strip()
+        from bowhead_core.selected_skill_runtime import selected_resource
+
+        # A Skill the user selected has its state checked by its exact source when the tool
+        # resolves it, and its grant here by that source; the name-keyed gate would judge a
+        # same-name personal record instead.
+        selected = selected_resource(ctx, name) if name else None
         if name:
-            from bowhead_core.resource_execution_gate import check_skill_execution
+            from bowhead_core.resource_execution_gate import check_selected_skill_grant, check_skill_execution
 
             permission = "read" if tool_name == "skill_read" else "invoke"
-            denial = await check_skill_execution(
-                ctx,
-                catalog=catalog,
-                skill_name=name,
-                permission=permission,
+            denial = (
+                await check_selected_skill_grant(ctx, selected, name, permission=permission)
+                if selected is not None
+                else await check_skill_execution(
+                    ctx,
+                    catalog=catalog,
+                    skill_name=name,
+                    permission=permission,
+                )
             )
             if denial is not None:
                 from bowhead_core.ordinary_lead_material import note_known_rejection
@@ -369,8 +384,13 @@ def register_skill_tools(
         if assigned_skill_active(ctx) or reference_skill_active(ctx):
             # Exact sources use the existing call-scoped material authorization.
             return None
-        from bowhead_core.resource_execution_gate import check_skill_execution
+        from bowhead_core.resource_execution_gate import check_selected_skill_grant, check_skill_execution
+        from bowhead_core.selected_skill_runtime import selected_resource
 
+        if (selected := selected_resource(ctx, skill_name)) is not None:
+            # Resolving a selected Skill already rechecked its exact source's state; the
+            # name-keyed gate would read a same-name personal record instead.
+            return await check_selected_skill_grant(ctx, selected, skill_name, permission="invoke")
         return await check_skill_execution(ctx, catalog=catalog, skill_name=skill_name, permission="invoke")
 
     from bowhead_core.html_static_check import HTML_STATIC_CHECK_GUIDANCE
@@ -389,7 +409,16 @@ def register_skill_tools(
             return skill_unavailable(str(spec.name), "read", "not_granted", cause="lead_index")
         return None
 
-    defs = build_skill_tools(catalog, runtime, authorize_invoke=authorize_invoke, authorize_read=authorize_read, material_observer=observer)
+    from bowhead_core.selected_skill_runtime import resolve_selected_skill
+
+    defs = build_skill_tools(
+        catalog,
+        runtime,
+        authorize_invoke=authorize_invoke,
+        authorize_read=authorize_read,
+        material_observer=observer,
+        resolve_selected=resolve_selected_skill,
+    )
 
     def record_material(tool_name, handler):
         @wraps(handler)

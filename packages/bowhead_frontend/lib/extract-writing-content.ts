@@ -80,6 +80,17 @@ function findStringValue(raw: string, key: string): string | null {
 }
 
 /**
+ * The purpose the model gave a code call (`intent`, top level or inside a dispatcher's `input`), once its value has
+ * started streaming; null before that. Turn visibility FR5: the writing row reads "正在写代码 · {intent}".
+ */
+export function extractWritingIntent(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const value = findStringValue(raw, "intent");
+  const intent = value?.replace(/\s+/g, " ").trim();
+  return intent ? intent : null;
+}
+
+/**
  * Extract the code/query being written from the accumulated raw tool-args JSON.
  * Falls back to the raw string if nothing recognizable can be extracted (never
  * worse than the pre-fix behavior).
@@ -87,6 +98,7 @@ function findStringValue(raw: string, key: string): string | null {
 export function extractWritingContent(
   raw: string,
   toolName?: string | null,
+  { fallbackToRaw = true }: { fallbackToRaw?: boolean } = {},
 ): string {
   if (!raw) return raw;
   const keys = targetKeys(toolName);
@@ -112,6 +124,7 @@ export function extractWritingContent(
     const val = findStringValue(raw, k);
     if (val !== null) return val;
   }
-  // Give up — show raw (no worse than before this fix).
-  return raw;
+  // Give up — show raw (no worse than before this fix). Code steps (turn visibility FR5) show nothing instead
+  // until their code starts, so the box never shows the arguments' JSON scaffold.
+  return fallbackToRaw ? raw : "";
 }

@@ -29,6 +29,7 @@ export type FileErrorKey =
   | "errors.file_type_unsupported"
   | "errors.office_type_mismatch"
   | "errors.office_invalid_package"
+  | "errors.office_duplicate_part"
   | "errors.office_active_content_unsupported"
   | "errors.office_package_limit"
   | "errors.office_multipart_required"
@@ -67,6 +68,7 @@ const FILE_ERROR_KEY: Readonly<Record<string, FileErrorKey>> = {
   file_type_unsupported: "errors.file_type_unsupported",
   file_office_type_mismatch: "errors.office_type_mismatch",
   file_office_invalid_package: "errors.office_invalid_package",
+  file_office_duplicate_part: "errors.office_duplicate_part",
   file_office_unsafe_xml: "errors.office_invalid_package",
   file_office_active_content_unsupported: "errors.office_active_content_unsupported",
   file_office_package_limit: "errors.office_package_limit",

@@ -12,11 +12,14 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 from bowhead_skill.runtime import (
@@ -28,9 +31,6 @@ from bowhead_skill.runtime import (
 from bowhead_skill.tools import build_skill_tools
 
 from bowhead_skill import SkillCatalog
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass
@@ -51,7 +51,7 @@ class _FixedRuntime:
         self._result = result
         self.calls: list[dict[str, Any]] = []
 
-    async def run(self, spec, *, entry_script, input_data, extra_args):
+    async def run(self, spec, *, entry_script, input_data):
         self.calls.append(dict(input_data))
         return self._result
 
@@ -63,6 +63,51 @@ def _mk_skill(root: Path, name: str, script: str = "run.py") -> None:
     scripts = d / "scripts"
     scripts.mkdir()
     (scripts / script).write_text("print('x')\n", encoding="utf-8")
+
+
+_RUNNER_PATH = Path(__file__).resolve().parents[1] / "catalog" / "python_sandbox" / "scripts" / "runner.py"
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("python_sandbox", {"script": "runner.py", "input": {"code": "print(1)"}}),
+        ("deck", {"script": "run.py", "input": {}}),
+    ],
+)
+async def test_skill_invoke_keeps_model_arguments_off_the_script_command_line(tmp_path: Path, name: str, arguments: dict) -> None:
+    """Host scripts take `--input`/`--workdir` from the server; argparse keeps the last repeated value."""
+    _mk_skill(tmp_path, name, script=arguments["script"])
+    cat = SkillCatalog(roots=[tmp_path])
+    cat.refresh()
+    rt = _FixedRuntime(_FakeResult(result_json={"ok": True}))
+    res = await _invoke_tool(cat, rt).handler(
+        {"name": name, **arguments, "extra_args": ["--input", "/elsewhere/input.json", "--workdir", "/elsewhere"]}, object()
+    )
+    assert len(rt.calls) == 1
+    assert res["ignored_arguments"] == {"extra_args": "Not passed: the script command line is fixed. Pass values in input instead."}
+    assert "/elsewhere" not in json.dumps(rt.calls)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--input", "a.json", "--workdir", "wd", "--input", "b.json"],
+        ["--input", "a.json", "--workdir", "wd", "--workdir=other"],
+        ["--input", "a.json", "--workdir", "wd", "--inp", "b.json"],
+        ["--input", "a.json", "--workdir", "wd", "--", "--input", "b.json"],
+        ["--input", "a.json", "--workdir", "wd", "extra"],
+        ["--input", "a.json"],
+    ],
+)
+def test_sandbox_runner_accepts_only_its_fixed_command_line(argv: list[str]) -> None:
+    spec = importlib.util.spec_from_file_location("_fixed_argv_runner", _RUNNER_PATH)
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    assert vars(runner._parse_runner_args(["--input", "a.json", "--workdir", "wd"])) == {"input": "a.json", "workdir": "wd"}
+    with pytest.raises(SystemExit) as exited:
+        runner._parse_runner_args(argv)
+    assert exited.value.code == 2
 
 
 def _invoke_tool(cat: SkillCatalog, rt: Any):

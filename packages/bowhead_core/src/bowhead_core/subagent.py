@@ -65,7 +65,7 @@ from bowhead_core.agent_run_limits import (
     get_runtime_controls,
 )
 from bowhead_core.agent_run_wrap_up import EVENT_SECTION_MAX_CHARS
-from bowhead_core.agents._generated.tool_display import TOOL_DISPLAY
+from bowhead_core.agents._generated.tool_display import TOOL_CODE_LANGUAGE, TOOL_DISPLAY
 from bowhead_core.agents._generated.tool_renames import canonical_tool_name
 from bowhead_core.agents.capability_protocols import render_capability_protocols
 
@@ -126,6 +126,8 @@ from bowhead_core.published_diagnostics import (
 from bowhead_core.reference_read_question import ReferenceReadQuestion
 from bowhead_core.sandbox_inputs_normalize import settle_skill_invoke_calls
 from bowhead_core.scrub import scrub as _scrub  # ④f: scrub cred shapes from exception text
+from bowhead_core.step_facts import input_facts as step_input_facts
+from bowhead_core.step_facts import output_facts as step_output_facts
 from bowhead_core.subagent_resume import ResumeGrant
 from bowhead_core.terminal_effect_contract import TOOL_EFFECT_NONE
 from bowhead_core.text_tool_call_salvage import apply_text_tool_call_salvage
@@ -3820,12 +3822,9 @@ class SubagentRunner:
             filtered_schemas.append(review_spec.schema)
         # Visual self-check: the run's primary model decides once whether renders are shown (FR1)
         # and whether the run may look at files on request (FR20).
-        from bowhead_router.visual_input import visual_self_check_enabled
-
         _accepts_images = getattr(self.router, "accepts_images_for", None)
         _visual_accepts = (
-            visual_self_check_enabled()
-            and callable(_accepts_images)
+            callable(_accepts_images)
             and _accepts_images(
                 profile.llm_agent_type,
                 profile_name,
@@ -4552,7 +4551,7 @@ class SubagentRunner:
         # now false: summary.llm_count is **hardcoded to 1** in turn_runner.py, whose comment promises
         # eventual orch.lead_llm_call_count values, but that counter **does not exist anywhere in the repository**.
         # The Lead path also has no per-iteration/duration metrics (searched).
-        # 📏 Observed 116 t_94f886fbf442: 72.9 seconds total, 44 in peers;
+        # 📏 Observed a reproduced task: 72.9 seconds total, 44 in peers;
         # the **remaining ~29 seconds in Lead were completely unobservable**, leaving only half a map of time spent.
         # ⚠ Lead and peers run **the same loop** (Lead uses runner.run(profile_name=lead)),
         # so this simply stops excluding an existing probe; payload profile already distinguishes them.
@@ -4640,6 +4639,14 @@ class SubagentRunner:
 
         # The parallel batch in flight, as (call, task), until its results have joined `messages`.
         _open_batch: list[tuple[ToolCall, asyncio.Future]] = []
+        # Where the Lead's reply began in the narrative the user sees, while that reply is not in
+        # `messages`: its model call is in flight, or it returned without a Tool call.
+        _reply_from: list[int] = []
+
+        def _shown_narrative() -> str:
+            read = getattr(parent_bus, "_shown_lead_narrative", None)
+            return str(read() or "") if callable(read) else ""
+
         if context_view is not None and profile.name == "lead" and exact_binding is not None and exact_binding.parent_execution_id is None:
 
             async def _unfinished_context_publication(status: str, *, owner: Any = None) -> Any:
@@ -4667,7 +4674,11 @@ class SubagentRunner:
                                 return _serialize(outcome, ref_allowlist=_ν15_allowlist)
                     return open_delegations(parent_bus).result(call.id, status)
 
-                return await context_view.conversation_publication(repair_pending_tool_calls(messages, known_result))
+                publication = await context_view.conversation_publication(repair_pending_tool_calls(messages, known_result))
+                # What the user saw of the reply this ending cut off. A reply the transcript already holds is not repeated.
+                reply = _shown_narrative()[_reply_from[0] :].strip() if _reply_from else ""
+                held = next((_answer_text(message.content) for message in reversed(messages) if message.role == "assistant"), "")
+                return replace(publication, unfinished_reply=reply) if reply and reply not in held else publication
 
             parent_bus._unfinished_context_publication = _unfinished_context_publication  # type: ignore[attr-defined]
 
@@ -5941,6 +5952,8 @@ class SubagentRunner:
                     if _forced_first_response is None and runtime_control is not None and not runtime_control.admit():
                         return await _limit_wrap_up(runtime_control.limit_reason)
                     _ordinary_model_admitted = _forced_first_response is None
+                    if profile_name == "lead":
+                        _reply_from[:] = [len(_shown_narrative())]
                     if runtime_control is not None and _forced_first_response is None and _is_helper:
                         from bowhead_core import turn_progress as _turn_progress
 
@@ -6037,6 +6050,8 @@ class SubagentRunner:
                                 timeout=llm_timeout,
                             )
                     _llm_call_ok = True
+                    if resp.tool_calls:
+                        _reply_from.clear()  # its text joins `messages` with the calls
                     if _visual_sent:
                         from bowhead_core.visual_self_check import settle_renders
 
@@ -6573,7 +6588,7 @@ class SubagentRunner:
                         _delivery_text_reviewed = True
                         # Lead already ended its work with this answer while a call had failed. The
                         # review guidance checks that answer and leaves any choice it asked to the user
-                        # (116 t_7edbc155f8d8). The guidance is advisory: a gate that refused every other
+                        # (a reproduced task). The guidance is advisory: a gate that refused every other
                         # call left Lead spinning until the user cancelled (the original regression).
                         _bounce = review_guidance(
                             invocations,
@@ -6598,7 +6613,7 @@ class SubagentRunner:
                         and can_decide(iteration)
                     ):
                         # A helper that worked and then answered in prose ends its run without a result
-                        # (116 t_b2fde199d566: 39 calls, no file, no return). State the facts once; the
+                        # (a reproduced task: 39 calls, no file, no return). State the facts once; the
                         # model decides whether to continue or to return what it has.
                         _unreturned_work_noted = True
                         _bounce = UNRETURNED_WORK_NOTE
@@ -8401,20 +8416,20 @@ class SubagentRunner:
         )
         # Regression check N1: an accepted review whose only unmet items are stated gaps names them in one
         # sentence instead of the generic notice; the gap requirements are then not repeated as bare lines.
-        from bowhead_core.tool_delivery_review import named_delivery_gaps
+        # When another unfulfilled issue makes "not completed" unsafe, the same requirements are listed in
+        # the unconfirmed notice instead, so they never stand alone as unlabeled lines.
+        from bowhead_core.tool_delivery_review import named_delivery_gaps, reviewed_gaps
 
-        _named_gaps = (
-            named_delivery_gaps(accepted_delivery_review.get("delivery_review"), invocations)
-            if accepted_delivery_review is not None and _business_delivery_partial and returned_payload is None
-            else []
-        )
+        _review_gaps_listed = accepted_delivery_review is not None and _business_delivery_partial and returned_payload is None
+        _named_gaps = named_delivery_gaps(accepted_delivery_review.get("delivery_review"), invocations) if _review_gaps_listed else []
+        _unconfirmed_gaps = [] if _named_gaps or not _review_gaps_listed else reviewed_gaps(accepted_delivery_review.get("delivery_review"))
         _gap_caveats = (
             {
                 item["requirement"].strip()
                 for item in accepted_delivery_review["delivery_review"]["requirements"]
                 if item.get("status") == "unfulfilled"
             }
-            if _named_gaps
+            if _named_gaps or _unconfirmed_gaps
             else set()
         )
         if accepted_delivery_review is not None and final_answer.strip():
@@ -8425,9 +8440,12 @@ class SubagentRunner:
             from bowhead_core.report_chrome_text import chrome_text, delivery_gaps_notice
 
             _notice_language = effective_output_language(bus=parent_bus, language_context=getattr(parent_ctx, "language_context", None))
-            delivery_notice = (
-                delivery_gaps_notice(_named_gaps, _notice_language) if _named_gaps else chrome_text("delivery_unverified", _notice_language)
-            )
+            if _named_gaps:
+                delivery_notice = delivery_gaps_notice(_named_gaps, _notice_language)
+            elif _unconfirmed_gaps:
+                delivery_notice = delivery_gaps_notice(_unconfirmed_gaps, _notice_language, unconfirmed=True)
+            else:
+                delivery_notice = chrome_text("delivery_unverified", _notice_language)
             if accepted_delivery_review is None or delivery_notice not in final_answer:
                 final_answer += "\n\n" + delivery_notice
 
@@ -8766,7 +8784,7 @@ class SubagentRunner:
             raise
         finally:
             # A required question the owner left pending would otherwise block
-            # the requester until expiry, or forever (116 t_649dfe4abb48).
+            # the requester until expiry, or forever (a reproduced task).
             if settled and pending_ids:
                 try:
                     if await frame.runtime.store.close_unanswered_owner_questions(frame.runtime.worker, question_ids=pending_ids):
@@ -9177,12 +9195,102 @@ class SubagentRunner:
             # for `lead_thinking_writing` step. Maps step_id → True once emit_started
             # has run; resets on a Router restart.
             _lead_writing_started: dict[str, bool] = {}
+            # Turn visibility FR6: streamed code is combined per call and sent at most every
+            # _WRITING_FLUSH_SECONDS (or _WRITING_FLUSH_CHARS); step_id -> [pending text, last send, writer agent].
+            _writing_buffers: dict[str, list[Any]] = {}
+            # A dispatcher's arguments (skill_invoke) are held until they name the inner skill; calls that
+            # turn out not to write code are skipped for the rest of the attempt.
+            _writing_held: dict[str, str] = {}
+            _writing_skipped: set[str] = set()
             # Characters (code points) of this attempt's peer prose already published as partial_answer.
             partial_answer_chars = 0
             # On a per-call timeout, answer what the model emitted during these 300s: stream_visible=True alone
             # could not distinguish endless thinking, unfinished tool arguments (large code), or prose. Record only lengths and timestamps.
             _t_start = time.perf_counter()
             _deadline_stats: dict[str, Any] = {"chunks": 0, "first_s": None, "last_s": None, "tool_args_chars": 0, "tool_name": ""}
+
+            async def _on_writing_partial(raw_tool: str, call_id: str, partial: str) -> None:
+                """Open, fill and attribute the writing step of a call whose arguments are streaming.
+
+                A code Tool is found by the surface name the run step will use (`python_exec` and
+                `skill_invoke` of `python_sandbox` are both `python_sandbox`) and its declared
+                `code_language`; Lead's query Tools keep their stream. Anything else is not streamed.
+                """
+                step_id = f"writing_{call_id}"
+                if step_id in _writing_skipped or bus is None or turn_id is None:
+                    return
+                if step_id in _writing_buffers:
+                    _writing_buffers[step_id][0] += partial
+                    await _send_writing(step_id)
+                    return
+                held = _writing_held.pop(step_id, "") + partial
+                if raw_tool in _WRITING_DISPATCHERS:
+                    inner = _streamed_inner_skill(held)
+                    if inner is None:
+                        _writing_held[step_id] = held
+                        return
+                    tool_name = _surface_inner_skill_name(raw_tool, {"name": inner})
+                else:
+                    tool_name = _surface_inner_skill_name(raw_tool, None)
+                code_language = TOOL_CODE_LANGUAGE.get(tool_name)
+                if code_language is None and not (profile_name == "lead" and tool_name in _LEAD_WRITING_QUERY_HEADERS):
+                    _writing_skipped.add(step_id)
+                    return
+                writer = None if profile_name == "lead" else subagent_id
+                _lead_writing_started[step_id] = True
+                # 0.39.8 #3 — register on bus so the matching tool dispatch site (`_execute_tool`) closes
+                # writing_<call_id> for THIS call only, with the same writer agent.
+                try:
+                    _wset = getattr(bus, "_writing_call_ids", None)
+                    if _wset is None:
+                        _wset = {}
+                        bus._writing_call_ids = _wset  # type: ignore[attr-defined]
+                    _wset[call_id] = writer
+                except Exception:  # noqa: S110
+                    pass
+                try:
+                    await bus.emit(
+                        OrchestratorEvent(
+                            event_type="step_started",
+                            turn_id=turn_id,
+                            payload={
+                                "card_id": turn_id,
+                                "step_id": step_id,
+                                "step_type": "lead_thinking_writing",
+                                "header_zh": "写代码" if code_language is not None else _LEAD_WRITING_QUERY_HEADERS[tool_name],
+                                "started_at": utc_now_iso(),
+                                "tool_name": tool_name,
+                                "call_id": call_id,
+                                **({"code_language": code_language} if code_language is not None else {}),
+                                **({"subagent_id": writer} if writer is not None else {}),
+                            },
+                            parent_agent_id=writer,
+                        )
+                    )
+                except Exception as _wstart_e:
+                    logger.warning("lead_writing.step_started_emit_failed: %s", _wstart_e)
+                _writing_buffers[step_id] = [held, time.monotonic(), writer]
+                await _send_writing(step_id)
+
+            async def _send_writing(step_id: str, *, final: bool = False) -> None:
+                """Send the code buffered for one writing step once enough time or text has gathered."""
+                pending = _writing_buffers.get(step_id)
+                if bus is None or turn_id is None or not pending or not pending[0]:
+                    return
+                if not final and time.monotonic() - pending[1] < _WRITING_FLUSH_SECONDS and len(pending[0]) < _WRITING_FLUSH_CHARS:
+                    return
+                text, pending[0], pending[1] = pending[0], "", time.monotonic()
+                try:
+                    await bus.emit(
+                        OrchestratorEvent(
+                            event_type="step_progress",
+                            turn_id=turn_id,
+                            payload={"card_id": turn_id, "step_id": step_id, "content_delta": text},
+                            parent_agent_id=pending[2],
+                        )
+                    )
+                except Exception as _wprog_e:
+                    logger.warning("lead_writing.step_progress_emit_failed: %s", _wprog_e)
 
             async def _withdraw_attempt() -> None:
                 """Discard everything the restarted attempt produced and published."""
@@ -9208,14 +9316,17 @@ class SubagentRunner:
                 response_diagnostics = None
                 partial_answer_chars = 0
                 _lead_writing_started.clear()
+                _writing_buffers.clear()
+                _writing_held.clear()
+                _writing_skipped.clear()
                 _STREAM_ATTEMPT.set(object())
                 if bus is None or turn_id is None:
                     return
-                writing_ids = getattr(bus, "_lead_writing_call_ids", None)
+                writing_ids = getattr(bus, "_writing_call_ids", None)
                 for step_id in discarded_step_ids:
                     call_id = step_id.removeprefix("writing_")
-                    if isinstance(writing_ids, set):
-                        writing_ids.discard(call_id)
+                    if isinstance(writing_ids, dict):
+                        writing_ids.pop(call_id, None)
                     # Close the withdrawn writing step so no trace keeps it running; the
                     # restart event below tells views to drop it.
                     try:
@@ -9357,93 +9468,18 @@ class SubagentRunner:
                         accumulated_tool_calls.append(chunk.tool_call_delta)
                     # Sprint chat-redesign-2026-05-21 Phase 1.1 (Spike 1) —
                     # tool_call_partial → lead_thinking_writing step_started/progress.
-                    # Only for Lead profile; only for slow tools where the user
-                    # benefits from seeing the SQL/Python get typed out in real time.
-                    # Peer subagents don't expose partial code (per tech-design §2.2.4).
-                    if chunk.tool_call_partial is not None and bus is not None and turn_id and subagent_id and profile_name == "lead":
-                        tool_name = chunk.tool_call_partial.get("tool_name") or ""
-                        # Sprint chat-redesign p0-followup B3 — extend slow-tool
-                        # set so KB / web search large queries also surface
-                        # partial-token visibility (P8 pain point, audit P1-2).
-                        # Audit doc: docs/chat-redesign-prd-gap-audit-2026-05-23.md §3 P1-2
-                        # PRD ref: §4.1.2 + §5.3.
-                        if tool_name in {"python_sandbox", "bi_query", "kb_search", "web_search"}:
-                            call_id = chunk.tool_call_partial.get("tool_call_id") or ""
-                            partial = chunk.tool_call_partial.get("partial_args_json") or ""
-                            step_id = f"writing_{call_id}"
-                            if not _lead_writing_started.get(step_id):
-                                _lead_writing_started[step_id] = True
-                                # 0.39.8 #3 — register on bus so the matching
-                                # tool dispatch site (`_execute_tool`) emits a
-                                # step_done(writing_<call_id>) close for THIS
-                                # call_id only. Without this guard the close
-                                # emit would fire unconditionally for every
-                                # tool call, polluting bus traces (broke
-                                # test_subagent_step_emit_contract.py strict-
-                                # sequence assertions).
-                                try:
-                                    _wset = getattr(bus, "_lead_writing_call_ids", None)
-                                    if _wset is None:
-                                        _wset = set()
-                                        bus._lead_writing_call_ids = _wset  # type: ignore[attr-defined]
-                                    _wset.add(call_id)
-                                except Exception:  # noqa: S110
-                                    pass
-                                _LEAD_WRITING_HEADERS = {
-                                    "python_sandbox": "写代码 (Python)",
-                                    "bi_query": "写查询 (SQL)",
-                                    "kb_search": "查知识库 (KB)",
-                                    "web_search": "搜网络 (Web)",
-                                }
-                                # The fallback was f"调用 {tool_name}": those four entries above are
-                                # language/target labels (Python / SQL), not tool identifiers; the fallback
-                                # exposed the identifier itself to users (`调用 canvas_add_spec_block`).
-                                # Resolve names through the same display table used by step cards and chips.
-                                header_zh = _LEAD_WRITING_HEADERS.get(
-                                    tool_name,
-                                    f"调用 {_tool_header_zh(tool_name)}",
-                                )
-                                try:
-                                    await bus.emit(
-                                        OrchestratorEvent(
-                                            event_type="step_started",
-                                            turn_id=turn_id,
-                                            payload={
-                                                "card_id": turn_id,
-                                                "step_id": step_id,
-                                                "step_type": "lead_thinking_writing",
-                                                "header_zh": header_zh,
-                                                "started_at": utc_now_iso(),
-                                                "tool_name": tool_name,
-                                                "call_id": call_id,
-                                            },
-                                            parent_agent_id=None,  # Lead-level
-                                        )
-                                    )
-                                except Exception as _wstart_e:
-                                    logger.warning(
-                                        "lead_writing.step_started_emit_failed: %s",
-                                        _wstart_e,
-                                    )
-                            if partial:
-                                try:
-                                    await bus.emit(
-                                        OrchestratorEvent(
-                                            event_type="step_progress",
-                                            turn_id=turn_id,
-                                            payload={
-                                                "card_id": turn_id,
-                                                "step_id": step_id,
-                                                "content_delta": partial,
-                                            },
-                                            parent_agent_id=None,
-                                        )
-                                    )
-                                except Exception as _wprog_e:
-                                    logger.warning(
-                                        "lead_writing.step_progress_emit_failed: %s",
-                                        _wprog_e,
-                                    )
+                    # Turn visibility D7/FR5/FR6 (2026-11-22): code streams for EVERY agent while it is written,
+                    # for each Tool that declares the language it runs (`code_language` in tool_aliases.yaml ->
+                    # TOOL_CODE_LANGUAGE). Helpers write all code (116, two weeks: 2,910 of 2,910 runs), and the
+                    # earlier Lead-only gate also matched only `python_sandbox`, a name the model never calls, so
+                    # no code had streamed. Lead's query Tools keep their earlier stream. A helper's writing
+                    # step carries its agent (`subagent_id`, `parent_agent_id`) so the trace nests it there.
+                    if chunk.tool_call_partial is not None and bus is not None and turn_id and subagent_id:
+                        await _on_writing_partial(
+                            chunk.tool_call_partial.get("tool_name") or "",
+                            chunk.tool_call_partial.get("tool_call_id") or "",
+                            chunk.tool_call_partial.get("partial_args_json") or "",
+                        )
                     if chunk.finish_reason:
                         finish_reason = chunk.finish_reason
                     if chunk.usage:
@@ -9452,6 +9488,9 @@ class SubagentRunner:
             attempt_token = _STREAM_ATTEMPT.set(object())
             try:
                 await asyncio.wait_for(_drain(), timeout=timeout)
+                # The arguments are complete: send what is still buffered before the call is dispatched.
+                for _writing_step in list(_writing_buffers):
+                    await _send_writing(_writing_step, final=True)
                 if bus is not None:
                     raise_if_terminal_bus_failed(bus)
             except TimeoutError as exc:
@@ -9719,6 +9758,8 @@ class SubagentRunner:
         _input_preview_pretty = _prettify_input_preview(_surface_tool_name, tc.arguments)
         if tc.name == "agent_message":
             _input_preview_pretty = ""
+        if tc.name == "view_file":
+            _input_preview_pretty = await _view_file_step_label(ctx, tc.arguments)
         if tc.name.startswith("personalmcp."):
             _input_preview_pretty = getattr(ctx, "personal_mcp_labels", {}).get(tc.name, "Personal MCP")
             _a4_kind, _a4_display, _a4_open_world = "write", lookup_display_category("write"), True
@@ -9742,9 +9783,9 @@ class SubagentRunner:
         # call_id — guards against polluting bus traces for tool calls that
         # never opened a writing step (peer tools, non-slow tools, unit
         # tests that bypass _stream_invoke entirely).
-        _wset = getattr(bus, "_lead_writing_call_ids", None)
-        if isinstance(_wset, set) and tc.id in _wset:
-            _wset.discard(tc.id)
+        _wset = getattr(bus, "_writing_call_ids", None)
+        if isinstance(_wset, dict) and tc.id in _wset:
+            _writer = _wset.pop(tc.id)
             try:
                 await bus.emit(
                     OrchestratorEvent(
@@ -9759,8 +9800,9 @@ class SubagentRunner:
                             "tool_name": _surface_tool_name,
                             "call_id": tc.id,
                             "ok": True,
+                            **({"subagent_id": _writer} if _writer is not None else {}),
                         },
-                        parent_agent_id=None,
+                        parent_agent_id=_writer,
                     )
                 )
             except Exception as _wclose_e:
@@ -9781,6 +9823,8 @@ class SubagentRunner:
                 "parent_step_id": parent_step_id,
                 "concurrency_group_id": concurrency_group_id,
                 "input_preview": _input_preview_pretty,
+                # Turn visibility FR4: facts the interface words in its own language (step_facts.py).
+                **({"facts": _step_in_facts} if (_step_in_facts := step_input_facts(_surface_tool_name, tc.arguments)) else {}),
                 # Backward-compat fields (Phase 1.1 dual-emit window)
                 "tool_name": _surface_tool_name,
                 "call_id": tc.id,
@@ -10236,6 +10280,11 @@ class SubagentRunner:
                 "step_type": "tool_run",
                 "state": _step_state,
                 "output_preview": _output_preview_pretty,
+                **(
+                    {"facts": _step_out_facts}
+                    if (_step_out_facts := step_output_facts(_surface_tool_name, public_result, succeeded=_step_state == "success"))
+                    else {}
+                ),
                 "duration_ms": int(inv.duration_ms) if inv.duration_ms else 0,
                 # Backward-compat fields (Phase 1.1 dual-emit window)
                 "tool_name": _surface_tool_name,
@@ -10604,7 +10653,7 @@ def _extract_step_code_input(tool_name: str, arguments: Any) -> dict[str, Any] |
 
     input_ids = sandbox_input_artifact_ids(arguments)
     return {
-        "language": "python",
+        "language": TOOL_CODE_LANGUAGE.get(tool_name, "python"),
         "code": source,
         "truncated": truncated,
         **({"input_artifact_ids": input_ids} if input_ids else {}),
@@ -10627,6 +10676,27 @@ def _extract_step_code_input(tool_name: str, arguments: Any) -> dict[str, Any] |
 # historical turns + legacy + unknown tool shapes).
 
 _INPUT_PREVIEW_MAX_LEN = 120
+
+# Writing steps (turn visibility FR6). Lead's query Tools keep their stream and headers; code Tools are
+# found through TOOL_CODE_LANGUAGE. Streamed code is combined: at most one progress event per
+# _WRITING_FLUSH_SECONDS, or sooner once _WRITING_FLUSH_CHARS have gathered (each provider delta is
+# about two characters, so one event per delta stored hundreds of events for a median call).
+_LEAD_WRITING_QUERY_HEADERS: dict[str, str] = {
+    "bi_query": "写查询 (SQL)",
+    "kb_search": "查知识库 (KB)",
+    "web_search": "搜网络 (Web)",
+}
+_WRITING_FLUSH_SECONDS = 0.25
+_WRITING_FLUSH_CHARS = 2048
+# Dispatchers whose arguments name the Tool that actually runs (`{"name": "python_sandbox", ...}`).
+_WRITING_DISPATCHERS = frozenset({"skill_invoke"})
+_STREAMED_SKILL_NAME = re.compile(r'"name"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _streamed_inner_skill(partial_args: str) -> str | None:
+    """The inner skill a dispatcher's streamed arguments name, once its value is complete; else None."""
+    match = _STREAMED_SKILL_NAME.search(partial_args)
+    return match.group(1) if match else None
 
 
 def _prettify_input_preview(tool_name: str, args: Any) -> str:
@@ -10663,6 +10733,24 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
 
     if tool_name in {"subagent_return", "review_delivery"}:
         # Native packing arguments and parser repair instructions are model-only.
+        return ""
+
+    if isinstance(args, dict) and "_args_parse_error" in args:
+        # The router's repair hint for the model (`args_parse_hint`), never a label; facts say "retrying".
+        return ""
+
+    if tool_name == "kb_list_sources":
+        # Its only arguments are a page size and an opaque continuation cursor.
+        return ""
+
+    if tool_name == "find_results" and isinstance(args, dict):
+        # The kind is an enum code ("data_file"); facts name it. Older readers see the searched name only.
+        name = args.get("name")
+        return _truncate_preview(name.strip()) if isinstance(name, str) and name.strip() else ""
+
+    if tool_name == "view_file":
+        # Its options (`detail`: "full" / "sheet", pages) are not words for users; the caller in
+        # `_execute_tool` names the file instead (`_view_file_step_label`).
         return ""
 
     _zh = _is_zh_ui(None)
@@ -10735,8 +10823,13 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
     # whose header already said "运行代码"; the suffix added nothing beyond exposing the identifier.
     # This branch has code but no name, matching the script branch below when no name is available,
     # so use the same wording.
+    # Turn visibility FR1: a code call shows the purpose the model wrote for users (`intent`), and
+    # nothing when it gave none, so the row reads "运行代码 · <intent>" or just "运行代码". The
+    # placeholder "运行: (代码)" said nothing the header did not (116, 2026-11-06..20: all 2,907 code
+    # steps showed it although 86% carried an intent). The intent is the model's own words, shown as
+    # written like answer text, never translated.
     if tool_name == "python_sandbox" and isinstance(args.get("code"), str) and "script" not in args:
-        return _truncate_preview(_t("运行: (代码)", "Run: (code)"))
+        return _code_step_intent(args)
 
     # python_sandbox: { name: "...", script: "..." } / { script: "..." }
     name = args.get("name")
@@ -10747,15 +10840,17 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
         # direct `python_exec` calls. Fixing only the flat branch fixes nothing (Regression check captured this exact wording).
         if name != "python_sandbox":
             return _truncate_preview(_t(f"运行: {name}", f"Run: {name}"))
-        return _truncate_preview(_t("运行: (代码)", "Run: (code)"))
+        return _code_step_intent(args)
     script = args.get("script")
     if isinstance(script, str) and script.strip():
+        if intent := _code_step_intent(args):
+            return intent
         # First non-blank line of the script (skip shebang / encoding hints)
         for line in script.splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
                 return _truncate_preview(_t(f"运行: {line}", f"Run: {line}"))
-        return _truncate_preview(_t("运行: (代码)", "Run: (code)"))
+        return ""
 
     # parse_file / file ops: { filename: "..." } / { file_id: "..." }
     for k in ("filename", "file_id", "path"):
@@ -10788,6 +10883,34 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
 
     # Final fallback — raw JSON-ish preview. FE prettify catches this.
     return _truncate_preview(_preview(args, max_len=_INPUT_PREVIEW_MAX_LEN))
+
+
+async def _view_file_step_label(ctx: Any, args: Any) -> str:
+    """`view_file` names the file it looks at (turn visibility G2); "" when it cannot be read."""
+    artifact_id = args.get("artifact_id") if isinstance(args, dict) else None
+    store = getattr(ctx, "artifact_store", None)
+    if not isinstance(artifact_id, str) or not artifact_id.strip() or store is None:
+        return ""
+    try:
+        artifact = await store.get(artifact_id, check_created_by=getattr(ctx, "user_id", None))
+    except Exception:  # A label lookup never fails the step.
+        return ""
+    filename = getattr(artifact, "filename", None)
+    return _truncate_preview(filename.strip()) if isinstance(filename, str) and filename.strip() else ""
+
+
+def _code_step_intent(args: dict[str, Any]) -> str:
+    """The purpose the model gave a code call (`intent`), cleaned like a dispatch task label.
+
+    Flat `python_exec` carries it at the top level; the `skill_invoke` sandbox path may nest the
+    call under `input`. Returns "" when there is none.
+    """
+    nested = args.get("input")
+    for source in (args, nested if isinstance(nested, dict) else None):
+        intent = source.get("intent") if isinstance(source, dict) else None
+        if isinstance(intent, str) and intent.strip():
+            return _first_clause_label(_strip_inline_markdown(strip_internal_object_ids(intent, artifacts=True)))
+    return ""
 
 
 def _truncate_preview(s: str) -> str:
@@ -11066,6 +11189,7 @@ _FAILURE_LABELS: dict[str, tuple[str, str]] = {
     "tool_arguments_invalid": ("参数无效", "invalid input"),
     "tool_resource_unavailable": ("所需内容不可用", "resource unavailable"),
     "tool_code_failed": ("代码运行出错", "code error"),
+    "tool_output_not_saved": ("文件未保存", "file not saved"),
     "tool_execution_timeout": ("超时", "timed out"),
     "tool_execution_unknown": ("结果未知", "outcome unknown"),
     "tool_execution_failed": ("执行出错", "execution error"),
@@ -11163,7 +11287,7 @@ def _prettify_output_preview(
             return _t("连环切换已暂停 · 先盘点当前工作区", "Rapid switching paused · inspect current workspace first")
 
     # Dict-shaped Tool errors (`{"error": …}`, `{"ok": false, …}`) mark the step failed through the shared
-    # outcome extraction; the summary must agree before any per-Tool success wording. 116 t_7edbc155f8d8:
+    # outcome extraction; the summary must agree before any per-Tool success wording. a reproduced task:
     # failed `add_chart` rows read "Added · chart" and failed `read_chart` rows showed raw JSON.
     # Expected outcomes (`_is_non_failure_result`) stay neutral above.
     _failed = isinstance(result, dict) and _extract_result_ok(result) is False and not _is_non_failure_result(result)

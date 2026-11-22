@@ -39,7 +39,7 @@ class _CapturingRuntime:
     def __init__(self) -> None:
         self.captured: dict[str, Any] | None = None
 
-    async def run(self, spec, *, entry_script, input_data, extra_args):
+    async def run(self, spec, *, entry_script, input_data):
         self.captured = input_data
         return _FakeResult()
 

@@ -40,7 +40,7 @@ from bowhead_router.retry import DEFAULT_MAX_RETRIES, RetryNotice, adapter_timeo
 from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse
 from bowhead_router.usage import record_usage
-from bowhead_router.visual_input import visual_self_check_enabled, withhold_images
+from bowhead_router.visual_input import withhold_images
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -263,13 +263,13 @@ class Router:
         return binding.primary in self._image_input_targets
 
     def _withhold_unreadable_images(self, req: LLMRequest, target: tuple[str, str]) -> None:
-        """With visual self-check on, a target without image input gets a notice for each render.
+        """A target without image input gets a notice for each visual self-check render.
 
         Only the render message (``bowhead_visual_view_v1``) is withheld; user attachments are
         sent as before, because many catalogs do not declare image input (tech design §3.2, D13).
         Without catalog capabilities (``set_image_input_targets`` never called) requests are unchanged.
         """
-        if self._image_input_targets is None or target in self._image_input_targets or not visual_self_check_enabled():
+        if self._image_input_targets is None or target in self._image_input_targets:
             return
         if not any(message.images and message.name == VISUAL_VIEW_NOTE_NAME for message in req.messages):
             return

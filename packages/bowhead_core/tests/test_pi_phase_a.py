@@ -1794,16 +1794,19 @@ async def test_done_payload_enriched_with_summary_fields() -> None:
 async def test_an_unfinished_turn_passes_the_lead_transcript_to_its_terminal_write() -> None:
     """A failed, aborted or cancelled Turn hands the store the Lead's transcript when one exists.
 
-    A publication the Lead built is used as it is; otherwise the run's registered function builds
-    one. A function that raises never keeps the Turn from ending.
+    Only a worker that still owns the running Turn builds one. A publication the Lead built is
+    used as it is; otherwise the run's registered function builds one. A function that raises
+    never keeps the Turn from ending.
     """
     from types import SimpleNamespace
 
+    from bowhead_core.document_chat_continuation import DocumentTurnOwner
     from bowhead_core.turn_runner import TurnRunner
 
     store = MagicMock()
     for name in ("mark_failed", "mark_aborted", "mark_cancelled"):
         setattr(store, name, AsyncMock(return_value=True))
+    store.worker_owns_running_turn = AsyncMock(return_value=True)
     orch = MagicMock()
     orch.session_store = store
     runner = TurnRunner(orch)
@@ -1826,7 +1829,16 @@ async def test_an_unfinished_turn_passes_the_lead_transcript_to_its_terminal_wri
             error_kind="lead_internal_error",
         )
 
+    # Without the original worker there is no owner to publish as.
+    runner._summary_bus = SimpleNamespace(_unfinished_context_publication=build)
+    await end("error")
+    assert store.mark_failed.call_args.kwargs["context_publication"] is None and not asked
+
+    runner._execution_worker = DocumentTurnOwner(
+        team_id="org_1", user_id="usr_1", workspace_id="ws_1", session_id="s_1", turn_id="t_1", generation=1, owner_id="w_1"
+    )
     # No Lead run registered anything: the Turn ends without a publication.
+    runner._summary_bus = SimpleNamespace()
     await end("error")
     assert store.mark_failed.call_args.kwargs["context_publication"] is None
 
@@ -1849,6 +1861,15 @@ async def test_an_unfinished_turn_passes_the_lead_transcript_to_its_terminal_wri
     await end("error")
     assert store.mark_failed.call_args.kwargs["context_publication"] == "transcript:failed"
 
+    # After a Stop the worker no longer owns the Turn (a reproduced task): it builds nothing
+    # for the status write that follows, and the write is refused by the store as before.
+    store.worker_owns_running_turn = AsyncMock(return_value=False)
+    await end("error")
+    await end("aborted")
+    assert store.mark_failed.call_args.kwargs["context_publication"] is None
+    assert store.mark_aborted.call_args.kwargs["context_publication"] is None and len(asked) == 4
+    store.worker_owns_running_turn = AsyncMock(return_value=True)
+
     async def broken(status, *, owner=None):
         raise RuntimeError("context_conversation_has_pending_tools")
 
@@ -1857,38 +1878,53 @@ async def test_an_unfinished_turn_passes_the_lead_transcript_to_its_terminal_wri
     assert store.mark_failed.call_args.kwargs["context_publication"] is None
 
 
-async def test_a_stopped_turn_is_published_as_its_stopped_owner_and_never_raises() -> None:
+async def test_a_stopped_turn_is_published_once_as_its_stopped_owner_and_never_raises() -> None:
     from types import SimpleNamespace
 
     from bowhead_core.context_ownership import StoppedTurnOwner
     from bowhead_core.document_chat_continuation import DocumentTurnOwner
     from bowhead_core.turn_runner import TurnRunner
+    from bowhead_core.unfinished_turn_context import publish_stopped_turn
 
-    store = MagicMock()
-    store.publish_stopped_turn_context = AsyncMock(return_value=True)
-    store.worker_owns_running_turn = AsyncMock(return_value=False)
-    orch = MagicMock()
-    orch.session_store = store
-    runner = TurnRunner(orch)
     worker = DocumentTurnOwner(team_id="org_1", user_id="usr_1", workspace_id="ws_1", session_id="s_1", turn_id="t_1", generation=1, owner_id="w_1")
     owners: list[object] = []
 
     async def build(status, *, owner=None):
-        owners.append(owner)
+        owners.append((status, owner))
         return "transcript"
 
+    store = MagicMock()
+    store.publish_stopped_turn_context = AsyncMock(return_value=True)
+    # The Lead run publishes where it receives the Stop, resolving the owner from its context.
+    ctx = SimpleNamespace(
+        execution_owner_id="w_1", execution_generation=1, team_id="org_1", user_id="usr_1", workspace_id="ws_1", session_id="s_1", turn_id="t_1"
+    )
     bus = SimpleNamespace(_unfinished_context_publication=build)
-    # Without the original worker there is nobody to publish as.
-    await runner._publish_stopped_turn(bus, "t_1")
-    assert not owners and not await runner._worker_ends_turn("t_1")
-
-    runner._execution_worker = worker
-    assert not await runner._worker_ends_turn("t_1")
-    await runner._publish_stopped_turn(bus, "t_1")
-    assert isinstance(owners[0], StoppedTurnOwner) and owners[0].model_dump() == worker.model_dump()
+    assert await publish_stopped_turn(bus, store=store, turn_id="t_1", ctx=ctx)
+    assert owners[0][0] == "cancelled" and isinstance(owners[0][1], StoppedTurnOwner) and owners[0][1].model_dump() == worker.model_dump()
     store.publish_stopped_turn_context.assert_awaited_once_with(turn_id="t_1", context_publication="transcript")
+    # The Turn runner's finalizer reaches the same Turn later: nothing is built or published twice.
+    orch = MagicMock()
+    orch.session_store = store
+    runner = TurnRunner(orch)
+    runner._execution_worker = worker
+    runner._summary_bus = bus
+    await runner._publish_stopped_turn(SimpleNamespace(), "t_1")
+    assert len(owners) == 1 and store.publish_stopped_turn_context.await_count == 1
 
+    # A Stop the runner notices at a boundary: the finalizer publishes, from the bus the run used.
+    later = SimpleNamespace(_unfinished_context_publication=build)
+    runner._summary_bus = later
+    await runner._publish_stopped_turn(SimpleNamespace(), "t_1")
+    assert len(owners) == 2 and store.publish_stopped_turn_context.await_count == 2
+
+    # Nothing to publish as, nothing registered, or a failing store: no exception, no publication.
+    assert not await publish_stopped_turn(SimpleNamespace(_unfinished_context_publication=build), store=store, turn_id="t_1")
+    assert not await publish_stopped_turn(SimpleNamespace(), store=store, turn_id="t_1", worker=worker)
+    assert not await publish_stopped_turn(
+        SimpleNamespace(_unfinished_context_publication=build), store=SimpleNamespace(), turn_id="t_1", worker=worker
+    )
     store.publish_stopped_turn_context = AsyncMock(side_effect=RuntimeError("database is locked"))
-    await runner._publish_stopped_turn(bus, "t_1")
+    assert not await publish_stopped_turn(SimpleNamespace(_unfinished_context_publication=build), store=store, turn_id="t_1", worker=worker)
     store.worker_owns_running_turn = AsyncMock(side_effect=RuntimeError("database is locked"))
     assert not await runner._worker_ends_turn("t_1")

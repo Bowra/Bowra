@@ -502,8 +502,6 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
     import copy
     from dataclasses import replace
 
-    from bowhead_router.visual_input import visual_self_check_enabled
-
     if not delivery_review_enabled():
         return schema
     definition = copy.deepcopy(schema.input_schema)
@@ -537,9 +535,9 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
             "call_id": {"type": "string"},
             "resolution": {
                 "type": "string",
-                "enum": ["recovered", "covered", "expected", "unfulfilled", *(["disclosed"] if visual_self_check_enabled() else [])],
+                "enum": ["recovered", "covered", "expected", "unfulfilled", "disclosed"],
                 "description": "Recovered requires the same Tool and identical arguments; use covered for a changed alternative with successful evidence and an explanation."
-                + (" Disclosed only for a call in review_context.visual_disclosures, explained for the user." if visual_self_check_enabled() else ""),
+                " Disclosed only for a call in review_context.visual_disclosures, explained for the user.",
             },
             "evidence_call_ids": {
                 "type": "array",

@@ -30,6 +30,7 @@ const FACT_MESSAGE_KEYS = {
   field: "fact_field",
   missing_key: "fact_missing_key",
   exception: "fact_exception",
+  file: "fact_file",
   exit_code: "fact_exit_code",
 } as const;
 type FailureFactKey = keyof typeof FACT_MESSAGE_KEYS;
@@ -38,8 +39,9 @@ type FailureFactKey = keyof typeof FACT_MESSAGE_KEYS;
 const INTERNAL_ID = /\b[a-z][a-z0-9]{0,11}_[0-9a-f]{6,}\b/i;
 
 /**
- * Published `safe_detail` facts the row names (`field=columns; missing_key=bm`), at most two: the argument, then
- * the most specific cause of a code failure (a missing key, else the exception type, else the exit code).
+ * Published `safe_detail` facts the row names (`field=columns; missing_key=bm`), at most two: the argument (else a
+ * file that was not saved), then the most specific cause of a code failure (a missing key, else the exception type,
+ * else the exit code).
  * Unknown facts, such as the finite `phase=…; failure_class=…` pairs, stay in the copied diagnostics only.
  */
 export function readableFailureFacts(safeDetail: string | undefined): Array<{ key: FailureFactKey; value: string }> {
@@ -53,7 +55,8 @@ export function readableFailureFacts(safeDetail: string | undefined): Array<{ ke
     }
   }
   const cause = (["missing_key", "exception", "exit_code"] as const).find((key) => published.has(key));
-  return (["field", cause] as const).flatMap((key) => (key && published.has(key) ? [{ key, value: published.get(key)! }] : []));
+  const subject = published.has("field") ? "field" : "file";
+  return ([subject, cause] as const).flatMap((key) => (key && published.has(key) ? [{ key, value: published.get(key)! }] : []));
 }
 
 /**
@@ -67,6 +70,7 @@ const ACTION_KEYS: Record<string, "action_check_source" | "action_check_effect" 
   tool_execution_unknown: "action_check_effect",
   tool_arguments_invalid: "action_follow_up",
   tool_code_failed: "action_follow_up",
+  tool_output_not_saved: "action_follow_up",
   tool_execution_failed: "action_follow_up",
   tool_delivery_review_required: "action_follow_up",
 };

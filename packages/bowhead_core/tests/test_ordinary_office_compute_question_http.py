@@ -154,7 +154,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
 
     monkeypatch.setattr(attachment_read, "extract_attachment_bounded", parse)
 
-    async def run(spec, *, entry_script, input_data, extra_args):
+    async def run(spec, *, entry_script, input_data):
         if completion_order == "office_first":
             with anyio.fail_after(10):
                 await first_completed.wait()

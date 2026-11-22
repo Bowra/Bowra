@@ -25,8 +25,7 @@ TURN = "t_html"
 
 
 @pytest.fixture(autouse=True)
-def switch_on(monkeypatch):
-    monkeypatch.setenv("FEATURE_VISUAL_SELF_CHECK", "1")
+def fresh_state():
     vsc._RUNS.clear()
     hs._semaphores.clear()
     yield

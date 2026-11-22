@@ -240,13 +240,14 @@ class SkillRuntime:
         spec: SkillSpec,
         entry_script: str,
         input_data: dict[str, Any],
-        extra_args: list[str] | None = None,
     ) -> RunResult:
         """在沙箱里跑 skill 的一个 entry script.
 
         entry_script: 相对于 spec.script_dir 的 .py 文件名（防止路径穿越）
         input_data: 序列化到 workdir/input.json 供脚本读取
-        extra_args: 追加 CLI args（调用方可按 skill 约定传 --output 等）
+
+        The command line is fixed to `--input <workdir>/input.json --workdir <workdir>`; callers
+        pass values through input_data only.
         """
         import time
 
@@ -369,8 +370,6 @@ class SkillRuntime:
                 "--workdir",
                 str(workdir),
             ]
-            if extra_args:
-                args.extend(extra_args)
 
             env = self._build_env(spec.name)
 

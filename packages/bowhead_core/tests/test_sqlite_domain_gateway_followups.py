@@ -167,3 +167,20 @@ async def test_buffered_diagnostics_cannot_reappear_after_account_retirement(dom
             assert not db.in_transaction
     async with connect(path) as db, db.execute("SELECT COUNT(*) FROM llm_request_chunks WHERE turn_id='t_late'") as cursor:
         assert await cursor.fetchone() == (0,)
+
+
+@pytest.mark.asyncio
+async def test_request_diagnostic_scope_checks_plan_on_the_turn_index(domain_directory: Path) -> None:
+    """116 1.7.61: without statistics the chunk check planned on the user index and scanned every record of the
+    user (9.7 ms per chunk), while the recorder's batch held core's and execution's shared leases."""
+    from bowhead_core.sqlite_domain_runtime import REQUEST_RECORD_SCOPE_SQL, REQUEST_TURN_SCOPE_SQL
+
+    path = domain_database_path(domain_directory / "bowhead.db", "observability")
+    plans: dict[str, list[str]] = {}
+    async with connect(path) as db:
+        for name, sql in (("turn", REQUEST_TURN_SCOPE_SQL), ("record", REQUEST_RECORD_SCOPE_SQL)):
+            async with db.execute("EXPLAIN QUERY PLAN " + sql, ("key",)) as cursor:
+                plans[name] = [str(row[3]) for row in await cursor.fetchall() if str(row[3]).startswith("SEARCH r ")]
+    assert len(plans["turn"]) == 1 and "idx_llm_request_records_turn (turn_id=?)" in plans["turn"][0], plans
+    assert len(plans["record"]) == 1 and "(id=?)" in plans["record"][0], plans
+    assert not any("idx_llm_request_records_user" in line for line in plans["turn"] + plans["record"]), plans

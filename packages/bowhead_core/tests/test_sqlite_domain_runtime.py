@@ -55,6 +55,8 @@ def domain_files(tmp_path: Path) -> Path:
         # collected, and a test connection opened with timeout=0 meanwhile fails with SQLITE_BUSY.
         with closing(sqlite3.connect(tmp_path / DOMAIN_TARGET_FILES[domain])) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
+            # Every admitted domain file has it; writer transactions use it as their gate.
+            db.execute("CREATE TABLE alembic_version(version_num VARCHAR(32) PRIMARY KEY NOT NULL)")
             for sql in statements:
                 db.execute(sql)
             for name in {
@@ -177,7 +179,10 @@ def test_preparation_retry_never_restarts_an_existing_snapshot_or_callback(
     execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
     try:
         if boundary == "transaction":
-            core.execute("BEGIN").close()
+            # A script's BEGIN IMMEDIATE starts the attached snapshots before any lease. A writer
+            # transaction opened with BEGIN IMMEDIATE itself waits instead, through its writer gate
+            # (test_sqlite_in_transaction_lease_wait.py).
+            core.executescript("BEGIN IMMEDIATE;")
         elif boundary == "cursor":
             cursor = core.execute("SELECT 1")
         else:

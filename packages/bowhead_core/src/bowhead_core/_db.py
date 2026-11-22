@@ -60,7 +60,7 @@ import aiosqlite
 import anyio
 
 from bowhead_core import sqlite_capacity, sqlite_pool_summary
-from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
+from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot, enter_retry_attempt, leave_retry_attempt
 from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_connection
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_request_deadline import remaining_ms, request_write_deadline
@@ -211,9 +211,16 @@ async def repeat_while_busy[T](
     started = time.monotonic()
     delay = first_delay
     waiting = False
+    attempts = 0
     while True:
+        attempts += 1
         try:
-            result = await attempt()
+            # Each attempt is numbered in sqlite.operation_failed, which then logs an expected busy failure at info.
+            token = enter_retry_attempt(attempts)
+            try:
+                result = await attempt()
+            finally:
+                leave_retry_attempt(token)
         except sqlite3.OperationalError as error:
             if retry(error):
                 remaining = seconds_left()

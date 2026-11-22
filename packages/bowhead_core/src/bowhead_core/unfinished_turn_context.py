@@ -11,7 +11,8 @@ Design: docs/sprints/failed-turn-history-2026-11-20/tech-design.md.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Sequence
+import logging
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -20,21 +21,35 @@ from bowhead_router.types import Message, ToolCall
 
 from bowhead_core.context_assembly import TOOL_FAILURES_MAX_BYTES, render_spawn_result
 
+logger = logging.getLogger(__name__)
+
 # The call may have taken effect, so the text never says it did not run.
 PENDING_RESULT = "The Turn ended before this call's result was recorded. The call may have run; check the current state before repeating it."
 
 
+# A failed run's error output ends with the exception; what precedes it is the call stack.
+ERROR_OUTPUT_TAIL_BYTES = 1024
+
+
+def _stated_error(result: dict[str, Any]) -> str:
+    """What one result says went wrong: its message, else its error, then the end of the error output it kept."""
+    stated = next((value.strip() for value in (result.get("error_message"), result.get("error")) if isinstance(value, str) and value.strip()), "")
+    run = result.get("result_json")
+    output = next(
+        (value for value in (result.get("stderr"), run.get("stderr") if isinstance(run, dict) else None) if isinstance(value, str) and value.strip()),
+        "",
+    )
+    tail = output.encode()[-ERROR_OUTPUT_TAIL_BYTES:].decode(errors="ignore").strip()
+    return f"{stated}: {tail}" if stated and tail else stated or tail
+
+
 def returned_error_messages(result: Any) -> list[str]:
-    """The error messages a Tool put in its own result: each failed item's, else the result's own."""
+    """What a Tool said went wrong in its own result: each failed item's text, else the result's own."""
     if not isinstance(result, dict):
         return []
-    texts = [
-        str(item["error_message"])
-        for item in result.get("results") or []
-        if isinstance(item, dict) and item.get("ok") is False and item.get("error_message")
-    ]
-    if not texts and result.get("error_message"):
-        texts.append(str(result["error_message"]))
+    items = result.get("results")
+    texts = [_stated_error(item) for item in (items if isinstance(items, list) else []) if isinstance(item, dict) and item.get("ok") is False]
+    texts = [text for text in texts if text] or [text for text in [_stated_error(result)] if text]
     return list(dict.fromkeys(texts))
 
 
@@ -115,3 +130,63 @@ def repair_pending_tool_calls(messages: Sequence[Message], result_for: Callable[
             repaired.append(Message(role="tool", name=call.name, tool_call_id=call.id, content=result_for(call) or PENDING_RESULT))
             answered.add(call.id)
     return repaired
+
+
+def unfinished_reply_from_events(events: Iterable[tuple[str, Mapping[str, Any]]]) -> str:
+    """What a Turn had shown of the Lead reply its ending cut off, from its events in order.
+
+    ``events`` holds ``narrative.delta``, ``llm.call_timing`` and ``llm.stream_restarted`` as
+    ``(event_type, payload)``. A reply that made Tool calls joined the transcript, so its text
+    is not returned. A reply without them stands until another reply follows it.
+    """
+    streamed = reply = ""
+    for kind, payload in events:
+        if kind == "narrative.delta":
+            streamed += str(payload.get("delta") or "")
+        elif payload.get("profile") != "lead":
+            continue
+        elif kind == "llm.stream_restarted":
+            withdrawn = payload.get("discarded_narrative_chars")
+            streamed = streamed[: max(0, len(streamed) - withdrawn)] if isinstance(withdrawn, int) and withdrawn > 0 else streamed
+        elif kind == "llm.call_timing":
+            reply = "" if payload.get("ok") and payload.get("tool_call_count") else streamed
+            streamed = ""
+    return (streamed or reply).strip()
+
+
+async def publish_stopped_turn(bus: Any, *, store: Any, turn_id: str, worker: Any = None, ctx: Any = None) -> bool:
+    """Publish the Lead's transcript of a Turn the user stopped, once, as its stopped owner.
+
+    The Stop request has already committed the cancelled status. This runs where the worker
+    first learns of it, before the cancellation leaves the Lead run: a task group further out
+    can wrap that cancellation in an exception group, and the Turn runner's cancelled finalizer
+    then never runs (a reproduced task). The finalizer calls this too; the second call is a
+    no-op. A failure leaves the Turn stopped and rebuilt from events.
+
+    ``worker`` is the Turn's original owner; the Lead run passes its ``ctx`` instead.
+    """
+    from bowhead_core.context_ownership import StoppedTurnOwner, context_owner
+    from bowhead_core.document_chat_continuation import DocumentTurnOwner
+
+    state = getattr(bus, "__dict__", None)
+    if state is None or state.get("_stopped_turn_publication_attempted"):
+        return False
+    build = state.get("_unfinished_context_publication")
+    publish = getattr(store, "publish_stopped_turn_context", None)
+    if build is None or not callable(publish):
+        return False
+    try:
+        if worker is None:
+            worker = context_owner(ctx)
+        if not isinstance(worker, DocumentTurnOwner):
+            return False
+        bus._stopped_turn_publication_attempted = True
+        publication = await build("cancelled", owner=StoppedTurnOwner(**worker.model_dump()))
+        return publication is not None and bool(await publish(turn_id=turn_id, context_publication=publication))
+    except Exception as failure:  # noqa: BLE001 - a stopped Turn stays stopped without it
+        logger.warning(
+            "context_publication.unfinished_turn_unavailable turn=%s status=cancelled condition=%s",
+            turn_id,
+            str(failure)[:120] or type(failure).__name__,
+        )
+        return False

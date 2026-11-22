@@ -40,6 +40,9 @@ log = structlog.get_logger(__name__)
 
 #: A wait at least this long is logged on its own; shorter waits appear only in the summary.
 LOG_THRESHOLD_MS = 50.0
+#: A lease held at least this long is logged when it is released, with the call site that took it. A shared
+#: lease blocks every exclusive writer of its domain for as long as it is held; see the lock hold-time spike.
+HOLD_LOG_THRESHOLD_MS = 1000.0
 #: Length of one summary window.
 SUMMARY_WINDOW_S = 60.0
 #: Call sites per window written as their own summary line; the rest are folded into one ``other`` line.
@@ -207,3 +210,33 @@ def _write_summary(started_at: datetime, seconds: float, totals: dict[tuple[str,
 def _app_version() -> str:
     version = os.environ.get("BOWHEAD_VERSION", "")
     return version if _SAFE_VERSION.fullmatch(version) else "unavailable"
+
+
+def record_hold(
+    *,
+    lease_domain: str,
+    lease_mode: int,
+    held_ms: float,
+    context: Any,
+    database: str | None,
+    connection_id: str | None,
+) -> None:
+    """Log one lease that was held for at least ``HOLD_LOG_THRESHOLD_MS``, named by the code that took it.
+
+    ``context`` is the operation context captured when the lease was taken (call site and request
+    identifiers). Called after the lease is released, so logging never lengthens the hold.
+    """
+    if held_ms < HOLD_LOG_THRESHOLD_MS:
+        return
+    event = {
+        "lease_domain": lease_domain,
+        "lease_mode": "exclusive" if lease_mode == 2 else "shared",
+        "held_ms": round(held_ms, 3),
+        "database": database,
+        "connection_id": connection_id,
+        "callsite": str(getattr(context, "callsite", None) or "unavailable"),
+        **dict(getattr(context, "request_ids", None) or ()),
+        "app_version": _app_version(),
+    }
+    # Do not merge unrelated context variables into the event.
+    contextvars.Context().run(log.info, "sqlite.lease_held_long", **event)

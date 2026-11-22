@@ -238,13 +238,13 @@ async def test_stale_metadata_update_does_not_overwrite(
     assert stale.value.details == {"current_revision": 2}
 
 
-def _lose_lease_in_metadata_write(monkeypatch: pytest.MonkeyPatch, times: int) -> list[int]:
-    """Fail the audit write inside the metadata transaction, after its UPDATE, with the lease conflict."""
+def _lose_lease_in_metadata_write(monkeypatch: pytest.MonkeyPatch, times: int, action: str = "workspace_metadata_updated") -> list[int]:
+    """Fail the audit write inside a governance transaction, after its UPDATE, with the lease conflict."""
     attempts: list[int] = []
     original = UserStore.write_admin_audit_log
 
     async def write_admin_audit_log(self: UserStore, **kwargs: object) -> object:
-        if kwargs.get("action") == "workspace_metadata_updated":
+        if kwargs.get("action") == action:
             attempts.append(len(attempts) + 1)
             if len(attempts) <= times:
                 raise sqlite_domain_runtime._busy()
@@ -300,3 +300,47 @@ async def test_metadata_update_reports_busy_and_writes_nothing_once_the_wait_is_
     unchanged = await store.get_workspace(created["workspace_id"])
     assert unchanged is not None
     assert (unchanged["name"], unchanged["revision"]) == ("Original", 1)
+
+
+async def test_archive_and_restore_repeat_after_losing_the_authority_lease(
+    store: UserStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """116 (1.7.61): with Turns running, Space archive and restore answered 500 on a lost lease."""
+    team_id, owner_id = await _seed_owner(store)
+    await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Kept")
+    created = await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Seasonal")
+
+    archive_attempts = _lose_lease_in_metadata_write(monkeypatch, 1, action="workspace_archived")
+    archived = await store.archive_governed_workspace(
+        team_id=team_id, actor_user_id=owner_id, workspace_id=created["workspace_id"], expected_revision=1
+    )
+    # Each attempt rechecks status and revision; the failed one rolled back, so the revision moved once.
+    assert archive_attempts == [1, 2]
+    assert (archived["status"], archived["revision"]) == ("archived", 2)
+
+    restore_attempts = _lose_lease_in_metadata_write(monkeypatch, 1, action="workspace_restored")
+    restored = await store.restore_governed_workspace(
+        team_id=team_id, actor_user_id=owner_id, workspace_id=created["workspace_id"], expected_revision=2
+    )
+    assert restore_attempts == [1, 2]
+    assert (restored["status"], restored["revision"]) == ("active", 3)
+
+
+async def test_archive_reports_busy_and_writes_nothing_once_the_wait_is_spent(
+    store: UserStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    team_id, owner_id = await _seed_owner(store)
+    await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Kept")
+    created = await store.create_governed_workspace(team_id=team_id, actor_user_id=owner_id, name="Seasonal")
+    monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
+    attempts = _lose_lease_in_metadata_write(monkeypatch, 10_000, action="workspace_archived")
+
+    with pytest.raises(_db.SQLiteStoreBusy):
+        await store.archive_governed_workspace(team_id=team_id, actor_user_id=owner_id, workspace_id=created["workspace_id"], expected_revision=1)
+
+    assert len(attempts) > 1
+    unchanged = await store.get_workspace(created["workspace_id"])
+    assert unchanged is not None
+    assert (unchanged["status"], unchanged["revision"]) == ("active", 1)

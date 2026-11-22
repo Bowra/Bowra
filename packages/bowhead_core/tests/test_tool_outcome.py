@@ -86,3 +86,28 @@ def test_expected_human_pause_stays_outside_failures() -> None:
 def test_partial_delivery_does_not_hide_an_execution_failure() -> None:
     assert classify_tool_outcome({"ok": True, "completion": "partial"}).state == "partial"
     assert classify_tool_outcome({"ok": False, "completion": "partial", "error": "Write failed"}).state == "failure"
+
+
+def test_a_refused_output_is_a_file_not_saved_with_its_name() -> None:
+    # 116 (2026-11-18): the code exited 0 but r3.pptx was refused; the step said "代码运行出错".
+    result = {
+        "ok": False,
+        "exit_code": 0,
+        "result_json": {
+            "ok": False,
+            "exit_code": 0,
+            "stdout": "saved",
+            "stderr": "[runner] sandbox file r3.pptx was not saved: …",
+            "outputs_not_saved": ["r3.pptx"],
+        },
+    }
+    outcome = classify_tool_outcome(result)
+    assert (outcome.state, outcome.code, outcome.file, outcome.exit_code) == ("failure", "tool_output_not_saved", "r3.pptx", None)
+    assert publish_tool_failure(outcome).safe_detail == "file=r3.pptx"
+    nested = classify_tool_outcome({"ok": False, "result_json": {**result["result_json"], "outputs_not_saved": ["out/报告.pptx"]}})
+    assert nested.file == "报告.pptx"
+
+
+def test_a_code_failure_stays_a_code_failure_when_an_output_is_also_not_saved() -> None:
+    result = {"ok": False, "result_json": {"ok": False, "exit_code": 1, "stdout": "", "stderr": "KeyError: 'x'", "outputs_not_saved": ["a.pptx"]}}
+    assert classify_tool_outcome(result).code == "tool_code_failed"

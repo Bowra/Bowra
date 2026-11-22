@@ -175,6 +175,25 @@ def test_incomplete_turn_with_spawn_records_keeps_the_tool_calls(monkeypatch, re
 
 
 @pytest.mark.unit
+def test_an_unfinished_turn_keeps_the_reply_it_had_shown_before_its_marker() -> None:
+    from bowhead_core.context_assembly import has_incomplete_turn_marker
+
+    turns = [
+        _turn(1, status="cancelled", user="写一篇文章", answer=""),
+        _turn(2, status="failed", answer=""),
+        _turn(3, status="completed", answer="回答3"),
+    ]
+    replies = {"t1": "  第一段已经写完 [cite:2]。\n\n第二段写到一半\n", "t3": "never used"}
+    th = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE, strip=_strip_markers, unfinished_replies=replies)
+    stopped = th.messages[1]["content"]
+    assert stopped == "第一段已经写完。\n\n第二段写到一半\n\n" + INCOMPLETE_TURN_MARKERS["cancelled"]
+    assert has_incomplete_turn_marker(stopped)
+    assert th.messages[3]["content"] == INCOMPLETE_TURN_MARKERS["failed"]
+    assert th.messages[5]["content"] == "回答3"
+    assert th.incomplete_turns == 2
+
+
+@pytest.mark.unit
 def test_markers_are_stripped_from_answers_only() -> None:
     turns = [_turn(1, user="看 [cite:1]", answer="营业额 92.94 亿 [cite:1] [num:3]。")]
     th = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE, strip=_strip_markers)

@@ -93,7 +93,7 @@ async def test_unclassified_read_failure_cannot_be_retained_as_known_rejection(a
     def interrupted_read(*args):
         raise OSError("Synthetic unclassified storage failure")
 
-    monkeypatch.setattr("bowhead_skill.tools.read_bundle_text", interrupted_read)
+    monkeypatch.setattr("bowhead_skill.tools.read_package_file", interrupted_read)
     child = await case.registry.execute("skill_read", {"name": "method", "file": "scripts/run.py"}, ctx)
     child.call_id = ctx.ordinary_call_identity[1]
     assert child.error
@@ -103,7 +103,7 @@ async def test_unclassified_read_failure_cannot_be_retained_as_known_rejection(a
     assert not case.calls
 
 
-@pytest.mark.parametrize("file", ["profit.json", "references/../profit.json", "references/missing.json", "scripts/run.py"])
+@pytest.mark.parametrize("file", ["profit.json", "references/../profit.json", "references/missing.json", "/profit.json", "scripts/run.py"])
 async def test_native_bundle_rejection_retains_exact_call_without_executing(assigned_case, monkeypatch, file):
     case = assigned_case
     ctx = await collect(case, monkeypatch)
@@ -116,7 +116,8 @@ async def test_native_bundle_rejection_retains_exact_call_without_executing(assi
     assert captured[0]["kind"] == ("skill_read" if file == "scripts/run.py" else "rejected")
     assert not case.calls
     if file != "scripts/run.py":
-        assert child.result["error_kind"] == "invalid_args"
+        # A path outside the package is invalid; a path the package lacks is a miss that lists its files.
+        assert child.result["error_kind"] == ("invalid_args" if file.startswith("/") else "skill_file_not_found")
         assert "body" not in child.result
     child.arguments = {**arguments, "file": "references/other.json"}
     with pytest.raises(ValueError):
@@ -159,6 +160,20 @@ async def test_native_read_retains_exact_personal_source_and_rechecks_it(assigne
     else:
         with pytest.raises(ValueError):
             await revalidate_skills(ctx, record["skills"])
+
+
+async def test_native_read_of_a_windows_line_ending_manifest_is_retained(assigned_case, monkeypatch):
+    # The handler reads SKILL.md with universal newlines; the retained record must compare the same text.
+    case = assigned_case
+    manifest = case.root / "SKILL.md"
+    manifest.write_bytes(manifest.read_bytes().replace(b"\n", b"\r\n"))
+    ctx = await collect(case, monkeypatch)
+    arguments = {"name": "method", "args": "audience"}
+    result = await invoke(case, tool="skill_read", args=arguments)
+    assert "UPLOADED audience" in result["body"]
+    assert "\r" not in result["body"] and "\r" not in result["body_raw"]
+    record = ctx.ordinary_lead_state.tool_materials[ctx.ordinary_call_identity]
+    await revalidate_skills(ctx, record["skills"])
 
 
 @pytest.mark.parametrize(
@@ -284,7 +299,7 @@ async def test_sandbox_requires_actual_input_and_settled_executor_output(assigne
     original = await artifact_evidence(ctx, source.id, output=False)
     output_ids = []
 
-    async def run(spec, *, entry_script, input_data, extra_args):
+    async def run(spec, *, entry_script, input_data):
         assert spec.name == "python_sandbox" and entry_script == "runner.py"
         assert input_data["inputs"]["source"]["artifact_id"] == source.id
         output = await store.put_bytes(

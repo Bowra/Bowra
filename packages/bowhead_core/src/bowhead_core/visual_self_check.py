@@ -2,9 +2,8 @@
 
 Design: docs/sprints/visual-self-check-2026-11-16/tech-design.md §3–§5 and §7.1.
 
-A run (one Lead or helper execution) that starts with ``FEATURE_VISUAL_SELF_CHECK`` on
-registers a ``VisualRun``. When its primary model reads images, each deliverable a Tool
-call saves (PPTX, PNG/JPEG/WebP, PDF) is rendered; the Tool result carries a content-free
+Every run (one Lead or helper execution) registers a ``VisualRun``. When its primary model
+reads images, each deliverable a Tool call saves (PPTX, PNG/JPEG/WebP, PDF) is rendered; the Tool result carries a content-free
 ``visual_view`` summary and the images wait in ``VisualRun.pending`` for the next model
 request, where they travel as one ``bowhead_visual_view_v1`` message that is never
 persisted. A save the model declares a presentation-only fix (``presentation_fix``) is
@@ -24,7 +23,6 @@ from typing import Any
 import anyio
 from bowhead_router.runtime_notes import VISUAL_VIEW_NOTE_NAME
 from bowhead_router.types import ImageRef, LLMRequest, Message
-from bowhead_router.visual_input import visual_self_check_enabled
 
 from bowhead_core.product_identity import product_name
 
@@ -147,8 +145,8 @@ def agent_key(profile_name: str, subagent_id: str) -> str:
 
 
 def begin_run(turn_id: str | None, key: str, *, accepts_images: bool) -> VisualRun | None:
-    """Register a run; None when the switch is off."""
-    if not visual_self_check_enabled() or not turn_id:
+    """Register a run; None without a Turn."""
+    if not turn_id:
         return None
     run = VisualRun(enabled=accepts_images)
     _RUNS.pop((turn_id, key), None)
@@ -175,9 +173,9 @@ def run_for(ctx: Any) -> tuple[VisualRun, str] | None:
 
 
 def with_presentation_fix(input_schema: dict[str, Any]) -> dict[str, Any]:
-    """A producer Tool's schema with the optional ``presentation_fix`` field, only while the switch is on."""
+    """A producer Tool's schema with the optional ``presentation_fix`` field."""
     properties = input_schema.get("properties") if isinstance(input_schema, dict) else None
-    if not visual_self_check_enabled() or not isinstance(properties, dict) or PRESENTATION_FIX_FIELD in properties:
+    if not isinstance(properties, dict) or PRESENTATION_FIX_FIELD in properties:
         return input_schema
     return {**input_schema, "properties": {**properties, PRESENTATION_FIX_FIELD: PRESENTATION_FIX_SCHEMA}}
 
@@ -634,8 +632,6 @@ def visual_disclosure_calls(invocations: Any) -> dict[str, dict[str, Any]]:
     is delivered (declared by its producer, from ``render_deck``, or presented) and its
     visual check did not complete. Undoing a change with a new save removes the item.
     """
-    if not visual_self_check_enabled():
-        return {}
     from bowhead_core.artifact_presentation import declared_deliverable_names
     from bowhead_core.tool_outcome import invocation_result
 

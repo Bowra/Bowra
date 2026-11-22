@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -23,7 +24,8 @@ from bowhead_core.chat_reference_plan import ReferencePlanStep
 from bowhead_core.chat_reference_runtime_store import require_reference_worker_in_connection
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.chat_references import SkillResourceRef, _bounded_json
-from bowhead_core.skill_baseline_read import read_baseline_package, snapshot_skill_read_arguments
+from bowhead_core.skill_baseline_read import read_baseline_package, read_package_path, snapshot_skill_read_arguments
+from bowhead_core.skill_package_material import CapturedSkillPackage, SkillPackageMaterialError
 from bowhead_core.skill_read_receiver import (
     INVOKABLE_BASELINE_RUNTIME_POLICIES,
     PreparedReceiverSkillReads,
@@ -31,7 +33,7 @@ from bowhead_core.skill_read_receiver import (
     require_initial_skill_invocation_baseline,
     require_initial_skill_read_baseline,
 )
-from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadSourceResolver
+from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadResolutionError, SkillReadSourceResolver
 from bowhead_core.skill_reference_execution import ReferenceSkillPrimaryComposition, restore_skill_primary_composition_in_connection
 from bowhead_core.sqlite_domains import domain_database_path
 
@@ -41,6 +43,8 @@ if TYPE_CHECKING:
     from bowhead_core.agent_dependency_compiler import ExactSkillGrant
     from bowhead_core.skill_read_render import RenderedSkillReads
     from bowhead_core.tool_registry import ToolExecutionContext
+
+logger = logging.getLogger(__name__)
 
 
 class SkillReadAccessError(ValueError):
@@ -196,6 +200,9 @@ class ReferenceSkillReadAccess:
     extension_read_names: tuple[str, ...] = ()
     plan_step: ReferencePlanStep | None = None
     context_only: bool = False
+    # Name and exact resource of each Skill read through the extension, so the
+    # resource grant check keys it by that source (skill-bundle-read tech-design §10.3).
+    extension_reads: tuple[tuple[str, SkillResourceRef], ...] = ()
 
     @property
     def receiver_turn_id(self) -> str:
@@ -236,6 +243,11 @@ class ReferenceSkillReadAccess:
                 sources=sources, cipher=cipher, scope=scope, turn_id=turn_id, owner_id=owner_id, generation=generation, plan_step=plan_step
             )
             execution_id = plan_step.execution_id if plan_step is not None else composition.execution_id
+            extension_reads = (
+                tuple(sorted(((item.proof.name, item.proof.resource) for item in prepared.closure.items), key=lambda pair: pair[0]))
+                if prepared.extension and prepared.receiver.ordinary_system_scope is not True
+                else ()
+            )
             return cls(
                 sources,
                 cipher,
@@ -246,11 +258,10 @@ class ReferenceSkillReadAccess:
                 composition.digest,
                 _handles(composition, scope, generation, prepared, execution_id),
                 execution_id,
-                tuple(sorted(item.proof.name for item in prepared.closure.items))
-                if prepared.extension and prepared.receiver.ordinary_system_scope is not True
-                else (),
+                tuple(name for name, _ in extension_reads),
                 plan_step,
                 prepared.receiver.ordinary_system_scope is True and composition.method_reference is not None,
+                extension_reads,
             )
         except Exception:
             raise SkillReadAccessError("reference_skill_access_unavailable") from None
@@ -389,7 +400,7 @@ class ReferenceSkillReadAccess:
 
     async def authorize_tool(self, tool_name: str, arguments: dict, ctx: ToolExecutionContext) -> None:
         if tool_name == "skill_read":
-            await self.read_tool(arguments, ctx)
+            await self._read_arguments(arguments, ctx, authorize_only=True)
         else:
             await self._invocation_package(tool_name, arguments, ctx)
 
@@ -414,13 +425,73 @@ class ReferenceSkillReadAccess:
         )
 
     async def read_tool(self, arguments: dict, ctx: ToolExecutionContext) -> dict:
+        return await self._read_arguments(arguments, ctx)
+
+    async def _read_arguments(self, arguments: dict, ctx: ToolExecutionContext, *, authorize_only: bool = False) -> dict:
         # Each policy preserves the entire original baseline. Read-only policies
         # never inherit invocation rights from the new complete-baseline policy.
         try:
             arguments = snapshot_skill_read_arguments(arguments)
         except ValueError:
             raise SkillReadAccessError("reference_skill_arguments_unavailable") from None
-        return await self._read(None, ctx=ctx, name=arguments["name"], file=arguments.get("file") or None, arguments=arguments)
+        return await self._read(
+            None, ctx=ctx, name=arguments["name"], file=arguments.get("file") or None, arguments=arguments, authorize_only=authorize_only
+        )
+
+    async def _extension_package(self, prepared: PreparedReceiverSkillReads, handle: ResolvedSkillReadHandle) -> CapturedSkillPackage | None:
+        """The exact selected package of an extension Skill, or None when it no longer matches.
+
+        Only the projection is retained for an extension (tech-design §10.2). The
+        source resolver rechecks the exact source and use policy around the
+        capture, and the bytes must hash to the selected version. Call this
+        after `_load_current` has closed its transaction.
+        """
+        item = next((item for item in prepared.closure.items if item.proof.resource == handle.resource), None)
+        if item is None:
+            return None
+        try:
+            package = await self.sources.prepare_runtime_package(handle.resource, scope=item.proof.scope)
+        except (SkillReadResolutionError, SkillPackageMaterialError) as error:
+            logger.info("reference_skill_read.extension_package_unavailable cause=%s", getattr(error, "code", None) or error)
+            return None
+        if package.proof.resource != handle.resource or package.proof.name != item.proof.name:
+            return None
+        return package.material
+
+    async def _read_extension(
+        self,
+        member: dict,
+        prepared: PreparedReceiverSkillReads,
+        handle: ResolvedSkillReadHandle,
+        *,
+        file: str | None,
+        ref: str,
+        authorize_only: bool,
+    ) -> dict:
+        """Read an extension Skill: retained projection first, then its exact package (tech-design §10.3)."""
+        from bowhead_skill.bundle_files import package_file_listing
+
+        from bowhead_core.selected_skill_runtime import selected_skill_changed
+
+        retained = [item["path"] for item in member["files"]]
+        if file is not None and not ref and file in retained:
+            # A retained entry file keeps its original parameters.
+            member["files"] = [item for item in member["files"] if item["path"] == file]
+            return member
+        if authorize_only:
+            # Authority is checked; the handler pass reads the package outside any transaction.
+            return member
+        name = next(item.proof.name for item in prepared.closure.items if item.proof.resource == handle.resource)
+        package = await self._extension_package(prepared, handle)
+        if file is None and not ref:
+            if package is None:
+                return member
+            return {**member, **package_file_listing(sorted((path, len(data)) for path, data in package.files().items()))}
+        if package is None:
+            return {**selected_skill_changed(name), "retained_files": retained}
+        read = read_package_path(name, package.files(), (file or ref).strip(), prefer_references=file is None)
+        # A miss stands alone; a resolved file carries the exact resource it came from.
+        return read if "requested" in read else {"resource": handle.resource.model_dump(mode="json"), **read}
 
     async def _read(
         self,
@@ -430,6 +501,7 @@ class ReferenceSkillReadAccess:
         file: str | None = None,
         name: str | None = None,
         arguments: dict | None = None,
+        authorize_only: bool = False,
     ) -> dict:
         """Read original selected-method data or the separate Agent baseline.
 
@@ -452,6 +524,7 @@ class ReferenceSkillReadAccess:
             )
             canonical = _handles(composition, self.scope, self.generation, prepared, self.execution_id)
             selected_members = rendered.document()["skills"]
+            extension_read = False
             if name is not None:
                 _require_supported_baseline(prepared, composition.runtime_policy)
                 if prepared.baseline is not None:
@@ -474,10 +547,12 @@ class ReferenceSkillReadAccess:
                         raise SkillReadAccessError("reference_skill_arguments_unavailable")
                     matches = [current for current, item in zip(canonical, prepared.closure.items, strict=True) if item.proof.name == name]
                 if not matches and prepared.extension is not None:
-                    if any((arguments or {}).get(key, "") != "" for key in ("ref", "args")):
+                    # The selection fixed this Skill's parameters; a path is read from its package.
+                    if (arguments or {}).get("args", "") != "":
                         raise SkillReadAccessError("reference_skill_arguments_unavailable")
                     resources = [item.proof.resource for item in prepared.closure.items if item.proof.name == name]
                     matches = [current for current in canonical if current.parameter_source == "initial-source.v1" and current.resource in resources]
+                    extension_read = True
                 if len(matches) != 1:
                     raise SkillReadAccessError("reference_skill_alias_unavailable")
                 handle = matches[0]
@@ -502,6 +577,10 @@ class ReferenceSkillReadAccess:
                     result["selected_method"] = selected
                 return result
             member = next(item for item in selected_members if item["resource"] == handle.resource.model_dump(mode="json"))
+            if extension_read:
+                return await self._read_extension(
+                    member, prepared, handle, file=file, ref=str((arguments or {}).get("ref", "")).strip(), authorize_only=authorize_only
+                )
             if file is not None:
                 if type(file) is not str or not any(item["path"] == file for item in member["files"]):
                     raise SkillReadAccessError("reference_skill_file_unavailable")
@@ -511,6 +590,17 @@ class ReferenceSkillReadAccess:
             raise
         except Exception:
             raise SkillReadAccessError("reference_skill_access_unavailable") from None
+
+
+def reference_extension_resource(ctx, name: str) -> SkillResourceRef | None:
+    """The exact source of a Skill this receiver reads through its extension, by name.
+
+    Keys the resource grant check only; every read still goes through the access.
+    """
+    access = getattr(ctx, "reference_skill_access", None)
+    if type(access) is not ReferenceSkillReadAccess:
+        return None
+    return next((resource for current, resource in access.extension_reads if current == name), None)
 
 
 def reference_read_scope(original, ctx):

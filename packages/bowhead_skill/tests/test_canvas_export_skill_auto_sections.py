@@ -271,7 +271,7 @@ class _CapturingRuntime:
         self.last_input_data: dict[str, Any] | None = None
         self.run_call_count = 0
 
-    async def run(self, spec: Any, *, entry_script: Any, input_data: dict[str, Any], extra_args: Any) -> Any:
+    async def run(self, spec: Any, *, entry_script: Any, input_data: dict[str, Any]) -> Any:
         self.run_call_count += 1
         self.last_input_data = input_data
 

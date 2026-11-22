@@ -15,7 +15,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 import aiosqlite
@@ -95,15 +95,19 @@ from bowhead_gateway.resource_impact_http import (
 from bowhead_gateway.routes.auth import _current_user
 from bowhead_gateway.skill_bundle_files import (
     BundleFileChange,
+    PackageFileChange,
     change_bundle_file,
+    change_package_file,
     display_body,
     read_bundle_file_snapshot,
     read_bundle_manifest,
     read_bundle_snapshot,
+    read_package_file_snapshot,
     require_bundle_authoring,
     validate_file_ref,
     write_bundle_body,
     write_bundle_file,
+    write_package_file,
 )
 from bowhead_gateway.skill_import_sources import build_resolution_sources
 from bowhead_gateway.skill_workflow_errors import skill_workflow_http_error
@@ -1387,7 +1391,7 @@ async def get_skill(
     enabled = inst.enabled if inst else True
 
     src_dir = Path(str(spec.source_dir))
-    snapshot = read_bundle_snapshot(src_dir, editable=_is_user_skill_instance(inst))
+    snapshot = read_bundle_snapshot(src_dir, editable=_is_user_skill_instance(inst), builtin=source_type == "builtin")
     if not _is_user_skill_instance(inst):
         snapshot["body_md"] = spec.body_md
         snapshot["body_raw"] = snapshot["body_raw"] or spec.body_md
@@ -1433,6 +1437,35 @@ class SkillFileContentDTO(BaseModel):
     size: int
     mime: str
     content_sha256: str | None = None
+
+
+class SkillPackageFileContentDTO(BaseModel):
+    """Any file of the package, for viewing; ``content`` is null for a file that is not previewable text."""
+
+    path: str
+    content: str | None
+    unavailable: Literal["binary", "too_large"] | None = None
+    size: int
+    mime: str
+    content_sha256: str | None = None
+
+
+@router.get("/{name}/package-files/{path:path}", response_model=SkillPackageFileContentDTO)
+async def get_skill_package_file(
+    name: str,
+    path: str,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: SkillInstanceStore = Depends(_store),
+) -> SkillPackageFileContentDTO:
+    """Any file of the Skill package by its path from the Skill root, as the detail's ``package_files`` lists it."""
+    spec, inst = await _resolve_skill_for_user(name=name, user_id=user.id, catalog=_catalog(request), store=store)
+    if spec is None or not await _skill_visible_for_request(request, user, name):
+        raise skill_workflow_http_error(status.HTTP_404_NOT_FOUND, "skill_not_found")
+    builtin = inst is None and _classify_source(str(spec.source_dir), _builtin_dir(request), _user_dir_for(user.id)) == "builtin"
+    return SkillPackageFileContentDTO(
+        **read_package_file_snapshot(Path(str(spec.source_dir)), path, editable=_is_user_skill_instance(inst), builtin=builtin)
+    )
 
 
 @router.get("/{name}/files/{kind}/{filename:path}", response_model=SkillFileContentDTO)
@@ -1599,6 +1632,52 @@ async def put_skill_file(
     )
     await _restamp_user_skill(request, store, user, inst, validated)
     return SkillFileContentDTO(**payload)
+
+
+class PersonalPackageFileChange(PackageFileChange):
+    expected_instance_id: str | None = Field(None, pattern=r"^sk_[A-Za-z0-9_-]+$", max_length=80)
+
+
+@router.post("/{name}/package-files", response_model=SkillPackageFileContentDTO, dependencies=[Depends(require_not_readonly)])
+async def change_skill_package_file(
+    name: str,
+    body: PersonalPackageFileChange,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: SkillInstanceStore = Depends(_store),
+) -> SkillPackageFileContentDTO:
+    """Create, rename or delete any file of a personal Skill by its path from the Skill root."""
+    require_bundle_authoring()
+    await _require_skill_capability_for_request(request, user, permission="write")
+    src_dir, inst = await _editable_user_skill(name=name, request=request, user=user, store=store)
+    payload, validated = change_package_file(
+        src_dir, **body.model_dump(exclude={"expected_instance_id"}), check=await _personal_quota_check(store, user, inst, body.expected_instance_id)
+    )
+    await _restamp_user_skill(request, store, user, inst, validated)
+    return SkillPackageFileContentDTO(**payload)
+
+
+@router.put("/{name}/package-files/{path:path}", response_model=SkillPackageFileContentDTO, dependencies=[Depends(require_not_readonly)])
+async def put_skill_package_file(
+    name: str,
+    path: str,
+    body: SkillFileWriteRequest,
+    request: Request,
+    user: User = Depends(_current_user),
+    store: SkillInstanceStore = Depends(_store),
+) -> SkillPackageFileContentDTO:
+    """Overwrite any existing file of a personal Skill with text, by its path from the Skill root."""
+    await _require_skill_capability_for_request(request, user, permission="write")
+    src_dir, inst = await _editable_user_skill(name=name, request=request, user=user, store=store)
+    payload, validated = write_package_file(
+        src_dir,
+        path,
+        body.content,
+        expected_content_sha256=body.expected_content_sha256,
+        check=await _personal_quota_check(store, user, inst, body.expected_instance_id),
+    )
+    await _restamp_user_skill(request, store, user, inst, validated)
+    return SkillPackageFileContentDTO(**payload)
 
 
 @router.put("/{name}/body", response_model=SkillFileContentDTO, dependencies=[Depends(require_not_readonly)])

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from bowhead_router.errors import InvocationOutcomeUnknownError
 
+from bowhead_core import step_facts
 from bowhead_core.chat_turn_source import current_attachment_positions
 from bowhead_core.published_diagnostics import get_or_build_chat_turn_failure
 
@@ -472,6 +473,8 @@ def _prep_to_step_done_payload(
         if prep.truncated:
             preview += " · 截断"
         base["output_preview"] = preview
+        # Turn visibility FR4: the interface words this ("已读入前 5,017 字"); the text above is for older readers.
+        base["facts"] = step_facts.attachment_done(len(prep.extracted_text), bool(prep.truncated))
     elif prep.note:
         base["output_preview"] = prep.note[:200]
     else:
@@ -549,6 +552,7 @@ async def _preprocess_attachments_with_events(
                                 "step_type": "parse",
                                 "header_zh": f"解析 {filename}",
                                 "input_preview": preview,
+                                "facts": step_facts.attachment_started(filename, size),
                                 "started_at": utc_now_iso(),
                             },
                         )
@@ -756,6 +760,20 @@ async def _persist_turn_state(
 # Future real multiprovider needs provider-config/model price table; V1 hardcoded.
 _PRICE_INPUT_PER_1K = 0.002
 _PRICE_OUTPUT_PER_1K = 0.006
+
+
+def _holds_only_a_stop(group: BaseExceptionGroup) -> bool:
+    """Whether every exception in ``group``, at any depth, is the user's Stop."""
+    from bowhead_core.orchestrator import TurnCancelledError
+
+    def is_stop(error: BaseException) -> bool:
+        if isinstance(error, BaseExceptionGroup):
+            return bool(error.exceptions) and all(is_stop(inner) for inner in error.exceptions)
+        if isinstance(error, asyncio.CancelledError):
+            return error.args[:1] == ("durable_user_cancel",)
+        return isinstance(error, TurnCancelledError)
+
+    return is_stop(group)
 
 
 def _estimate_cost_usd(tokens_in: int, tokens_out: int) -> float:
@@ -1745,7 +1763,7 @@ class TurnRunner:
             # Lead emits status="aborted" on asyncio.CancelledError; the
             # legacy turn_runner._finish_cancelled path emits status="cancelled".
             # Both flow through mark_aborted vs. mark_cancelled respectively.
-            unfinished = await self._unfinished_publication(status, turn_id=turn_id)
+            unfinished = await self._unfinished_publication(status, turn_id=turn_id) if await self._worker_ends_turn(turn_id) else None
             if status == "cancelled":
                 return bool(
                     await store.mark_cancelled(
@@ -1784,7 +1802,8 @@ class TurnRunner:
                 tokens_input=int(tokens_input or 0),
                 tokens_output=int(tokens_output or 0),
                 cost_usd=float(cost_usd or 0.0),
-                context_publication=await self._unfinished_publication("failed", turn_id=turn_id),
+                # A worker that no longer owns the Turn, as after a Stop, builds nothing.
+                context_publication=await self._unfinished_publication("failed", turn_id=turn_id) if await self._worker_ends_turn(turn_id) else None,
             )
         )
 
@@ -1828,20 +1847,20 @@ class TurnRunner:
             return False
 
     async def _publish_stopped_turn(self, bus: Any, turn_id: str) -> None:
-        """After a Stop request ended the Turn, publish what the Lead had done. Never raises."""
-        from bowhead_core.context_ownership import StoppedTurnOwner
-        from bowhead_core.document_chat_continuation import DocumentTurnOwner
+        """After a Stop request ended the Turn, publish what the Lead had done. Never raises.
 
-        worker = getattr(self, "_execution_worker", None)
-        publish = getattr(getattr(self._orch, "session_store", None), "publish_stopped_turn_context", None)
-        if not isinstance(worker, DocumentTurnOwner) or not callable(publish):
-            return
-        try:
-            publication = await self._unfinished_publication("cancelled", turn_id=turn_id, bus=bus, owner=StoppedTurnOwner(**worker.model_dump()))
-            if publication is not None:
-                await publish(turn_id=turn_id, context_publication=publication)
-        except Exception as failure:  # noqa: BLE001 - a stopped Turn stays stopped without it
-            logger.warning("context_publication.unfinished_turn_unavailable turn=%s status=cancelled condition=%s", turn_id, str(failure)[:120])
+        The Lead run normally did this when it received the cancellation; this covers a Stop
+        the runner notices at a boundary instead.
+        """
+        from bowhead_core.unfinished_turn_context import publish_stopped_turn
+
+        summary_bus = getattr(self, "_summary_bus", None)
+        await publish_stopped_turn(
+            summary_bus if summary_bus is not None else bus,
+            store=getattr(self._orch, "session_store", None),
+            turn_id=turn_id,
+            worker=getattr(self, "_execution_worker", None),
+        )
 
     async def run(self, request: TurnRequest) -> TurnResult:
         """执行一个 turn，emit 事件到 bus，返回聚合结果.
@@ -2106,7 +2125,15 @@ class TurnRunner:
                             terminal_runtime,
                             cost_estimator=_estimate_cost_usd,
                         ):
-                            result = await self._run_inner(request, cancel_event)
+                            try:
+                                result = await self._run_inner(request, cancel_event)
+                            except BaseExceptionGroup as group:
+                                # A task group the run holds open, such as a Tool connection, wraps
+                                # the Stop on its way out. It is still the Stop, and takes the same
+                                # finalizer: the Turn's usage is settled and its terminal events sent.
+                                if not _holds_only_a_stop(group):
+                                    raise
+                                raise TurnCancelledError("turn cancelled by durable request") from group
                         if terminal_runtime is None and request.session_id:
                             session_store = getattr(orch, "session_store", None)
                             if session_store is not None:

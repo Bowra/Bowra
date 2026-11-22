@@ -145,6 +145,10 @@
   font-family: var(--font-control);
   font-size: var(--fs-sm);
 }
+/* Turn visibility FR5: the newest line of code being written. */
+:root:root .bh-band__foot-prose--code {
+  font-family: var(--font-mono);
+}
 :root:root .bh-band__foot-meta + .bh-band__foot-prose::before {
   color: var(--c-ink-3);
 }

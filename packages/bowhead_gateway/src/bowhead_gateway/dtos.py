@@ -1162,6 +1162,13 @@ class SkillScriptInfoDTO(BaseModel):
     size: int
 
 
+class SkillPackageFileInfoDTO(BaseModel):
+    """One file of a Skill package by its path from the Skill root."""
+
+    path: str
+    size: int
+
+
 class SkillUsedByDTO(BaseModel):
     """引用了某 skill 的自定义子代理（详情 drawer「被子代理使用」反查行）."""
 
@@ -1185,6 +1192,8 @@ class SkillDetailDTO(SkillSummaryDTO):
     trigger_examples: list[str] = Field(default_factory=list)
     references: list[SkillScriptInfoDTO] = Field(default_factory=list)
     eval_files: list[SkillScriptInfoDTO] = Field(default_factory=list)
+    # Every file of the package, as the model's skill_read lists it; the three lists above are the editing contract.
+    package_files: list[SkillPackageFileInfoDTO] = Field(default_factory=list)
     evals_count: int = 0
     has_evals: bool = False
     # Skills-page IA redesign: reverse team-subagent lookup (always empty when subagent_creator flag is off).

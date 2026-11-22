@@ -233,15 +233,17 @@ def render_role_bindings_py(tools: list[dict[str, Any]]) -> str:
     canonical_names = {t["canonical"] for t in tools}
     entries: dict[str, list[str]] = {}
     for t in tools:
-        if t.get("pseudo"):
+        if t.get("pseudo") or t.get("role_binding") is False:
             # G5: pseudo entries (display-only, not registered ToolSpecs) produce no role bindings —
             # the former phantom python_sandbox binding was always inert (set_allowed_roles silently skips it)
             # and misleading in audits (docs/skills-tools-ssot.md §5-G5).
+            # `role_binding: false`: a registered or run-local part named for display only; its own
+            # admission rules decide who may call it, so it stays out of the role map.
             continue
         roles = sorted(t.get("allowed_roles") or [])
         entries[t["canonical"]] = roles
     for t in tools:
-        if t.get("pseudo"):
+        if t.get("pseudo") or t.get("role_binding") is False:
             continue
         roles = sorted(t.get("allowed_roles") or [])
         for legacy in t.get("legacy_aliases") or []:
@@ -339,6 +341,18 @@ def render_tool_display_py(tools: list[dict[str, Any]]) -> str:
         lines.append(f'        "sigil": "{t.get("sigil") or "·"}",')
         lines.append(f'        "category": "{t.get("category") or "unknown"}",')
         lines.append("    },")
+    lines.append("}")
+    lines.append("")
+    lines.append("")
+    lines.append("#: The language each code-running Tool executes (`code_language`); its code streams while written (turn visibility E4).")
+    lines.append("TOOL_CODE_LANGUAGE: dict[str, str] = {")
+    for t in tools:
+        language = t.get("code_language")
+        if language is None:
+            continue
+        if not isinstance(language, str) or not language.isidentifier() or language != language.lower():
+            raise ValueError(f"Tool {t['canonical']!r} has code_language {language!r}; expected a lower-case name such as python.")
+        lines.append(f'    "{t["canonical"]}": "{language}",')
     lines.append("}")
     lines.append("")
     return "\n".join(lines)

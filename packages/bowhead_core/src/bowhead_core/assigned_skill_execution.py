@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import tempfile
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -89,6 +91,33 @@ def _scope(ctx: Any) -> ReferenceRequestScope:
 
 def _name(tool_name: str, arguments: dict) -> str:
     return "python_sandbox" if tool_name == "python_exec" else str(arguments.get("name") or "").strip()
+
+
+# Call-local exact copies live under the data root because the sandbox runner
+# stages Skill scripts only from `.data/{user,team,org,exact}_skills`; a copy in
+# the system temporary folder could be read but never run. A copy is removed when
+# its call ends; one left by a crashed process is removed after a day.
+_EXACT_COPY_ROOT = Path(".data") / "exact_skills"
+_EXACT_COPY_PREFIXES = ("bowhead-assigned-skill-", "bowhead-reference-skill-")
+_STALE_EXACT_COPY_SECONDS = 24 * 3600
+
+
+def _exact_copy_directory(prefix: str) -> tempfile.TemporaryDirectory:
+    root = _EXACT_COPY_ROOT.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    cutoff = time.time() - _STALE_EXACT_COPY_SECONDS
+    for entry in root.iterdir():
+        try:
+            if entry.name.startswith(_EXACT_COPY_PREFIXES) and not entry.is_symlink() and entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
+    return tempfile.TemporaryDirectory(prefix=prefix, dir=root)
+
+
+def _exact_copy_root(temporary: tempfile.TemporaryDirectory) -> Path:
+    # The runner expects `.data/<root>/<folder>/<skill>`, as uploaded Skills are laid out.
+    return Path(temporary.name) / "package"
 
 
 def _load_copy(root: Path, files: dict[str, bytes]) -> SkillSpec:
@@ -225,8 +254,8 @@ async def execute_assigned_skill(handler: Callable[..., Awaitable[Any]], argumen
         if package.proof.name != name:
             return _denied(name, tool_name)
         files = package.material.files()
-        temporary = tempfile.TemporaryDirectory(prefix="bowhead-assigned-skill-")
-        spec = await anyio.to_thread.run_sync(partial(_load_copy, Path(temporary.name), files))
+        temporary = await anyio.to_thread.run_sync(_exact_copy_directory, "bowhead-assigned-skill-")
+        spec = await anyio.to_thread.run_sync(partial(_load_copy, _exact_copy_root(temporary), files))
         material = _Material(spec, grant.kind, sources, package.proof, grants, ctx.turn_id, tool_name)
         ctx.assigned_skill_material = material
         if denial := await assigned_skill_operation_denial(ctx, tool_name, arguments):
@@ -281,8 +310,8 @@ async def dispatch_retained_reference_skill(
         if not reference_skill_active(ctx) or ctx.skill_runtime_grants != grants:
             raise ValueError("reference_skill_receiver_changed")
         files = package.material.files()
-        temporary = tempfile.TemporaryDirectory(prefix="bowhead-reference-skill-")
-        spec = await anyio.to_thread.run_sync(partial(_load_copy, Path(temporary.name), files))
+        temporary = await anyio.to_thread.run_sync(_exact_copy_directory, "bowhead-reference-skill-")
+        spec = await anyio.to_thread.run_sync(partial(_load_copy, _exact_copy_root(temporary), files))
         material = _Material(
             spec, package.proof.resource.source_kind, sources, package.proof, grants, ctx.turn_id, tool_name, reference_authorizer=authorizer
         )

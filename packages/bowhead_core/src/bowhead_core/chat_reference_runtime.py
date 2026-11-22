@@ -953,7 +953,7 @@ class ReferencePrimaryRuntime:
         access = await ReferenceSkillReadAccess.bind(
             sources=self.skill_sources, cipher=self.cipher, scope=self.scope, turn_id=self.turn_id, owner_id=self.owner_id, generation=self.generation
         )
-        _, rendered, _ = await _load_current(
+        _, rendered, prepared = await _load_current(
             sources=self.skill_sources, cipher=self.cipher, scope=self.scope, turn_id=self.turn_id, owner_id=self.owner_id, generation=self.generation
         )
         # Only the selected receiver's copy gains these pointers. The Lead and
@@ -962,6 +962,14 @@ class ReferencePrimaryRuntime:
         if not access.context_only:
             primary_ctx.reference_skill_required = True
             primary_ctx.reference_skill_access = access
+        else:
+            # A context-only receiver reads and runs its method through the ordinary Skill
+            # tools. Those resolve a selected name to the selected source and version, as for
+            # a `/` selection in Lead (skill-bundle-read tech-design §6, §12.2).
+            primary_ctx.selected_skill_resources = {
+                **(getattr(primary_ctx, "selected_skill_resources", None) or {}),
+                **{item.proof.name: item.proof.resource for item in prepared.closure.items},
+            }
         primary_ctx.reference_source_db_path = str(self.bindings.db_path)
         if not access.context_only:
             await primary_ctx.ensure_reference_skill_context()

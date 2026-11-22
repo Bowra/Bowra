@@ -552,7 +552,10 @@ export function RunningBand({
               <div className="bh-band__foot">
                 {footMeta ? <span className="bh-band__foot-meta">{footMeta}</span> : null}
                 {prose ? (
-                  <span className="bh-band__foot-prose" data-testid="running-band-prose">
+                  <span
+                    className={model.current?.proseIsCode ? "bh-band__foot-prose bh-band__foot-prose--code" : "bh-band__foot-prose"}
+                    data-testid="running-band-prose"
+                  >
                     {prose}
                   </span>
                 ) : null}

@@ -12,6 +12,7 @@ import { buildAgentGrouping } from "./agent-grouping";
 // raw milliseconds: see `formatSummaryDuration` below.
 import type { StepView } from "./types";
 import type { StepOutcome } from "@/lib/turn-feedback";
+import type { TurnOutput } from "@/lib/turn-outputs";
 
 export interface StepSummaryProps {
   /** Original execution records, retained for Agent grouping and duration fallback. */
@@ -39,6 +40,8 @@ export interface StepSummaryProps {
   expanded?: boolean;
   /** Folds the trace again. Required for the row to act as a collapse control while `expanded`. */
   onCollapse?: () => void;
+  /** What the Turn produced, by kind, from the stored answer (turn visibility FR12). Empty: the old wording. */
+  outputs?: readonly TurnOutput[] | null;
 }
 
 /**
@@ -51,7 +54,7 @@ export interface StepSummaryProps {
  * with `aria-expanded`, so keyboard focus is not lost and the reader can fold the trace again. Its accessible name
  * is the visible row text, so the outcome ("Execution ended · 2 s") is announced with the action.
  */
-export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpand, expanded = false, onCollapse }: StepSummaryProps) {
+export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpand, expanded = false, onCollapse, outputs }: StepSummaryProps) {
   const tStep = useTranslations("step_list");
   const open = Boolean(expanded && onCollapse);
   const toggle = open ? onCollapse! : onExpand;
@@ -83,7 +86,13 @@ export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpan
   const { peerBlocks } = buildAgentGrouping(steps, peerNames ?? {}, {}, {});
   const agentCount = peerBlocks.length;
   const hasPeerStep = peerBlocks.length > 0 || steps.some((s) => s.stepType === "subagent");
-  const lead = agentCount > 0 ? `${completionLabel} · ${tStep("summary_agents", { count: agentCount })}` : completionLabel;
+  // Turn visibility FR12: name what was produced ("1 个网页 · 1 份演示文稿"); the agent count then appears only when
+  // several agents worked. Without outputs (a text answer, an earlier Turn) the line keeps its old wording.
+  const produced = (outputs ?? []).map((output) => tStep(`summary_output.${output.kind}`, { count: output.count }));
+  const agents = tStep("summary_agents", { count: agentCount });
+  const lead = produced.length > 0
+    ? [completionLabel, ...produced, ...(agentCount > 1 ? [agents] : [])].join(" · ")
+    : agentCount > 0 ? `${completionLabel} · ${agents}` : completionLabel;
 
   return (
     <ChatCard

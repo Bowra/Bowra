@@ -164,6 +164,8 @@ export interface StepView {
   outputArtifacts?: StepOutputArtifact[] | null;
   /** Streaming code/sql tokens append into this as `step_progress` fires. */
   partialContent?: string;
+  /** Declared language of the code being written (writing steps only). */
+  codeLanguage?: string;
   /** When state=failed. */
   error?: StepError | null;
   /** Subagent peer display name — e.g. "Compute Peer". */

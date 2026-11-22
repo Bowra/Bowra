@@ -373,4 +373,55 @@ describe("StepSummary", () => {
       expect(screen.getByTestId("step-summary").textContent).not.toMatch(/\d\s*ms\b/);
     });
   });
+
+  describe("turn visibility FR12: output count", () => {
+    function agents(n: number) {
+      const peerNames = Object.fromEntries(Array.from({ length: n }, (_, index) => [`peer_${index}`, `agent-${index}`]));
+      const steps = [
+        step({ stepId: "lead", subagentId: "LEAD" }),
+        ...Array.from({ length: n }, (_, index) =>
+          step({ stepId: `spawn_${index}`, stepType: "subagent", toolName: "subagent_spawn", subagentId: "LEAD", peerProseKey: `peer_${index}` }),
+        ),
+      ];
+      return { peerNames, steps };
+    }
+
+    it("names what was produced in place of a single agent count", () => {
+      const { peerNames, steps } = agents(1);
+      renderIntl(
+        <StepSummary
+          steps={steps}
+          peerNames={peerNames}
+          totalDurationMs={113_000}
+          outputs={[{ kind: "web_page", count: 1 }, { kind: "presentation", count: 1 }]}
+          onExpand={() => {}}
+        />,
+      );
+      const summary = screen.getByTestId("step-summary");
+      expect(summary.textContent).toContain("执行已结束 · 1 个网页 · 1 份演示文稿 · 1 分 53 秒");
+      expect(summary.textContent).not.toContain("智能体");
+    });
+
+    it("keeps the agent count when several agents worked", () => {
+      const { peerNames, steps } = agents(2);
+      renderIntl(<StepSummary steps={steps} peerNames={peerNames} outputs={[{ kind: "report", count: 1 }]} onExpand={() => {}} />);
+      expect(screen.getByTestId("step-summary").textContent).toContain("执行已结束 · 1 份报告 · 调用 2 个智能体");
+    });
+
+    it("words counts in the interface language with plural forms", () => {
+      const { container } = renderIntl(
+        <StepSummary steps={[]} outputs={[{ kind: "chart", count: 2 }, { kind: "image", count: 1 }]} onExpand={() => {}} />,
+        { locale: "en-US" },
+      );
+      expect(screen.getByTestId("step-summary").textContent).toContain("Execution ended · 2 charts · 1 image");
+      expect(container.textContent ?? "").not.toMatch(/[一-鿿]/);
+    });
+
+    it("keeps the old wording without outputs", () => {
+      const { peerNames, steps } = agents(1);
+      renderIntl(<StepSummary steps={steps} peerNames={peerNames} outputs={[]} onExpand={() => {}} />);
+      expect(screen.getByTestId("step-summary").textContent).toContain("执行已结束 · 调用 1 个智能体");
+    });
+  });
 });
+

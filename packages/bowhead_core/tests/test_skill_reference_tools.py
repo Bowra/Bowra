@@ -135,8 +135,6 @@ async def test_read_context_never_becomes_a_script_or_discovery_permission(tool_
     [
         {"name": "other"},
         {"name": "method", "args": {"year": 2030}},
-        {"name": "method", "ref": "unselected.md"},
-        {"name": "method", "file": "../SKILL.md"},
         {"name": "method", "file": True},
         {"name": "method", "new_parameter": 1},
     ],
@@ -144,6 +142,16 @@ async def test_read_context_never_becomes_a_script_or_discovery_permission(tool_
 async def test_model_arguments_cannot_select_another_package_or_rebind_parameters(tool_case, args):
     tool_case.ctx.skill_runtime_scope = None
     assert (await call(tool_case, "raw", args=args))["error_kind"] == "reference_skill_unavailable"
+
+
+async def test_paths_stay_inside_the_granted_package_and_a_miss_lists_it(tool_case):
+    """A file path resolves only among the granted package's files (skill-bundle-read tech-design §4)."""
+    tool_case.ctx.skill_runtime_scope = None
+    manifest = await call(tool_case, "raw", args={"name": "method", "file": "../SKILL.md"})
+    assert manifest["file"] == "SKILL.md" and manifest["resource"]["id"] == "builtin:method"
+    miss = await call(tool_case, "raw", args={"name": "method", "ref": "unselected.md"})
+    assert miss["error_kind"] == "skill_file_not_found" and "body" not in miss
+    assert {entry["path"] for entry in miss["package_files"]} == {"SKILL.md", "method.md"}
 
 
 async def test_registry_unwraps_arguments_before_exact_lookup_and_keeps_role_checks(tool_case):

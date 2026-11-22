@@ -20,6 +20,7 @@ from bowhead_core.subagent import UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.tool_registry import ToolRegistry
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope
 from bowhead_skill.tools import build_skill_tools
+from test_assigned_skill_execution import stage_with_runner
 from test_skill_model_invocation import adapter_for, router_for, success
 from test_skill_read_access import access_case as _access_case
 from test_skill_read_access import receiver
@@ -43,10 +44,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.parametr
 def tools_for(root, monkeypatch):
     catalog, runtime, calls = SkillCatalog(roots=[root]), SkillRuntime(), []
 
-    async def run(spec, *, entry_script, input_data, extra_args):
+    async def run(spec, *, entry_script, input_data):
         source = Path(input_data["_skill_dir"]) if "_skill_dir" in input_data else spec.source_dir
         source_script = input_data.get("_skill_entry") or entry_script
-        calls.append((spec.name, source, (source / "scripts" / source_script).read_bytes(), input_data.copy()))
+        staged = stage_with_runner(source, source_script) if "_skill_dir" in input_data else None
+        calls.append((spec.name, source, (source / "scripts" / source_script).read_bytes(), input_data.copy(), staged))
         return SimpleNamespace(
             ok=True, exit_code=0, stdout="CALCULATED 42", stderr="", result_json={"answer": 42}, outputs=[], workdir=None, duration_ms=1, error=None
         )
@@ -58,8 +60,9 @@ def tools_for(root, monkeypatch):
 
 
 @pytest.fixture
-async def invoke_case(access_case, monkeypatch):
+async def invoke_case(access_case, monkeypatch, tmp_path):
     case = access_case
+    monkeypatch.setattr("bowhead_core.assigned_skill_execution._EXACT_COPY_ROOT", tmp_path / ".data" / "exact_skills")
     composition, prepared, _ = await restore(case.case)
     assert composition.runtime_policy == "initial-primary-skill-baseline.v1"
     case.ctx.reference_skill_required, case.ctx.reference_skill_access = True, case.access
@@ -214,6 +217,7 @@ async def test_uploaded_original_package_uses_sandbox_and_parent_flag(invoke_cas
         assert result["ok"] is True
         assert case.calls[0][0] == "python_sandbox" and case.calls[0][2] == original
         assert case.calls[0][3]["_skill_entry"] == "runner.py" and not case.calls[0][1].exists()
+        assert case.calls[0][4] is None  # The real runner stages the exact copy.
 
 
 @pytest.mark.parametrize("receiver_case", ["admission_unused_invoke"], indirect=True)

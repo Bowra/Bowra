@@ -14,22 +14,25 @@ import { renderIntl } from "@/__tests__/intl-render";
 
 import { SkillDrawer, type SkillDrawerTarget } from "./skill-drawer";
 
-const { getTeamSkill, getTeamSkillFile, fetchSkillDetail, fetchSkillFile } = vi.hoisted(() => ({
+const { getTeamSkill, getTeamSkillFile, getTeamSkillPackageFile, fetchSkillDetail, fetchSkillFile, fetchSkillPackageFile } = vi.hoisted(() => ({
   getTeamSkill: vi.fn(),
   getTeamSkillFile: vi.fn(),
+  getTeamSkillPackageFile: vi.fn(),
   fetchSkillDetail: vi.fn(),
   fetchSkillFile: vi.fn(),
+  fetchSkillPackageFile: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow-solidify-api", () => ({
   getTeamSkill,
   getTeamSkillFile,
+  getTeamSkillPackageFile,
   copyTeamSkillToPersonal: vi.fn(),
   promoteSkill: vi.fn(),
   withdrawTeamSkill: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({ fetchSkillDetail, fetchSkillFile }));
+vi.mock("@/lib/api", () => ({ fetchSkillDetail, fetchSkillFile, fetchSkillPackageFile }));
 
 vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => ({ push: vi.fn() }) }));
 
@@ -90,6 +93,58 @@ describe("SkillDrawer · 团队 skill 文件面", () => {
     // Address by team row ID; never call the personal endpoint (by skill name), which always returns 404 for team rows.
     expect(getTeamSkillFile).toHaveBeenCalledWith("oskill_1", "references", "metrics.md");
     expect(fetchSkillFile).not.toHaveBeenCalled();
+  });
+
+  /* The settings page shows what Agents can read: every package file, read through the package endpoint by path. */
+  it("列出整包文件；三个目录以外的文件按路径读取", async () => {
+    getTeamSkill.mockResolvedValue({
+      ...TEAM_ROW,
+      body_md: "# 渠道毛利",
+      references: [{ name: "metrics.md", size: 29960 }],
+      scripts: [{ name: "step_1.py", size: 120 }],
+      package_files: [
+        { path: "README.md", size: 7 },
+        { path: "SKILL.md", size: 90 },
+        { path: "assets/deck.pptx", size: 2048 },
+        { path: "references/metrics.md", size: 29960 },
+        { path: "scripts/step_1.py", size: 120 },
+      ],
+      evals_count: 0,
+      has_evals: false,
+    });
+    getTeamSkillPackageFile.mockImplementation(async (_id: string, path: string) =>
+      path === "README.md"
+        ? { path, content: "read me", unavailable: null, size: 7, mime: "text/markdown" }
+        : { path, content: null, unavailable: "binary", size: 2048, mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+    );
+
+    renderIntl(<SkillDrawer target={{ ...TARGET, canEdit: true }} onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "文件 (4)" }));
+    expect(await screen.findByText("assets · 1")).toBeTruthy();
+    expect(screen.getByText("根目录 · 1")).toBeTruthy();
+    // SKILL.md is the description tab, not listed again.
+    expect(screen.queryByText("SKILL.md")).toBeNull();
+
+    fireEvent.click(screen.getByText("deck.pptx"));
+    await waitFor(() => expect(screen.getByText(/这个文件不是文本/)).toBeTruthy());
+    expect(getTeamSkillPackageFile).toHaveBeenCalledWith("oskill_1", "assets/deck.pptx");
+    // A file that is not text is replaced by a new upload, never edited here.
+    expect(screen.getByText(/要替换它，请上传新版本的技能包/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+
+    fireEvent.click(screen.getByText("返回文件列表"));
+    fireEvent.click(await screen.findByText("README.md"));
+    await waitFor(() => expect(screen.getByText("read me")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
+
+    // Files in the editable folders keep their editing endpoint and the Edit button.
+    getTeamSkillFile.mockResolvedValue({ path: "references/metrics.md", content: "口径", size: 29960, mime: "text/markdown", content_sha256: "a".repeat(64) });
+    fireEvent.click(screen.getByText("返回文件列表"));
+    fireEvent.click(await screen.findByText("metrics.md"));
+    await waitFor(() => expect(screen.getByText("口径")).toBeTruthy());
+    expect(getTeamSkillFile).toHaveBeenCalledWith("oskill_1", "references", "metrics.md");
+    expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
   });
 
   it("没有附属文件时不出「文件」tab（老形态不回退）", async () => {

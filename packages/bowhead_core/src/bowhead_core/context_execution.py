@@ -136,7 +136,10 @@ class ExecutionContextView:
     async def restore(self) -> None:
         if self._loaded:
             return
-        async with open_shared_ctx(self.db_path) as db:
+        # A pure read: on the read-only pool it takes no authority lease, so it neither waits for nor is refused by
+        # an exclusive writer of core (116, 1.7.61: refused at Lead start, the Turn failed). It decides on the last
+        # commit, as before; every later write re-authorizes inside its own transaction.
+        async with open_pooled_read_ctx(self.db_path) as db:
             await db.execute("BEGIN")
             await require_context_owner_in_tx(db, worker=self.worker)
             async with db.execute(
@@ -180,6 +183,13 @@ class ExecutionContextView:
                 self.generation = generation
             await db.rollback()
         self._loaded = True
+
+    async def require_owner(self) -> None:
+        """Check that the original worker still owns this context, on the read-only pool as in ``restore``."""
+        async with open_pooled_read_ctx(self.db_path) as db:
+            await db.execute("BEGIN")
+            await require_context_owner_in_tx(db, worker=self.worker)
+            await db.rollback()
 
     async def prepare(
         self,
@@ -230,10 +240,7 @@ class ExecutionContextView:
 
         async def authorize() -> None:
             await self.validate_sources(request.messages)
-            async with open_shared_ctx(self.db_path) as db:
-                await db.execute("BEGIN")
-                await require_context_owner_in_tx(db, worker=self.worker)
-                await db.rollback()
+            await self.require_owner()
 
         async def started(identity: str, reason: Trigger, budget: TargetContextBudget) -> None:
             nonlocal source_generation, operation_id

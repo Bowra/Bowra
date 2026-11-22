@@ -26,7 +26,7 @@ class _Rt:
     def __init__(self) -> None:
         self.ran = False
 
-    async def run(self, spec, *, entry_script, input_data, extra_args):
+    async def run(self, spec, *, entry_script, input_data):
         self.ran = True
         raise AssertionError("knowledge skill must not be executed")
 
@@ -123,7 +123,7 @@ async def test_invoke_tool_skill_still_runs(tmp_path: Path) -> None:
     cat.refresh()
 
     class _OkRt:
-        async def run(self, spec, *, entry_script, input_data, extra_args):
+        async def run(self, spec, *, entry_script, input_data):
             class _R:
                 ok = True
                 exit_code = 0

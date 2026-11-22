@@ -6726,6 +6726,29 @@ class UserStore:
     ) -> dict[str, Any]:
         """Archive a Space while serializing the last-active-Space invariant."""
 
+        # Only the transaction repeats: after it commits, a repeat would meet its own archived status.
+        await self._write_archived_workspace(
+            team_id=team_id,
+            actor_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            expected_revision=expected_revision,
+        )
+        return await self._get_workspace_governance_record(
+            team_id=team_id,
+            caller_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            require_team_governance=False,
+        )
+
+    @_repeat_when_authority_busy
+    async def _write_archived_workspace(
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        workspace_id: str,
+        expected_revision: int,
+    ) -> None:
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -6787,12 +6810,6 @@ class UserStore:
             except Exception:
                 await db.rollback()
                 raise
-        return await self._get_workspace_governance_record(
-            team_id=team_id,
-            caller_user_id=actor_user_id,
-            workspace_id=workspace_id,
-            require_team_governance=False,
-        )
 
     async def restore_governed_workspace(
         self,
@@ -6805,6 +6822,31 @@ class UserStore:
     ) -> dict[str, Any]:
         """Restore a Space and repair a missing administrator atomically."""
 
+        # Only the transaction repeats: after it commits, a repeat would meet its own restored status.
+        await self._write_restored_workspace(
+            team_id=team_id,
+            actor_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            expected_revision=expected_revision,
+            recovery_admin_user_id=recovery_admin_user_id,
+        )
+        return await self._get_workspace_governance_record(
+            team_id=team_id,
+            caller_user_id=actor_user_id,
+            workspace_id=workspace_id,
+            require_team_governance=False,
+        )
+
+    @_repeat_when_authority_busy
+    async def _write_restored_workspace(
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        workspace_id: str,
+        expected_revision: int,
+        recovery_admin_user_id: str | None = None,
+    ) -> None:
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -6910,12 +6952,6 @@ class UserStore:
             except Exception:
                 await db.rollback()
                 raise
-        return await self._get_workspace_governance_record(
-            team_id=team_id,
-            caller_user_id=actor_user_id,
-            workspace_id=workspace_id,
-            require_team_governance=False,
-        )
 
     async def restore_openapi_workspace(
         self,

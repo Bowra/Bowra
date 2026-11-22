@@ -710,6 +710,26 @@ def _http_error_detail(http_error: urllib.error.HTTPError) -> dict:
         return {}
 
 
+#: Why the file store refused an output, by its error code: what is wrong with the file, so the code that wrote it
+#: can be fixed. Codes without an entry are named as they are.
+_REFUSAL_REASONS = {
+    "file_office_duplicate_part": (
+        "the Office package contains two parts with the same name, so it is damaged. python-pptx names a new slide part "
+        "slide{count+1}.xml, so adding a slide after removing one from the slide list can reuse the part name of a kept slide"
+    ),
+    "file_office_invalid_package": "it is not a valid Office package: its parts, content types or relationships do not match",
+    "file_office_type_mismatch": "its extension does not match the Office document type inside it",
+    "file_office_active_content_unsupported": "it contains macros or a digital signature, which cannot be stored",
+    "file_office_unsafe_xml": "it contains XML with a document type declaration, which is not accepted",
+    "file_office_package_limit": "it exceeds the Office package limits on file size, part size, part count or XML size",
+}
+
+
+def _refused_output_error(name: str, code: str) -> str:
+    reason = _REFUSAL_REASONS.get(code, "the file store refused it")
+    return f"sandbox file {name} was not saved: {reason} ({code})"
+
+
 def _unsupported_type_error(name: str, mime: str, entry: str | None = None) -> str:
     """Name a file the Gateway refused by type, and say how it can still reach the user."""
     parts = entry.split("/") if entry else []
@@ -802,14 +822,17 @@ def _upload_artifact(
             with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as http_error:
+            detail = _http_error_detail(http_error) if 400 <= http_error.code < 500 else {}
+            code = str(detail.get("code") or "")
             # A refused file version names its reason (and the latest version) so the caller can say which file to target.
-            if version_of and http_error.code in {400, 409}:
-                detail = _http_error_detail(http_error)
-                if str(detail.get("code") or "").startswith("version_target_"):
-                    return {"name": path.name, "version_error": detail["code"], "latest_id": detail.get("latest_id")}
+            if version_of and http_error.code in {400, 409} and code.startswith("version_target_"):
+                return {"name": path.name, "version_error": code, "latest_id": detail.get("latest_id")}
             # A refused file type is named with its type, so the caller can say how to deliver it instead.
-            elif http_error.code == 415 and _http_error_detail(http_error).get("code") == "file_type_unsupported":
+            if http_error.code == 415 and code == "file_type_unsupported":
                 return {"name": path.name, "type_error": mime}
+            # Any other coded refusal (a damaged Office package, a size limit) is named, so the caller can say why.
+            if code:
+                return {"name": path.name, "refused": code}
             raise
         return {
             "name": path.name,
@@ -1586,9 +1609,9 @@ def _stage_user_skill(workdir: Path, skill_dir: Path, entry: str) -> str | None:
     _parts = skill_dir.resolve().parts
     bundled_compiler = Path(__file__).resolve().parents[2] / "latex-report"
     if skill_dir.resolve() != bundled_compiler.resolve() and not any(
-        part == ".data" and _parts[i + 1] in {"user_skills", "team_skills", "org_skills"} for i, part in enumerate(_parts[:-3])
+        part == ".data" and _parts[i + 1] in {"user_skills", "team_skills", "org_skills", "exact_skills"} for i, part in enumerate(_parts[:-3])
     ):
-        return f"skill dir not under .data/{{user,team}}_skills: {skill_dir}"
+        return f"skill dir not under .data/{{user,team,org,exact}}_skills: {skill_dir}"
     dst = workdir / "skill"
 
     def _ignore_symlinks(directory: str, names: list[str]) -> set[str]:
@@ -1724,6 +1747,15 @@ def _unique_data_output_path(workdir: Path, preferred_name: str) -> Path:
     raise RuntimeError("sandbox data output namespace exhausted")
 
 
+def _fail_output_not_saved(result: dict, name: str, reason: str) -> None:
+    """A file the code wrote was not stored. The run is not ok, but its code did not fail: the exit code stays."""
+    result["ok"] = False
+    result.setdefault("outputs_not_saved", []).append(name)
+    prior_error = str(result.get("error") or "").strip()
+    result["error"] = f"{prior_error}; {reason}" if prior_error else reason
+    result["stderr"] = (result.get("stderr") or "") + f"\n[runner] {reason}"
+
+
 def _fail_data_materialization(result: dict, reason: str) -> None:
     result["ok"] = False
     if not result.get("exit_code"):
@@ -1829,6 +1861,11 @@ _MAX_FOLDER_FILES = 2000
 _FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 _NOT_SAVED_MAX_LINES = 12
 _NOT_SAVED_SCAN_LIMIT = 10_000
+_SKILL_NOT_SAVED_HINT = (
+    "These files were written below the top level of the working directory and were not saved: {files}. Only files "
+    "written directly into the working directory (/workdir; {{output_dir}} in a command) are saved, and the directory is "
+    "discarded after the call."
+)
 _NOT_SAVED_HINT = (
     "These files were written below the top level and were not saved: {files}. Every call starts with an empty working "
     "directory and discards it afterwards. To deliver one, write it at the top level, or list its path (or its folder as "
@@ -1932,12 +1969,38 @@ def _pack_declared_folder(workdir: Path, parts: tuple[str, ...], out_dir: Path) 
     return target, len(members)
 
 
-def _unsaved_nested_files(workdir: Path, pre_existing: set[str], declared: list[tuple[tuple[str, ...], bool]]) -> list[str]:
-    """New files below the top level that no entry covers, grouped per top-level folder."""
+def _staged_files(root: Path) -> frozenset[str]:
+    """Regular files of a staged Skill copy, by path from its root."""
+    found: set[str] = set()
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            path = Path(dirpath) / name
+            try:
+                if stat.S_ISREG(os.lstat(path).st_mode):
+                    found.add(path.relative_to(root).as_posix())
+            except OSError:
+                continue
+    return frozenset(found)
+
+
+def _unsaved_nested_files(
+    workdir: Path,
+    pre_existing: set[str],
+    declared: list[tuple[tuple[str, ...], bool]],
+    *,
+    skill_files: frozenset[str] | None = None,
+) -> list[str]:
+    """New files below the top level that no entry covers, grouped per top-level folder.
+
+    With ``skill_files`` (what was staged into ``skill/``), files the run added
+    inside ``skill/`` count too, grouped per folder below it: a command runs from
+    ``/workdir/skill``, so a relative output folder lands there.
+    """
     per_top: dict[str, list[str]] = {}
     seen = 0
     for top in sorted(path.name for path in workdir.iterdir()):
-        if top in pre_existing or top in _RESERVED_TOP_DIRS or top in _SKIPPED_DIR_NAMES:
+        in_skill = top == "skill" and skill_files is not None
+        if not in_skill and (top in pre_existing or top in _RESERVED_TOP_DIRS or top in _SKIPPED_DIR_NAMES):
             continue
         try:
             if not stat.S_ISDIR(os.lstat(workdir / top).st_mode):
@@ -1956,7 +2019,12 @@ def _unsaved_nested_files(workdir: Path, pre_existing: set[str], declared: list[
                 rel_parts = path.relative_to(workdir).parts
                 if any(rel_parts[: len(parts)] == parts if is_folder else rel_parts == parts for parts, is_folder in declared):
                     continue
-                per_top.setdefault(top, []).append("/".join(rel_parts))
+                group = top
+                if in_skill:
+                    if "/".join(rel_parts[1:]) in skill_files:
+                        continue  # Part of the staged Skill.
+                    group = "/".join(rel_parts[:2]) if len(rel_parts) > 2 else top
+                per_top.setdefault(group, []).append("/".join(rel_parts))
                 seen += 1
                 if seen >= _NOT_SAVED_SCAN_LIMIT:
                     break
@@ -1968,11 +2036,24 @@ def _unsaved_nested_files(workdir: Path, pre_existing: set[str], declared: list[
     return lines[:_NOT_SAVED_MAX_LINES]
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
+def _parse_runner_args(argv: list[str]) -> argparse.Namespace:
+    """Accept exactly the command line the server builds.
+
+    Each option once, no abbreviations and nothing else: argparse keeps the last
+    repeated value, so any extra token could replace the server's paths.
+    """
+    ap = argparse.ArgumentParser(allow_abbrev=False)
     ap.add_argument("--input", required=True)
     ap.add_argument("--workdir", required=True)
-    args, _ = ap.parse_known_args()
+    args = ap.parse_args(argv)
+    for option in ("--input", "--workdir"):
+        if sum(arg == option or arg.startswith(f"{option}=") for arg in argv) != 1:
+            ap.error(f"{option} must be given exactly once")
+    return args
+
+
+def main() -> int:
+    args = _parse_runner_args(sys.argv[1:])
 
     workdir = Path(args.workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
@@ -1999,6 +2080,7 @@ def main() -> int:
             )
             return 0
         code = _SKILL_DISPATCH_SHIM
+        _staged_skill_files = _staged_files(workdir / "skill")
     else:
         code = str(payload.get("code") or "").strip()
         if not code:
@@ -2068,6 +2150,8 @@ def main() -> int:
     # Declared nested files and folders; their paths are checked again before anything is read.
     _nested_deliverables: list[tuple[str, tuple[str, ...], bool]] = []
     _nested_reported: dict[str, str] = {}
+    # Declared entries whose file was written but not stored (refused, wrong type, version conflict, upload failure).
+    _nested_not_saved: set[str] = set()
     if _output_purpose == "deliverable":
         for _entry in sorted(_deliverable_outputs):
             try:
@@ -2258,6 +2342,8 @@ def main() -> int:
     # fails. Run success remains independent from artifact presence.
     outputs: list[dict] = []
     output_data_errors: list[str] = []
+    # Files the code wrote that were not stored, with why; they fail the run without making it a code failure.
+    not_saved: list[tuple[str, str]] = []
     for p in sorted(workdir.iterdir()):
         if p.name in pre_existing:
             continue
@@ -2273,7 +2359,7 @@ def main() -> int:
             sys.stderr.write(f"[runner] skip {p.name} size={size} (limit {_MAX_OUTPUT_BYTES})\n")
             continue
         if size > _MAX_OUTPUT_BYTES:
-            output_data_errors.append(f"sandbox file {p.name} exceeds Data artifact limit")
+            not_saved.append((p.name, f"sandbox file {p.name} exceeds Data artifact limit"))
             continue
         _out_kind = _kind_for_output(
             p.name,
@@ -2303,11 +2389,13 @@ def main() -> int:
             _saved_as_new_file.append(p.name)
         if rec and rec.get("version_error"):
             latest = f"; the latest version is {rec['latest_id']}" if rec.get("latest_id") else ""
-            output_data_errors.append(
-                f"sandbox file {p.name} was not stored as a new version of {_revises.get(p.name)}: {rec['version_error']}{latest}"
+            not_saved.append(
+                (p.name, f"sandbox file {p.name} was not stored as a new version of {_revises.get(p.name)}: {rec['version_error']}{latest}")
             )
         elif rec and rec.get("type_error"):
-            output_data_errors.append(_unsupported_type_error(p.name, rec["type_error"]))
+            not_saved.append((p.name, _unsupported_type_error(p.name, rec["type_error"])))
+        elif rec and rec.get("refused"):
+            not_saved.append((p.name, _refused_output_error(p.name, rec["refused"])))
         elif rec:
             # Structured tabular files (csv/tsv/json/jsonl) get previews so the canvas
             # decomposer can convert them into data_table sections in the Data tab.
@@ -2316,7 +2404,7 @@ def main() -> int:
                 rec["preview"] = preview
             outputs.append(rec)
         else:
-            output_data_errors.append(f"sandbox file {p.name} Data artifact upload failed")
+            not_saved.append((p.name, f"sandbox file {p.name} Data artifact upload failed"))
 
     # 4b. Declared nested files and folders: resolved without following links; a folder is packed
     # into one `<folder>.zip` in a host temporary directory, never inside the shared /workdir.
@@ -2360,8 +2448,13 @@ def main() -> int:
                     _nested_reported[entry] = (
                         f"declared deliverable {entry} was not stored as a new version of {_revises.get(entry)}: {rec['version_error']}{latest}"
                     )
+                    _nested_not_saved.add(entry)
                 elif rec and rec.get("type_error"):
                     _nested_reported[entry] = _unsupported_type_error(saved_name, rec["type_error"], entry)
+                    _nested_not_saved.add(entry)
+                elif rec and rec.get("refused"):
+                    _nested_reported[entry] = _refused_output_error(saved_name, rec["refused"])
+                    _nested_not_saved.add(entry)
                 elif rec:
                     rec["path"] = entry
                     if file_count is not None:
@@ -2371,7 +2464,12 @@ def main() -> int:
                     outputs.append(rec)
                 else:
                     _nested_reported[entry] = f"sandbox file {saved_name} Data artifact upload failed"
-    output_data_errors.extend(_nested_reported.values())
+                    _nested_not_saved.add(entry)
+    for entry, reported in _nested_reported.items():
+        if entry in _nested_not_saved:
+            not_saved.append((entry, reported))
+        else:
+            output_data_errors.append(reported)
 
     # 5. Stitch result.json
     result = {
@@ -2394,10 +2492,21 @@ def main() -> int:
     ]
     if missing_deliverables:
         output_data_errors.append("declared deliverable outputs were not produced and persisted: " + ", ".join(missing_deliverables))
+    for name, reason in not_saved:
+        _fail_output_not_saved(result, name, reason)
     for output_data_error in output_data_errors:
         _fail_data_materialization(result, output_data_error)
     if _skill_mode:
         _relay_skill_result(workdir, result)
+        if not outputs:
+            # A Skill that saves its output may keep intermediate files in nested folders on purpose
+            # (LaTeX build files), so those runs are not reported. One that saved nothing would lose
+            # what it wrote without a word. ok is unchanged: a script may keep scratch files in a folder
+            # and answer through stdout or skill_result.json (command mode fails below when nothing is saved).
+            not_saved = _unsaved_nested_files(workdir, pre_existing, [], skill_files=_staged_skill_files)
+            if not_saved:
+                result["not_saved"] = not_saved
+                result["stderr"] = (result.get("stderr") or "") + "\n[runner] " + _SKILL_NOT_SAVED_HINT.format(files="; ".join(not_saved))
     else:
         # A direct code run says which nested files it wrote but did not keep (§4.3); ok is unchanged.
         not_saved = _unsaved_nested_files(workdir, pre_existing, [(parts, is_folder) for _, parts, is_folder in _nested_deliverables])

@@ -150,8 +150,9 @@ async def test_builtin_latex_routes_through_sandbox_and_preserves_grant(monkeypa
     assert (await tools["skill_read"].handler({"name": "latex-report"}, ctx))["script_execution"] == "sandbox"
     runtime.run.reset_mock()
     override = await tools["skill_invoke"].handler({**arguments, "extra_args": ["--input", "/tmp/other.json"]}, ctx)
-    assert override["error_kind"] == "invalid_args"
-    runtime.run.assert_not_awaited()
+    assert set(runtime.run.call_args.kwargs) == {"entry_script", "input_data"}
+    assert override["ignored_arguments"] == {"extra_args": "Not passed: the script command line is fixed. Pass values in input instead."}
+    runtime.run.reset_mock()
     grant.return_value = {"error": "Skill access revoked"}
     assert (await tools["skill_invoke"].handler(arguments, ctx))["error"] == "Skill access revoked"
     runtime.run.assert_not_awaited()

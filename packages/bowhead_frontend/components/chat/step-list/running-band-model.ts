@@ -16,6 +16,8 @@
  *   - Agent identity → `agent-meta.ts` (`peerNames[subagentId]` is authoritative)
  *   - Whether a failure can self-heal → `self-healing.ts`
  */
+import { newestCodeLine } from "@/lib/code-languages";
+import { extractWritingContent } from "@/lib/extract-writing-content";
 import type { PeerTerminal } from "@/lib/turn-store";
 
 import { deriveTerminalStatus, formatPeerDuration } from "./agent-grouping";
@@ -261,6 +263,8 @@ export interface BandCurrent {
    * it alone indicates whether execution is stuck.
    */
   prose: string;
+  /** Turn visibility FR5: `prose` is the newest line of code being written (rendered as code), not agent prose. */
+  proseIsCode?: boolean;
   /**
    * Current step's tool **category** (`tool-catalog`'s `cat`), for coarse phase copy in the disclosure strip.
    *
@@ -1059,6 +1063,13 @@ export function buildBandModel({
   const prevName = prev ? displayNameOf(prev, peerNames, peerDisplayNames) : "";
   const curName = displayNameOf(cur, peerNames, peerDisplayNames);
   const announceHandoff = handoff && prevName !== curName;
+  // Turn visibility FR5: while an agent writes code, the act names its purpose ("写代码 · 生成看板") and the foot
+  // shows the newest line of that code in place of prose; the band keeps its fixed height.
+  const writingCode = cur.stepType === "lead_thinking_writing" && Boolean(cur.codeLanguage);
+  const intent = writingCode ? stripInternal(cur.label) : "";
+  const codeLine = writingCode
+    ? newestCodeLine(extractWritingContent(cur.partialContent ?? "", cur.toolName, { fallbackToRaw: false }))
+    : "";
 
   return {
     phase: "running",
@@ -1074,16 +1085,17 @@ export function buildBandModel({
       //   while catalog `activeName` already contains `正在` (e.g. `正在整理结果`); passing true renders
       //   `正在正在整理结果`. Previously backend headings almost always prevented catalog fallback;
       //   filtering jargon above now reaches it. History has no wrapper and still uses active names (see :291).
-      what: humanLabel(cur, false),
-      detail: [stripInternal(cur.label), stripInternal(cur.durationText)].filter(Boolean),
+      what: intent ? `${humanLabel(cur, false)} · ${intent}` : humanLabel(cur, false),
+      detail: (writingCode ? [stripInternal(cur.durationText)] : [stripInternal(cur.label), stripInternal(cur.durationText)]).filter(Boolean),
       owner: ownerIdOf(cur, peerNames),
       waitingOnPeer: null,
       waitingOnPeerUnknown: false,
       handoffFrom: announceHandoff ? prevName : null,
       toolCat: toolCatOf(cur),
-      prose: proseTailOf(
-        rowPeerIdOf(cur, peerNames), peerProse, { allowFallback: false },
-      ).text,
+      prose: writingCode
+        ? codeLine
+        : proseTailOf(rowPeerIdOf(cur, peerNames), peerProse, { allowFallback: false }).text,
+      ...(writingCode && codeLine ? { proseIsCode: true } : {}),
     },
   };
 }

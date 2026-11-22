@@ -43,6 +43,22 @@ _VIEWS: dict[str, dict[str, Any]] = _REGISTRY["views"]
 _AUTHORITY: dict[str, dict[str, list[str]]] = _REGISTRY["authority_columns"]
 _LOG = structlog.get_logger(__name__)
 
+# The scope checks behind the chunk and change insert triggers of the request diagnostics. ``+r.user_id`` keeps the
+# planner off ``idx_llm_request_records_user``: without statistics it chose that index for the turn selector and
+# scanned every record of the user (9.7 ms per chunk on 116 with 10,007 records of one user, while the recorder held
+# core's and execution's shared leases). The turn selector uses ``idx_llm_request_records_turn``, the record selector
+# the primary key; the result is the same.
+_REQUEST_SCOPE_BODY = (
+    "SELECT EXISTS(SELECT 1 FROM llm_request_records r JOIN turns t ON t.id=r.turn_id "
+    "JOIN sessions s ON s.id=t.session_id JOIN workspaces w ON w.id=s.workspace_id "
+    "JOIN users u ON u.id=s.user_id WHERE {selector}"
+    " AND r.session_id=s.id AND +r.user_id=s.user_id AND r.workspace_id=s.workspace_id AND r.team_id=w.team_id "
+    "AND u.status='active' AND s.deleted_at IS NULL "
+    "AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=u.id))"
+)
+REQUEST_TURN_SCOPE_SQL = _REQUEST_SCOPE_BODY.format(selector="r.turn_id=?")
+REQUEST_RECORD_SCOPE_SQL = _REQUEST_SCOPE_BODY.format(selector="r.id=?")
+
 
 def compile_domain_trigger(name: str, sql: str) -> str:
     """Rewrite only frozen, reviewed cross-domain trigger definitions."""
@@ -113,6 +129,23 @@ def _lease_callsite() -> str:
     return (context or _operation_context()).callsite
 
 
+#: Opens a writer transaction on a domain connection in place of ``BEGIN IMMEDIATE`` (``DomainCursor._run``).
+#: It takes the file's writer lock up front and changes no row. ``BEGIN IMMEDIATE`` would also start a
+#: snapshot of every read-only attached domain file at once (SQLite 3.46.1 and 3.53.4), before the
+#: authorizer takes that domain's lease, so an authority change committed between BEGIN and the first
+#: read of that domain would go unseen. Every admitted domain file has ``alembic_version``.
+_WRITER_GATE_SQL = "UPDATE main.alembic_version SET version_num=version_num WHERE 0"
+
+#: How long a refused lease may wait inside a transaction (``DomainConnection._may_wait``). Exclusive
+#: holds take 2–8 ms on 116 (the longest under 128 ms); the owner chose one second on 2026-11-22.
+IN_TRANSACTION_LEASE_WAIT_SECONDS = 1.0
+
+
+def _opens_writer(sql: str) -> bool:
+    words = re.findall(r"[a-z]+", sql.lower())
+    return words[:1] == ["begin"] and any(word in {"immediate", "exclusive"} for word in words[1:3])
+
+
 def _busy() -> sqlite3.OperationalError:
     error = sqlite3.OperationalError("database is locked: SQLite authority lease is busy; retry the complete transaction")
     error.sqlite_errorcode = sqlite3.SQLITE_BUSY
@@ -132,6 +165,8 @@ class DomainConnection(DiagnosticConnection):
         self._core_path: Path | None = None
         self._gates: dict[str, Any] = {}
         self._leases: dict[str, int] = {}
+        # When each held lease was first taken and the operation context that took it, for sqlite.lease_held_long.
+        self._lease_taken: dict[str, tuple[float, Any]] = {}
         self._external_authorizer: Any = None
         self._profiles: dict[str, dict[str, int]] = {}
         self._preparing: list[str] = []
@@ -148,6 +183,12 @@ class DomainConnection(DiagnosticConnection):
         self._unprotected_snapshot = False
         # The lease the last refused acquisition asked for, read only when a statement starts to wait.
         self._lease_blocked: tuple[str, int] | None = None
+        # Whether main has the table the writer gate writes to (see ``_WRITER_GATE_SQL``).
+        self._writer_gate = False
+        # For the open transaction: it took its own file's writer lock at BEGIN, and a BEGIN IMMEDIATE or
+        # a script started the attached snapshots before their leases. Both reset when no transaction is open.
+        self._writer_begun = False
+        self._attached_pinned = False
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         if not args:
@@ -175,10 +216,16 @@ class DomainConnection(DiagnosticConnection):
             gate = self._core_path.with_name(f".sqlite-authority-{domain}.lock").open("a+b")
             self._gates[domain] = gate
         previous = self._leases.get(domain, 0)
+        flags = fcntl.LOCK_EX if mode == 2 else fcntl.LOCK_SH
         try:
-            # No waiting while retaining a database writer or snapshot. Competing
-            # cross-domain upgrades fail and require rollback of the whole operation.
-            fcntl.flock(gate.fileno(), (fcntl.LOCK_EX if mode == 2 else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+            # Outside a transaction a refused statement repeats its preparation (``_operation``). Inside
+            # one, a lease waits only as ``_may_wait`` allows; competing upgrades and pinned snapshots fail
+            # and require rollback of the whole operation.
+            try:
+                fcntl.flock(gate.fileno(), flags | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if not (self._may_wait(domain, mode, previous) and self._wait_for(gate, flags, domain, mode)):
+                    raise
         except BlockingIOError:
             if previous == 1:
                 self._lost_lease = True
@@ -188,10 +235,15 @@ class DomainConnection(DiagnosticConnection):
                     # Do not allow any subsequent SQL to use an unprotected old
                     # snapshot; rollback/close remain available to the caller.
                     self._leases.pop(domain, None)
+                    self._lease_taken.pop(domain, None)
                     self._lost_lease = True
             self._lease_blocked = (domain, mode)
             raise _busy() from None
         self._leases[domain] = mode
+        if domain not in self._lease_taken:
+            # Runs inside SQLite callbacks, so it never raises. The call site is resolved only for a long hold.
+            with contextlib.suppress(Exception):
+                self._lease_taken[domain] = (time.monotonic(), _CONTEXT.get() or _operation_context())
         if mode == 2:
             # Exclusive holds are rare (authority writes); remember who holds so a waiting read can name it.
             # This runs inside SQLite callbacks (the authorizer and the guard UDF), where an exception would
@@ -199,7 +251,51 @@ class DomainConnection(DiagnosticConnection):
             with contextlib.suppress(Exception):
                 sqlite_lease_wait.note_exclusive(domain, self.bowhead_connection_id, _lease_callsite())
 
+    def _may_wait(self, domain: str, mode: int, previous: int) -> bool:
+        """Whether a refused lease may wait inside the open transaction without a stale read or a cycle.
+
+        - Shared: the first lease of an attached domain whose snapshot has not started (no BEGIN IMMEDIATE
+          or script pinned it; SQLite starts it at the first read, after this lease), on a connection that
+          holds no exclusive lease.
+        - Exclusive: the connection's own domain, while its transaction holds that file's writer lock, so
+          no other connection can commit to the file meanwhile, and no other lease.
+
+        Whoever is waited on then holds an exclusive lease and waits for none, or holds only shared leases
+        and waits for no exclusive one, so waits cannot form a cycle.
+        """
+        if previous or not self.in_transaction:
+            return False
+        if mode == 1:
+            return domain != self._domain and not self._attached_pinned and all(held != 2 for held in self._leases.values())
+        return domain == self._domain and self._writer_begun and not self._leases
+
+    def _wait_for(self, gate: Any, flags: int, domain: str, mode: int) -> bool:
+        """Poll a refused lease for up to ``IN_TRANSACTION_LEASE_WAIT_SECONDS``; report the wait; never raise."""
+        started = time.monotonic()
+        holder = None
+        with contextlib.suppress(Exception):
+            holder = sqlite_lease_wait.holder_of(domain)
+        sql = self._preparing[-1] if self._preparing else None
+        deadline = started + IN_TRANSACTION_LEASE_WAIT_SECONDS
+        delay = 0.002
+        attempts = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._report_lease_wait((started, (domain, mode), holder), attempts, "timed_out", sql)
+                return False
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, 0.01)
+            attempts += 1
+            try:
+                fcntl.flock(gate.fileno(), flags | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            self._report_lease_wait((started, (domain, mode), holder), attempts, "proceeded", sql)
+            return True
+
     def _release(self) -> None:
+        released = []
         for domain in list(self._leases):
             if self._leases[domain] == 2:
                 # Before unlocking, so the next exclusive holder cannot be forgotten in its place; a failure
@@ -207,7 +303,21 @@ class DomainConnection(DiagnosticConnection):
                 with contextlib.suppress(Exception):
                     sqlite_lease_wait.clear_exclusive(domain, self.bowhead_connection_id)
             fcntl.flock(self._gates[domain].fileno(), fcntl.LOCK_UN)
+            released.append((domain, self._leases[domain], self._lease_taken.get(domain)))
+        # After unlocking, so reporting never lengthens the hold, and never in a way that could fail the release.
+        for domain, mode, taken in released:
+            if taken is not None:
+                with contextlib.suppress(Exception):
+                    sqlite_lease_wait.record_hold(
+                        lease_domain=domain,
+                        lease_mode=mode,
+                        held_ms=(time.monotonic() - taken[0]) * 1000,
+                        context=taken[1],
+                        database=self.bowhead_database,
+                        connection_id=self.bowhead_connection_id,
+                    )
         self._leases.clear()
+        self._lease_taken.clear()
         self._lost_lease = False
         self._unprotected_snapshot = False
 
@@ -268,6 +378,9 @@ class DomainConnection(DiagnosticConnection):
             and not self._preparing
         )
         deadline = time.monotonic() + self.bowhead_busy_timeout_ms / 1000
+        if not self.in_transaction:
+            self._writer_begun = False
+            self._attached_pinned = False
         self._operation_depth += 1
         if sql is not None:
             self._preparing.append(sql)
@@ -391,19 +504,7 @@ class DomainConnection(DiagnosticConnection):
     def _request_child_scope(self, key: str, *, record: bool) -> int:
         if self._domain != "observability":
             raise sqlite3.OperationalError("Unknown SQLite request diagnostic authority")
-        selector = "r.id=?" if record else "r.turn_id=?"
-        return int(
-            self._scalar(
-                "SELECT EXISTS(SELECT 1 FROM llm_request_records r JOIN turns t ON t.id=r.turn_id "
-                "JOIN sessions s ON s.id=t.session_id JOIN workspaces w ON w.id=s.workspace_id "
-                "JOIN users u ON u.id=s.user_id WHERE "
-                + selector
-                + " AND r.session_id=s.id AND r.user_id=s.user_id AND r.workspace_id=s.workspace_id AND r.team_id=w.team_id "
-                "AND u.status='active' AND s.deleted_at IS NULL "
-                "AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=u.id))",
-                (key,),
-            )
-        )
+        return int(self._scalar(REQUEST_RECORD_SCOPE_SQL if record else REQUEST_TURN_SCOPE_SQL, (key,)))
 
     def _authority(self, table: str) -> int:
         if table not in _AUTHORITY.get(self._domain or "", {}):
@@ -550,7 +651,12 @@ class DomainCursor(DiagnosticCursor):
             return super()._run(function, phase, sql)
         connection._operation_depth += 1
         try:
+            if phase == "begin" and sql is not None and not connection.in_transaction and _opens_writer(sql):
+                return self._begin_writer(function, sql)
             result = super()._run(function, phase, sql)
+            if phase == "script" and connection.in_transaction:
+                # A script may have opened BEGIN IMMEDIATE itself, which pins the attached snapshots.
+                connection._attached_pinned = True
             if phase in {"execute", "execute_many", "script"} and self.description is not None:
                 connection._active_readers.add(self)
             if phase == "fetch" and (result is None or result == []):
@@ -559,6 +665,31 @@ class DomainCursor(DiagnosticCursor):
         finally:
             connection._operation_depth -= 1
             connection._settle()
+
+    def _begin_writer(self, function: Any, sql: str) -> Any:
+        """Open a writer transaction: ``BEGIN`` and the writer gate, or the statement itself without a gate.
+
+        Diagnostics still see the caller's statement, so the transaction is reported as immediate. A gate
+        that fails (its writer wait ran out) rolls the empty transaction back, as a failed BEGIN IMMEDIATE
+        leaves none open.
+        """
+        connection = self.connection
+        assert isinstance(connection, DomainConnection)
+        if not connection._writer_gate:
+            result = super()._run(function, "begin", sql)
+            connection._writer_begun = True
+            connection._attached_pinned = True
+            return result
+        super()._run(lambda: sqlite3.Cursor.execute(self, "BEGIN"), "begin", sql)
+        try:
+            result = super()._run(lambda: sqlite3.Cursor.execute(self, _WRITER_GATE_SQL), "execute", _WRITER_GATE_SQL)
+        except BaseException:
+            if connection.in_transaction:
+                with contextlib.suppress(sqlite3.Error):
+                    super()._run(lambda: sqlite3.Cursor.execute(self, "ROLLBACK"), "rollback", "ROLLBACK")
+            raise
+        connection._writer_begun = True
+        return result
 
     def __next__(self) -> Any:
         try:
@@ -705,6 +836,8 @@ def guard_connection(connection: DomainConnection, core_path: Path, domain: str)
     connection._domain = domain
     with connection.execute("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' AND name GLOB 'trg_domain_mutation_*' LIMIT 1") as cursor:
         connection._mutation_guards = cursor.fetchone() is not None
+    with connection.execute("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name='alembic_version'") as cursor:
+        connection._writer_gate = cursor.fetchone() is not None
     if domain not in {"core", "execution", "content"}:
         # These domains have no authority triggers of their own. Resolve the
         # protocol before enabling the authorizer or fixing any read snapshot.

@@ -25,6 +25,9 @@ const {
   fetchSkillFile,
   putSkillFile,
   putSkillBody,
+  changeSkillPackageFile,
+  fetchSkillPackageFile,
+  putSkillPackageFile,
 } = vi.hoisted(() => ({
   changeSkillFile: vi.fn(),
   getTeamSkill: vi.fn(),
@@ -35,6 +38,9 @@ const {
   fetchSkillFile: vi.fn(),
   putSkillFile: vi.fn(),
   putSkillBody: vi.fn(),
+  changeSkillPackageFile: vi.fn(),
+  fetchSkillPackageFile: vi.fn(),
+  putSkillPackageFile: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow-solidify-api", () => ({
@@ -52,6 +58,9 @@ vi.mock("@/lib/api", () => ({
   fetchSkillFile,
   putSkillFile,
   putSkillBody,
+  changeSkillPackageFile,
+  fetchSkillPackageFile,
+  putSkillPackageFile,
 }));
 vi.mock("@/lib/use-app-router", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/use-app-router")>(),
@@ -331,6 +340,71 @@ describe("SkillDrawer · 文件编辑回归", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "x=2" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(putSkillFile).toHaveBeenCalledWith("dupont", "scripts", "nested/run.py", "x=2", REVISION));
+  });
+
+  /* Files outside references/, scripts/ and evals/ are edited by their path from the Skill root (tech-design §12.1). */
+  it("三个目录以外的文件按路径编辑、新建和重命名；非文本文件不能编辑", async () => {
+    fetchSkillDetail.mockResolvedValue({
+      ...personalDetail(),
+      authoring_enabled: true,
+      package_files: [
+        { path: "SKILL.md", size: 60 },
+        { path: "assets/logo.png", size: 6 },
+        { path: "assets/theme.json", size: 2 },
+      ],
+    });
+    fetchSkillPackageFile.mockImplementation(async (_name: string, path: string) =>
+      path === "assets/theme.json"
+        ? { path, content: "{}", unavailable: null, size: 2, mime: "application/json", content_sha256: REVISION }
+        : { path, content: null, unavailable: "binary", size: 6, mime: "image/png", content_sha256: REVISION },
+    );
+    putSkillPackageFile.mockImplementation(async (_name: string, path: string, content: string) => ({
+      path, content, unavailable: null, size: content.length, mime: "application/json", content_sha256: REVISION,
+    }));
+    changeSkillPackageFile.mockImplementation(async (_name: string, input: { path: string; target?: string; content?: string }) => ({
+      path: input.target ?? input.path, content: input.content ?? "{}", unavailable: null, size: 2, mime: "application/json", content_sha256: REVISION,
+    }));
+    renderIntl(<SkillDrawer target={personalTarget("user_upload")} onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "文件 (2)" }));
+
+    fireEvent.click(await screen.findByText("logo.png"));
+    await waitFor(() => expect(screen.getByText(/要替换它，请上传新版本的技能包/)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(screen.getByRole("button", { name: "重命名" })).toBeTruthy();
+
+    fireEvent.click(screen.getByText("返回文件列表"));
+    fireEvent.click(await screen.findByText("theme.json"));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: '{"color": "blue"}' } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(putSkillPackageFile).toHaveBeenCalledWith("dupont", "assets/theme.json", '{"color": "blue"}', REVISION));
+    expect(putSkillFile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("返回文件列表"));
+    fireEvent.change(await screen.findByLabelText("文件目录"), { target: { value: "other" } });
+    fireEvent.change(screen.getByLabelText("相对技能根目录的路径"), { target: { value: "templates/deck.json" } });
+    fireEvent.click(screen.getByRole("button", { name: "新建文件" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "{}" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(changeSkillPackageFile).toHaveBeenCalledWith("dupont", {
+        operation: "create",
+        path: "templates/deck.json",
+        content: "{}",
+        expected_content_sha256: REVISION,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "重命名" }));
+    expect((screen.getByLabelText("相对技能根目录的路径") as HTMLInputElement).value).toBe("templates/deck.json");
+    fireEvent.change(screen.getByLabelText("相对技能根目录的路径"), { target: { value: "templates/main.json" } });
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    await waitFor(() =>
+      expect(changeSkillPackageFile).toHaveBeenLastCalledWith(
+        "dupont",
+        expect.objectContaining({ operation: "rename", path: "templates/deck.json", target: "templates/main.json" }),
+      ),
+    );
+    expect(changeSkillFile).not.toHaveBeenCalled();
   });
 
   it("空 bundle 可以新建 reference，重命名和删除使用明确的文件操作", async () => {

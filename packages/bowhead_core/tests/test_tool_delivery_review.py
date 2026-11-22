@@ -350,7 +350,7 @@ def test_repeated_review_rejection_preserves_partial_results(monkeypatch: pytest
     assert review_terminal_payload(payload, calls, language="zh-CN") is None
     assert payload["completion"] == "partial"
     assert payload["exec_summary"] == "Confirmed annual revenue."
-    assert "尚未完成或核实" in payload["caveats"][0]
+    assert payload["caveats"][0].startswith("未能确认全部要求都已完成。")
 
 
 @pytest.mark.asyncio

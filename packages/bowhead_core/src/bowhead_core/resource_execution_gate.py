@@ -175,6 +175,26 @@ async def check_skill_execution(
     )
 
 
+async def check_selected_skill_grant(ctx: Any, resource: Any, skill_name: str, *, permission: str) -> dict[str, Any] | None:
+    """Recheck the resource grant of a Skill the user selected, keyed by its selected source.
+
+    Its state (enabled, approval, sharing, `use` and version) was rechecked when
+    the tool resolved it; this is the grant recheck `check_skill_execution`
+    makes for other names, without same-name priority.
+    """
+    team_skill = None
+    if getattr(resource, "source_kind", None) == "team":
+        team_store = getattr(ctx, "team_skill_store", None)
+        try:
+            team_skill = await team_store.get_team_skill(ctx.team_id, resource.id, only_enabled=False) if team_store is not None else None
+        except Exception:
+            logger.warning("resource_execution_gate.selected_team_skill_failed skill=%s", skill_name, exc_info=True)
+            return _denied("resource_state_unavailable", "skill state could not be verified")
+        if team_skill is None:
+            return _denied("resource_revoked", "skill is no longer available")
+    return await _check_skill_grant(ctx, skill_name, permission=permission, team_skill=team_skill)
+
+
 async def _check_skill_grant(
     ctx: Any,
     skill_name: str,
@@ -202,4 +222,4 @@ async def _check_skill_grant(
     return None
 
 
-__all__ = ["check_skill_execution", "check_team_tool_execution"]
+__all__ = ["check_selected_skill_grant", "check_skill_execution", "check_team_tool_execution"]

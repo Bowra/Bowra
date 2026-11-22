@@ -206,7 +206,7 @@ async def test_plugin_write_that_never_gets_the_lease_answers_busy_and_writes_no
     from bowhead_core.error_catalog import default_error_catalog_dir, load_error_catalog
     from bowhead_gateway.error_handler import register_error_handlers
 
-    from bowhead_core import _db
+    from bowhead_core import _db, sqlite_request_deadline
 
     path = tmp_path / "bowhead.db"
     initialize_migrated_core_database(path.with_name("bowhead.db"))
@@ -221,7 +221,10 @@ async def test_plugin_write_that_never_gets_the_lease_answers_busy_and_writes_no
         elapsed += delay
 
     monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.05)
-    monkeypatch.setattr(_db, "time", SimpleNamespace(monotonic=lambda: elapsed, time=_db.time.time))
+    clock = SimpleNamespace(monotonic=lambda: elapsed, time=_db.time.time)
+    monkeypatch.setattr(_db, "time", clock)
+    # A request write's deadline (sqlite_request_deadline) is read against the same clock as the repeat.
+    monkeypatch.setattr(sqlite_request_deadline, "time", clock)
     monkeypatch.setattr(_db, "anyio", SimpleNamespace(sleep=pause))
     attempts = _lose_lease(monkeypatch, 10_000)
     app = FastAPI()

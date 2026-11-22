@@ -446,7 +446,7 @@ def _tidy_space_before_cjk_punct(text: str) -> str:
 def _seed_citations_from_sources(registry: Any, parent_ctx: object, invocations: list[Any] | None = None) -> None:
     """canvas-summon: 用**用户看得见的来源编号**给空的 citation 注册表播种。
 
-    现场（116 t_fc73e8cf873c 实测）：Lead 自己调 bi_query 出了 39 家门店的表，终答写
+    现场（a reproduced task 实测）：Lead 自己调 bi_query 出了 39 家门店的表，终答写
     `完整数据见 [cite:1]`。实时流里这个 marker 在，落库的 final_answer 里没了 ——
     句子被剥成「完整数据见 ）」。
 
@@ -555,7 +555,7 @@ _CANVAS_WRITE_PREFIXES = (
 # delivery-surface C1: **Exclude** `sources` / `caveats` too: metadata, not conclusions.
 # Lead aggregation almost always includes peer sources (merge loop below), so counting them defeats
 # the no-content-no-compose gate for BI turns, producing shell reports from exec_summary+sources
-# (116 t_b816e1879d6d: canvas prose merely requested additional evidence).
+# (a reproduced task: canvas prose merely requested additional evidence).
 _REPORT_CONTENT_FIELDS = ("kpis", "insights", "recommendations", "actions")
 
 # Tools producing **report-grade content** on canvas. Any match proves material was produced this turn,
@@ -635,7 +635,7 @@ async def _peer_authored_narrative_exists(parent_ctx: Any, turn_id: str | None) 
 # delivery-surface C5: deterministic recognition of explicit user instructions against report writing.
 #
 # Match only **unambiguous imperatives**. Deliberately exclude requests for one sentence / brief wording / direct numbers:
-# they can modify only one part of a multipart question (116 t_fddef587b612: one-sentence summary was one of four questions,
+# they can modify only one part of a multipart question (a reproduced task: one-sentence summary was one of four questions,
 # so suppressing the whole turn misclassified it). Prefer misses, falling back to evidence defaults, over suppressing genuine reports.
 # Priority chain (tech-design §1): explicit user instruction > explicit Lead decision > evidence default.
 # Only two consumers (r2/F6; not _compute_response_kind_dispatch, where pre_flight short-circuit conflicts with scanner):
@@ -1980,7 +1980,16 @@ async def run_turn(
             # canonical TurnRunner finalizer so live/persisted/replayed status
             # is `cancelled`, not Lead's legacy `aborted` fallback.
             from bowhead_core.orchestrator import TurnCancelledError
+            from bowhead_core.unfinished_turn_context import publish_stopped_turn
 
+            # Publish what the Lead had done while the cancellation is still this one: a
+            # task group further out may wrap it, and the finalizer then never runs.
+            await publish_stopped_turn(
+                runtime.parent_bus,
+                store=getattr(runtime.parent_ctx, "session_store", None),
+                turn_id=sctx.turn_id,
+                ctx=runtime.parent_ctx,
+            )
             raise TurnCancelledError("turn cancelled by durable request") from cancel_exc
         if getattr(runtime.parent_bus, "terminal_protocol_version", None) == 1:
             # A raw cancellation inside a terminal generation is not proof of
@@ -3820,7 +3829,7 @@ async def _run_plan_execution_turn(
                     _cw_payload["title"] = _tail_title or str(_cw_payload.get("title") or "").strip() or "计划执行报告"
                     # G3 (decision #2): cover KPI band **from closing chapter**, not first N cross-chapter aggregates.
                     # Aggregation first-wins accumulation ⇒ chapter 1/2 cards duplicated verbatim in evidence
-                    # (116 t_c9853b490565); decision explicitly calls this bug, pure noise.
+                    # (a reproduced task); decision explicitly calls this bug, pure noise.
                     # Closing chapter without KPI → omit band (do not invent), never fill with noise.
                     if _tail_title:
                         _cw_payload["kpis"] = _tail_kpis
@@ -4963,7 +4972,7 @@ async def _compose_turn_output_unchecked(
             _plan_kind_for_decision = "answer"
         elif force_canvas:
             _plan_kind_for_decision = "report"
-    # canvas-update-turn batch B0 (116 t_6c1cd1b92dfa): in-place revision of prior body (canvas-writer
+    # canvas-update-turn batch B0 (a reproduced task): in-place revision of prior body (canvas-writer
     # canvas_patch_section: thin payload, no appended sections) also definitive output—without admission, revision finalizer never runs.
     # Same memo as _peer_authored_hit: at most one DB query per turn; flag off always empty.
     _revised_memo: list[Any] | None = None
@@ -5353,7 +5362,7 @@ async def _compose_turn_output_unchecked(
                     )
                 except Exception:  # noqa: S110
                     pass
-            # Same restatement criterion for final_answer—116 t_a164a57d1ec8: narrative
+            # Same restatement criterion for final_answer—a reproduced task: narrative
             # suppressed, but text_for_chat retained same wrong numbers (slope 82.622 vs report 82.937,
             # 0.38% drift), unseen within old 2% tolerance; user still sees error, now once instead of
             # twice. Both surfaces must use same criterion, or narrative suppression only moves problem.
@@ -5362,7 +5371,7 @@ async def _compose_turn_output_unchecked(
                 _chat_reason = "restatement_drift" if _chat_drifted else "unmatched_vs_tool_results"
                 # The replacement must pass the same user-facing checks. A summary that is itself
                 # unsupported or still shows Tool names, result codes or internal IDs is not a better
-                # answer (116 t_7edbc155f8d8); keep the original prose rather than suppress it.
+                # answer (a reproduced task); keep the original prose rather than suppress it.
                 _replacement_problem = _chat_replacement_problem(
                     str(aggregated_payload.get("exec_summary") or ""),
                     observed=_fab_observed,
@@ -5562,7 +5571,7 @@ async def _compose_turn_output_unchecked(
     except Exception:
         # ★ warning, not debug: production debug disabled, exceptions here become **entirely silent**—
         # guard appears active yet swallowed every turn, despite being final overclaim backstop.
-        # 116 t_72011a27fce9: recalculation deserved flag yet zero logs/revisions; could not tell
+        # a reproduced task: recalculation deserved flag yet zero logs/revisions; could not tell
         # unreached vs exception, because no trace here. Include exc_info, otherwise
         # err=... alone cannot locate failing step.
         logger.warning(
@@ -6444,10 +6453,23 @@ async def _lead_loop(
                         _instructions_by_turn = await _applied_reader([str(t.id) for t in _turns_all if str(t.id) != str(sctx.turn_id)][-60:])
                     except Exception as _ai_e:  # noqa: BLE001 — history keeps the original requests
                         logger.warning("lead.turn_history_instructions_failed turn=%s err=%s", sctx.turn_id, _ai_e)
+                # An unfinished Turn keeps what it had shown of the reply its ending cut off.
+                # Unavailable input does not block the Turn.
+                _unfinished_replies: dict[str, str] | None = None
+                _replies_reader = getattr(_ss_hist, "list_unfinished_replies", None)
+                if callable(_replies_reader):
+                    from bowhead_core.context_assembly import INCOMPLETE_TURN_MARKERS as _UNFINISHED
+
+                    _unfinished_ids = [str(t.id) for t in _turns_all if getattr(t, "status", None) in _UNFINISHED and str(t.id) != str(sctx.turn_id)]
+                    try:
+                        _unfinished_replies = await _replies_reader(_unfinished_ids[-60:]) if _unfinished_ids else None
+                    except Exception as _ur_e:  # noqa: BLE001 — history keeps the markers
+                        logger.warning("lead.turn_history_unfinished_replies_failed turn=%s err=%s", sctx.turn_id, _ur_e)
                 _th = _build_turn_history(
                     _turns_all,
                     exclude_turn_id=sctx.turn_id,
                     instructions=_instructions_by_turn,
+                    unfinished_replies=_unfinished_replies,
                     budget_tokens=_hist_budget_tokens,
                     hysteresis=_HIST_HYST,
                     make_message=lambda role, content: _HMessage(role=role, content=content),
@@ -6813,6 +6835,10 @@ async def _lead_loop(
             return int(snapshot["emitted_chars"])
 
         stream_restart_cb = _withdraw_stream_attempt
+        # The Lead run reads what the user has seen of its narrative here, to keep the reply an
+        # unfinished Turn cut off. A bus that cannot hold the reader leaves that text out.
+        with contextlib.suppress(AttributeError, TypeError):
+            runtime.parent_bus._shown_lead_narrative = lambda: getattr(runtime.parent_ctx, "_lead_narrative_text", "") or ""
 
         # Sprint phase-plan-removal: turn.plan derive + emit block removed.
         # Shape-gate signal now driven by tool_call / agent_spawned / peer_dispatched
@@ -7329,6 +7355,16 @@ async def _lead_loop(
             runtime.parent_ctx._selected_skill_messages = selected_skill_messages(_selected_skills, history=_history_msgs or ())
             # Skills selected in earlier Turns stay dispatchable by name from Lead's own history.
             runtime.parent_ctx._history_skill_texts = history_skill_texts(_history_msgs or ())
+            # Name-keyed Skill lookups of Lead and its helpers use the selected sources (tech-design §6).
+            from bowhead_core.selected_skill_runtime import history_selected_resources
+
+            _earlier_selected = await history_selected_resources(
+                runtime.parent_ctx,
+                session_id=sctx.session_id,
+                turn_id=sctx.turn_id,
+                names=[name for name in runtime.parent_ctx._history_skill_texts if name not in {skill.name for skill in _selected_skills}],
+            )
+            runtime.parent_ctx.selected_skill_resources = {**_earlier_selected, **{skill.name: skill.resource for skill in _selected_skills}}
             result = await runner.run(
                 profile_name="lead",
                 **({"exact_binding": _context_lead_binding} if _context_lead_binding is not None else {}),
@@ -8784,6 +8820,8 @@ async def _lead_loop(
                 # set key only nonempty, return count.)
                 if _lookup_arts:
                     _lookup_payload["inline_artifacts"] = _lookup_arts
+                if _lookup_outputs := await _collect_turn_outputs(runtime.parent_ctx, sctx.turn_id):
+                    _lookup_payload["outputs"] = _lookup_outputs
                 _lookup_art_count = len(_lookup_arts)
                 await _v4_emit_event("lead.final.payload", _lookup_payload)
                 runtime.parent_ctx._v4_final_payload_emitted = True
@@ -9694,6 +9732,9 @@ async def _inject_inline_artifacts(
     arts = await _collect_inline_artifacts(parent_ctx, turn_id)
     if arts:
         payload_dict["inline_artifacts"] = arts
+    # Turn visibility FR12: the finished line counts what the Turn produced.
+    if outputs := await _collect_turn_outputs(parent_ctx, turn_id):
+        payload_dict["outputs"] = outputs
     return len(arts)
 
 
@@ -9901,6 +9942,98 @@ def _inline_image_artifact(sec: Any) -> dict[str, Any] | None:
     return out
 
 
+async def _current_turn_deliverables(art_store: Any, turn_id: str) -> tuple[list[Any], bool]:
+    """The deliverables this Turn's answer shows, and whether the Turn delivered any file at all.
+
+    One list for the file items and the output count, so they never disagree. A revised input and
+    every earlier copy a helper rewrote leave the answer (the trace keeps them); a later version of
+    the same file written in this Turn replaces its card (file versions R3).
+    """
+    delivs = await art_store.list_deliverables_for_turn(turn_id)
+    from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    identities = {artifact.id: (artifact.filename, artifact.mime) for artifact in delivs}
+    superseded: set[str] = set()
+    if len(set(identities.values())) < len(identities):
+        try:
+            events = await TurnLogStore(str(art_store.db_path)).list_events(turn_id, event_types=("step_started", "step_done"))
+            step_events = [(event.event_type, event.payload) for event in events]
+            superseded = superseded_deliverable_ids(identities, step_events) | rewritten_deliverable_ids(identities, step_events)
+        except Exception:
+            logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
+    newest_in_turn: dict[str, int] = {}
+    for d in delivs:
+        root = getattr(d, "lineage_id", None) or d.id
+        newest_in_turn[root] = max(newest_in_turn.get(root, 0), getattr(d, "version_no", None) or 1)
+    shown = [
+        d
+        for d in delivs
+        if d.id not in superseded and (getattr(d, "version_no", None) or 1) >= newest_in_turn[getattr(d, "lineage_id", None) or d.id]
+    ]
+    return shown, bool(delivs)
+
+
+#: Turn visibility FR12: the order of output kinds in the finished line.
+_OUTPUT_KINDS: tuple[str, ...] = ("report", "chart", "web_page", "presentation", "pdf", "document", "spreadsheet", "image", "file")
+_OUTPUT_KIND_BY_SUFFIX: dict[str, str] = {
+    **dict.fromkeys(("html", "htm"), "web_page"),
+    "pptx": "presentation",
+    "pdf": "pdf",
+    **dict.fromkeys(("docx", "md"), "document"),
+    **dict.fromkeys(("xlsx", "csv"), "spreadsheet"),
+    **dict.fromkeys(("png", "jpg", "jpeg", "webp", "gif", "svg"), "image"),
+}
+
+
+def _output_kind(filename: Any) -> str:
+    suffix = str(filename or "").rsplit(".", 1)[-1].lower() if "." in str(filename or "") else ""
+    return _OUTPUT_KIND_BY_SUFFIX.get(suffix, "file")
+
+
+async def _collect_turn_outputs(parent_ctx: Any, turn_id: str) -> list[dict[str, Any]]:
+    """What this Turn produced, counted by kind for the finished line (turn visibility FR12).
+
+    A report when the Turn's sections stay in Canvas (the same `is_report_worthy` decision as the done
+    chokepoint), each chart section it appended, and the deliverables its answer shows, by file type.
+    Stored with the answer, so live, reloaded and replayed views count the same. Best-effort: a lookup
+    failure returns [] and the line keeps its old wording.
+    """
+    from collections import Counter
+
+    try:
+        counts: Counter[str] = Counter()
+        delivs: list[Any] = []
+        had_deliverable = False
+        art_store = getattr(parent_ctx, "artifact_store", None)
+        if art_store is not None:
+            delivs, had_deliverable = await _current_turn_deliverables(art_store, turn_id)
+        canvas_store = getattr(parent_ctx, "canvas_store", None)
+        sections = []
+        if canvas_store is not None:
+            sections = [s for s in await canvas_store.list_sections_appended_by_turn(turn_id) if not getattr(s, "superseded", False)]
+        if sections:
+            from bowhead_core.agents.delivery_decision import declared_surface_from_bus
+
+            bus = getattr(parent_ctx, "parent_bus", None)
+            keep, _ = is_report_worthy(
+                sections,
+                has_deliverable=had_deliverable,
+                is_plan_execution=bool(getattr(bus, "_d6_is_plan_execution", False)),
+                plan_deliverable_kind=getattr(bus, "_d6_plan_deliverable_kind", None),
+                declared=declared_surface_from_bus(bus),
+            )
+            if keep:
+                counts["report"] = 1
+            counts["chart"] = sum(1 for s in sections if s.kind == "chart")
+        for d in delivs:
+            counts[_output_kind(getattr(d, "filename", None))] += 1
+        return [{"kind": kind, "count": counts[kind]} for kind in _OUTPUT_KINDS if counts[kind]]
+    except Exception:
+        logger.warning("turn_outputs.collect_failed turn=%s", turn_id, exc_info=True)
+        return []
+
+
 async def _collect_inline_artifacts(
     parent_ctx: Any,
     turn_id: str,
@@ -9950,29 +10083,8 @@ async def _collect_inline_artifacts(
         _art_store = getattr(parent_ctx, "artifact_store", None)
         if _art_store is not None:
             try:
-                _delivs = await _art_store.list_deliverables_for_turn(turn_id)
-                _has_deliverable = bool(_delivs)
-                from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
-                from bowhead_core.turn_log_store import TurnLogStore
-
-                identities = {artifact.id: (artifact.filename, artifact.mime) for artifact in _delivs}
-                superseded: set[str] = set()
-                if len(set(identities.values())) < len(identities):
-                    try:
-                        events = await TurnLogStore(str(_art_store.db_path)).list_events(turn_id, event_types=("step_started", "step_done"))
-                        step_events = [(event.event_type, event.payload) for event in events]
-                        # A revised input, and every earlier copy a helper rewrote, leave the answer; the trace keeps them.
-                        superseded = superseded_deliverable_ids(identities, step_events) | rewritten_deliverable_ids(identities, step_events)
-                    except Exception:
-                        logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
-                # File versions (R3): a later version of the same file written in this Turn replaces its card.
-                newest_in_turn: dict[str, int] = {}
+                _delivs, _has_deliverable = await _current_turn_deliverables(_art_store, turn_id)
                 for _d in _delivs:
-                    root = getattr(_d, "lineage_id", None) or _d.id
-                    newest_in_turn[root] = max(newest_in_turn.get(root, 0), getattr(_d, "version_no", None) or 1)
-                for _d in _delivs:
-                    if _d.id in superseded or (getattr(_d, "version_no", None) or 1) < newest_in_turn[getattr(_d, "lineage_id", None) or _d.id]:
-                        continue
                     _chip = await _deliverable_inline_artifact(_art_store, _d)
                     if _chip is not None:
                         out.append(_chip)

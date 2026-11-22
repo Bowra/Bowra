@@ -14,8 +14,9 @@ and its character offsets; paged files must retain the same target revision.
 Preserve unrelated text and binary assets.
 
 Author focused `{path, content}` changes, then `agent_skill_validate` and
-`agent_skill_save`. Supported writable paths are `SKILL.md`, `references/`,
-`scripts/` and `evals/`; null deletes a file but the manifest cannot be deleted.
+`agent_skill_save`. Any text file can be written by its exact path from the
+Skill root, in any folder or at the root; null deletes a file but the manifest
+cannot be deleted.
 For a text-only method, write the requested package directly rather than reading
 multiple whole frameworks for style. A draft-only request stops before saving.
 

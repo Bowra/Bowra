@@ -9,7 +9,14 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 import yaml
-from bowhead_skill.bundle_files import MAX_TEXT_BYTES, validate_file_ref
+from bowhead_skill.bundle_files import (
+    MAX_TEXT_BYTES,
+    BundleFileError,
+    package_file_listing,
+    package_miss,
+    package_read_result,
+    resolve_package_path,
+)
 from bowhead_skill.index import substitute_args
 from bowhead_skill.loader import split_skill_markdown
 from bowhead_skill.script_langs import entry_extensions, script_execution_mode
@@ -19,12 +26,17 @@ from bowhead_core.skill_package_material import PreparedSkillPackage
 
 
 def snapshot_skill_read_arguments(arguments: dict) -> dict:
-    """Detach bounded tool arguments before any authorization await."""
+    """Detach bounded tool arguments before any authorization await.
+
+    `null` or empty optionals count as omitted, as the ordinary handler treats
+    them; every exact layer compares this snapshot. Unknown keys stay refused.
+    """
     try:
+        if type(arguments) is not dict or set(arguments) - {"name", "file", "ref", "args"}:
+            raise ValueError()
+        arguments = {key: value for key, value in arguments.items() if key == "name" or value not in (None, "")}
         if (
-            type(arguments) is not dict
-            or set(arguments) - {"name", "file", "ref", "args"}
-            or type(arguments.get("name")) is not str
+            type(arguments.get("name")) is not str
             or not arguments["name"].strip()
             or any(key in arguments and type(arguments[key]) is not str for key in ("file", "ref"))
         ):
@@ -36,6 +48,23 @@ def snapshot_skill_read_arguments(arguments: dict) -> dict:
         return {**arguments, "name": arguments["name"].strip(), "args": list(raw) if type(raw) is list else raw}
     except Exception:
         raise ValueError("reference_skill_arguments_unavailable") from None
+
+
+def read_package_path(name: str, files: dict[str, bytes], requested: str, *, prefer_references: bool) -> dict:
+    """Read one exact package file by the path the model passed.
+
+    Same resolver and result shapes as the ordinary handler (skill-bundle-read
+    tech-design §4). A miss is the model's to correct, so it returns the package
+    files instead of raising.
+    """
+    listing = sorted((path, len(data)) for path, data in files.items())
+    try:
+        path = resolve_package_path(requested, files, prefer_references=prefer_references)
+    except BundleFileError:
+        return package_miss(name, requested, listing, reason="skill_path_invalid")
+    if path is None:
+        return package_miss(name, requested, listing)
+    return package_read_result(name, path, files[path], ref_requested=prefer_references)
 
 
 def read_baseline_package(package: PreparedSkillPackage, arguments: dict, *, invoke_allowed: bool = False) -> dict:
@@ -54,18 +83,9 @@ def read_baseline_package(package: PreparedSkillPackage, arguments: dict, *, inv
         }
         file, ref = arguments.get("file", "").strip(), arguments.get("ref", "").strip()
         if file or ref:
-            if not file:
-                validate_file_ref("references", ref)
-                if "references/" + ref not in files and not PurePosixPath(ref).suffix:
-                    ref += ".md"
-                file = "references/" + ref
-            if file != "SKILL.md":
-                kind, _, filename = file.partition("/")
-                validate_file_ref(kind, filename)
-            data = files[file]
-            if len(data) > MAX_TEXT_BYTES or b"\0" in data:
-                raise ValueError()
-            return {**result, "file": file, "body": data.decode("utf-8"), **({"ref": ref} if ref else {})}
+            read = read_package_path(package.name, files, file or ref, prefer_references=not file)
+            # A miss stands alone; a resolved file (even one too large to show) keeps the package identity.
+            return read if "requested" in read else {**result, **read}
         header, body = split_skill_markdown(files["SKILL.md"].decode("utf-8"))
         metadata = yaml.safe_load(header)
         allowed = metadata.get("allowed-tools") or metadata.get("allowed_tools") or []
@@ -86,6 +106,7 @@ def read_baseline_package(package: PreparedSkillPackage, arguments: dict, *, inv
             allowed_tools=allowed,
             references=[path.removeprefix("references/") for path in files if path.startswith("references/")],
             scripts=scripts,
+            **package_file_listing(sorted((path, len(data)) for path, data in files.items())),
             script_execution=(
                 script_execution_mode(
                     name=package.name,

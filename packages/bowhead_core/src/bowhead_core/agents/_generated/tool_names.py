@@ -34,6 +34,7 @@ AGENT_EVAL_EVIDENCE_GET = "agent_eval_evidence_get"
 AGENT_EVAL_SUITE_GET = "agent_eval_suite_get"
 AGENT_EVAL_SUITE_LIST = "agent_eval_suite_list"
 AGENT_EVAL_TURNS_LIST = "agent_eval_turns_list"
+AGENT_MESSAGE = "agent_message"
 AGENT_OPERATION_GET = "agent_operation_get"
 AGENT_OPERATION_OPEN = "agent_operation_open"
 AGENT_PLUGIN_INSPECT = "agent_plugin_inspect"
@@ -88,6 +89,7 @@ KB_OPERATION_STATUS = "kb_operation_status"
 KB_QUERY_RECORDS = "kb_query_records"
 KB_REMOVE_FILE = "kb_remove_file"
 KB_SEARCH = "kb_search"
+PLAN_PROPOSE = "plan_propose"
 PRESENT_ARTIFACTS = "present_artifacts"
 PYTHON_EXEC = "python_exec"
 PYTHON_SANDBOX = "python_sandbox"
@@ -97,6 +99,7 @@ RECALL = "recall"
 REMEMBER = "remember"
 REMOVE_CHART = "remove_chart"
 RENDER_DECK = "render_deck"
+REVIEW_DELIVERY = "review_delivery"
 ROUTINE_NOTIFY = "routine_notify"
 SEND_EMAIL = "send_email"
 SKILL_INVOKE = "skill_invoke"
@@ -108,6 +111,7 @@ SUBAGENT_SPAWN = "subagent_spawn"
 TEMPLATE_DOCUMENT_SUBMIT = "template_document_submit"
 TOOL_LIST_WORKSPACES = "tool_list_workspaces"
 TOOL_SWITCH_CONTEXT = "tool_switch_context"
+VIEW_FILE = "view_file"
 WEB_CRAWL = "web_crawl"
 WEB_DEEP_RESEARCH = "web_deep_research"
 WEB_EXTRACT = "web_extract"
@@ -146,6 +150,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "agent_eval_suite_get",
     "agent_eval_suite_list",
     "agent_eval_turns_list",
+    "agent_message",
     "agent_operation_get",
     "agent_operation_open",
     "agent_plugin_inspect",
@@ -200,6 +205,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "kb_query_records",
     "kb_remove_file",
     "kb_search",
+    "plan_propose",
     "present_artifacts",
     "python_exec",
     "python_sandbox",
@@ -209,6 +215,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "remember",
     "remove_chart",
     "render_deck",
+    "review_delivery",
     "routine_notify",
     "send_email",
     "skill_invoke",
@@ -220,6 +227,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "template_document_submit",
     "tool_list_workspaces",
     "tool_switch_context",
+    "view_file",
     "web_crawl",
     "web_deep_research",
     "web_extract",

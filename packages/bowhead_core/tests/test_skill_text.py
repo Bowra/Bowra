@@ -50,3 +50,14 @@ def test_skill_read_keeps_its_json_model_view():
     result = {"name": "x", "body": BODY}
     content = _serialize(ToolInvocation(tool_name="skill_read", arguments={"name": "x"}, result=result))
     assert json.loads(content) == result
+
+
+def test_package_files_follow_the_method_and_stay_short():
+    files = [(f"references/part-{index:03}.md", index) for index in range(60)]
+    text = render_skill_text(name="review", body="Method", package_files=files)
+    listing = text.split("<skill_files>", 1)[1]
+    assert text.index("Method") < text.index("<skill_files>")
+    assert 'skill_read(name="review", file="<path>")' in listing
+    assert "references/part-049.md (49 bytes)" in listing and "part-050" not in listing
+    assert '… and 10 more files; skill_read(name="review") lists them all.' in listing
+    assert "<skill_files>" not in render_skill_text(name="review", body="Method")

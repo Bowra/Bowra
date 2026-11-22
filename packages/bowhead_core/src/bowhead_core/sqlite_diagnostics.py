@@ -168,9 +168,23 @@ def summarize_statement(sql: str | None) -> StatementSummary:
 class _OperationContext:
     callsite: str
     request_ids: tuple[tuple[str, str], ...]
+    #: The attempt number while ``_db.repeat_while_busy`` runs this operation, else ``None``.
+    retry_attempt: int | None = None
 
 
 _CONTEXT: contextvars.ContextVar[_OperationContext | None] = contextvars.ContextVar("sqlite_diagnostic_context", default=None)
+_RETRY_ATTEMPT: contextvars.ContextVar[int | None] = contextvars.ContextVar("sqlite_retry_attempt", default=None)
+
+
+def enter_retry_attempt(attempt: int) -> contextvars.Token[int | None]:
+    """Mark the operations of one repeat attempt; pass the token to ``leave_retry_attempt``."""
+    return _RETRY_ATTEMPT.set(attempt)
+
+
+def leave_retry_attempt(token: contextvars.Token[int | None]) -> None:
+    _RETRY_ATTEMPT.reset(token)
+
+
 _SAFE_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 _RUNTIME_FILES = frozenset({"sqlite_diagnostics.py", "sqlite_domain_runtime.py", "_db.py"})
 # Frames that stand between this runtime and the code that asked for the statement: the driver, whose
@@ -227,7 +241,7 @@ def _operation_context() -> _OperationContext:
         # be matched with that request's ``gateway.http_request_completed`` line.
         if key in {"request_id", "http_request_id", "trace_id", "turn_id"} and isinstance(value, str) and _SAFE_ID.fullmatch(value)
     )
-    return _OperationContext(callsite, ids)
+    return _OperationContext(callsite, ids, _RETRY_ATTEMPT.get())
 
 
 def _kind(sql: str) -> str:
@@ -393,13 +407,16 @@ class DiagnosticConnection(sqlite3.Connection):
                 "sql_unavailable_reason": summary.reason,
                 "callsite": context.callsite,
                 "statement_completed": self.bowhead_recent_completed,
-                "retry_attempt": None,
+                "retry_attempt": context.retry_attempt,
                 **dict(context.request_ids),
             }
             version = os.environ.get("BOWHEAD_VERSION", "")
             fields["app_version"] = version if _SAFE_ID.fullmatch(version) else "unavailable"
+            # A busy or locked failure inside a repeat is expected and the repeat logs its own outcome
+            # (sqlite.authority_busy_wait_*), so it is kept at info rather than adding an error line per attempt.
+            expected = context.retry_attempt is not None and isinstance(code, int) and code & 0xFF in {5, 6}
             # Do not merge unrelated context variables or include the exception's raw message.
-            contextvars.Context().run(log.error, "sqlite.operation_failed", **fields)
+            contextvars.Context().run(log.info if expected else log.error, "sqlite.operation_failed", **fields)
         except Exception:  # noqa: S110 -- A failing diagnostic sink must not replace the SQLite error.
             # Diagnostics must preserve the original SQLite error even if the log sink fails.
             pass

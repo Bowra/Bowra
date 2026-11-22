@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import WRITER_WAIT_SECONDS, open_pooled_read_ctx, open_shared_ctx, repeat_while_busy, writer_busy
 from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.sqlite_readable_schema import readable_table_exists
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from bowhead_core.chat_references import SkillResourceRef
     from bowhead_core.coach_operation_history import CoachOperationHistory
     from bowhead_core.context_action import ContextMaintenanceAction
+    from bowhead_core.context_publication import ContextPublication
     from bowhead_core.document_chat_continuation import DocumentResumeReservation, DocumentTurnOwner
 from bowhead_core.chat_turn_source import (
     ChatTurnUserSource,
@@ -103,6 +105,23 @@ def _record_completion_write(turn_id: str, elapsed_ms: float, *, context: bool, 
             help="Duration of the Turn completion transaction, which holds the execution writer lock.",
             buckets=(50, 250, 1_000, 5_000, 15_000, 30_000, 60_000),
         )
+
+
+async def verify_publication_authority(publication: ContextPublication, answer: str) -> ContextPublication:
+    """``publication.verify_authority``, repeated while a SQLite lock is busy.
+
+    The check only reads, before the completion takes the writer lock, so a busy lease or writer lock
+    says nothing about authority. On 116 (1.7.62) a busy lease here was reported as an unavailable
+    source and a finished Turn was lost. The repeats share the writer wait of ``WRITER_WAIT_SECONDS``.
+    """
+    deadline = time.monotonic() + WRITER_WAIT_SECONDS
+    return await repeat_while_busy(
+        lambda: publication.verify_authority(answer),
+        retry=writer_busy,
+        seconds_left=lambda: deadline - time.monotonic(),
+        first_delay=0.01,
+        max_delay=0.25,
+    )
 
 
 async def _begin_worker_transition(db: aiosqlite.Connection, *, turn_id: str, worker: DocumentTurnOwner | None) -> bool:
@@ -5379,6 +5398,38 @@ class SessionStore:
                         taken.setdefault(str(turn_id), []).extend(texts)
         return taken
 
+    async def list_unfinished_replies(self, turn_ids: list[str]) -> dict[str, str]:
+        """Return what each given Turn had shown of the Lead reply its ending cut off.
+
+        Reads the Lead's published narrative and model-call events of ``turn_events``. A Turn
+        without such text is absent from the result; a malformed row is skipped.
+        """
+        from bowhead_core.unfinished_turn_context import unfinished_reply_from_events
+
+        ids = [str(turn_id) for turn_id in dict.fromkeys(turn_ids) if turn_id]
+        events: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        # A pure read of committed events: the read-only pool takes no authority lease.
+        async with open_pooled_read_ctx(self._db_path) as db:
+            for start in range(0, len(ids), 200):
+                chunk = ids[start : start + 200]
+                placeholders = ",".join("?" for _ in chunk)
+                async with db.execute(
+                    f"SELECT turn_id, event_type, payload_json FROM turn_events "  # noqa: S608 — placeholders only
+                    f"WHERE turn_id IN ({placeholders}) AND event_type IN ('narrative.delta','llm.call_timing','llm.stream_restarted') "
+                    f"ORDER BY turn_id, seq",
+                    tuple(chunk),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                for turn_id, event_type, payload_json in rows:
+                    try:
+                        payload = json.loads(str(payload_json))
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(payload, dict):
+                        events.setdefault(str(turn_id), []).append((str(event_type), payload))
+        replies = {turn_id: unfinished_reply_from_events(items) for turn_id, items in events.items()}
+        return {turn_id: reply for turn_id, reply in replies.items() if reply}
+
     async def materialize_steer_follow_up(
         self,
         *,
@@ -6671,7 +6722,9 @@ class SessionStore:
 
         if reference_store is not None and type(reference_store) is not ChatReferenceStore:
             raise TypeError("reference_store must be ChatReferenceStore")
-        async with open_shared_ctx(self._db_path) as db:
+        # A pure read: the read-only pool takes no authority lease, so an exclusive writer of core no longer turns
+        # this list into a 503 (116, 1.7.61). It reads one committed snapshot and always rolls back.
+        async with open_pooled_read_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             try:
@@ -7001,7 +7054,7 @@ class SessionStore:
             if isinstance(context_publication, ContextPublication):
                 # Authority is rechecked here, before the writer lock: the checks read other databases and
                 # must not keep every other Turn from writing while they run.
-                context_publication = await context_publication.verify_authority(final_answer)
+                context_publication = await verify_publication_authority(context_publication, final_answer)
             async with open_shared_ctx(self._db_path) as db:
                 if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
                     return False
@@ -7555,27 +7608,30 @@ class SessionStore:
     ) -> bool:
         """Commit a worker-owned ending, with the Lead's transcript when one can be published.
 
-        The transcript ends with the marker history already uses for this ending. A publication
-        that cannot be prepared, verified or stored is skipped, and the status change is written
-        on its own: the next Turn then reads the Turn rebuilt from events.
+        The transcript ends with the marker history already uses for this ending, after what the
+        Turn had shown of the reply that was cut off. A publication that cannot be prepared,
+        verified or stored is skipped, and the status change is written on its own: the next Turn
+        then reads the Turn rebuilt from events.
         """
-        from bowhead_core.context_assembly import incomplete_turn_marker
+        from bowhead_core.context_assembly import incomplete_turn_marker, unfinished_turn_answer
         from bowhead_core.context_publication import ContextPublication
 
         if isinstance(context_publication, ContextPublication) and worker is not None and await self.worker_owns_running_turn(turn_id, worker):
-            marker = incomplete_turn_marker(status, error_kind if status == "failed" else None)
+            closing = unfinished_turn_answer(
+                incomplete_turn_marker(status, error_kind if status == "failed" else None), context_publication.unfinished_reply
+            )
             started = datetime.now(tz=UTC)
             try:
-                prepared = await context_publication.prepare_for_answer(marker)
+                prepared = await context_publication.prepare_for_answer(closing)
                 async with prepared.open_adoption_readers() as publication:
                     # Authority is rechecked before the writer lock, as for a completed Turn.
-                    publication = await publication.verify_authority(marker)
+                    publication = await verify_publication_authority(publication, closing)
                     prepared_at = datetime.now(tz=UTC)
                     async with open_shared_ctx(self._db_path) as db:
                         if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
                             return False
                         try:
-                            await publication(db, marker)
+                            await publication(db, closing)
                             transitioned = await write(db)
                             if transitioned:
                                 await db.commit()
@@ -7635,7 +7691,7 @@ class SessionStore:
         own, admitted for the stopped owner only (``require_stopped_worker_in_tx``). It is
         refused once a later Turn exists. Returns whether the transcript was published.
         """
-        from bowhead_core.context_assembly import incomplete_turn_marker
+        from bowhead_core.context_assembly import incomplete_turn_marker, unfinished_turn_answer
         from bowhead_core.context_ownership import StoppedTurnOwner
         from bowhead_core.context_publication import ContextPublication
 
@@ -7643,17 +7699,17 @@ class SessionStore:
             return False
         if context_publication.worker.turn_id != turn_id:
             return False
-        marker = incomplete_turn_marker("cancelled")
+        closing = unfinished_turn_answer(incomplete_turn_marker("cancelled"), context_publication.unfinished_reply)
         started = datetime.now(tz=UTC)
         try:
-            prepared = await context_publication.prepare_for_answer(marker)
+            prepared = await context_publication.prepare_for_answer(closing)
             async with prepared.open_adoption_readers() as publication:
-                publication = await publication.verify_authority(marker)
+                publication = await verify_publication_authority(publication, closing)
                 prepared_at = datetime.now(tz=UTC)
                 async with open_shared_ctx(self._db_path) as db:
                     await db.execute("BEGIN IMMEDIATE")
                     try:
-                        await publication(db, marker)
+                        await publication(db, closing)
                         await db.commit()
                     except BaseException:
                         await db.rollback()

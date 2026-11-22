@@ -23,6 +23,7 @@
  * add fields here for every surface to receive them.
  * Gate: `TurnContainer.step-projection.test.tsx` (including a real-ingest case).
  */
+import { extractWritingIntent } from "@/lib/extract-writing-content";
 import { inferFailureUiKind, type PeerTerminal, type Step } from "@/lib/turn-store";
 
 import type { StepView } from "./types";
@@ -88,7 +89,8 @@ export function stepToStepView(
     stepType: step.stepType,
     toolName: step.toolName,
     headerZh: step.headerZh,
-    label: step.label ?? undefined,
+    // Turn visibility FR5: a code writing row names its purpose as soon as `intent` streams in.
+    label: step.label ?? (isWritingStep(step) ? extractWritingIntent(step.partialContent) : null) ?? undefined,
     state: step.state,
     summary: legacyAdmissionBlock ? undefined : step.summary ?? undefined,
     durationText,
@@ -96,6 +98,7 @@ export function stepToStepView(
     subSteps: step.subSteps,
     outputArtifacts: step.outputArtifacts,
     partialContent: step.partialContent,
+    ...(step.codeLanguage ? { codeLanguage: step.codeLanguage } : {}),
     // CTO review P1 #4 — preserve the source `kind` (carrying backend
     // taxonomy: needs_user_input / unknown / ...) and surface the narrowed
     // FailureKind via `uiKind`. FailureAckCard reads `uiKind` to pick the

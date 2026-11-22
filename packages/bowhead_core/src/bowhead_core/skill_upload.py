@@ -31,7 +31,14 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from bowhead_skill.bundle_files import MAX_TEXT_BYTES, BundleFileError, bundle_file_path, is_python_cache_path
+from bowhead_skill.bundle_files import (
+    MAX_TEXT_BYTES,
+    BundleFileError,
+    bundle_file_path,
+    is_python_cache_path,
+    package_file_path,
+    validate_package_write_path,
+)
 from bowhead_skill.script_langs import (
     all_entry_extensions,
     entry_extensions,
@@ -355,15 +362,13 @@ def validate_and_save_generated(
                     if not isinstance(item, dict) or not isinstance(item.get("path"), str) or "content" not in item:
                         raise SkillUploadError(code="skill_filename_invalid")
                     path = item["path"]
-                    kind, _, filename = path.partition("/")
-                    if path in seen or (scripts is not None and kind == "scripts"):
+                    if path in seen or (scripts is not None and path.partition("/")[0] == "scripts"):
                         raise SkillUploadError(code="skill_filename_invalid")
                     seen.add(path)
                     try:
-                        fp = bundle_file_path(tmp_dir, kind, filename)
+                        # Any file by its path from the Skill root (skill-bundle-read tech-design §12.4).
+                        fp = package_file_path(tmp_dir, validate_package_write_path(path))
                     except BundleFileError as e:
-                        if e.code == "skill_file_kind_invalid":
-                            raise SkillUploadError(code="skill_file_kind_invalid") from e
                         raise SkillUploadError(code="skill_filename_invalid") from e
                     content = item["content"]
                     if content is None:

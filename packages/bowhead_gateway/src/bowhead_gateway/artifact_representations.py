@@ -213,7 +213,7 @@ async def build_presentation_view(
         log.warning("artifact.presentation_view_failed artifact_id=%s error_code=%s", art.id, code)
         if code in {"document_slide_limit", "file_office_package_limit", "document_preview_limit"}:
             raise representation_error("too_large") from exc
-        if code in {"file_office_invalid_package", "document_pdf_invalid", "document_pdf_page_mismatch"}:
+        if code in {"file_office_invalid_package", "file_office_duplicate_part", "document_pdf_invalid", "document_pdf_page_mismatch"}:
             raise representation_error("corrupt") from exc
         raise representation_error("unavailable") from exc
     return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

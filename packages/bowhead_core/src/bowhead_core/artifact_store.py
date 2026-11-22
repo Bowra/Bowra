@@ -4110,13 +4110,16 @@ class ArtifactStore:
             params.extend(internal_params)
         sql += " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?"
         params += [limit, offset]
-        async with _open_db(self.db_path, connection) as db:
+        async with _open_read_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             try:
                 async with db.execute(sql, params) as cur:
                     rows = await cur.fetchall()
-            except aiosqlite.OperationalError:
-                # canvases / sessions may be absent in some dev deployments; degrade to path 3
+            except aiosqlite.OperationalError as error:
+                # canvases / sessions may be absent in some dev deployments; degrade to path 3.
+                # Any other error (a busy lock included) is not an absent table.
+                if "no such table" not in str(error):
+                    raise
                 sql_fallback = """
                 WITH session_artifact_ids AS (
                     SELECT DISTINCT ta.artifact_id
@@ -4195,12 +4198,14 @@ class ArtifactStore:
             internal_sql, internal_params = results_internal_artifact_sql("a")
             sql += f" AND NOT {internal_sql}"
             params.extend(internal_params)
-        async with _open_db(self.db_path, connection) as db:
+        async with _open_read_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             try:
                 async with db.execute(sql, params) as cur:
                     row = await cur.fetchone()
-            except aiosqlite.OperationalError:
+            except aiosqlite.OperationalError as error:
+                if "no such table" not in str(error):
+                    raise
                 return None
         return _row_to_artifact(row) if row is not None else None
 

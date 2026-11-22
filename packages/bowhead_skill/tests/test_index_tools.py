@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import pytest
 from bowhead_skill.tools import build_skill_tools
 
 from bowhead_skill import SkillCatalog, SkillRuntime, render_index, substitute_args
@@ -231,8 +232,94 @@ async def test_read_reference_path_traversal_blocked(tmp_path: Path) -> None:
     cat = SkillCatalog(roots=[tmp_path])
     cat.refresh()
     read = next(t for t in build_skill_tools(cat, SkillRuntime()) if t.name == "skill_read")
-    out = await read.handler({"name": "x", "ref": "../secret"}, None)
-    assert "invalid ref" in out["error"]
+    for requested in ({"ref": "../secret"}, {"file": "../secret.md"}, {"file": "../../secret.md"}):
+        out = await read.handler({"name": "x", **requested}, None)
+        assert out["error_kind"] == "skill_file_not_found" and "SECRET" not in str(out)
+    absolute = await read.handler({"name": "x", "file": str(tmp_path / "secret.md")}, None)
+    assert absolute["error_kind"] == "invalid_args" and "SECRET" not in str(absolute)
+
+
+def _mk_package(root: Path) -> SkillCatalog:
+    """A Skill laid out like Anthropic's: root files, assets/, references/, a hidden file."""
+    d = _mk_with_refs(root, "x", {"guide.md": "guide body"})
+    (d / "FORMS.md").write_text("forms body")
+    (d / "assets").mkdir()
+    (d / "assets" / "theme.json").write_text('{"accent": "#123"}')
+    (d / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+    (d / ".config").mkdir()
+    (d / ".config" / "env.json").write_text("{}")
+    (d / "references" / "nested").mkdir()
+    (d / "references" / "nested" / "format.md").write_text("[example](../../assets/theme.json)")
+    cat = SkillCatalog(roots=[root])
+    cat.refresh()
+    return cat
+
+
+@pytest.mark.parametrize(
+    ("requested", "path"),
+    [
+        ({"file": "FORMS.md"}, "FORMS.md"),
+        ({"file": "FORMS"}, "FORMS.md"),
+        ({"file": "./assets/theme.json"}, "assets/theme.json"),
+        ({"file": "../../assets/theme.json"}, "assets/theme.json"),
+        ({"file": "theme.json"}, "assets/theme.json"),
+        ({"file": ".config/env.json"}, ".config/env.json"),
+        ({"file": "references/guide"}, "references/guide.md"),
+        ({"ref": "references/guide.md"}, "references/guide.md"),
+        ({"ref": "./references/guide.md"}, "references/guide.md"),
+        ({"ref": "guide"}, "references/guide.md"),
+        ({"ref": "FORMS.md"}, "FORMS.md"),
+    ],
+)
+async def test_read_any_package_file_as_skill_md_links_it(tmp_path: Path, requested: dict, path: str) -> None:
+    """Every file of the package is readable by its path from the Skill root (skill-bundle-read tech-design §1)."""
+    read = next(t for t in build_skill_tools(_mk_package(tmp_path), SkillRuntime()) if t.name == "skill_read")
+    out = await read.handler({"name": "x", **requested}, None)
+    assert out["file"] == path and out["body"] == (tmp_path / "x" / path).read_text()
+
+
+async def test_read_lists_every_package_file_and_describes_non_text(tmp_path: Path) -> None:
+    read = next(t for t in build_skill_tools(_mk_package(tmp_path), SkillRuntime()) if t.name == "skill_read")
+    listed = {entry["path"] for entry in (await read.handler({"name": "x"}, None))["package_files"]}
+    assert listed == {
+        "SKILL.md",
+        "FORMS.md",
+        "assets/theme.json",
+        "assets/logo.png",
+        ".config/env.json",
+        "references/guide.md",
+        "references/nested/format.md",
+    }
+    logo = await read.handler({"name": "x", "file": "assets/logo.png"}, None)
+    assert logo == {
+        "name": "x",
+        "file": "assets/logo.png",
+        "binary": True,
+        "size": 9,
+        "media_type": "image/png",
+        "note": (
+            "Not text, so its content is not shown. Its path from the Skill root is assets/logo.png; "
+            "a script of this Skill running in the sandbox reaches it at /workdir/skill/assets/logo.png."
+        ),
+    }
+
+
+async def test_read_miss_names_the_request_and_lists_the_package(tmp_path: Path) -> None:
+    cat = _mk_package(tmp_path)
+    (tmp_path / "x" / "templates").mkdir()
+    (tmp_path / "x" / "templates" / "theme.json").write_text("{}")  # A second theme.json makes the bare name ambiguous.
+    read = next(t for t in build_skill_tools(cat, SkillRuntime()) if t.name == "skill_read")
+    out = await read.handler({"name": "x", "file": "theme.json"}, None)
+    assert out["error_kind"] == "skill_file_not_found" and out["requested"] == "theme.json"
+    assert {"assets/theme.json", "templates/theme.json"} <= {entry["path"] for entry in out["package_files"]}
+
+
+async def test_read_reports_a_text_file_over_the_limit(tmp_path: Path) -> None:
+    cat = _mk_package(tmp_path)
+    (tmp_path / "x" / "assets" / "big.csv").write_text("x" * (1024 * 1024 + 1))
+    read = next(t for t in build_skill_tools(cat, SkillRuntime()) if t.name == "skill_read")
+    out = await read.handler({"name": "x", "file": "assets/big.csv"}, None)
+    assert out["error_kind"] == "skill_file_too_large" and out["size"] == 1024 * 1024 + 1 and "body" not in out
 
 
 async def test_read_no_references_dir(tmp_path: Path) -> None:

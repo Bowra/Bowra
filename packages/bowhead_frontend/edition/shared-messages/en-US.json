@@ -9329,6 +9329,7 @@
       "file_in_knowledge_base": "This file is still in the knowledge base. Remove it there before deleting it.",
       "office_type_mismatch": "The extension does not match the Office format. Save a copy in the matching format using Word or PowerPoint and try again.",
       "office_invalid_package": "This Office file could not be read. Its structure may be damaged or unsupported. Check the original file and try again.",
+      "office_duplicate_part": "This Office file contains two parts with the same name, so it is damaged. Open it in PowerPoint or Word, save a new copy and upload that copy.",
       "office_active_content_unsupported": "Macros or digital signatures in this file are not supported yet. Use a copy without them.",
       "office_package_limit": "This Office file exceeds the current size or structure limits (32 MiB file limit). Reduce embedded content or split the file and try again.",
       "office_multipart_required": "This Office file requires full content validation. Refresh the page and upload it again.",
@@ -10358,6 +10359,11 @@
       "group_references": "References",
       "group_scripts": "Scripts",
       "group_evals": "Eval cases",
+      "group_root": "Package root",
+      "file_kind_other": "Other folder or root",
+      "file_path": "Path from the Skill root",
+      "file_not_text": "This file is not text ({mime}), so its content is not shown or edited here. To replace it, upload a new version of the Skill package.",
+      "file_too_large": "This file is larger than 1 MB, so its content is not shown or edited here.",
       "body_label": "Steps",
       "trig_empty": "No trigger examples yet.",
       "evals_empty": "No evaluation cases yet."
@@ -12326,12 +12332,24 @@
     "cite_kb_page": "Page {page}",
     "cite_kb_paragraph": "Paragraph {n}",
     "summary_agents": "{count, plural, one {# Agent used} other {# Agents used}}",
+    "summary_output": {
+      "report": "{count, plural, =1 {{count} report} other {{count} reports}}",
+      "chart": "{count, plural, =1 {{count} chart} other {{count} charts}}",
+      "web_page": "{count, plural, =1 {{count} web page} other {{count} web pages}}",
+      "presentation": "{count, plural, =1 {{count} presentation} other {{count} presentations}}",
+      "pdf": "{count, plural, =1 {{count} PDF} other {{count} PDFs}}",
+      "document": "{count, plural, =1 {{count} document} other {{count} documents}}",
+      "spreadsheet": "{count, plural, =1 {{count} spreadsheet} other {{count} spreadsheets}}",
+      "image": "{count, plural, =1 {{count} image} other {{count} images}}",
+      "file": "{count, plural, =1 {{count} file} other {{count} files}}"
+    },
     "step_failed_generic": "This step failed without a specific error that can be shown safely. Review the step information shown and contact your administrator if it happens again.",
     "failure_detail": {
       "reason": {
         "tool_arguments_invalid": "The step's inputs were rejected.",
         "tool_resource_unavailable": "Something this step needs was unavailable.",
         "tool_code_failed": "The code stopped with an error.",
+        "tool_output_not_saved": "The code ran, but a file it wrote was not saved.",
         "tool_execution_timeout": "The step timed out.",
         "tool_execution_unknown": "The step's result is unconfirmed.",
         "tool_execution_failed": "The tool couldn't complete this step.",
@@ -12340,6 +12358,7 @@
       "fact_field": "Input: {value}.",
       "fact_missing_key": "Missing key: {value}.",
       "fact_exception": "Error type: {value}.",
+      "fact_file": "File: {value}.",
       "fact_exit_code": "Exit code: {value}.",
       "action_recovered": "A retry succeeded; no action needed.",
       "action_check_source": "Check your access to the source, then ask again.",
@@ -14181,6 +14200,39 @@
     "run_error": "Run failed",
     "search": "Search: {q}"
   },
+  "step_facts": {
+    "attachment_header": "Read attachment",
+    "attachment_truncated": "Read the first {n} characters",
+    "attachment_complete": "Read in full",
+    "canvas_added": "Added · {name}",
+    "canvas_not_added": "Not added · {reason}",
+    "code_done": "Ran OK",
+    "code_outputs": "Ran OK · {count, plural, =1 {{count} output} other {{count} outputs}}",
+    "code_outputs_typed": "Ran OK · {count, plural, =1 {{count} output} other {{count} outputs}} ({types})",
+    "type_separator": ", ",
+    "arguments_retry": "Invalid arguments, retrying",
+    "section": {
+      "image": "Image",
+      "kpi_row": "KPI row",
+      "table": "Table",
+      "data_table": "Data table",
+      "narrative": "Text",
+      "recommendations": "Recommendations",
+      "chart": "Chart"
+    },
+    "result_kind": {
+      "delivered_file": "Delivered files",
+      "uploaded_file": "Uploaded files",
+      "data_file": "Data files",
+      "image": "Images",
+      "design": "Designs"
+    },
+    "not_added_reason": {
+      "invalid_artifact_id_format": "bad data ID",
+      "not_an_image": "not an image",
+      "design_v2a_disabled": "layout disabled"
+    }
+  },
   "citation_aria": {
     "cite_labeled": "Citation {n}: {label}",
     "numbered": "Citation {n}",
@@ -14405,6 +14457,7 @@
       "tool_arguments_invalid": "This step was rejected because its inputs do not match the required format or data fields. The agent must correct the inputs before trying again.",
       "tool_resource_unavailable": "The selected source is unavailable. Check access or select an available source before continuing.",
       "tool_code_failed": "The script failed. Check the recorded exception, declared inputs and actual column names before running corrected code.",
+      "tool_output_not_saved": "A file the script wrote was not saved: the file store refused it or could not store it. The agent receives the reason and needs to correct the file and run again.",
       "tool_execution_timeout": "This operation timed out and its result is not confirmed. Check the recorded outcome before repeating an operation that changes data.",
       "tool_execution_unknown": "The operation has no confirmed outcome. Verify whether it took effect before attempting it again.",
       "tool_execution_failed": "The tool could not complete this step. Review its recorded result and copy the diagnostics for your administrator if the cause is unavailable.",

@@ -289,6 +289,81 @@ async def test_execute_tool_surfaces_python_sandbox_tool_result_name() -> None:
 
 
 @pytest.mark.asyncio
+async def test_code_step_carries_its_purpose_and_output_facts() -> None:
+    """Turn visibility FR1/FR4: the started row is the model's intent; the done row carries facts.
+
+    The facts count the files the run saved and list their types, without the stdout record, so the
+    interface can say "运行成功 · 2 输出（HTML、JSON）" in its own language.
+    """
+
+    async def _skill_invoke(args: dict, ctx) -> Any:
+        return {
+            "ok": True,
+            "exit_code": 0,
+            "output_artifacts": [
+                {"artifact_id": "art_page", "name": "dashboard.html", "mime": "text/html", "size": 9},
+                {"artifact_id": "art_data", "name": "data.JSON", "mime": "application/json", "size": 9},
+                {"artifact_id": "art_stdout", "name": "sandbox-stdout.txt", "mime": "text/plain", "size": 6, "data_role": "stdout"},
+            ],
+        }
+
+    runner = _make_runner({"skill_invoke": _skill_invoke})
+    bus = TurnEventBus()
+    captured: list[OrchestratorEvent] = []
+
+    async def _consume() -> None:
+        async for ev in bus.subscribe():
+            captured.append(ev)
+
+    consumer = asyncio.create_task(_consume())
+    tc = ToolCall(
+        id="call_page",
+        name="skill_invoke",
+        arguments={"name": "python_sandbox", "script": "runner.py", "input": {"code": "print(1)", "intent": "生成单文件离线交互式 HTML 看板"}},
+    )
+    await runner._execute_tool(tc, _make_ctx(), bus, parent_turn_id="t_page", subagent_id="peer_compute", running_profile="compute")
+    await bus.emit(OrchestratorEvent(event_type="done", turn_id="t_page", payload={}))
+    await consumer
+
+    started = next(e for e in captured if e.event_type == "step_started")
+    done = next(e for e in captured if e.event_type == "step_done")
+    assert started.payload["input_preview"] == "生成单文件离线交互式 HTML 看板"
+    assert "facts" not in started.payload
+    assert done.payload["facts"] == {"v": 1, "kind": "code_outputs", "count": 2, "types": ["html", "json"]}
+
+
+@pytest.mark.asyncio
+async def test_a_helpers_writing_step_closes_under_that_helper() -> None:
+    """Turn visibility FR5: the writing step a helper's stream opened closes with the same agent, before the run row."""
+
+    async def _python_exec(args: dict, ctx) -> Any:
+        return {"ok": True, "exit_code": 0, "output_artifacts": []}
+
+    runner = _make_runner({"python_exec": _python_exec})
+    bus = TurnEventBus()
+    bus._writing_call_ids = {"call_code": "peer_compute"}  # type: ignore[attr-defined]  # opened by the stream
+    captured: list[OrchestratorEvent] = []
+
+    async def _consume() -> None:
+        async for ev in bus.subscribe():
+            captured.append(ev)
+
+    consumer = asyncio.create_task(_consume())
+    tc = ToolCall(id="call_code", name="python_exec", arguments={"code": "print(1)", "intent": "画图"})
+    await runner._execute_tool(tc, _make_ctx(), bus, parent_turn_id="t_code", subagent_id="peer_compute", running_profile="compute")
+    await bus.emit(OrchestratorEvent(event_type="done", turn_id="t_code", payload={}))
+    await consumer
+
+    close, run = captured[0], captured[1]
+    assert (close.event_type, close.payload["step_id"]) == ("step_done", "writing_call_code")
+    assert close.payload["subagent_id"] == "peer_compute"
+    assert close.parent_agent_id == "peer_compute"
+    assert (run.event_type, run.payload["step_id"]) == ("step_started", "step_call_code")
+    assert run.payload["code_input"]["language"] == "python"
+    assert bus._writing_call_ids == {}  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_keeps_unlisted_skill_invoke_result_name() -> None:
     """Only curated inner skills surface; generic skill calls stay skill_invoke."""
 

@@ -58,6 +58,9 @@ class OfficePackageInfo:
     expanded_bytes: int
     external_relationship_count: int
     opaque_embedding_count: int
+    # ``[Content_Types].xml`` entries naming a part the package does not contain. They carry no content;
+    # pptxgenjs 4 writes one per slide for slide masters it never writes.
+    absent_override_count: int = 0
 
 
 def defer_office_content(*, filename: str, mime: str) -> bool:
@@ -156,6 +159,10 @@ def _inspect_zip(content: bytes, *, expected_mime: str) -> OfficePackageInfo:
         names = set()
         for entry in entries:
             name = entry.filename.rstrip("/") if entry.is_dir() else entry.filename
+            if name in names:
+                # The same part written twice: python-pptx does this when a slide added after a removal
+                # takes the part name of a kept slide (``slide{count+1}.xml``).
+                raise OfficePackageError("file_office_duplicate_part")
             if not _safe_part(name) or entry.orig_filename != entry.filename or name.casefold() in seen:
                 raise OfficePackageError("file_office_invalid_package")
             seen.add(name.casefold())
@@ -190,6 +197,7 @@ def _inspect_zip(content: bytes, *, expected_mime: str) -> OfficePackageInfo:
     if types.tag != f"{{{CT_NS}}}Types":
         raise OfficePackageError("file_office_invalid_package")
     overrides, defaults = {}, {}
+    absent_overrides = 0
     for node in types:
         content_type = node.get("ContentType", "")
         # XLSB's standard type includes "macroEnabled" even for opaque data
@@ -198,8 +206,11 @@ def _inspect_zip(content: bytes, *, expected_mime: str) -> OfficePackageInfo:
             raise OfficePackageError("file_office_active_content_unsupported")
         if node.tag == f"{{{CT_NS}}}Override":
             path = node.get("PartName", "")
-            if not path.startswith("/") or path[1:] not in names or path in overrides:
+            if not path.startswith("/") or not _safe_part(path[1:]) or path in overrides:
                 raise OfficePackageError("file_office_invalid_package")
+            if path[1:] not in names:
+                # A type declared for a part that is not in the package admits no content; Office ignores it.
+                absent_overrides += 1
             overrides[path] = content_type
         elif node.tag == f"{{{CT_NS}}}Default":
             extension = node.get("Extension", "").lower()
@@ -276,4 +287,5 @@ def _inspect_zip(content: bytes, *, expected_mime: str) -> OfficePackageInfo:
         expanded,
         external_count,
         sum("/embeddings/" in name for name in names),
+        absent_overrides,
     )

@@ -16,6 +16,7 @@ from typing import Any
 
 SKILL_TEXT_RENDER_CONTRACT = "skill-read-text.v1"
 # Server-side integrity data; the model can neither verify nor use these.
+SELECTED_SKILL_LISTED_FILES = 50
 _SERVER_ONLY_KEYS = frozenset({"content_hash", "materialization_hash", "preparation_digest", "selection_digest", "sha256", "render_contract"})
 
 
@@ -47,8 +48,9 @@ def render_skill_text(
     files: Sequence[tuple[str, str]] = (),
     parameters: Mapping[str, Any] | None = None,
     details: Mapping[str, Any] | None = None,
+    package_files: Sequence[tuple[str, int]] = (),
 ) -> str:
-    """Render one Skill for the model: header, details, parameters, body, files."""
+    """Render one Skill for the model: header, details, parameters, body, files, then the package file list."""
     if not isinstance(name, str) or not name.strip():
         raise ValueError("skill_text_name_required")
     lines = [f'<skill_content name="{_attribute(name)}">', f"# Skill: {name}"]
@@ -75,5 +77,21 @@ def render_skill_text(
         lines += ["", body.strip("\n")]
     for path, text in files:
         lines += ["", f'<skill_file path="{_attribute(path)}">', text.strip("\n"), "</skill_file>"]
+    if package_files:
+        # The whole package, so links in the body and files it never mentions are both reachable.
+        # A short list keeps the kept history copy inside its budget; a name-only skill_read lists every file.
+        listed = list(package_files)[:SELECTED_SKILL_LISTED_FILES]
+        lines += [
+            "",
+            "<skill_files>",
+            f'Every file of this Skill, by path from its root. Read any of them with skill_read(name="{name}", file="<path>").',
+            *(f"{path} ({size} bytes)" for path, size in listed),
+            *(
+                [f'… and {len(package_files) - len(listed)} more files; skill_read(name="{name}") lists them all.']
+                if len(package_files) > len(listed)
+                else []
+            ),
+            "</skill_files>",
+        ]
     lines.append("</skill_content>")
     return "\n".join(lines)

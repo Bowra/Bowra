@@ -260,12 +260,35 @@ async def test_read_chunks_and_invalid_patch_cannot_escape_or_drop_assets(tmp_pa
     first = await service.read(target=target, file="SKILL.md", limit=20)
     second = await service.read(target=target, file="SKILL.md", offset=first["next_offset"])
     assert first["content"] + second["content"] == BODY
-    for path in ("../outside", "scripts/../../outside", "assets/new.txt"):
+    for path in ("../outside", "scripts/../../outside", "assets/./new.txt", "/abs.txt"):
         with pytest.raises(ValueError):
             await service.validate(target=target, changes=[{"path": path, "content": "must not write"}])
     with pytest.raises(ValueError, match="manifest_required"):
         await service.validate(target=target, changes=[{"path": "SKILL.md", "content": None}])
     assert (service.root / "owned-method" / "SKILL.md").read_text() == BODY
+
+
+async def test_patch_writes_any_file_by_its_path(tmp_path):
+    """Coach edits any file of the package by its path from the Skill root, as reads allow (tech-design §12.4)."""
+    service = await setup(tmp_path)
+    saved, _ = await create(service)
+    target = saved["result"]["target"]
+    bundle = service.root / "owned-method"
+    changes = [
+        {"path": "assets/theme.json", "content": '{"color": "blue"}'},
+        {"path": "README.md", "content": "root file"},
+        {"path": ".notes/review.md", "content": "hidden note"},
+    ]
+    result = await service.save(target=target, changes=changes, request_id="any-path", turn_id="t_any")
+    assert result["ok"], result
+    assert (bundle / "assets/theme.json").read_text() == '{"color": "blue"}'
+    assert (bundle / "README.md").read_text() == "root file" and (bundle / ".notes/review.md").read_text() == "hidden note"
+    current = await service.inspect(name="owned-method")
+    assert current["authoring"]["text_patch_paths"].startswith("SKILL.md or any other file")
+    removed = await service.save(
+        target=current["target"], changes=[{"path": "README.md", "content": None}], request_id="any-path-delete", turn_id="t_any"
+    )
+    assert removed["ok"] and not (bundle / "README.md").exists()
 
 
 async def test_reads_proceed_alongside_another_reader_but_not_a_writer(tmp_path):

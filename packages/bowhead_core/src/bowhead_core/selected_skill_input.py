@@ -22,6 +22,7 @@ from bowhead_router.types import Message
 
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+from bowhead_core.skill_package_material import SkillPackageMaterialError
 from bowhead_core.skill_read_material import SkillReadMaterialError
 from bowhead_core.skill_read_resolution import SkillReadResolutionError
 from bowhead_core.skill_text import render_skill_text
@@ -54,12 +55,12 @@ def _guidance(name: str) -> str:
     )
 
 
-def _render(name: str, content: bytes) -> str:
+def _render(name: str, content: bytes, package_files: Sequence[tuple[str, int]] = ()) -> str:
     material = json.loads(content)
     entry = material["read_only_entry"]["entry_file"]
     files = [(item["path"], item["text"]) for item in material["files"]]
     body = next((text for path, text in files if path == entry), "")
-    return render_skill_text(name=name, body=body, files=[(path, text) for path, text in files if path != entry])
+    return render_skill_text(name=name, body=body, files=[(path, text) for path, text in files if path != entry], package_files=package_files)
 
 
 async def load_selected_skills(ctx, *, turn_id: str) -> tuple[SelectedSkill, ...]:
@@ -85,10 +86,16 @@ async def load_selected_skills(ctx, *, turn_id: str) -> tuple[SelectedSkill, ...
         # A built-in Skill's identity is its catalog name; others resolve their name from the store.
         catalog_name = resource.id.removeprefix("builtin:") if resource.source_kind == "builtin" else ""
         try:
-            resolved = await _sources(ctx, resource, catalog_name).prepare(resource, scope=_scope(ctx))
-        except (SkillReadResolutionError, SkillReadMaterialError, OrdinaryContinuationUnavailable) as error:
+            sources = _sources(ctx, resource, catalog_name)
+            resolved = await sources.prepare(resource, scope=_scope(ctx))
+            # The selection is the whole package at this version: list every file after the body.
+            package = await sources.prepare_runtime_package(resource, scope=_scope(ctx))
+        except (SkillReadResolutionError, SkillReadMaterialError, SkillPackageMaterialError, OrdinaryContinuationUnavailable) as error:
             raise SelectedSkillUnavailable(str(error) or "selected_skill_unavailable") from None
-        selected.append(SelectedSkill(resource=resource, name=resolved.proof.name, text=_render(resolved.proof.name, resolved.material.content)))
+        listing = sorted((path, len(data)) for path, data in package.material.files().items())
+        selected.append(
+            SelectedSkill(resource=resource, name=resolved.proof.name, text=_render(resolved.proof.name, resolved.material.content, listing))
+        )
     return tuple(selected)
 
 

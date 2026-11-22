@@ -734,6 +734,7 @@
   "tool_arguments_invalid": "This step was rejected because its inputs do not match the required format or data fields. The agent must correct the inputs before trying again.",
   "tool_resource_unavailable": "The selected source is unavailable. Check access or select an available source before continuing.",
   "tool_code_failed": "The script failed. Check the recorded exception, declared inputs and actual column names before running corrected code.",
+  "tool_output_not_saved": "A file the script wrote was not saved: the file store refused it or could not store it. The agent receives the reason and needs to correct the file and run again.",
   "tool_execution_timeout": "This operation timed out and its result is not confirmed. Check the recorded outcome before repeating an operation that changes data.",
   "tool_execution_unknown": "The operation has no confirmed outcome. Verify whether it took effect before attempting it again.",
   "tool_execution_failed": "The tool could not complete this step. Review its recorded result and copy the diagnostics for your administrator if the cause is unavailable.",

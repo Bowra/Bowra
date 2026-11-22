@@ -712,3 +712,69 @@ def test_a_slow_completion_write_is_a_warning(caplog) -> None:
     levels = {record.getMessage().split(" ")[0]: record.levelno for record in caplog.records}
     assert levels["session.completion_write"] == logging.INFO
     assert levels["session.completion_write_slow"] == logging.WARNING
+
+
+@pytest.mark.asyncio
+async def test_list_for_session_reads_on_the_read_only_pool(store: ArtifactStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 (1.7.62): this pure read held execution's shared authority lease for 1.8 s on a write-capable connection."""
+    from bowhead_core import artifact_store as module
+
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute(
+            "INSERT INTO sessions(id, workspace_id, user_id, started_at, last_active_at) VALUES (?, ?, ?, ?, ?)",
+            ("s_t1", "1", "u1", _at(-30), _at(-1)),
+        )
+        await db.commit()
+    art = await store.put_bytes(content=b"x", filename="x.txt", mime="text/plain", source="python_sandbox", created_by="u1", session_id="s_t1")
+
+    def write_capable(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("list_for_session opened a write-capable connection")
+
+    with monkeypatch.context() as reads_only:
+        reads_only.setattr(module, "_open_db", write_capable)
+        assert [item.id for item in await store.list_for_session(session_id="s_t1", user_id="u1")] == [art.id]
+        assert [item.id for item in await store.list_for_session(session_id="s_t1", user_id="u1", artifact_id=art.id)] == [art.id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_session_does_not_take_a_busy_lock_for_an_absent_table(store: ArtifactStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its fallback query is for layouts without some tables; a busy lock must surface, not switch queries."""
+    import contextlib
+
+    from bowhead_core import artifact_store as module
+
+    class EmptyCursor:
+        async def __aenter__(self) -> EmptyCursor:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def fetchall(self) -> list:
+            return []
+
+        async def fetchone(self) -> None:
+            return None
+
+    class LockedConnection:
+        """Busy on the first query only, so a fallback query would answer quietly."""
+
+        row_factory = None
+        queries = 0
+
+        def execute(self, *_args: object) -> EmptyCursor:
+            LockedConnection.queries += 1
+            if LockedConnection.queries == 1:
+                raise aiosqlite.OperationalError("database is locked")
+            return EmptyCursor()
+
+    @contextlib.asynccontextmanager
+    async def locked(_path: str, _connection: object = None):  # type: ignore[no-untyped-def]
+        yield LockedConnection()
+
+    monkeypatch.setattr(module, "_open_read_db", locked)
+    with pytest.raises(aiosqlite.OperationalError, match="locked"):
+        await store.list_for_session(session_id="s_t1", user_id="u1")
+    LockedConnection.queries = 0
+    with pytest.raises(aiosqlite.OperationalError, match="locked"):
+        await store.list_for_session(session_id="s_t1", user_id="u1", artifact_id="art_x")

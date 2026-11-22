@@ -1,5 +1,5 @@
 name: agent-coach
-version: 53
+version: 54
 model: analyst
 trust_class: read-mostly
 max_iterations: 30
@@ -66,7 +66,7 @@ skill_grants:
       id: builtin:agent-authoring
       name: agent-authoring
     permissions: [read]
-    revision: sha256:73e5b6f8cc64df1205b759e9a30ee69aae1925ae76bbb1f561b090217e392140
+    revision: sha256:b9d0fa765881bc9280782f6bb1cee64152a46581f666926dde81f501320acf8d
     distribution: reference
 callable_peers: []
 produces: []

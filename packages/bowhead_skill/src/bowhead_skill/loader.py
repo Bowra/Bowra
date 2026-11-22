@@ -106,6 +106,15 @@ class SkillSpec:
         return [path.relative_to(self.script_dir).as_posix() for path in self.scripts]
 
 
+def decode_skill_markdown(data: bytes) -> str:
+    """SKILL.md bytes as the loader reads them: UTF-8 with universal newlines.
+
+    `\r\n` and a lone `\r` become `\n`, as text-mode reading does. Every
+    comparison with what `load_skill` returned decodes the bytes with this.
+    """
+    return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def split_skill_markdown(raw: str) -> tuple[str, str]:
     """Split the standard manifest without loading YAML or accessing files."""
     match = _FRONTMATTER_RE.match(raw)
@@ -121,7 +130,7 @@ def load_skill(skill_dir: Path) -> SkillSpec:
     if not md_path.is_file():
         raise ValueError(f"SKILL.md not found under {skill_dir}")
 
-    raw = md_path.read_text(encoding="utf-8")
+    raw = decode_skill_markdown(md_path.read_bytes())
     try:
         frontmatter_text, body_text = split_skill_markdown(raw)
     except ValueError as exc:

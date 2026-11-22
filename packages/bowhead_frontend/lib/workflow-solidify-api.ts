@@ -8,7 +8,7 @@
  */
 
 import { apiJson, apiVoid } from "./api-client";
-import type { SkillFileContentDTO } from "./api";
+import type { SkillFileContentDTO, SkillPackageFileContentDTO, SkillPackageFileInfo } from "./api";
 import type { ResourceUsageResponse, ResourceUsageSummary } from "./resource-usage";
 import type { SkillResourceChangeGuard, SkillResourceChangeImpact } from "./api";
 import type { Audience } from "./content-share-api";
@@ -155,6 +155,8 @@ export interface TeamSkillDetail extends TeamSkillPublic {
    */
   references?: { name: string; size: number }[];
   scripts?: { name: string; size: number }[];
+  /** Every file of the approved live copy by its path from the Skill root. Older backends omit it. */
+  package_files?: SkillPackageFileInfo[];
   evals_count?: number;
   has_evals?: boolean;
 }
@@ -260,6 +262,13 @@ export function getTeamSkillFile(
 ): Promise<SkillFileContentDTO> {
   return apiJson<SkillFileContentDTO>(
     `/api/v1/team-skills/${encodeURIComponent(skillId)}/files/${kind}/${encodeURIComponent(filename)}`,
+  );
+}
+
+/** Any file of a team skill's approved live copy, for viewing (symmetric with personal fetchSkillPackageFile). */
+export function getTeamSkillPackageFile(skillId: string, path: string): Promise<SkillPackageFileContentDTO> {
+  return apiJson<SkillPackageFileContentDTO>(
+    `/api/v1/team-skills/${encodeURIComponent(skillId)}/package-files/${path.split("/").map(encodeURIComponent).join("/")}`,
   );
 }
 
@@ -402,6 +411,35 @@ export function createPersonalSkill(args: {
       source_turn_id: args.sourceTurnId ?? null,
     }),
   });
+}
+
+/** Create, rename or delete any file of a team skill's live copy by its path from the Skill root. */
+export async function changeTeamSkillPackageFile(
+  id: string,
+  change: Omit<import("./api").SkillPackageFileChange, "expected_instance_id">,
+): Promise<SkillPackageFileContentDTO> {
+  return apiJson(`/api/v1/team-skills/${encodeURIComponent(id)}/package-files`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+}
+
+/** Overwrite an existing file of a team skill's live copy with text, by its path from the Skill root. */
+export function putTeamSkillPackageFile(
+  skillId: string,
+  path: string,
+  content: string,
+  expectedContentSha256?: string,
+): Promise<SkillPackageFileContentDTO> {
+  return apiJson<SkillPackageFileContentDTO>(
+    `/api/v1/team-skills/${encodeURIComponent(skillId)}/package-files/${path.split("/").map(encodeURIComponent).join("/")}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, expected_content_sha256: expectedContentSha256 }),
+    },
+  );
 }
 
 export async function changeTeamSkillFile(

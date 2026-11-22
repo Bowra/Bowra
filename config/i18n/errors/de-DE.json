@@ -734,6 +734,7 @@
   "tool_arguments_invalid": "Eingabeformat oder Datenfelder passen nicht zu diesem Schritt. Der Agent muss die Eingaben vor einem neuen Versuch korrigieren.",
   "tool_resource_unavailable": "Die gewählte Quelle ist nicht verfügbar. Prüfen Sie den Zugriff oder wählen Sie eine verfügbare Quelle.",
   "tool_code_failed": "Das Skript ist fehlgeschlagen. Prüfen Sie die Ausnahme, die angegebenen Eingaben und die tatsächlichen Spaltennamen vor einer korrigierten Ausführung.",
+  "tool_output_not_saved": "Eine vom Skript erzeugte Datei wurde nicht gespeichert: Der Dateispeicher hat sie abgelehnt oder konnte sie nicht speichern. Der Agent erhält den Grund und muss die Datei korrigieren und erneut ausführen.",
   "tool_execution_timeout": "Der Vorgang hat das Zeitlimit überschritten; das Ergebnis ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob Änderungen wirksam wurden.",
   "tool_execution_unknown": "Das Ergebnis des Vorgangs ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob er wirksam wurde.",
   "tool_execution_failed": "Das Tool konnte diesen Schritt nicht abschließen. Prüfen Sie das Ergebnis oder kopieren Sie die Diagnose für Ihren Administrator.",

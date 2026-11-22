@@ -128,7 +128,7 @@ async def test_lead_restart_resets_the_attempt_and_withdraws_its_output() -> Non
         ("step_started", "writing_call_new"),
     ]
     # Only the retried attempt's writing step is left for the tool dispatch to close.
-    assert bus._lead_writing_call_ids == {"call_new"}  # type: ignore[attr-defined]
+    assert bus._writing_call_ids == {"call_new": None}  # type: ignore[attr-defined]
 
 
 @pytest.mark.unit

@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, run_sqlite_authority_write
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy, run_sqlite_authority_write
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.subagent_write_boundary import (
@@ -67,6 +67,11 @@ def _id(prefix: str) -> str:
 
 
 FileShareAction = Literal["add", "remove", "private", "custom", "team_wide"]
+
+
+#: The standard repeat for a store method that owns one write transaction on fenced tables; see
+#: ``_db.repeat_when_authority_busy``.
+_repeat_when_authority_busy = repeat_when_authority_busy()
 
 
 @dataclass(frozen=True)
@@ -571,47 +576,60 @@ class AccessControlStore:
         role: str = "member",
         created_by: str | None = None,
     ) -> GroupMemberRecord:
-        now = _now()
-        async with diagnostic_connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            await db.execute("BEGIN IMMEDIATE")
-            group = await self._get_group_conn(db, team_id, group_id)
-            if group is None:
-                await db.rollback()
-                raise KeyError("group_not_found")
-            await self._assert_user_in_team_conn(db, user_id, team_id)
-            if group.workspace_id:
-                await self._assert_workspace_member_conn(db, group.workspace_id, user_id)
-            await db.execute(
-                "INSERT INTO group_memberships(team_id,group_id,principal_type,principal_id,"
-                "role,status,created_by,created_at,removed_at) VALUES (?,?,?,?,?,?,?,?,NULL) "
-                "ON CONFLICT(group_id, principal_type, principal_id) DO UPDATE SET "
-                "role=excluded.role,status='active',created_by=excluded.created_by,"
-                "created_at=excluded.created_at,removed_at=NULL",
-                (team_id, group_id, "user", user_id, role, "active", created_by, now),
-            )
-            await self._bump_policy_epoch_conn(db, team_id)
-            await self._bump_membership_epoch_conn(db, team_id, now=now)
-            await db.commit()
+        # Only the transaction repeats: after it commits, a repeat would meet its own membership row.
+        await self._write_group_member(team_id=team_id, group_id=group_id, user_id=user_id, role=role, created_by=created_by)
         member = await self.get_group_member(team_id, group_id, user_id)
         assert member is not None
         return member
 
+    @_repeat_when_authority_busy
+    async def _write_group_member(self, *, team_id: str, group_id: str, user_id: str, role: str, created_by: str | None) -> None:
+        now = _now()
+        async with diagnostic_connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                group = await self._get_group_conn(db, team_id, group_id)
+                if group is None:
+                    raise KeyError("group_not_found")
+                await self._assert_user_in_team_conn(db, user_id, team_id)
+                if group.workspace_id:
+                    await self._assert_workspace_member_conn(db, group.workspace_id, user_id)
+                await db.execute(
+                    "INSERT INTO group_memberships(team_id,group_id,principal_type,principal_id,"
+                    "role,status,created_by,created_at,removed_at) VALUES (?,?,?,?,?,?,?,?,NULL) "
+                    "ON CONFLICT(group_id, principal_type, principal_id) DO UPDATE SET "
+                    "role=excluded.role,status='active',created_by=excluded.created_by,"
+                    "created_at=excluded.created_at,removed_at=NULL",
+                    (team_id, group_id, "user", user_id, role, "active", created_by, now),
+                )
+                await self._bump_policy_epoch_conn(db, team_id)
+                await self._bump_membership_epoch_conn(db, team_id, now=now)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+    @_repeat_when_authority_busy
     async def remove_group_member(self, team_id: str, group_id: str, user_id: str) -> bool:
         now = _now()
         async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            cur = await db.execute(
-                "UPDATE group_memberships SET status='removed', removed_at=? "
-                "WHERE team_id=? AND group_id=? AND principal_type='user' "
-                "AND principal_id=? AND status='active'",
-                (now, team_id, group_id, user_id),
-            )
-            changed = cur.rowcount > 0
-            if changed:
-                await self._bump_policy_epoch_conn(db, team_id)
-                await self._bump_membership_epoch_conn(db, team_id, now=now)
-            await db.commit()
+            try:
+                cur = await db.execute(
+                    "UPDATE group_memberships SET status='removed', removed_at=? "
+                    "WHERE team_id=? AND group_id=? AND principal_type='user' "
+                    "AND principal_id=? AND status='active'",
+                    (now, team_id, group_id, user_id),
+                )
+                changed = cur.rowcount > 0
+                if changed:
+                    await self._bump_policy_epoch_conn(db, team_id)
+                    await self._bump_membership_epoch_conn(db, team_id, now=now)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
         return changed
 
     async def list_group_members(self, team_id: str, group_id: str) -> list[GroupMemberRecord]:

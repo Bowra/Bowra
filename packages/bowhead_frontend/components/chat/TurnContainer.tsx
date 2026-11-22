@@ -66,6 +66,7 @@ import {
 } from "@/lib/clarification-tombstone";
 import type { ReasonCode } from "@/lib/error-messages";
 import { extractInlineArtifacts } from "@/lib/inline-artifacts";
+import { extractTurnOutputs } from "@/lib/turn-outputs";
 import {
   acknowledgePlanEdit,
   invalidatePlanRevision,
@@ -2396,6 +2397,8 @@ function BeatStream({
   onReloadPlanCard,
   placeStepDisclosureBeforeAnswer,
 }: BeatStreamProps) {
+  // Turn visibility FR12: the finished line counts outputs from the stored answer (live, reload and replay alike).
+  const turnOutputs = useMemo(() => extractTurnOutputs(runner.finalPayload), [runner.finalPayload]);
   const tr = useTranslations("chat");
   const failedSummary = runner.errorReason && !runner.running
     ? { plannedTotal: runner.plan?.steps?.length ?? null }
@@ -2490,6 +2493,7 @@ function BeatStream({
           onExpand={onExpandSteps}
           expanded={!stepsFolded}
           onCollapse={onCollapseSteps}
+          outputs={turnOutputs}
         />
       ) : null}
       {foldedPendingConfirmations}
@@ -2545,6 +2549,7 @@ function BeatStream({
               onExpand={onExpandSteps}
               expanded={!stepsFolded}
               onCollapse={onCollapseSteps}
+              outputs={turnOutputs}
             />
             {foldedPendingConfirmations}
           </>
@@ -2625,6 +2630,7 @@ function BeatStream({
             onExpand={onExpandSteps}
             expanded={!stepsFolded}
             onCollapse={onCollapseSteps}
+            outputs={turnOutputs}
           />
           {foldedPendingConfirmations}
         </>

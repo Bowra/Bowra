@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-import re
-
 import pytest
 from bowhead_core.canvas_composers.mappers import _map_code_block
 from bowhead_core.pycell import render_code
@@ -26,7 +24,8 @@ from bowhead_core.subagent import (
 from bowhead_core.types import ToolInvocation
 
 _CODE = "import pandas as pd\nprint(INPUTS['rows'].get('columns'))"
-_FLAT_ARGS = {"code": _CODE, "inputs": {"rows": {"artifact_id": "art_x"}}}
+_INTENT = "读取附件并核对列名"
+_FLAT_ARGS = {"code": _CODE, "intent": _INTENT, "inputs": {"rows": {"artifact_id": "art_x"}}}
 _NESTED_ARGS = {"name": "python_sandbox", "script": "runner.py", "input": dict(_FLAT_ARGS)}
 _SANDBOX_RESULT = {"ok": True, "result_json": {"stdout": "col\n1\n2\n", "outputs": []}}
 
@@ -72,39 +71,38 @@ def test_step_label_never_shows_the_tool_code(tool_name: str, args: dict) -> Non
     """
     surfaced = _surface_inner_skill_name(tool_name, args)
     label = _prettify_input_preview(surfaced, args)
-    assert label, "步骤副标题不能是空的"
+    assert label == _INTENT, f"The step shows the model's purpose (turn visibility FR1): {label!r}"
     for code in ("python_sandbox", "python_exec", "skill_invoke"):
         assert code not in label, f"步骤副标题泄漏了工具代号 {code}：{label!r}"
 
 
 @pytest.mark.parametrize(("tool_name", "args"), _ENTRIES)
-def test_step_label_follows_the_ui_language(tool_name: str, args: dict) -> None:
-    """步骤副标题跟界面语言走。
+def test_step_label_is_the_models_intent_in_every_ui_language(tool_name: str, args: dict) -> None:
+    """A code step shows the intent as the model wrote it, whatever the interface language.
 
-    116 dogfood 2026-09-07：英文界面下这一行渲的是「🐍 Run Code · 运行: (代码)」——
-    抬头（走 `_prettify_output_preview` 的 `_t`）已经英文了，副标题还是中文，
-    因为 `_prettify_input_preview` 整个函数**从来没有 locale 概念**。
-    以前看不出来：这条路上的串多半是用户查询原文或工具代号，本来就"没有语言"。
-
-    突变验证：把 `_t("运行: (代码)", "Run: (code)")` 改回裸中文 → en 那半红。
+    Turn visibility FR1: the placeholder "运行: (代码)" / "Run: (code)" said nothing the header did
+    not; the intent is the model's own words, like answer text, and is never translated.
+    Mutation check: return the old placeholder again and both halves fail.
     """
     from bowhead_core.agents._lead_context import reset_current_ui_language, set_current_ui_language
 
-    CJK = re.compile(r"[一-鿿]")
     surfaced = _surface_inner_skill_name(tool_name, args)
-    # Restore the previous value with the token: the ContextVar default is English now, and forcing
-    # zh-CN in `finally` leaked a Chinese UI into later tests on the same xdist worker.
     token = set_current_ui_language("zh-CN")
     try:
-        zh = _prettify_input_preview(surfaced, args)
-        assert CJK.search(zh), f"中文界面下不该是英文：{zh!r}"
-
+        assert _prettify_input_preview(surfaced, args) == _INTENT
         set_current_ui_language("en-US")
-        en = _prettify_input_preview(surfaced, args)
-        assert not CJK.search(en), f"英文界面下漏了中文：{en!r}"
-        assert en.strip(), "英文串不能是空的"
+        assert _prettify_input_preview(surfaced, args) == _INTENT
     finally:
         reset_current_ui_language(token)
+
+
+@pytest.mark.parametrize(("tool_name", "args"), _ENTRIES)
+def test_step_label_without_an_intent_is_empty(tool_name: str, args: dict) -> None:
+    """Without an intent the row shows only its header ("运行代码"): no placeholder, no tool code, no source."""
+    bare = {k: v for k, v in args.items() if k != "intent"}
+    if isinstance(bare.get("input"), dict):
+        bare["input"] = {k: v for k, v in bare["input"].items() if k != "intent"}
+    assert _prettify_input_preview(_surface_inner_skill_name(tool_name, bare), bare) == ""
 
 
 @pytest.mark.parametrize(("tool_name", "args"), _ENTRIES)

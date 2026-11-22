@@ -14,7 +14,7 @@ from bowhead_core.agent_collaboration_runtime import CollaborationRuntime
 from test_agent_collaboration import CollaborationFixture
 from test_agent_collaboration import collab as collab
 
-from bowhead_core import _db, sqlite_capacity
+from bowhead_core import _db, sqlite_capacity, sqlite_domain_runtime
 
 pytestmark = pytest.mark.integration
 
@@ -195,6 +195,8 @@ async def test_a_collaboration_write_that_never_gets_the_lease_fails_as_before_a
 ) -> None:
     fixture = split_collab
     monkeypatch.setattr(_db, "AUTHORITY_BUSY_WAIT_SECONDS", 0.2)
+    # Each attempt may also wait inside its transaction; keep that shorter than the holder too.
+    monkeypatch.setattr(sqlite_domain_runtime, "IN_TRANSACTION_LEASE_WAIT_SECONDS", 0.05)
     holding = asyncio.Event()
     holder = asyncio.create_task(_hold_exclusive_core_lease(fixture, holding, 1.0))
     await holding.wait()

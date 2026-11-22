@@ -188,3 +188,52 @@ def test_unknown_xml_encoding_is_a_structured_rejection() -> None:
     xml = b'<?xml version="1.0" encoding="not-a-real-encoding"?><a/>'
     with pytest.raises(office.OfficePackageError, match="file_office_invalid_package"):
         office.inspect_office_package(_package(extra={"ppt/extra.xml": xml}), filename="x.pptx", declared_mime="")
+
+
+def _with_types(overrides: str) -> bytes:
+    mime = office.OFFICE_MIMES[".pptx"]
+    types = (
+        f'<Types xmlns="{office.CT_NS}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        f'<Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="{mime}.main+xml"/>'
+        f"{overrides}</Types>"
+    ).encode()
+    return _package(replace={"[Content_Types].xml": types})
+
+
+def test_a_type_declared_for_an_absent_part_is_admitted_and_counted() -> None:
+    # pptxgenjs 4.0.1 declares /ppt/slideMasters/slideMaster{n}.xml for every slide but writes only the first,
+    # so every deck it made with two or more slides was refused (116, 2026-11-12).
+    master = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"
+    content = _with_types("".join(f'<Override PartName="/ppt/slideMasters/slideMaster{n}.xml" ContentType="{master}"/>' for n in (2, 3)))
+    info = office.inspect_office_package(content, filename="deck.pptx", declared_mime="")
+    assert info.absent_override_count == 2 and info.part_count == 3
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        '<Override PartName="ppt/slideMasters/slideMaster2.xml" ContentType="application/xml"/>',
+        '<Override PartName="/../outside.xml" ContentType="application/xml"/>',
+        '<Override PartName="/ppt/presentation.xml" ContentType="application/xml"/>',
+    ],
+    ids=["relative", "unsafe", "duplicated"],
+)
+def test_a_malformed_or_repeated_declaration_is_still_refused(override) -> None:
+    with pytest.raises(office.OfficePackageError, match="file_office_invalid_package"):
+        office.inspect_office_package(_with_types(override), filename="deck.pptx", declared_mime="")
+
+
+def test_a_present_part_without_a_content_type_is_still_refused() -> None:
+    with pytest.raises(office.OfficePackageError, match="file_office_invalid_package"):
+        office.inspect_office_package(_package(extra={"ppt/media/image1.png": b"png"}), filename="deck.pptx", declared_mime="")
+
+
+def test_a_part_written_twice_is_named_as_a_duplicate_part() -> None:
+    # python-pptx writes slide{count+1}.xml again when a slide is added after one was removed (116, 2026-11-18).
+    result = io.BytesIO()
+    with pytest.warns(UserWarning, match="Duplicate name"), ZipFile(io.BytesIO(_package()), "r") as source, ZipFile(result, "w") as archive:
+        for entry in source.infolist():
+            archive.writestr(entry, source.read(entry.filename))
+        archive.writestr(ZipInfo("ppt/presentation.xml", date_time=(2027, 1, 1, 0, 0, 0)), source.read("ppt/presentation.xml"))
+    with pytest.raises(office.OfficePackageError, match="file_office_duplicate_part"):
+        office.inspect_office_package(result.getvalue(), filename="deck.pptx", declared_mime="")

@@ -9329,6 +9329,7 @@
       "file_in_knowledge_base": "Ce fichier figure encore dans la base de connaissances. Retirez-le de celle-ci avant de le supprimer.",
       "office_type_mismatch": "L’extension ne correspond pas au format Office. Enregistrez une copie au format correspondant dans Word ou PowerPoint, puis réessayez.",
       "office_invalid_package": "Ce fichier Office n’a pas pu être lu. Sa structure est peut-être endommagée ou non prise en charge. Vérifiez le fichier original puis réessayez.",
+      "office_duplicate_part": "Ce fichier Office contient deux parties portant le même nom : il est endommagé. Ouvrez-le dans PowerPoint ou Word, enregistrez-en une nouvelle copie et importez cette copie.",
       "office_active_content_unsupported": "Les macros et les signatures numériques de ce fichier ne sont pas encore prises en charge. Utilisez une copie sans ces éléments.",
       "office_package_limit": "Ce fichier Office dépasse les limites actuelles de taille ou de structure, avec un maximum de 32 Mio par fichier. Réduisez les contenus intégrés ou divisez le fichier, puis réessayez.",
       "office_multipart_required": "Le contenu complet de ce fichier Office doit être vérifié. Actualisez la page et importez-le à nouveau.",
@@ -10358,6 +10359,11 @@
       "group_references": "Références",
       "group_scripts": "Scripts",
       "group_evals": "Cas d’évaluation",
+      "group_root": "Racine du paquet",
+      "file_kind_other": "Autre dossier ou racine",
+      "file_path": "Chemin depuis la racine du Skill",
+      "file_not_text": "Ce fichier n’est pas du texte ({mime}) : son contenu n’est ni affiché ni modifiable ici. Pour le remplacer, importez une nouvelle version du paquet du Skill.",
+      "file_too_large": "Ce fichier dépasse 1 Mo : son contenu n’est ni affiché ni modifiable ici.",
       "body_label": "Étapes",
       "trig_empty": "Aucun exemple de déclenchement pour l’instant.",
       "evals_empty": "Aucun cas d’évaluation pour l’instant."
@@ -12326,12 +12332,24 @@
     "cite_kb_page": "Page {page}",
     "cite_kb_paragraph": "Paragraphe {n}",
     "summary_agents": "{count, plural, one {# agent utilisé} other {# agents utilisés}}",
+    "summary_output": {
+      "report": "{count, plural, =1 {{count} rapport} other {{count} rapports}}",
+      "chart": "{count, plural, =1 {{count} graphique} other {{count} graphiques}}",
+      "web_page": "{count, plural, =1 {{count} page web} other {{count} pages web}}",
+      "presentation": "{count, plural, =1 {{count} présentation} other {{count} présentations}}",
+      "pdf": "{count, plural, =1 {{count} PDF} other {{count} PDF}}",
+      "document": "{count, plural, =1 {{count} document} other {{count} documents}}",
+      "spreadsheet": "{count, plural, =1 {{count} feuille de calcul} other {{count} feuilles de calcul}}",
+      "image": "{count, plural, =1 {{count} image} other {{count} images}}",
+      "file": "{count, plural, =1 {{count} fichier} other {{count} fichiers}}"
+    },
     "step_failed_generic": "Cette étape a échoué sans erreur précise pouvant être affichée en toute sécurité. Consultez les informations affichées pour cette étape et contactez votre administrateur si cela se reproduit.",
     "failure_detail": {
       "reason": {
         "tool_arguments_invalid": "Les entrées de l’étape ont été refusées.",
         "tool_resource_unavailable": "Un élément nécessaire était indisponible.",
         "tool_code_failed": "Le code s’est arrêté sur une erreur.",
+        "tool_output_not_saved": "Le code s’est exécuté, mais un fichier qu’il a créé n’a pas été enregistré.",
         "tool_execution_timeout": "L’étape a expiré.",
         "tool_execution_unknown": "Le résultat de l’étape n’est pas confirmé.",
         "tool_execution_failed": "L’outil n’a pas pu terminer l’étape.",
@@ -12340,6 +12358,7 @@
       "fact_field": "Entrée : {value}.",
       "fact_missing_key": "Clé manquante : {value}.",
       "fact_exception": "Type d’erreur : {value}.",
+      "fact_file": "Fichier : {value}.",
       "fact_exit_code": "Code de sortie : {value}.",
       "action_recovered": "Une nouvelle tentative a réussi ; rien à faire.",
       "action_check_source": "Vérifiez votre accès à la source, puis reposez la question.",
@@ -14181,6 +14200,39 @@
     "run_error": "L’exécution a échoué",
     "search": "Recherche : {q}"
   },
+  "step_facts": {
+    "attachment_header": "Lire la pièce jointe",
+    "attachment_truncated": "{n} premiers caractères lus",
+    "attachment_complete": "Lu en entier",
+    "canvas_added": "Ajouté · {name}",
+    "canvas_not_added": "Non ajouté · {reason}",
+    "code_done": "Exécuté avec succès",
+    "code_outputs": "Exécuté · {count, plural, =1 {{count} sortie} other {{count} sorties}}",
+    "code_outputs_typed": "Exécuté · {count, plural, =1 {{count} sortie} other {{count} sorties}} ({types})",
+    "type_separator": ", ",
+    "arguments_retry": "Arguments non valides, nouvel essai",
+    "section": {
+      "image": "Image",
+      "kpi_row": "Ligne d’indicateurs",
+      "table": "Tableau",
+      "data_table": "Tableau de données",
+      "narrative": "Texte",
+      "recommendations": "Recommandations",
+      "chart": "Graphique"
+    },
+    "result_kind": {
+      "delivered_file": "Fichiers livrés",
+      "uploaded_file": "Fichiers importés",
+      "data_file": "Fichiers de données",
+      "image": "Images",
+      "design": "Maquettes"
+    },
+    "not_added_reason": {
+      "invalid_artifact_id_format": "ID de données invalide",
+      "not_an_image": "pas une image",
+      "design_v2a_disabled": "mise en page désactivée"
+    }
+  },
   "citation_aria": {
     "cite_labeled": "Citation {n} : {label}",
     "numbered": "Citation {n}",
@@ -14405,6 +14457,7 @@
       "tool_arguments_invalid": "Le format des entrées ou les champs de données ne conviennent pas à cette étape. L’agent doit corriger les entrées avant de réessayer.",
       "tool_resource_unavailable": "La source sélectionnée est indisponible. Vérifiez l’accès ou choisissez une source disponible.",
       "tool_code_failed": "Le script a échoué. Vérifiez l’exception, les entrées déclarées et les noms réels des colonnes avant d’exécuter le code corrigé.",
+      "tool_output_not_saved": "Un fichier créé par le script n’a pas été enregistré : le stockage de fichiers l’a refusé ou n’a pas pu l’enregistrer. L’agent reçoit la raison et doit corriger le fichier puis relancer.",
       "tool_execution_timeout": "Le délai de l’opération a expiré et son résultat n’est pas confirmé. Vérifiez les effets avant de répéter une opération qui modifie des données.",
       "tool_execution_unknown": "Le résultat de l’opération n’est pas confirmé. Vérifiez si elle a pris effet avant de la répéter.",
       "tool_execution_failed": "L’outil n’a pas terminé cette étape. Consultez le résultat ou copiez le diagnostic pour votre administrateur.",

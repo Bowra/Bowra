@@ -142,11 +142,13 @@ def chrome_lang(language_context: Any) -> str:
     return lang if lang in _CHROME else "en-US"
 
 
+# The generic notice states only what is known: the check could not confirm every requirement. It
+# appears when no failed step need exist (a review passed by the rejection limit), so it names none.
 for _locale, _message in {
-    "en-US": "Some requested work remains unfulfilled or unverified. Review the failed steps before relying on a complete result.",
-    "zh-CN": "部分要求尚未完成或核实。请查看失败步骤及其影响，当前成果不能视为完整交付。",
-    "de-DE": "Einige Anforderungen sind noch unerfüllt oder ungeprüft. Prüfen Sie die fehlgeschlagenen Schritte, bevor Sie das Ergebnis als vollständig betrachten.",
-    "fr-FR": "Certaines demandes restent inachevées ou non vérifiées. Consultez les étapes en échec avant de considérer le résultat comme complet.",
+    "en-US": "Not every requested item could be confirmed as complete. Before relying on the result, check the limitations stated in the answer and the run's steps.",
+    "zh-CN": "未能确认全部要求都已完成。使用结果前，请核对回答中说明的限制和执行步骤。",
+    "de-DE": "Nicht alle Anforderungen konnten als erledigt bestätigt werden. Prüfen Sie vor der Verwendung die in der Antwort genannten Einschränkungen und die Ausführungsschritte.",
+    "fr-FR": "Toutes les demandes n'ont pas pu être confirmées comme terminées. Avant d'utiliser le résultat, vérifiez les limites indiquées dans la réponse et les étapes d'exécution.",
 }.items():
     _CHROME[_locale]["delivery_unverified"] = _message
 # Regression check N1: an incomplete delivery whose review names its gaps says what is missing instead of the generic notice.
@@ -157,13 +159,28 @@ for _locale, _message in {
     "fr-FR": "Non réalisé : {gaps}.",
 }.items():
     _CHROME[_locale]["delivery_gaps"] = _message
+# The reviewed gaps when an unfulfilled call's effect may be unknown: "not completed" could misstate it.
+for _locale, _message in {
+    "en-US": "These requested items could not be confirmed as complete: {gaps}. Before relying on the result, check the limitations stated in the answer and the run's steps.",
+    "zh-CN": "未能确认以下要求已完成：{gaps}。使用结果前，请核对回答中说明的限制和执行步骤。",
+    "de-DE": "Diese Anforderungen konnten nicht als erledigt bestätigt werden: {gaps}. Prüfen Sie vor der Verwendung die in der Antwort genannten Einschränkungen und die Ausführungsschritte.",
+    "fr-FR": "Ces demandes n'ont pas pu être confirmées comme terminées : {gaps}. Avant d'utiliser le résultat, vérifiez les limites indiquées dans la réponse et les étapes d'exécution.",
+}.items():
+    _CHROME[_locale]["delivery_unconfirmed_gaps"] = _message
 
 
-def delivery_gaps_notice(gaps: list[str], lang: str) -> str:
-    """One sentence naming the unmet requirements, in the language ``chrome_text`` would use."""
+def delivery_gaps_notice(gaps: list[str], lang: str, *, unconfirmed: bool = False) -> str:
+    """One sentence listing the unmet requirements, in the language ``chrome_text`` would use.
+
+    ``unconfirmed`` says they could not be confirmed as complete instead of naming them not completed.
+    """
     resolved = lang if lang in _CHROME else "en-US"
     items = [gap.rstrip("。.；;，, ") for gap in gaps]
-    return chrome_text("delivery_gaps", resolved, gaps=("；" if resolved == "zh-CN" else "; ").join(item for item in items if item))
+    return chrome_text(
+        "delivery_unconfirmed_gaps" if unconfirmed else "delivery_gaps",
+        resolved,
+        gaps=("；" if resolved == "zh-CN" else "; ").join(item for item in items if item),
+    )
 
 
 def chrome_text(key: str, lang: str, **fmt: Any) -> str:

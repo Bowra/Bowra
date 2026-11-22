@@ -9329,6 +9329,7 @@
       "file_in_knowledge_base": "该文件仍在知识库中，请先从知识库移出后再删除。",
       "office_type_mismatch": "文件后缀与实际 Office 格式不一致，请在 Word 或 PowerPoint 中另存为对应格式后重试。",
       "office_invalid_package": "无法读取此 Office 文件，文件结构可能损坏或不受支持，请检查原文件后重试。",
+      "office_duplicate_part": "此 Office 文件里有两个同名部件，文件已损坏。请在 PowerPoint 或 Word 中打开，另存一份后上传另存的文件。",
       "office_active_content_unsupported": "暂不支持此文件的宏或数字签名，请使用不含这些内容的副本。",
       "office_package_limit": "此 Office 文件超过当前大小或结构限制（文件上限 32 MiB），请减少嵌入内容或拆分后重试。",
       "office_multipart_required": "此 Office 文件需要完整内容校验，请刷新页面后重新上传。",
@@ -10358,6 +10359,11 @@
       "group_references": "参考资料",
       "group_scripts": "脚本",
       "group_evals": "评估用例",
+      "group_root": "根目录",
+      "file_kind_other": "其他文件夹或根目录",
+      "file_path": "相对技能根目录的路径",
+      "file_not_text": "这个文件不是文本（{mime}），这里不显示也不编辑内容；要替换它，请上传新版本的技能包。",
+      "file_too_large": "这个文件超过 1 MB，这里不显示也不编辑内容。",
       "body_label": "步骤说明",
       "trig_empty": "还没有触发示例。",
       "evals_empty": "还没有评估用例。"
@@ -12326,12 +12332,24 @@
     "cite_kb_page": "第 {page} 页",
     "cite_kb_paragraph": "第 {n} 段",
     "summary_agents": "调用 {count} 个智能体",
+    "summary_output": {
+      "report": "{count} 份报告",
+      "chart": "{count} 张图表",
+      "web_page": "{count} 个网页",
+      "presentation": "{count} 份演示文稿",
+      "pdf": "{count} 份 PDF",
+      "document": "{count} 份文档",
+      "spreadsheet": "{count} 个表格文件",
+      "image": "{count} 张图片",
+      "file": "{count} 个文件"
+    },
     "step_failed_generic": "这一步执行失败，没有可安全展示的具体错误。请查看已显示的步骤信息；若再次发生，请联系管理员。",
     "failure_detail": {
       "reason": {
         "tool_arguments_invalid": "这一步的参数不符合要求。",
         "tool_resource_unavailable": "这一步需要的内容不可用。",
         "tool_code_failed": "代码运行出错。",
+        "tool_output_not_saved": "代码已运行，但它生成的文件没有保存。",
         "tool_execution_timeout": "这一步超时了。",
         "tool_execution_unknown": "这一步的结果尚未确认。",
         "tool_execution_failed": "工具未能完成这一步。",
@@ -12340,6 +12358,7 @@
       "fact_field": "参数：{value}。",
       "fact_missing_key": "缺少字段：{value}。",
       "fact_exception": "错误类型：{value}。",
+      "fact_file": "文件：{value}。",
       "fact_exit_code": "退出码：{value}。",
       "action_recovered": "重试已成功，无需处理。",
       "action_check_source": "请确认能访问该来源后再提问。",
@@ -14181,6 +14200,39 @@
     "run_error": "运行出错",
     "search": "搜索: {q}"
   },
+  "step_facts": {
+    "attachment_header": "读取附件",
+    "attachment_truncated": "已读入前 {n} 字",
+    "attachment_complete": "已读取",
+    "canvas_added": "已添加 · {name}",
+    "canvas_not_added": "未添加 · {reason}",
+    "code_done": "运行成功",
+    "code_outputs": "运行成功 · {count} 输出",
+    "code_outputs_typed": "运行成功 · {count} 输出（{types}）",
+    "type_separator": "、",
+    "arguments_retry": "参数有误，正在重试",
+    "section": {
+      "image": "图片",
+      "kpi_row": "KPI 行",
+      "table": "表格",
+      "data_table": "数据表",
+      "narrative": "正文",
+      "recommendations": "建议",
+      "chart": "图表"
+    },
+    "result_kind": {
+      "delivered_file": "交付文件",
+      "uploaded_file": "上传的文件",
+      "data_file": "数据文件",
+      "image": "图片",
+      "design": "设计稿"
+    },
+    "not_added_reason": {
+      "invalid_artifact_id_format": "数据 ID 不对",
+      "not_an_image": "不是图片",
+      "design_v2a_disabled": "该版式未启用"
+    }
+  },
   "citation_aria": {
     "cite_labeled": "引用 {n}：{label}",
     "numbered": "引用 {n}",
@@ -14405,6 +14457,7 @@
       "tool_arguments_invalid": "本步骤的输入格式或数据字段不符合要求，尚未执行成功。智能体需要修正输入后再尝试。",
       "tool_resource_unavailable": "所选数据来源当前不可用。请检查访问权限或选择可用来源后继续。",
       "tool_code_failed": "脚本执行失败。智能体需要核对已记录的异常、本次声明的输入和实际列名，再运行修正后的代码。",
+      "tool_output_not_saved": "脚本生成的文件没有保存：文件存储拒收或未能保存它。智能体会收到具体原因，需要修正文件后重新运行。",
       "tool_execution_timeout": "本次操作超时，结果尚未确认。对于会修改数据的操作，请先核对实际结果再决定是否重试。",
       "tool_execution_unknown": "本次操作的结果尚未确认。请先核实操作是否已经生效，再决定是否再次执行。",
       "tool_execution_failed": "工具未能完成本步骤。请查看已记录的执行结果；若原因仍不可见，可复制诊断信息交给管理员排查。",

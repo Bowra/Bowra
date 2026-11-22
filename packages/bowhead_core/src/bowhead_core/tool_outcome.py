@@ -168,6 +168,7 @@ TOOL_FAILURE_CODES = frozenset(
         "tool_arguments_invalid",
         "tool_resource_unavailable",
         "tool_code_failed",
+        "tool_output_not_saved",
         "tool_execution_timeout",
         "tool_execution_unknown",
         "tool_execution_failed",
@@ -205,6 +206,8 @@ class ToolOutcome:
     exception: str | None = None
     missing_key: str | None = None
     exit_code: int | None = None
+    # A file the code wrote that was not stored (``tool_output_not_saved``).
+    file: str | None = None
 
 
 def invocation_result(invocation: Any) -> Any:
@@ -223,6 +226,11 @@ def classify_tool_outcome(result: Any, error: str | None = None) -> ToolOutcome:
     kind, _ = _extract_result_error(result)
     exit_code = body.get("exit_code")
     exit_code = exit_code if type(exit_code) is int else None
+    not_saved = body.get("outputs_not_saved")
+    if exit_code in (None, 0) and isinstance(not_saved, list) and not_saved:
+        # The code finished; only storing a file it wrote failed. Its reason is in the run's error text.
+        first = not_saved[0]
+        return ToolOutcome("failure", "tool_output_not_saved", file=first.rsplit("/", 1)[-1] if isinstance(first, str) else None)
     if exit_code not in (None, 0):
         exception = missing_key = None
         # Runners may retain a Python traceback in either declared output stream.

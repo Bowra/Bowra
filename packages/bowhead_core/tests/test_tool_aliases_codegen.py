@@ -38,9 +38,12 @@ def test_yaml_loads_with_expected_fields() -> None:
     assert len(tools) >= 25, f"Expected ≥25 tools, got {len(tools)}"
     required_fields = {"canonical", "display_zh", "category", "allowed_roles"}
     for t in tools:
-        if t.get("pseudo"):
+        if t.get("pseudo") or t.get("role_binding") is False:
             # G5: pseudo entries (display-only, e.g. python_sandbox) have no allowed_roles;
             # they generate no role binding and only label traces (docs/skills-tools-ssot.md §5-G5).
+            # `role_binding: false` parts (turn visibility G2) are named for display only, so they
+            # carry no allowed_roles either; `allowed_roles` would contradict the flag.
+            assert not (t.get("role_binding") is False and "allowed_roles" in t), f"tool {t['canonical']}: role_binding false with allowed_roles"
             missing = {"canonical", "display_zh", "category"} - set(t.keys())
         else:
             missing = required_fields - set(t.keys())

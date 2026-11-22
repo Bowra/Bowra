@@ -14,7 +14,7 @@
 
 /** Canonical error reason codes emitted by backend; each has copy in `error_messages.reasons`. */
 export const REASON_CODE_LIST = [
-  "tool_arguments_invalid", "tool_resource_unavailable", "tool_code_failed",
+  "tool_arguments_invalid", "tool_resource_unavailable", "tool_code_failed", "tool_output_not_saved",
   "tool_execution_timeout", "tool_execution_unknown", "tool_execution_failed",
   "tool_delivery_review_required",
   "agent_step_limit",

@@ -475,3 +475,76 @@ def test_readonly_entry_body_and_file_updates_keep_valid_packages_on_both_routes
 def _prepare_usage_projection_databases(tmp_path, initialize_migrated_core_database):
     for filename in ("u.db",):
         initialize_migrated_core_database(tmp_path / filename)
+
+
+# ─────────────────────────── Any file by its path (tech-design §12.1) ──────────────────
+
+
+def test_personal_package_file_lifecycle_at_any_path(tmp_path, monkeypatch):
+    """Files outside references/, scripts/ and evals/ are edited like the others; the package stays valid."""
+    app = _app(tmp_path, monkeypatch)
+    d = _personal_skill(tmp_path, app)
+    (d / "assets").mkdir()
+    (d / "assets" / "logo.png").write_bytes(b"\x89PNG\x00")
+    c = _client(app, AUTHOR)
+    base = f"{_SKILLS}/channel-gm-recipe/package-files"
+    created = c.post(base, json={"operation": "create", "path": "templates/deck.json", "content": '{"slides": 1}'})
+    assert created.status_code == 200, created.text
+    assert created.json()["path"] == "templates/deck.json" and created.json()["content"] == '{"slides": 1}'
+    assert c.post(base, json={"operation": "create", "path": "README.md", "content": "root file"}).status_code == 200
+    assert c.post(base, json={"operation": "create", "path": ".env.example", "content": "KEY="}).status_code == 200
+    written = c.put(f"{base}/templates/deck.json", json={"content": '{"slides": 2}', "expected_content_sha256": created.json()["content_sha256"]})
+    assert written.status_code == 409  # The package changed after that revision.
+    current = c.get(f"{base}/templates/deck.json").json()
+    written = c.put(f"{base}/templates/deck.json", json={"content": '{"slides": 2}', "expected_content_sha256": current["content_sha256"]})
+    assert written.status_code == 200, written.text
+    assert (d / "templates" / "deck.json").read_text() == '{"slides": 2}'
+    # A file that is not text can be moved and removed; it is replaced only by a new upload.
+    moved = c.post(base, json={"operation": "rename", "path": "assets/logo.png", "target": "assets/brand/logo.png"})
+    assert moved.status_code == 200, moved.text
+    assert (moved.json()["unavailable"], moved.json()["content"]) == ("binary", None)
+    assert (d / "assets" / "brand" / "logo.png").read_bytes() == b"\x89PNG\x00"
+    assert c.post(base, json={"operation": "delete", "path": "README.md"}).status_code == 200
+    listed = [entry["path"] for entry in c.get(f"{_SKILLS}/channel-gm-recipe").json()["package_files"]]
+    assert listed == [".env.example", "SKILL.md", "assets/brand/logo.png", "references/notes.md", "templates/deck.json"]
+    inst = _run(app.state.skill_instance_store.get(user_id="u_author", name="channel-gm-recipe"))
+    assert inst.size_bytes > 1
+
+
+def test_package_file_paths_name_one_place_and_never_the_manifest(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    d = _personal_skill(tmp_path, app)
+    (tmp_path / "outside.md").write_text("keep")
+    c = _client(app, AUTHOR)
+    base = f"{_SKILLS}/channel-gm-recipe/package-files"
+    before = bundle_sha256(d)
+    for path in ("SKILL.md", "../outside.md", "references/../../outside.md", "a//b.md", "./notes.md", "/abs.md", "dir\\file.md"):
+        r = c.post(base, json={"operation": "create", "path": path, "content": "x"})
+        assert r.status_code == 400 and r.json()["detail"]["code"] == "skill_filename_invalid", (path, r.text)
+    assert c.post(base, json={"operation": "delete", "path": "SKILL.md"}).status_code == 400
+    assert c.post(base, json={"operation": "rename", "path": "references/notes.md", "target": "SKILL.md"}).status_code == 400
+    assert c.put(f"{base}/SKILL.md", json={"content": _skill_md(body="other\n")}).status_code == 400
+    assert c.put(f"{base}/missing.md", json={"content": "x"}).status_code == 404
+    assert c.post(base, json={"operation": "create", "path": "data/blob.txt", "content": "\x00"}).status_code == 415
+    assert bundle_sha256(d) == before and (tmp_path / "outside.md").read_text() == "keep"
+    # A built-in Skill is never edited here.
+    assert c.post(f"{_SKILLS}/pdf/package-files", json={"operation": "create", "path": "x.md", "content": "x"}).status_code == 404
+
+
+def test_team_package_files_follow_the_content_governance_gate(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    sid, sk_dir = _team_skill(app, AUTHOR)  # Pending team_wide: only an admin edits its content.
+    change = {"operation": "create", "path": "assets/theme.json", "content": '{"color": "blue"}'}
+    r = _client(app, AUTHOR).post(f"{_BASE}/{sid}/package-files", json=change)
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "team_skill_content_admin_required"
+    assert not (sk_dir / "assets").exists()
+
+    sid, sk_dir = _team_skill(app, ADMIN, name="admin-recipe")
+    row = _run(app.state.user_store.get_team_skill("team_a", sid))
+    admin = _client(app, ADMIN)
+    assert admin.post(f"{_BASE}/{sid}/package-files", json=change).status_code == 200
+    saved = admin.put(f"{_BASE}/{sid}/package-files/assets/theme.json", json={"content": '{"color": "red"}'})
+    assert saved.status_code == 200, saved.text
+    assert (sk_dir / "assets" / "theme.json").read_text() == '{"color": "red"}'
+    after = _run(app.state.user_store.get_team_skill("team_a", sid))
+    assert after.approved_sha256 == bundle_sha256(sk_dir) != row.approved_sha256

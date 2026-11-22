@@ -101,6 +101,8 @@ export interface Step {
   outputArtifacts: StepOutputArtifact[] | null;
   /** Bounded executable source persisted on step_started for Results > Code. */
   codeInput: StepCodeInput | null;
+  /** Declared language of code being written (`code_language` on a writing step); null otherwise. */
+  codeLanguage?: string | null;
   /** Failure envelope when state=failed. */
   error: StepError | null;
   /** Subagent peer display name (when stepType=subagent). */
@@ -1059,6 +1061,7 @@ export interface ApplyStepStartedInput {
   subagentId?: string | null;
   subagentName?: string | null;
   codeInput?: StepCodeInput | null;
+  codeLanguage?: string | null;
   /** Per-turn monotonic bus sequence (`payload.evt_seq`); see `Step.evtSeq`. */
   evtSeq?: number;
 }
@@ -1086,6 +1089,7 @@ export function applyStepStarted(input: ApplyStepStartedInput): void {
     subSteps: null,
     outputArtifacts: null,
     codeInput: input.codeInput ?? null,
+    codeLanguage: input.codeLanguage ?? null,
     error: null,
     subagentName: input.subagentName ?? null,
     startedAt: input.startedAt

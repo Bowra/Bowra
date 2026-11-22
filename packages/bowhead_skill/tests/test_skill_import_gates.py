@@ -47,7 +47,7 @@ class _Ctx:
 
 
 class _Runtime:
-    async def run(self, spec, *, entry_script, input_data, extra_args):  # noqa: ANN001
+    async def run(self, spec, *, entry_script, input_data):  # noqa: ANN001
         raise AssertionError("pending skill must be denied before runtime")
 
 

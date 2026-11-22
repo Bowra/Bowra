@@ -201,4 +201,13 @@ describe("readableFailureFacts", () => {
     expect(readableFailureFacts(undefined)).toEqual([]);
     expect(readableFailureFacts("field=")).toEqual([]);
   });
+
+  it("names a file that was not saved when there is no argument", () => {
+    expect(readableFailureFacts("file=r3.pptx")).toEqual([{ key: "file", value: "r3.pptx" }]);
+    expect(readableFailureFacts("file=报告.pptx; exit_code=0")).toEqual([
+      { key: "file", value: "报告.pptx" },
+      { key: "exit_code", value: "0" },
+    ]);
+    expect(readableFailureFacts("field=columns; file=r3.pptx")).toEqual([{ key: "field", value: "columns" }]);
+  });
 });

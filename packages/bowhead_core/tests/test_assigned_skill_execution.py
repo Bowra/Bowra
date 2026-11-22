@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib.util
+import os
 import shutil
+import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,10 +28,24 @@ from test_skill_read_receiver_integration import receiver_case as _receiver_case
 from test_skill_read_receiver_integration import start_case as _start_case
 
 from bowhead_skill import SkillCatalog, SkillRuntime
+from bowhead_skill.catalog import builtin_catalog_dir
 
 receiver_case = _receiver_case
 start_case = _start_case
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.parametrize("start_case", ["team"], indirect=True)]
+
+_RUNNER = None
+
+
+def stage_with_runner(skill_dir: Path, entry: str) -> str | None:
+    """Stage a Skill folder with the real sandbox runner; None when it accepts the folder."""
+    global _RUNNER
+    if _RUNNER is None:
+        spec = importlib.util.spec_from_file_location("_assigned_stage_runner", builtin_catalog_dir() / "python_sandbox/scripts/runner.py")
+        _RUNNER = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_RUNNER)
+    with tempfile.TemporaryDirectory() as workdir:
+        return _RUNNER._stage_user_skill(Path(workdir), skill_dir, entry)
 
 
 @pytest.fixture
@@ -36,6 +54,7 @@ async def assigned_case(receiver_case, monkeypatch):
     monkeypatch.setenv("BOWHEAD_SKILL_MULTIRUNTIME", "1")
     monkeypatch.setenv("BOWHEAD_PI_K_ENABLED", "0")
     monkeypatch.setattr("bowhead_core.assigned_skill_execution.builtin_catalog_dir", lambda: case.root)
+    monkeypatch.setattr("bowhead_core.assigned_skill_execution._EXACT_COPY_ROOT", case.root.parent / ".data" / "exact_skills")
     root = case.root.parent / "uploaded"
     (root / "scripts").mkdir(parents=True)
     (root / "SKILL.md").write_text("---\nname: method\ndescription: exact method\nsandbox_requirements: [numpy==2.0.0]\n---\nUPLOADED $ARGUMENTS\n")
@@ -54,7 +73,7 @@ async def assigned_case(receiver_case, monkeypatch):
     runtime = SkillRuntime()
     calls = []
 
-    async def run(spec, *, entry_script, input_data, extra_args):
+    async def run(spec, *, entry_script, input_data):
         copied_root = Path(input_data["_skill_dir"]) if "_skill_dir" in input_data else spec.source_dir
         calls.append(
             {
@@ -63,6 +82,8 @@ async def assigned_case(receiver_case, monkeypatch):
                 "root": copied_root,
                 "input": copy.deepcopy(input_data),
                 "files": {p.relative_to(copied_root).as_posix(): p.read_bytes() for p in copied_root.rglob("*") if p.is_file()},
+                # The real runner's staging check: the process boundary is mocked, staging is not.
+                "staged": stage_with_runner(copied_root, input_data["_skill_entry"]) if "_skill_dir" in input_data else None,
             }
         )
         return SimpleNamespace(
@@ -129,7 +150,28 @@ async def test_exact_user_source_reads_and_runs_pinned_copy_despite_builtin_coll
     assert call["files"]["scripts/run.py"] == b"print('ORIGINAL')\n"
     assert call["files"]["asset.bin"] == b"\x00\x01asset"
     assert call["input"]["_sandbox_requirements"] == ["numpy==2.0.0"]
+    assert call["staged"] is None
     assert case.ctx.assigned_skill_material is None
+
+
+async def test_exact_copies_live_under_the_data_root_and_stale_ones_are_removed(assigned_case):
+    from bowhead_core import assigned_skill_execution
+
+    case = assigned_case
+    root = assigned_skill_execution._EXACT_COPY_ROOT
+    root.mkdir(parents=True)
+    stale, fresh, other = root / "bowhead-assigned-skill-crashed", root / "bowhead-reference-skill-running", root / "kept-unrelated"
+    for folder in (stale, fresh, other):
+        (folder / "package").mkdir(parents=True)
+    two_days_ago = time.time() - 2 * 24 * 3600
+    os.utime(stale, (two_days_ago, two_days_ago))
+    os.utime(other, (two_days_ago, two_days_ago))
+    result = await invoke(case)
+    assert result["ok"] is True
+    call = case.calls[0]
+    assert call["root"].parent.parent == root.resolve() and call["staged"] is None
+    assert not call["root"].exists()
+    assert not stale.exists() and fresh.exists() and other.exists()
 
 
 @pytest.mark.parametrize("change", ["id", "permission", "distribution", "pending", "disabled", "scope", "raw", "flag"])
@@ -478,7 +520,7 @@ async def test_handler_failure_keeps_original_error_contract_and_cleans_copy(ass
     case = assigned_case
     roots = []
 
-    async def fail(spec, *, entry_script, input_data, extra_args):
+    async def fail(spec, *, entry_script, input_data):
         roots.append(Path(input_data["_skill_dir"]))
         raise RuntimeError("process outcome unavailable")
 

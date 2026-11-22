@@ -86,7 +86,7 @@ def test_python_sandbox_script_all_comments_fallback() -> None:
         "python_sandbox",
         {"script": "# just a comment\n# nothing else"},
     )
-    assert out == "运行: (代码)"
+    assert out == ""
 
 
 # ─── kb_search / web_search shapes ──────────────────────────────────────────
@@ -200,7 +200,11 @@ def test_other_tools_keep_their_previews_untouched() -> None:
     `test_flat_sandbox_downstream_surfaces.py::test_step_label_never_shows_the_tool_code`。
     """
     assert _prettify_input_preview("bi_query", {"queries": ["2026年 营业额 按品牌", "x", "y"]}) == "2026年 营业额 按品牌 +2 more"
-    assert _prettify_input_preview("python_sandbox", {"name": "python_sandbox", "script": "print(1)"}) == "运行: (代码)"
+    assert _prettify_input_preview("python_sandbox", {"name": "python_sandbox", "script": "print(1)"}) == ""
+    assert (
+        _prettify_input_preview("python_sandbox", {"name": "python_sandbox", "script": "print(1)", "intent": "核对：列名与行数"})
+        == "核对：列名与行数"
+    )
     # Preserve an actual skill name (do not erase the informative part too).
     assert _prettify_input_preview("python_sandbox", {"name": "data-prep", "script": "print(1)"}) == "运行: data-prep"
     assert _prettify_input_preview("kb_search", {"query": "Q1 销售"}) == "Q1 销售"

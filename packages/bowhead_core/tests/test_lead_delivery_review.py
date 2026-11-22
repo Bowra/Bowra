@@ -6,6 +6,7 @@ import json
 
 import pytest
 from bowhead_core.agents.lead_orchestrator import _LEAD_TOOL_DENY
+from bowhead_core.report_chrome_text import chrome_text
 from bowhead_core.subagent_return_tool import register_subagent_return_tool
 from bowhead_core.tool_delivery_review import delivery_summary_input, validate_delivery_review
 from bowhead_core.types import ToolInvocation
@@ -577,10 +578,54 @@ async def test_a_partial_helper_is_delivered_with_its_gap_named(collab, monkeypa
     assert not harness.provider.failures, harness.provider.failures
     assert result.completion == "partial" and not result.reviewed_delivery_complete
     assert delivery_summary_input(result) == {"_delivery_completion": "partial"}
-    generic = "Some requested work remains unfulfilled or unverified."
+    generic = chrome_text("delivery_unverified", "en-US")
     if citable:
         assert result.final_answer == f"{answer}\n\nNot completed: Sort stores by province."
     else:
-        assert result.final_answer.startswith(answer) and result.final_answer.endswith(
-            generic + " Review the failed steps before relying on a complete result."
-        )
+        assert result.final_answer.startswith(answer) and result.final_answer.endswith(generic)
+
+
+async def test_unconfirmed_gaps_are_listed_in_the_notice_not_as_bare_lines(collab, monkeypatch):
+    """An accepted review leaves an empty helper delivery unfulfilled; its gaps appear once, labeled.
+
+    A reproduced task: the requirements were appended as bare lines before the generic notice.
+    """
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    requests = 0
+    reviewed: list[bool] = []
+    answer = "The connected source has no sales measure, so neither result could be computed."
+    gaps = ["Monthly sales for 2026", "Store ranking by sales."]
+
+    async def spawn(args, ctx):
+        return {"ok": True, "completion": "partial", "delivered": "none", "final_answer": ""}
+
+    async def provider(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return LLMResponse(content="", tool_calls=[ToolCall(id="helper", name="subagent_spawn", arguments={"profile": "compute"})])
+        guidance = [message.content for message in request.messages if message.role == "user" and "review_context (JSON data): " in message.content]
+        if guidance and not reviewed:
+            reviewed.append(True)
+            context = json.loads(guidance[-1].split("review_context (JSON data): ", 1)[1])
+            helper = context["failed_calls"][0]
+            assert not helper.get("citable", False)
+            review = {
+                "requirements": [{"requirement": gap, "status": "unfulfilled", "evidence_call_ids": []} for gap in gaps],
+                "issues": [{"call_id": helper["call_id"], "resolution": "unfulfilled", "evidence_call_ids": [], "explanation": "No sales measure."}],
+            }
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id="review", name="review_delivery", arguments={"payload": {"delivery_review": review}})]
+            )
+        return LLMResponse(content=answer)
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("subagent_spawn", spawn)
+    register_subagent_return_tool(harness.registry)
+    result = await harness.run(collab.lead, tool_deny=_LEAD_TOOL_DENY)
+    assert not harness.provider.failures, harness.provider.failures
+    assert result.completion == "partial" and not result.reviewed_delivery_complete
+    assert result.final_answer == (
+        f"{answer}\n\nThese requested items could not be confirmed as complete: Monthly sales for 2026; Store ranking by sales. "
+        "Before relying on the result, check the limitations stated in the answer and the run's steps."
+    )

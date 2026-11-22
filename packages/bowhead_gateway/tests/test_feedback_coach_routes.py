@@ -83,6 +83,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (skill_dir / "scripts").mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(BODY, encoding="utf-8")
     (skill_dir / "scripts" / "run.py").write_text("print(1)\n", encoding="utf-8")
+    (skill_dir / "assets").mkdir()
+    (skill_dir / "assets" / "theme.json").write_text("{}", encoding="utf-8")  # Any folder is part of the package.
     app = FastAPI()
     app.include_router(fcr.router, prefix="/api/v1/feedback-coach")
     app.state.skill_instance_store = _Instances(skill_dir)
@@ -138,7 +140,7 @@ def test_coach_sees_body_available_names_and_findings_by_severity(env):
         env.seen["target_kind"] == "user_skill" and env.seen["mounted_assets"] == [] and env.seen["timeout_sec"] == fcr.USER_SKILL_DRAFT_TIMEOUT_SEC
     )
     surface = env.seen["config_surface"]
-    assert surface["body_raw"] == BODY and surface["files"] == [{"path": "scripts/run.py", "size": 9}]
+    assert surface["body_raw"] == BODY and surface["files"] == [{"path": "assets/theme.json", "size": 2}, {"path": "scripts/run.py", "size": 9}]
     assert surface["available"] == {"tools": ["bi_query", "bi_schema"], "skills": ["chart-style"]}  # Coach renaming must choose from here.
     assert "findings" not in surface["import_report"] and surface["import_report"]["finding_ids"] == ["f1", "f2"]  # findings via sanitizer.
     excerpts = "\n".join(env.seen["evidence_excerpts"])
