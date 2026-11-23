@@ -10,7 +10,7 @@ from typing import Protocol
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.rate_card import ModelTokenUsage, ModelUsageLine, credits_for_model_lines, credits_for_tokens
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.user_store import _id, _insert_credit_model_usage_in_tx
@@ -546,7 +546,8 @@ class SubagentDraftCreditAccountant:
                 "AND NOT EXISTS(SELECT 1 FROM llm_usage_events e WHERE e.id=d.usage_event_id))"
             )
             args = (cutoff, cutoff, limit)
-        async with open_shared_ctx(self.db_path) as db:
+        # The candidate list is a pure read; `settle` rechecks each row's state under its own writer lock.
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT d.team_id,d.owner_user_id,d.request_key_hash,d.draft_id,d.input_tokens,d.output_tokens,d.attempts "

@@ -33,7 +33,7 @@ from bowhead_core.skill_read_receiver import (
     require_initial_skill_invocation_baseline,
     require_initial_skill_read_baseline,
 )
-from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadResolutionError, SkillReadSourceResolver
+from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadResolutionError, SkillReadSourceResolver, repeat_once_if_source_changed
 from bowhead_core.skill_reference_execution import ReferenceSkillPrimaryComposition, restore_skill_primary_composition_in_connection
 from bowhead_core.sqlite_domains import domain_database_path
 
@@ -450,7 +450,7 @@ class ReferenceSkillReadAccess:
         if item is None:
             return None
         try:
-            package = await self.sources.prepare_runtime_package(handle.resource, scope=item.proof.scope)
+            package = await repeat_once_if_source_changed(lambda: self.sources.prepare_runtime_package(handle.resource, scope=item.proof.scope))
         except (SkillReadResolutionError, SkillPackageMaterialError) as error:
             logger.info("reference_skill_read.extension_package_unavailable cause=%s", getattr(error, "code", None) or error)
             return None

@@ -3035,7 +3035,7 @@ class ArtifactStore:
             return False
         placeholders = ",".join("?" for _ in child_ids)
         async with (
-            _open_db(self.db_path) as db,
+            _open_read_db(self.db_path) as db,
             db.execute(
                 f"SELECT COUNT(*) FROM chat_attachment_bundle_members WHERE bundle_artifact_id=? AND child_artifact_id IN ({placeholders})",  # noqa: S608 - placeholders only
                 (bundle_artifact_id, *child_ids),
@@ -4602,7 +4602,8 @@ class ArtifactStore:
         kph = ",".join("?" for _ in self.RUN_DATA_KINDS)
         sph = ",".join("?" for _ in self.TTL_EXEMPT_SOURCES)
 
-        async with _open_db(self.db_path) as db:
+        # A pure read: `expire_run_data_ids` rechecks every criterion in its own write, so the candidate list needs no authority lease.
+        async with _open_read_db(self.db_path) as db:
             # Canvas-body references are JSON, unavailable to this SQL check; collect them once and exclude in Python after SQL.
             # Same pattern as kb_files (SQL cannot join, so merge checks afterward).
             reference_sql, canvas_referenced = await self._reference_filter(db)

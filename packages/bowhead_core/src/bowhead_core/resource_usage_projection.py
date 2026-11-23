@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import TeamSubagentAccessDecision, TeamSubagentAccessResolver
 
@@ -165,7 +165,10 @@ class ResourceUsageProjectionService:
         if not unique:
             return {}
         try:
-            async with open_shared_ctx(self.db_path) as db:
+            # A pure read: on 116 (1.7.63) it held execution's shared authority lease for 1.6-2.9 s per call on a
+            # write-capable connection, so Session deletes and other execution authority writes waited it out.
+            # The read-only pool takes no lease and still reads the last commit.
+            async with open_pooled_read_ctx(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
                 return await self.usage_many_in_connection(
                     db,

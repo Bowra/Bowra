@@ -14302,6 +14302,7 @@
       "skill_selection_unavailable": "Skills können gerade nicht verwendet werden. Ihr Entwurf bleibt erhalten. Versuchen Sie es gleich erneut oder entfernen Sie den Skill und senden Sie ohne ihn.",
       "selected_skill_unavailable": "Ein ausgewählter Skill ist für Sie nicht mehr verfügbar: Er wurde deaktiviert oder Ihr Zugriff wurde entfernt. Ihr Entwurf bleibt erhalten. Entfernen Sie ihn oder wählen Sie mit / einen anderen Skill aus und senden Sie erneut.",
       "selected_skill_changed": "Ein ausgewählter Skill wurde nach Ihrer Auswahl aktualisiert. Ihr Entwurf bleibt erhalten. Wählen Sie ihn mit / erneut aus und senden Sie.",
+      "selected_skill_check_interrupted": "Der ausgewählte Skill oder Ihr Zugriff hat sich während der Prüfung geändert, daher wurde nichts gesendet. Ihr Entwurf bleibt erhalten. Senden Sie gleich noch einmal.",
       "selected_skill_too_large": "Die Anweisungen eines ausgewählten Skills sind zu umfangreich zum Senden. Ihr Entwurf bleibt erhalten. Entfernen Sie diesen Skill oder bitten Sie den Verantwortlichen, ihn zu kürzen, und senden Sie erneut.",
       "plan_execution_claim_lost": "Der Planstatus hat sich geändert. Prüfen Sie den Plan vor der Ausführung erneut.",
       "attachment_bundle_mismatch": "Dieses Anhangspaket hat sich geändert. Laden Sie es vor dem Senden erneut hoch.",

@@ -14302,6 +14302,7 @@
       "skill_selection_unavailable": "Les Skills ne peuvent pas être utilisés pour le moment. Votre brouillon est conservé. Réessayez dans un instant, ou retirez le Skill et envoyez sans lui.",
       "selected_skill_unavailable": "Un Skill sélectionné ne vous est plus disponible : il a été désactivé ou votre accès a été retiré. Votre brouillon est conservé. Retirez-le ou choisissez un autre Skill avec /, puis renvoyez votre demande.",
       "selected_skill_changed": "Un Skill sélectionné a été mis à jour après votre sélection. Votre brouillon est conservé. Sélectionnez-le à nouveau avec /, puis envoyez.",
+      "selected_skill_check_interrupted": "Le Skill sélectionné ou votre accès changeait pendant la vérification ; rien n’a donc été envoyé. Votre brouillon est conservé. Renvoyez-le dans un instant.",
       "selected_skill_too_large": "Les instructions d’un Skill sélectionné sont trop volumineuses pour être envoyées. Votre brouillon est conservé. Retirez ce Skill ou demandez à son responsable de le raccourcir, puis renvoyez votre demande.",
       "plan_execution_claim_lost": "L’état du plan a changé. Vérifiez à nouveau le plan avant de l’exécuter.",
       "attachment_bundle_mismatch": "Ce lot de pièces jointes a changé. Importez-le à nouveau avant l’envoi.",

@@ -127,6 +127,12 @@ CHAT_SEND_SHARED_CODES = frozenset(
         "tamper",
         "clock_tamper",
         "entitlement_unavailable",
+        # A Skill-only `/` send refused before admission (bowhead_gateway.selected_skills, module constants).
+        "skill_selection_unavailable",
+        "selected_skill_unavailable",
+        "selected_skill_changed",
+        "selected_skill_check_interrupted",
+        "selected_skill_too_large",
     }
 )
 

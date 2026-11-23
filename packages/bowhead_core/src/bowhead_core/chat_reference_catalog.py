@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_serializer, model_validator
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.access_control import AccessContext, AccessControlStore, resource_grants_enforce_enabled
 from bowhead_core.agent_capability_catalog import default_catalog
 from bowhead_core.agent_execution_binding import team_agent_dispatchable_state_sql
@@ -1070,7 +1070,9 @@ async def read_reference_metadata(
     these current access decisions before search or UI pagination is applied.
     """
     query = ReferenceCatalogRequest.model_validate(query.model_dump(mode="python"))
-    async with open_shared_ctx(db_path) as db:
+    # A pure read that always rolls back: on the read-only pool its membership and grant checks take no
+    # authority lease, so the Composer menus neither wait for nor hold up permission and settings writes.
+    async with open_pooled_read_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN")
         try:

@@ -63,12 +63,16 @@ def input_facts(tool_name: str, args: Any) -> dict[str, Any] | None:
 
 
 def _saved_outputs(result: dict[str, Any]) -> list[dict[str, Any]] | None:
-    for holder in (result, result.get("result_json")):
-        if isinstance(holder, dict):
-            for key in ("outputs", "output_artifacts"):
-                items = holder.get(key)
-                if isinstance(items, list):
-                    return [item for item in items if isinstance(item, dict)]
+    """The saved files as records. The sandbox Tool lists them twice: `output_artifacts` holds the
+    records (with `data_role` on the stdout record) and its top-level `outputs` only the bare names, so
+    the records are read first. The runner's own `result_json.outputs` holds records too."""
+    nested = result.get("result_json")
+    for holder, key in ((result, "output_artifacts"), (nested, "output_artifacts"), (nested, "outputs"), (result, "outputs")):
+        items = holder.get(key) if isinstance(holder, dict) else None
+        if isinstance(items, list):
+            return [
+                item if isinstance(item, dict) else {"name": item} for item in items if isinstance(item, dict) or (isinstance(item, str) and item)
+            ]
     return None
 
 

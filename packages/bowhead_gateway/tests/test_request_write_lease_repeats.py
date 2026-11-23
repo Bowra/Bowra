@@ -170,6 +170,7 @@ def _standard_wrapper_code() -> object:
         UserStore.update_team_llm_config,
         UserStore.update_team_llm_config_if_version,
         UserStore.update_team_tool_source_auth,
+        UserStore.update_team_tool_source_meta,
         UserStore._write_governed_workspace_metadata,
         UserStore._write_archived_workspace,
         UserStore._write_restored_workspace,

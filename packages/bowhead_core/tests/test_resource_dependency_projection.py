@@ -496,3 +496,22 @@ async def test_disabled_legacy_agents_do_not_block_it(tmp_path: Path) -> None:
     view = await _tool_source_usage(db_path, team, owner)
 
     assert "team_agents_not_projectable" not in view.summary.reason_codes
+
+
+async def test_usage_reads_on_the_read_only_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """116 (1.7.63): this pure read held execution's shared authority lease 1.6-2.9 s per call on a
+    write-capable connection, and Session deletes waited it out. The read-only pool takes no lease."""
+    from bowhead_core import resource_usage_projection
+
+    db_path, team, owner = await _team_with_one_agent(tmp_path, definition_mode="legacy_mutable")
+    borrowed: list[str] = []
+    pooled = resource_usage_projection.open_pooled_read_ctx
+
+    def recording(path):  # type: ignore[no-untyped-def]
+        borrowed.append(str(path))
+        return pooled(path)
+
+    monkeypatch.setattr(resource_usage_projection, "open_pooled_read_ctx", recording)
+    view = await _tool_source_usage(db_path, team, owner)
+    assert view.summary.completeness in {"complete", "partial"}
+    assert len(borrowed) == 1

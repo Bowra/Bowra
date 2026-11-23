@@ -43,7 +43,7 @@ members = [
 ]
 
 [[tool.uv.index]]
-url = "https://mirrors.tencent.com/pypi/simple/"
+url = "https://pypi.org/simple/"
 default = true
 
 [tool.uv.sources]

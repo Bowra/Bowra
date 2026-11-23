@@ -55,6 +55,7 @@ def test_a_refused_deck_is_not_saved_with_its_reason_and_the_code_did_not_fail(r
     assert result["outputs_not_saved"] == ["deck.pptx"]
     assert "sandbox file deck.pptx was not saved: the Office package contains two parts with the same name" in result["error"]
     assert "python-pptx names a new slide part slide{count+1}.xml" in result["error"]
+    assert "slide.part.partname = PackURI('/ppt/slides/slide<n>.xml')" in result["error"]
     assert "(file_office_duplicate_part)" in result["error"]
     assert "Data artifact upload failed" not in result["error"]
     assert [output["name"] for output in result["outputs"]] == ["notes.txt"]
@@ -94,3 +95,19 @@ def test_a_declared_deliverable_the_code_never_wrote_stays_a_code_failure(runner
     assert result["ok"] is False
     assert result["exit_code"] == 1
     assert "outputs_not_saved" not in result
+
+
+def test_a_refused_deliverable_is_not_also_reported_as_missing(runner, tmp_path, monkeypatch) -> None:
+    # 116 (1.7.63): the runtime declared 删页测试.pptx a deliverable; once refused, the missing-deliverable check
+    # also reported it ("were not produced and persisted") and set exit_code=1, so the step read "代码运行出错".
+    result = _run(
+        runner,
+        tmp_path,
+        monkeypatch,
+        "open('deck.pptx', 'wb').write(b'PK')\n",
+        _store_except({"deck.pptx": "file_office_duplicate_part"}),
+        _output_purpose="deliverable",
+        _deliverable_outputs=["deck.pptx"],
+    )
+    assert (result["ok"], result["exit_code"], result["outputs_not_saved"]) == (False, 0, ["deck.pptx"])
+    assert "were not produced" not in result["error"]

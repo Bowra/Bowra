@@ -96,13 +96,15 @@ async def test_each_selected_skill_is_prepared_with_the_request_scope(tmp_path, 
     ("error", "code"),
     [
         (SkillReadMaterialError("reference_skill_version_changed"), "selected_skill_changed"),
-        (SkillReadResolutionError("reference_skill_source_changed"), "selected_skill_changed"),
+        # The source or the sender's access kept changing during the check: not an edit of the Skill.
+        (SkillReadResolutionError("reference_skill_source_changed"), "selected_skill_check_interrupted"),
         (SkillReadMaterialError("reference_skill_material_too_large"), "selected_skill_too_large"),
         (SkillReadResolutionError("reference_skill_source_unavailable"), "selected_skill_unavailable"),
         (RuntimeError("store down"), "selected_skill_unavailable"),
     ],
 )
 async def test_refusals_name_the_failing_condition(tmp_path, monkeypatch, error, code):
+    """A refusal names its condition; a source that changed during the check is checked once more first."""
 
     async def prepare(*args, **kwargs):
         raise error
@@ -110,3 +112,31 @@ async def test_refusals_name_the_failing_condition(tmp_path, monkeypatch, error,
     with pytest.raises(HTTPException) as caught:
         await _admit(_request(tmp_path, prepare), [SkillResourceRef.model_validate(SKILL)])
     assert caught.value.detail == {"error": {"code": code, "admission": "not_started"}}
+
+
+@pytest.mark.asyncio
+async def test_an_access_change_during_the_check_is_checked_again(tmp_path):
+    """116 2026-11-22: another session added the sender to a group mid-check; a second check admits the send."""
+    calls = []
+
+    async def prepare(resource, *, scope, require_declaration=False):
+        calls.append(resource.id)
+        if len(calls) == 1:
+            raise SkillReadResolutionError("reference_skill_source_changed")
+
+    skills = [SkillResourceRef.model_validate(SKILL)]
+    assert await _admit(_request(tmp_path, prepare), skills) == tuple(skills)
+    assert calls == ["sk_c029829564ae", "sk_c029829564ae"]
+
+
+@pytest.mark.asyncio
+async def test_an_edited_skill_is_not_checked_again(tmp_path):
+    calls = []
+
+    async def prepare(resource, *, scope, require_declaration=False):
+        calls.append(resource.id)
+        raise SkillReadMaterialError("reference_skill_version_changed")
+
+    with pytest.raises(HTTPException) as caught:
+        await _admit(_request(tmp_path, prepare), [SkillResourceRef.model_validate(SKILL)])
+    assert caught.value.detail["error"]["code"] == "selected_skill_changed" and len(calls) == 1

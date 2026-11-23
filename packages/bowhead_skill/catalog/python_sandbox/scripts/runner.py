@@ -631,8 +631,8 @@ def _kind_for_output(
     ``deliverable`` classification. Other formats are promoted only when the
     direct python_sandbox call carried explicit ``purpose=deliverable`` *and*
     named this exact top-level output in ``deliverable_outputs``; MIME or extension
-    alone never promotes media such as MP4/PNG, and helper files from the same run
-    cannot hitchhike into the delivery group. Default analysis files remain normal
+    alone never promotes media such as MP4/PNG, and no undeclared file of that call
+    (a document either) hitchhikes into the delivery group. Default analysis files remain normal
     sandbox outputs (None → gateway defaults kind from ``source``).
     The set is about document *format*, not the producing agent — any agent's
     .xlsx/.docx/.pdf downloads, not just the consultant's deck.
@@ -649,6 +649,10 @@ def _kind_for_output(
         return "deck_preview"
     if purpose == "deliverable" and name in deliverable_outputs:
         return "deliverable"
+    if purpose == "deliverable" and deliverable_outputs:
+        # 116 1.7.63: a call that declared the deck as its result saved fix.pptx instead; the draft became a second
+        # result card. A call that names its result files leaves every other file it writes as work in progress.
+        return None
     if analysis_declared:
         # Regression check: a call that explicitly declared purpose='analysis' wrote drafts
         # (stage1.html, final.html) that became result cards beside the declared deliverable.
@@ -715,7 +719,9 @@ def _http_error_detail(http_error: urllib.error.HTTPError) -> dict:
 _REFUSAL_REASONS = {
     "file_office_duplicate_part": (
         "the Office package contains two parts with the same name, so it is damaged. python-pptx names a new slide part "
-        "slide{count+1}.xml, so adding a slide after removing one from the slide list can reuse the part name of a kept slide"
+        "slide{count+1}.xml, so adding a slide after removing one from the slide list can reuse the part name of a kept slide; "
+        "a slide's part can be renamed before saving with slide.part.partname = PackURI('/ppt/slides/slide<n>.xml') "
+        "(from pptx.opc.packuri import PackURI) using a number no other slide uses"
     ),
     "file_office_invalid_package": "it is not a valid Office package: its parts, content types or relationships do not match",
     "file_office_type_mismatch": "its extension does not match the Office document type inside it",
@@ -2488,7 +2494,8 @@ def main() -> int:
             purpose=_output_purpose,
             deliverable_outputs=_deliverable_outputs,
         )
-        if name not in _nested_reported
+        # A file the code wrote but the store refused was produced; it is reported as not saved, not as missing.
+        if name not in _nested_reported and name not in {saved for saved, _ in not_saved}
     ]
     if missing_deliverables:
         output_data_errors.append("declared deliverable outputs were not produced and persisted: " + ", ".join(missing_deliverables))

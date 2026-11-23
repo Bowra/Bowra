@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from pathlib import Path
 
+import anyio
 import pytest
 from bowhead_cli.migrate import upgrade
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
@@ -18,6 +20,17 @@ from bowhead_core.sqlite_domains import DOMAIN_TABLES, DOMAIN_TARGET_FILES, INFR
 from bowhead_core.subagent_draft_accounting import SubagentDraftCreditAccountant
 from core_legacy_database import upgrade as upgrade_legacy
 from cryptography.fernet import Fernet
+
+
+@contextmanager
+def _authority_held(directory: Path, *domains: str):
+    """Hold these domains' authority leases exclusively, as an authority write in another process would."""
+    with ExitStack() as stack:
+        for domain in domains:
+            gate = stack.enter_context((directory / f".sqlite-authority-{domain}.lock").open("a+b"))
+            fcntl.flock(gate.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            stack.callback(fcntl.flock, gate.fileno(), fcntl.LOCK_UN)
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -69,6 +82,9 @@ async def test_domain_stores_initialize_without_recreating_tables_and_write_owne
     assert await canvases.get_canvas(canvas.id) is not None
     artifact = await artifacts.put_bytes(content=b"hello", filename="hello.txt", mime="text/plain", created_by="u_1", session_id="s_1")
     assert await artifacts.get(artifact.id) is not None
+    # The daily run-data candidate list reads execution's references; an execution authority write does not hold it up.
+    with _authority_held(domain_directory, "execution"), anyio.fail_after(3):
+        assert await artifacts.stale_run_data_ids(days=30) == []
     await metrics.track("domain.test", user_id="u_1")
     assert len(await metrics.query_recent(name="domain.test")) == 1
     await notifications.write(
@@ -133,6 +149,9 @@ async def test_draft_usage_replay_repairs_interrupted_execution_publication(doma
     fail_publish = False
     assert await accountant.settle_pending() == 1
     assert await accountant.settle_pending() == 0
+    # The candidate list is a pure read of execution's usage events: an execution authority write does not hold it up.
+    with _authority_held(domain_directory, "execution"), anyio.fail_after(3):
+        assert await accountant.settle_pending() == 0
     with sqlite3.connect(domain_directory / "bowhead_execution.db") as connection:
         assert connection.execute("SELECT id,tokens_input FROM llm_usage_events WHERE id=?", (usage_id,)).fetchall() == [(usage_id, 700)]
     with sqlite3.connect(domain_directory / "bowhead.db") as connection:
@@ -366,6 +385,10 @@ async def test_document_freeze_and_approval_repair_across_domains(domain_directo
     assert published["state"] == "published"
     assert (await artifacts.get(source_id)).kind == "deliverable"
     assert (await delivery.read_file(scope=scope, job_id=receipt.job_id, name="candidate.pptx", preview=False))[0] == b"source"
+    # The repair's candidate list and a file read are pure reads of core and content: authority writes there do not hold them up.
+    with _authority_held(domain_directory, "core", "content"), anyio.fail_after(3):
+        assert await delivery.repair_confirmed_publications() == 0
+        assert (await delivery.read_file(scope=scope, job_id=receipt.job_id, name="candidate.pptx", preview=False))[0] == b"source"
     # Repair a crash after content promotion without undoing a user's detach.
     pdf_id = draft["draft"]["files"]["candidate.pdf"]["artifact_id"]
     async with open_shared_ctx(sessions.db_path) as connection:

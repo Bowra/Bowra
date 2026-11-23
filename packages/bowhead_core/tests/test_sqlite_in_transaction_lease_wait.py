@@ -13,7 +13,6 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
-from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
@@ -21,6 +20,7 @@ import pytest
 from bowhead_core.sqlite_domain_runtime import DomainConnection
 from test_sqlite_domain_runtime import domain_files as domain_files
 from test_sqlite_domain_runtime import managed
+from test_sqlite_mutation_guards import mutation_files as mutation_files
 
 from bowhead_core import sqlite_domain_runtime
 
@@ -194,32 +194,117 @@ def test_an_authority_write_waits_for_the_readers_of_its_own_domain(domain_files
     assert 0.05 < waited < sqlite_domain_runtime.IN_TRANSACTION_LEASE_WAIT_SECONDS
 
 
-@pytest.mark.parametrize(
-    "begin",
-    [
-        # Holding another domain's lease: waiting could close a cycle with a writer of that domain.
-        # (It reads a column: ``count(*)`` reads none, so SQLite asks the authorizer about no read.)
-        lambda db: (db.execute("BEGIN IMMEDIATE").close(), db.execute("SELECT user_id FROM sessions").fetchall()),
-        # Without the writer lock another connection could commit to core meanwhile.
-        lambda db: db.execute("BEGIN").close(),
-    ],
-    ids=["holding_another_lease", "without_the_writer_lock"],
-)
-def test_an_authority_write_fails_at_once_where_waiting_is_unsafe(
-    domain_files: Path, monkeypatch: pytest.MonkeyPatch, begin: Callable[[DomainConnection], object]
-) -> None:
+def test_an_authority_write_fails_at_once_without_the_writer_lock(domain_files: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Asked for at preparation in a deferred transaction, the lease comes before the writer lock: another
+    connection could commit to core meanwhile."""
     _seed(domain_files)
     reader, _ = _hold_core_shared(domain_files, 0.5)
     _no_sleep(monkeypatch)
     core = managed(domain_files, "core")
     try:
-        begin(core)
+        core.execute("BEGIN").close()
         with pytest.raises(sqlite3.OperationalError, match="authority lease"):
             core.execute("UPDATE users SET status='suspended' WHERE id='u'")
         core.rollback()
     finally:
         core.close()
         reader.join(5)
+
+
+def test_an_authority_write_that_read_another_domain_waits_for_the_readers_of_its_own(domain_files: Path) -> None:
+    """The common shape: read core, then write a fenced row of the connection's own domain."""
+    _seed(domain_files)
+    reader, errors = _hold_core_shared(domain_files, 0.2)
+    core = managed(domain_files, "core")
+    try:
+        core.execute("BEGIN IMMEDIATE").close()
+        # It reads a column: ``count(*)`` reads none, so SQLite asks the authorizer about no read.
+        core.execute("SELECT user_id FROM sessions").fetchall()
+        assert core._leases == {"execution": 1}
+        started = time.monotonic()
+        core.execute("UPDATE users SET status='suspended' WHERE id='u'").close()
+        waited = time.monotonic() - started
+        core.commit()
+    finally:
+        core.close()
+        reader.join(5)
+    assert not errors
+    assert 0.05 < waited < sqlite_domain_runtime.IN_TRANSACTION_LEASE_WAIT_SECONDS
+
+
+def test_a_wait_that_would_close_a_cycle_fails_at_once_and_lets_the_other_proceed(domain_files: Path) -> None:
+    """Each writer read the other's domain: the second waiter would wait for the first until the cap."""
+    _seed(domain_files)
+    ready, go = threading.Event(), threading.Event()
+    first: list[object] = []
+
+    def write_core() -> None:
+        core = managed(domain_files, "core")
+        try:
+            core.execute("BEGIN IMMEDIATE").close()
+            core.execute("SELECT user_id FROM sessions").fetchall()
+            first.append(id(core))
+            ready.set()
+            go.wait(5)
+            core.execute("UPDATE users SET status='suspended' WHERE id='u'").close()
+            core.commit()
+            first.append("committed")
+        except BaseException as error:  # noqa: BLE001 -- reported to the test thread
+            first.append(error)
+            ready.set()
+        finally:
+            core.close()
+
+    writer = threading.Thread(target=write_core)
+    writer.start()
+    execution = managed(domain_files, "execution")
+    try:
+        assert ready.wait(5)
+        execution.execute("BEGIN IMMEDIATE").close()
+        execution.execute("SELECT status FROM users").fetchall()
+        go.set()
+        deadline = time.monotonic() + 5
+        while first[0] not in sqlite_domain_runtime._EXCLUSIVE_WAITERS:
+            assert time.monotonic() < deadline and len(first) == 1, first
+            time.sleep(0.001)
+        started = time.monotonic()
+        with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+            execution.execute("UPDATE sessions SET deleted_at='x' WHERE id='s'")
+        refused_after = time.monotonic() - started
+        execution.rollback()
+        writer.join(5)
+    finally:
+        execution.close()
+        go.set()
+        writer.join(5)
+    assert refused_after < 0.1
+    assert first[1:] == ["committed"]
+    assert not sqlite_domain_runtime._EXCLUSIVE_WAITERS
+
+
+@pytest.mark.parametrize("begin", [None, "BEGIN"], ids=["implicit_transaction", "deferred_transaction"])
+def test_a_guarded_write_waits_for_the_readers_of_its_own_domain(mutation_files: Path, begin: str | None) -> None:
+    """116 (1.7.63): single fenced writes failed at once beside a reader of their domain. Their mutation guard
+    runs inside the write, after SQLite took the file's writer lock, so nobody can commit to core meanwhile."""
+    with closing(managed(mutation_files, "core")) as seed:
+        seed.execute("INSERT INTO users(id,status) VALUES('u','active')").close()
+        seed.commit()
+    reader, errors = _hold_core_shared(mutation_files, 0.2)
+    core = managed(mutation_files, "core")
+    try:
+        assert core._mutation_guards
+        if begin:
+            core.execute(begin).close()
+        started = time.monotonic()
+        core.execute("UPDATE users SET status='suspended' WHERE id='u'").close()
+        waited = time.monotonic() - started
+        assert core._leases.get("core") == 2
+        core.commit()
+    finally:
+        core.close()
+        reader.join(5)
+    assert not errors
+    assert 0.05 < waited < sqlite_domain_runtime.IN_TRANSACTION_LEASE_WAIT_SECONDS
 
 
 def test_a_writer_gate_that_cannot_get_the_writer_lock_leaves_no_transaction(domain_files: Path) -> None:

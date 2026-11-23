@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 import aiosqlite
 import structlog
 
-from bowhead_core._db import open_shared_ctx, run_sqlite_authority_write
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.artifact_purge import purge_artifacts
 from bowhead_core.artifact_store import ArtifactStore
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
@@ -113,7 +113,10 @@ class DocumentInputStore:
         Blob/DB failures propagate; a retry resumes the persisted candidate set.
         """
         split = domain_layout_active(self.artifacts.db_path)
-        async with open_shared_ctx(self._execution_db_path) as db:
+        # Pure reads (this preflight, ``_check`` and ``read``) use the read-only pool, which takes no authority
+        # lease. Their result was never held across a write: ``reserve``, ``verify`` and ``freeze_metadata``
+        # authorize again in their own transactions.
+        async with open_pooled_read_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN")
             job, originals = await _authorized_inputs(db, scope, job_id, write=True)
             copies = await _copies(db, job_id)
@@ -280,7 +283,7 @@ class DocumentInputStore:
         )
 
     async def _check(self, scope: DocumentScope, job_id: str, *, write: bool) -> list[aiosqlite.Row]:
-        async with open_shared_ctx(self._execution_db_path) as db:
+        async with open_pooled_read_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN")
             _, originals = await _authorized_inputs(db, scope, job_id, write=write)
             return originals
@@ -291,7 +294,7 @@ class DocumentInputStore:
             raise DocumentRequestError(code)
 
     async def read(self, *, scope: DocumentScope, job_id: str, artifact_id: str) -> bytes:
-        async with open_shared_ctx(self._execution_db_path) as db:
+        async with open_pooled_read_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN")
             await _authorized_inputs(db, scope, job_id, write=False)
             async with db.execute(

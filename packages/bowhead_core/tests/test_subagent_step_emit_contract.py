@@ -300,6 +300,8 @@ async def test_code_step_carries_its_purpose_and_output_facts() -> None:
         return {
             "ok": True,
             "exit_code": 0,
+            # The sandbox Tool lists bare names here and the records below.
+            "outputs": ["dashboard.html", "data.JSON", "sandbox-stdout.txt"],
             "output_artifacts": [
                 {"artifact_id": "art_page", "name": "dashboard.html", "mime": "text/html", "size": 9},
                 {"artifact_id": "art_data", "name": "data.JSON", "mime": "application/json", "size": 9},

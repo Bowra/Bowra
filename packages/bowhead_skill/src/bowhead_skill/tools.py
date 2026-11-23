@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -570,6 +571,23 @@ def _output_artifacts_from_result_json(result_json: Any) -> list[dict[str, Any]]
     return projected
 
 
+def entry_script_name(script: str, entry_names: Sequence[str]) -> str:
+    """The entry that `script` names, also when written as SKILL.md links it.
+
+    Entries are named from `scripts/` (`build.py`, `tools/run.py`). The path from
+    the Skill root (`scripts/build.py`, `./scripts/build.py`) names the same
+    entry, as `skill_read` accepts it. An exact entry name always wins, and only
+    entries under `scripts/` are ever named, so nothing else becomes runnable.
+    """
+    if script in entry_names:
+        return script
+    text = script
+    while text.startswith("./"):
+        text = text[2:]
+    bare = text.removeprefix("scripts/")
+    return bare if bare != text and bare in entry_names else script
+
+
 def _spec_origin(catalog: SkillCatalog, name: str, spec: SkillSpec) -> str:
     """audit 行的来源归类：catalog | user | team（skill-team-governance，PRD 验收 9）.
 
@@ -1088,6 +1106,8 @@ def build_skill_tools(
                     ),
                 }
 
+        if script and not _cmd_mode:
+            script = entry_script_name(script, spec.script_names)
         if not script and not _cmd_mode:
             if len(spec.scripts) == 1:
                 script = spec.script_names[0]
@@ -1502,7 +1522,7 @@ def build_skill_tools(
         "name": {"type": "string", "description": "必填. 要运行的 skill 名, e.g. 'python_sandbox'. 不确定先调 skill_list."},
         "script": {
             "type": "string",
-            "description": "scripts/ 下的完整相对路径（保留子目录），从 skill_read 返回的 scripts 中选择。若只有一个脚本可省略",
+            "description": "要运行的入口脚本：skill_read 返回的 scripts 里的名字（相对 scripts/，保留子目录，如 build.py、tools/run.py），也可以写成从技能根目录算起的路径（如 scripts/build.py）。若只有一个脚本可省略",
         },
         "input": {
             "type": "object",

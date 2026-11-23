@@ -73,7 +73,7 @@ skill_save_generated(body_md="完整 SKILL.md", overwrite=true)
 }
 ```
 
-`path` 是相对技能根目录的完整路径，任何文件夹或根目录文件都可以（如 `assets/theme.json`、`README.md`），SKILL.md 用 `body_md` 修改。
+`path` 是相对技能根目录的完整路径，任何文件夹里的文件或根目录文件都可以，SKILL.md 用 `body_md` 修改。
 未列出的文件保留。`content: null` 明确删除该文件，仅在用户要求删除时使用。
 不要同时通过 scripts 和 files 改脚本。未开放 files 时，配置页仍可编辑已有文件；不调用未暴露参数或虚构文件写入工具。
 校验失败先修复提示中的问题，再保存；权限失败不能换接口绕过。

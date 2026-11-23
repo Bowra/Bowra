@@ -106,6 +106,9 @@ import { ComposerNotices, orderComposerNotices, type ComposerNoticeItem } from "
 import { useComposerFileDrop, type ComposerDropVerdict } from "./use-composer-file-drop";
 import { CharIcon } from "@/components/char-icon";
 
+/** Office refusals about the kind of file, as opposed to a damaged package. */
+const OFFICE_TYPE_REFUSALS: ReadonlySet<string> = new Set(["file_office_type_mismatch", "file_office_active_content_unsupported"]);
+
 const ReferenceEditor = dynamic(() => import("./composer-reference-editor").then((module) => module.ComposerReferenceEditor), { ssr: false });
 type InputDraftContent = Pick<ComposerOrdinaryDraft, "message" | "attachments"> & { input_document?: InputDocument; documentRevision?: ComposerDocumentRevision };
 function inputDraftContent(draft: InputDraftContent): InputDraftContent {
@@ -1948,7 +1951,10 @@ function V2ComposerScope({
       return { kind: "other", message: t("too_many_attachments", { max: MAX_COMPOSER_RUNTIME_ATTACHMENTS }), cause: e };
     }
     if (e instanceof ApiError && e.code?.startsWith("file_office_")) {
-      return { kind: e.status === 413 ? "size" : "unsupported", message: filesT(fileError(e, "upload")), cause: e };
+      // Only a type the store does not take reads "Unsupported type" on the chip; a damaged package is a plain failure,
+      // and the composer notice says what is wrong with it.
+      const kind = e.status === 413 ? "size" : OFFICE_TYPE_REFUSALS.has(e.code) ? "unsupported" : "other";
+      return { kind, message: filesT(fileError(e, "upload")), cause: e };
     }
     // Upload pipeline failures (API/object storage/disconnect/expired signature): show localized explanations, not raw
     // text like "presign expired (403 from object store)"; retain the original failure for "复制诊断".

@@ -1781,6 +1781,8 @@ class SubagentResult:
     # True when the tool-free wrap-up call wrote the Done/Remaining text; False when `partial_done`
     # is only the runtime's count of retained results.
     partial_reported: bool = field(default=False, repr=False, kw_only=True)
+    # A `budget` stop's balance (`user_credit_exhausted` / `team_pool_exhausted`), named in Lead's directive.
+    credit_denial: str | None = field(default=None, repr=False, kw_only=True)
     # In-place resume (agent run limits, phase 2 §6): the checkpoint this run left for a later
     # turn to continue; None when nothing was saved.
     resume_checkpoint_id: str | None = None
@@ -5030,7 +5032,7 @@ class SubagentRunner:
         _request_schemas: list[Any] = []
         user_pref: Any = None
 
-        async def _limit_wrap_up(stop_reason: str) -> SubagentResult:
+        async def _limit_wrap_up(stop_reason: str, *, credit_denial: str | None = None) -> SubagentResult:
             from bowhead_core.agent_run_wrap_up import (
                 WRAP_UP_MAX_OUTPUT_TOKENS,
                 WRAP_UP_TIMEOUT_S,
@@ -5059,7 +5061,7 @@ class SubagentRunner:
                 try:
                     _wrap_req = LLMRequest(
                         model="",
-                        messages=[*messages, Message(role="user", content=wrap_up_instruction(stop_reason))],
+                        messages=[*messages, Message(role="user", content=wrap_up_instruction(stop_reason, credit_denial))],
                         system=_system_aug if _system_aug is not None else profile.system_prompt,
                         tools=list(_request_schemas),
                         tool_choice="none",
@@ -5155,6 +5157,7 @@ class SubagentRunner:
                 partial_done=done,
                 partial_remaining=remaining,
                 partial_reported=_wrap_reported,
+                credit_denial=credit_denial,
                 resume_checkpoint_id=_checkpoint_id,
                 model_turn_count=_stop_usage["used"] if _stop_usage is not None else runtime_control.used if runtime_control is not None else 0,
                 model_turn_limit=_stop_usage["limit"] if _stop_usage is not None else 0,
@@ -5442,8 +5445,8 @@ class SubagentRunner:
                 # used the user's or the Team pool's balance up.
                 from bowhead_core.agent_run_limits import get_credit_gate as _get_credit_gate
 
-                if (_credit_gate := _get_credit_gate()) is not None and await _credit_gate.exhausted() is not None:
-                    return await _limit_wrap_up("budget")
+                if (_credit_gate := _get_credit_gate()) is not None and (_credit_denial := await _credit_gate.exhausted()) is not None:
+                    return await _limit_wrap_up("budget", credit_denial=_credit_denial)
             if _is_helper or runtime_control is not None:
                 if iteration > 0:
                     _np_progressed = False
@@ -12483,6 +12486,14 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "and that the user can continue."
                 ),
             }
+        # Agent run limits phase 3 §4: a helper started while the turn's credit is used up stops after its first
+        # step; none is started (a resumed run's checkpoint is released for a later turn).
+        from bowhead_core.agent_run_limits import get_credit_gate as _spawn_credit_gate
+
+        if (_spawn_gate := _spawn_credit_gate()) is not None and (_spawn_denial := await _spawn_gate.exhausted()) is not None:
+            from bowhead_core.agent_run_wrap_up import credit_dispatch_refusal
+
+            return {"ok": False, "error_kind": "credit_exhausted", "credit_denial": _spawn_denial, "error": credit_dispatch_refusal(_spawn_denial)}
         profile = args["profile"].strip() if isinstance(args.get("profile"), str) else ""
         task = args["task"].strip() if isinstance(args.get("task"), str) else ""
         if not task:
@@ -12683,6 +12694,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         try:
             declared_sources = required_source_urls(raw_sources) | required_source_urls(inherited_sources)
             required_source_urls(tuple(declared_sources))
+            # The list this call declared, as the events record it. Lead history renders it back
+            # into the call, so earlier calls show every required argument (tech-design §13.3).
+            call_sources = sorted(required_source_urls(raw_sources))
         except ValueError as exc:
             return invalid_argument("required_source_urls", f"{exc}. Correct the list and keep all required pages.")
         from copy import copy as copy_source_scope
@@ -13397,6 +13411,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         # The full task: history rebuilt from events reads it. `agent_spawned.task`
                         # is a 200-character preview for the interface's Agent card.
                         "task": task,
+                        "required_source_urls": call_sources,
                         "parent_ctx_summary": (rationale or task)[:200],  # KEEP for back-compat
                         **_agent_attribution_payload(_exact_binding),
                     },
@@ -13978,6 +13993,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         # r4: turn-level history reconstructs this spawn as Lead tool_calls, needing actual arguments passed then;
                         # `agent_spawned.task` only has 200 characters, so include full text here (bounded) + delivery / canvas_mode.
                         "task": task[:2000],
+                        "required_source_urls": call_sources,
                         "delivery": delivery or "",
                         # Shadow-mode compliance rate previously required container logs and could not join with turn-level data.
                         # Persisting it in replay events puts Lead's actual quote in the corpus, enabling offline calculation of the
@@ -14580,7 +14596,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "tool_count": len(result.tool_invocations),
                     "duration_ms": result.duration_ms,
                     "error_code": "subagent_partial",
-                    "directive": partial_directive(result.stop_reason or ""),
+                    "directive": partial_directive(result.stop_reason or "", result.credit_denial),
                 }
             )
         if not result.ok:

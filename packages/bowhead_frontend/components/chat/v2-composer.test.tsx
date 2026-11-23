@@ -530,14 +530,20 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
     expect(onSend.mock.calls[0][1][0].bundleArtifactIds).toBeUndefined();
   });
 
-  it("shows an Office rejection through the safe translation contract", async () => {
+  // 116 (1.7.63): a .pptx with a duplicate part read "类型不支持" on its chip although the notice said it was damaged.
+  it.each([
+    ["file_office_invalid_package", "errors.office_invalid_package", "failed"],
+    ["file_office_duplicate_part", "errors.office_duplicate_part", "failed"],
+    ["file_office_type_mismatch", "errors.office_type_mismatch", "err_unsupported"],
+  ] as const)("shows the Office rejection %s through the safe translation contract", async (code, key, chipState) => {
     const { container } = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
-    vi.mocked(uploadFile).mockRejectedValueOnce(new ApiError(415, "RAW_PACKAGE_PATH", { code: "file_office_invalid_package" }));
+    vi.mocked(uploadFile).mockRejectedValueOnce(new ApiError(415, "RAW_PACKAGE_PATH", { code }));
     await waitFor(() => expect(container.querySelector<HTMLInputElement>('input[type="file"]')?.disabled).toBe(false));
     fireEvent.change(container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["bad"], "template.pptx", { type: "application/octet-stream" })] },
     });
-    await waitFor(() => expect(container.querySelector(".v2-chip--error")?.getAttribute("title")).toContain("errors.office_invalid_package"));
+    await waitFor(() => expect(container.querySelector(".v2-chip--error")?.getAttribute("title")).toContain(key));
+    expect(container.querySelector(".v2-chip--error")?.textContent).toContain(chipState);
     expect(container.innerHTML).not.toContain("RAW_PACKAGE_PATH");
   });
 

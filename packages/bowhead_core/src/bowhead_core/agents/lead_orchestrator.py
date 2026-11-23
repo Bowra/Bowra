@@ -6779,6 +6779,7 @@ async def _lead_loop(
             _rk_headline_emit_flag[0] = False
             _rk_metric_emitted[0] = False
             _attempt_snapshot.clear()
+            _forget_reply_whitespace()
             with contextlib.suppress(Exception):
                 runtime.parent_ctx._lead_narrative_text = ""
 
@@ -6788,6 +6789,14 @@ async def _lead_loop(
         # narrative.delta code points that attempt has emitted. Keyed by the attempt
         # token, so a later model call or a restart starts a fresh snapshot.
         _attempt_snapshot: dict[str, Any] = {}
+        # Whitespace the current reply streamed on its own after its first prose, shown with the
+        # prose that follows it. `_reply_shown` is whether this reply has shown any prose yet.
+        _held_whitespace = [""]
+        _reply_shown = [False]
+
+        def _forget_reply_whitespace() -> None:
+            _held_whitespace[0] = ""
+            _reply_shown[0] = False
 
         def _note_stream_attempt() -> None:
             from bowhead_core.subagent import current_stream_attempt
@@ -6817,6 +6826,7 @@ async def _lead_loop(
 
             snapshot = dict(_attempt_snapshot)
             _attempt_snapshot.clear()
+            _forget_reply_whitespace()  # the withdrawn attempt's, never shown
             token = current_stream_attempt()
             if token is None or snapshot.get("token") is not token:
                 return 0  # This attempt delivered no prose to the callback.
@@ -6978,10 +6988,12 @@ async def _lead_loop(
                     runtime.parent_ctx._lead_narrative_text = _prev_narr + safe_text
             # Phase 1.6 G3 — narrative.delta emit. Single chokepoint shared
             # with test_narrative_delta_emit so the gate doesn't drift.
+            shown, _held_whitespace[0] = _shown_with_held_whitespace(_held_whitespace[0], safe_text, reply_shown=_reply_shown[0])
+            _reply_shown[0] = _reply_shown[0] or bool(shown)
             emitted = await _emit_narrative_delta(
                 runtime.parent_bus,
                 sctx.turn_id,
-                safe_text,
+                shown,
             )
             from bowhead_core.subagent import current_stream_attempt
 
@@ -7002,6 +7014,7 @@ async def _lead_loop(
             tail, _rk_scanner_state = _scanner_flush(_rk_scanner_state)
             if tail:
                 await _emit_scanner_text(tail)
+            _forget_reply_whitespace()  # the reply ended: no prose followed what is still held
 
         stream_cb = _scanner_gated_stream_cb
 
@@ -9622,6 +9635,21 @@ def _planning_fallback_fields(bus: Any) -> dict[str, str]:
     return {"planning_fallback": reason} if reason in _PLANNING_FALLBACK_REASONS else {}
 
 
+def _shown_with_held_whitespace(held: str, safe_text: str, *, reply_shown: bool) -> tuple[str, str]:
+    """Return the Lead prose to show now and the whitespace still held.
+
+    Models stream some whitespace as chunks of their own: the line break after a heading, the
+    space before a number. Such a chunk shows nothing by itself, so it waits and is shown in
+    front of the prose that follows it in the same reply. Dropping it joined a heading to its
+    paragraph in the streamed text, which is all a stopped Turn keeps (an observed execution).
+    Before the reply's first prose (`reply_shown` false) there is nothing to separate, so such
+    a chunk is dropped, as is whatever is still held when the reply ends.
+    """
+    if safe_text.strip():
+        return held + safe_text, ""
+    return "", held + safe_text if reply_shown else ""
+
+
 async def _emit_narrative_delta(
     bus: Any,
     turn_id: str,
@@ -9634,8 +9662,10 @@ async def _emit_narrative_delta(
     exactly what `feedback_ut_must_assert_emit_contract` warns against.
 
     Skipped for empty / whitespace-only safe_text so the surface stays quiet
-    when the LLM is mid-tool-call (no prose tokens). Best-effort emit — never
-    raises; instrumentation must not break the streaming pipeline.
+    when the LLM is mid-tool-call (no prose tokens). The stream callback holds
+    such a chunk and passes it with the prose that follows
+    (`_shown_with_held_whitespace`). Best-effort emit — never raises;
+    instrumentation must not break the streaming pipeline.
 
     Returns the code points of the emitted ``delta`` (0 when skipped or not
     emitted), which a Router restart withdraws with ``llm.stream_restarted``.
@@ -9945,21 +9975,34 @@ def _inline_image_artifact(sec: Any) -> dict[str, Any] | None:
 async def _current_turn_deliverables(art_store: Any, turn_id: str) -> tuple[list[Any], bool]:
     """The deliverables this Turn's answer shows, and whether the Turn delivered any file at all.
 
-    One list for the file items and the output count, so they never disagree. A revised input and
-    every earlier copy a helper rewrote leave the answer (the trace keeps them); a later version of
-    the same file written in this Turn replaces its card (file versions R3).
+    One list for the file items and the output count, so they never disagree. A revised input, every
+    earlier copy a helper rewrote and, once the Turn selected files, sandbox drafts nobody selected leave
+    the answer (the trace and Results keep them); a later version of the same file written in this Turn
+    replaces its card (file versions R3).
     """
     delivs = await art_store.list_deliverables_for_turn(turn_id)
-    from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
+    from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids, unselected_sandbox_file_ids
     from bowhead_core.turn_log_store import TurnLogStore
 
     identities = {artifact.id: (artifact.filename, artifact.mime) for artifact in delivs}
     superseded: set[str] = set()
-    if len(set(identities.values())) < len(identities):
+    if len(identities) > 1:
         try:
             events = await TurnLogStore(str(art_store.db_path)).list_events(turn_id, event_types=("step_started", "step_done"))
             step_events = [(event.event_type, event.payload) for event in events]
-            superseded = superseded_deliverable_ids(identities, step_events) | rewritten_deliverable_ids(identities, step_events)
+            if len(set(identities.values())) < len(identities):
+                superseded = superseded_deliverable_ids(identities, step_events) | rewritten_deliverable_ids(identities, step_events)
+            roots = {artifact.id: getattr(artifact, "lineage_id", None) or artifact.id for artifact in delivs}
+            versioned_by_owner: dict[str, list[str]] = {}
+            for artifact in delivs:
+                owner_id = getattr(artifact, "created_by", None)
+                if owner_id and roots[artifact.id] != artifact.id:
+                    versioned_by_owner.setdefault(owner_id, []).append(artifact.id)
+            for owner_id, artifact_ids in versioned_by_owner.items():
+                overview = await art_store.lineage_overview(artifact_ids, user_id=owner_id)
+                for artifact_id, (members, _referenced) in overview.items():
+                    roots.update((member, roots[artifact_id]) for member in members)
+            superseded |= unselected_sandbox_file_ids(roots, step_events)
         except Exception:
             logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
     newest_in_turn: dict[str, int] = {}
@@ -10001,6 +10044,8 @@ async def _collect_turn_outputs(parent_ctx: Any, turn_id: str) -> list[dict[str,
     """
     from collections import Counter
 
+    from bowhead_core.canvas_store import _REPORT_SURFACE_EXCLUDED_KINDS
+
     try:
         counts: Counter[str] = Counter()
         delivs: list[Any] = []
@@ -10012,7 +10057,10 @@ async def _collect_turn_outputs(parent_ctx: Any, turn_id: str) -> list[dict[str,
         sections = []
         if canvas_store is not None:
             sections = [s for s in await canvas_store.list_sections_appended_by_turn(turn_id) if not getattr(s, "superseded", False)]
-        if sections:
+        # A report needs a section its body shows. A deliverable alone keeps the Canvas (deck previews), so
+        # `is_report_worthy` keeps a Turn whose sections are only saved code; the report shows none of them
+        # (an observed execution: a deck and 12 code blocks, `done.report_sections_saved` 0).
+        if any(s.kind not in _REPORT_SURFACE_EXCLUDED_KINDS for s in sections):
             from bowhead_core.agents.delivery_decision import declared_surface_from_bus
 
             bus = getattr(parent_ctx, "parent_bus", None)

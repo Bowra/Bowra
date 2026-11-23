@@ -4,6 +4,8 @@ English | [简体中文](README.zh-CN.md)
 
 Use Python 3.12, `uv`, Node.js 24 and npm. Run these commands from this independent Community checkout. The committed Gateway and frontend manifests must both select `community`; edition selection is a build input.
 
+Python dependencies download from official PyPI and files.pythonhosted.org using the committed versions and hashes. Allow access to both hosts when preparing a new environment. The Gateway command loads `.env` and starts the service in the same shell, including with GNU Make 3.81.
+
 ## Install and configure
 
 ```sh
@@ -36,6 +38,8 @@ PYTHON
 ```
 
 Review `.env`. Its relative database path is `.data/sqlite/bowhead.db`; keep the working directory stable. Retain both keys and all database/object data for upgrades and recovery. Restoring an instance snapshot restores its account state; a snapshot from before deletion can restore that account. Do not reuse a Business database for first-owner setup.
+
+The local deletion ledger is `.privacy-ledger/deletions.db`, configured by `BOWHEAD_PRIVACY_LEDGER_DB` in `.env.example`. Keep this directory writable and retain it independently of application-database rollback. Preserve `BOWHEAD_FERNET_KEY`, and restore application snapshots without replacing the ledger with an older copy. The ledger and its deletion history must stay private.
 
 ## Runtime prerequisites
 

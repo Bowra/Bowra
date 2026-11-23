@@ -78,6 +78,7 @@ describe("chat send HTTP error mapping", () => {
     ["skill_selection_unavailable", /can’t be used right now.*send without it/],
     ["selected_skill_unavailable", /no longer available.*choose another Skill from \//],
     ["selected_skill_changed", /updated after you selected it.*Select it again from \/ and send/],
+    ["selected_skill_check_interrupted", /changing while it was being checked.*Send again in a moment/],
     ["selected_skill_too_large", /too large to send.*Remove that Skill/],
   ] as const)("explains the selected-Skill refusal %s with its next step", (code, wording) => {
     document.documentElement.lang = "en-US";

@@ -27,3 +27,4 @@ test-results/
 dist/
 build/
 *.egg-info/
+.privacy-ledger/

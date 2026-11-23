@@ -481,6 +481,11 @@ def render_spawn_arguments(rec: Any, *, strip: Callable[[str], str] | None = Non
     **r5（116 第二轮 dogfood A/H 对照）**：`canvas_mode` / `delivery` 是**分类标签**不是事实，渲进历史就被当模板抄——前面两轮 append，
     接着的裸口径 3/3 判 append；前一轮 revise 则 3/3 revise。档位判据只留尾块的续轮档位提示，历史不带。
     记录里仍保留这两个字段（落库事实），只是不渲。
+
+    `required_source_urls` is a fact of the call, not a label, and it is a required argument. History
+    without it taught the model to omit it: replaying two 116 Lead requests (2026-11-22), every first
+    spawn copied the three-key shape and was refused. It is rendered after `task` when the events
+    recorded it; older records stay three keys rather than show an invented value.
     """
     st = strip or (lambda x: x)
     out: dict[str, Any] = {}
@@ -492,6 +497,9 @@ def render_spawn_arguments(rec: Any, *, strip: Callable[[str], str] | None = Non
     if getattr(rec, "task_truncated", False):
         # Only the interface preview was recorded. Say so: an unmarked cut reads as a broken dispatch.
         out["task"] += TASK_TRUNCATION_NOTE
+    sources = getattr(rec, "required_source_urls", None)
+    if sources is not None:
+        out["required_source_urls"] = list(sources)
     return out
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids
+from bowhead_core.final_deliverables import rewritten_deliverable_ids, superseded_deliverable_ids, unselected_sandbox_file_ids
 from bowhead_core.subagent import _extract_step_code_input, _output_artifact_meta
 
 
@@ -147,3 +147,41 @@ def test_a_reported_name_that_differs_from_the_stored_file_proves_nothing() -> N
     events = rewrite_events(("sub_compute", "art_1")) + rewrite_events(("sub_compute", "art_2"), filename="other.html")
     events[2][1]["step_id"] = events[3][1]["step_id"] = "step_later"
     assert rewritten_deliverable_ids(identities, events) == set()
+
+
+def sandbox_write(step_id: str, *written: str, declared: tuple[str, ...] = (), tool: str = "python_sandbox") -> list[tuple[str, dict]]:
+    meta: dict = {"output_artifacts": [{"artifact_id": artifact_id} for artifact_id in written]}
+    if declared:
+        meta["artifact_presentation"] = {"origin": "producer_declared", "items": [{"artifact_id": artifact_id} for artifact_id in declared]}
+    return [("step_started", {"step_id": step_id, "tool_name": tool}), ("step_done", {"step_id": step_id, "result_meta": meta})]
+
+
+def presented(step_id: str, *artifact_ids: str) -> list[tuple[str, dict]]:
+    meta = {"artifact_presentation": {"origin": "explicit_tool", "items": [{"artifact_id": artifact_id} for artifact_id in artifact_ids]}}
+    return [("step_started", {"step_id": step_id, "tool_name": "present_artifacts"}), ("step_done", {"step_id": step_id, "result_meta": meta})]
+
+
+def test_a_draft_beside_a_declared_file_leaves_the_answer() -> None:
+    """Observed execution: fix.pptx, a draft from a failed call, showed beside the declared deck."""
+    roots = {"art_deck": "art_deck", "art_fix": "art_fix"}
+    events = sandbox_write("s1", "art_deck", declared=("art_deck",)) + sandbox_write("s2", "art_fix")
+    assert unselected_sandbox_file_ids(roots, events) == {"art_fix"}
+
+
+def test_a_turn_that_selected_nothing_keeps_every_file() -> None:
+    roots = {"art_a": "art_a", "art_b": "art_b"}
+    assert unselected_sandbox_file_ids(roots, sandbox_write("s1", "art_a") + sandbox_write("s2", "art_b")) == set()
+
+
+def test_presenting_any_version_selects_the_file() -> None:
+    """The Lead presented v1 of the deck; v16 and the undeclared deck it presented stay, the probe file leaves."""
+    roots = {"art_v16": "art_v1", "art_probe": "art_probe", "art_undeclared": "art_undeclared"}
+    events = sandbox_write("s1", "art_v16", "art_probe", "art_undeclared") + presented("p1", "art_v1", "art_undeclared")
+    assert unselected_sandbox_file_ids(roots, events) == {"art_probe"}
+
+
+def test_files_of_other_producers_always_stay() -> None:
+    """Canvas exports and render Tools have no declaration step."""
+    roots = {"art_deck": "art_deck", "art_export": "art_export", "art_unreported": "art_unreported"}
+    events = sandbox_write("s1", "art_deck", declared=("art_deck",)) + sandbox_write("s2", "art_export", tool="skill_invoke")
+    assert unselected_sandbox_file_ids(roots, events) == set()

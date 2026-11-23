@@ -21,7 +21,7 @@ from pathlib import Path, PurePosixPath
 import aiosqlite
 import anyio
 
-from bowhead_core._db import open_shared_ctx, writer_busy
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx, writer_busy
 from bowhead_core.access_control import AccessContext, AccessControlStore
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef
@@ -53,7 +53,8 @@ def build_reference_skill_sources(
     access = AccessControlStore(db_path)
 
     async def current_access() -> AccessContext:
-        async with open_shared_ctx(str(db_path)) as db:
+        # A pure read: the read-only pool takes no authority lease.
+        async with open_pooled_read_ctx(str(db_path)) as db:
             await db.execute("BEGIN")
             return await read_reference_access_context_in_connection(db, scope=captured, access_store=access)
 
@@ -81,6 +82,27 @@ def _fail(code: str = "reference_skill_source_unavailable", *, reason: str | Non
     if isinstance(in_flight, sqlite3.OperationalError) and writer_busy(in_flight):
         raise in_flight
     raise SkillReadResolutionError(code, reason=reason, cause=cause) from None
+
+
+SOURCE_CHANGED = "reference_skill_source_changed"
+
+
+async def repeat_once_if_source_changed[T](check: Callable[[], Awaitable[T]]) -> T:
+    """Run a source check once more when the state it read changed while it ran.
+
+    ``reference_skill_source_changed`` means the facts read before and after
+    the check differ: the Skill's record, or the caller's access (groups,
+    roles, the Team policy epoch), for example when another session changes a
+    group membership at that moment. Nothing is started by a check, so a
+    second one is safe: a settled state passes, and a lasting change fails
+    again with its own reason.
+    """
+    try:
+        return await check()
+    except SkillReadResolutionError as error:
+        if str(error) != SOURCE_CHANGED:
+            raise
+    return await check()
 
 
 def _digest(value: object) -> str:

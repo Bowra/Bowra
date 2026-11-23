@@ -7,7 +7,7 @@ from typing import Any
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 
 
@@ -59,7 +59,7 @@ async def load_history(
         return {}
     if turn_ids is not None and (not 1 <= len(turn_ids) <= 100 or any(not isinstance(value, str) or not value for value in turn_ids)):
         raise ValueError("Invalid clarification history page")
-    async with open_shared_ctx(db_path) as db:
+    async with open_pooled_read_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN")
         await require_reference_request_scope(db, scope)

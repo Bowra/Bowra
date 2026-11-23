@@ -22,7 +22,7 @@ frontend-assemble: ## Materialize the fixed Community frontend before repository
 	cd $(FRONTEND_DIR) && node scripts/assemble-edition.mjs
 
 run-gateway: ## Prepare the database and run the API gateway with local configuration
-	set -a; source .env; set +a
+	set -a; source .env && set +a && \
 	BOWHEAD_STARTUP_BOWHEAD_BIN="$$(pwd)/.venv/bin/bowhead" BOWHEAD_STARTUP_PYTHON_BIN="$$(pwd)/.venv/bin/python" BOWHEAD_STARTUP_UVICORN_BIN="$$(pwd)/.venv/bin/uvicorn" sh deploy/start-app.sh
 
 run-frontend: ## Start frontend development against the gateway

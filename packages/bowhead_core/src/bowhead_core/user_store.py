@@ -2547,6 +2547,7 @@ class UserStore:
                 rows = await cur.fetchall()
         return [_row_to_team_tool_source(r) for r in rows]
 
+    @_repeat_when_authority_busy
     async def update_team_tool_source_meta(
         self,
         team_id: str,

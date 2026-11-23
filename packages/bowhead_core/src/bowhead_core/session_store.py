@@ -1530,6 +1530,15 @@ class TurnSpawnRecord:
     tool_failures: tuple[tuple[str, str], ...] = ()
     # The task is the 200-character interface preview, the only record of an older unfinished Turn.
     task_truncated: bool = False
+    # The `required_source_urls` the call declared; None when the events predate the field.
+    required_source_urls: tuple[str, ...] | None = None
+
+
+def _recorded_sources(payload: dict[str, Any]) -> tuple[str, ...] | None:
+    value = payload.get("required_source_urls")
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return tuple(value)
 
 
 @dataclass
@@ -1769,7 +1778,9 @@ class SessionStore:
             },
         }
         try:
-            async with open_shared_ctx(self._db_path) as db:
+            # On the read-only pool: a write-capable connection takes core's shared authority lease for the
+            # column checks, and a busy lease would report the application unready (see ``except`` below).
+            async with open_pooled_read_ctx(self._db_path) as db:
                 async with db.execute(
                     "SELECT version_num FROM alembic_version LIMIT 1",
                 ) as head_cursor:
@@ -5645,7 +5656,8 @@ class SessionStore:
         reference_scope = ReferenceScope.model_validate(reference_scope.model_dump(mode="python", warnings="error"))
         if reference_scope.session_id != session_id:
             raise ValueError("reference_submission_scope_invalid")
-        async with open_shared_ctx(self._db_path) as db:
+        # A pure read that always rolls back: the read-only pool takes no authority lease.
+        async with open_pooled_read_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             try:
@@ -8040,6 +8052,7 @@ class SessionStore:
                             synthesized=True,
                             tool_failures=tuple(tool_failures.get((tid, sid), ())),
                             task_truncated=full_task is None and (tid, sid) in cut_previews,
+                            required_source_urls=_recorded_sources(p),
                         ),
                     )
                 )
@@ -8070,6 +8083,7 @@ class SessionStore:
                         outcome=str(payload.get("outcome_message") or "")[:200],
                         delivery=str(payload.get("delivery") or ""),
                         canvas_mode=str(payload.get("canvas_mode") or ""),
+                        required_source_urls=_recorded_sources(payload),
                     ),
                 )
             )
@@ -8364,8 +8378,9 @@ class SessionStore:
         The Turn must already be durably paused and its previous generation's
         single-row dispatch must be settled. This closes the visible-card gap
         between ``clarification_required`` and the worker monitor tail.
+        A pure read, polled while an answer waits: the read-only pool takes no authority lease.
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_pooled_read_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             async with db.execute(

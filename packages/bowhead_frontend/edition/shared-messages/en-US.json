@@ -14302,6 +14302,7 @@
       "skill_selection_unavailable": "Skills can’t be used right now. Your draft is preserved. Try again shortly, or remove the Skill and send without it.",
       "selected_skill_unavailable": "A selected Skill is no longer available to you: it was turned off or your access was removed. Your draft is preserved. Remove it or choose another Skill from /, then send again.",
       "selected_skill_changed": "A selected Skill was updated after you selected it. Your draft is preserved. Select it again from / and send.",
+      "selected_skill_check_interrupted": "The selected Skill or your access was changing while it was being checked, so nothing was sent. Your draft is preserved. Send again in a moment.",
       "selected_skill_too_large": "A selected Skill’s instructions are too large to send. Your draft is preserved. Remove that Skill, or ask its owner to shorten it, then send again.",
       "plan_execution_claim_lost": "The plan state changed. Review the plan again before running it.",
       "attachment_bundle_mismatch": "This attachment bundle changed. Upload it again before sending.",

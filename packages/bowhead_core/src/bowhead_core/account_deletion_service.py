@@ -13,7 +13,7 @@ import aiosqlite
 import anyio
 import structlog
 
-from bowhead_core._db import execute_and_close
+from bowhead_core._db import execute_and_close, open_pooled_read_ctx
 from bowhead_core.account_artifact_lock import account_artifact_lock
 from bowhead_core.account_deletion import (
     AccountDeletion,
@@ -60,7 +60,8 @@ class AccountDeletionService:
         self._wake.set()
 
     async def request(self, user_id: str, *, expected_pwd_version: int | None = None) -> AccountDeletion:
-        async with diagnostic_connect(self.users.db_path) as db:
+        # A schema check that only reads: the read-only pool takes no authority lease for each attached file.
+        async with open_pooled_read_ctx(self.users.db_path) as db:
             await reviewed_schema(db)
         if getattr(self.artifacts.backend, "erase", None) is None:
             raise AccountDeletionError("account_erasure_backend_unavailable")
@@ -198,7 +199,7 @@ class AccountDeletionService:
         if self.external_quarantine is not None:
             await self.external_quarantine(deletion.user_id, deletion.operation_id)
         async with (
-            diagnostic_connect(self.users.db_path) as db,
+            open_pooled_read_ctx(self.users.db_path) as db,
             db.execute("SELECT id FROM sessions WHERE user_id=? ORDER BY id", (deletion.user_id,)) as cur,
         ):
             sessions = [row[0] for row in await cur.fetchall()]

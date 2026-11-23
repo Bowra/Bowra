@@ -1,6 +1,6 @@
 """Select the final files a Turn's answer shows.
 
-Two rules hide an earlier file from the answer; the run trace, Results and Files keep every file:
+Three rules hide a file from the answer; the run trace, Results and Files keep every file:
 
 - A successful sandbox call that read exactly one same-name file and wrote one replaces that input.
 - A helper that writes a file with the same name, type and folder path again in one Turn rewrote it: a
@@ -8,6 +8,9 @@ Two rules hide an earlier file from the answer; the run trace, Results and Files
   copy is shown. Copies from different helpers stay, because parallel helpers may deliver independent
   files, and so do same-name files of different declared folders (``site/a/index.html``,
   ``site/b/index.html``).
+- Once the Turn selected a file explicitly (its sandbox call declared it as a deliverable, or
+  ``present_artifacts`` named a version of it), a sandbox file nobody selected is a draft. Files from
+  other producers (Canvas exports, render Tools) have no declaration step and always stay.
 """
 
 from __future__ import annotations
@@ -121,3 +124,46 @@ def rewritten_deliverable_ids(
             if artifact_id not in written:
                 written.append(artifact_id)
     return {artifact_id for written in copies.values() for artifact_id in written[:-1]}
+
+
+#: The step name every python_sandbox entry is surfaced as (python_exec and skill_invoke of python_sandbox too).
+_SANDBOX_STEP = "python_sandbox"
+_SELECTION_ORIGINS = ("producer_declared", "explicit_tool")
+
+
+def unselected_sandbox_file_ids(roots: dict[str, str], events: list[tuple[str, dict[str, Any]]]) -> set[str]:
+    """Hide sandbox files no call declared and the Lead did not present, once the Turn selected any file.
+
+    ``roots`` maps the Turn's delivered files to their lineage root, so presenting or declaring any
+    version selects the file. ``events`` are the Turn's ``step_started``/``step_done`` events in order;
+    a ``step_done`` carries the call's ``artifact_presentation``. A Turn that selected nothing keeps
+    every file (116 2026-11-08..22: 8 of 138 Turns change, 40 of 280 cards, all drafts the answers
+    never named; docs/sprints/stray-result-files-2026-11-22).
+    """
+    tool_of: dict[str, str] = {}
+    from_sandbox: set[str] = set()
+    selected: set[str] = set()
+    for event_type, payload in events:
+        step_id = payload.get("step_id")
+        if not isinstance(step_id, str):
+            continue
+        if event_type == "step_started":
+            tool_of[step_id] = str(payload.get("tool_name") or "")
+            continue
+        meta = payload.get("result_meta")
+        if event_type != "step_done" or not isinstance(meta, dict):
+            continue
+        declaration = meta.get("artifact_presentation")
+        items = declaration.get("items") if isinstance(declaration, dict) and declaration.get("origin") in _SELECTION_ORIGINS else None
+        for item in items if isinstance(items, list) else []:
+            artifact_id = item.get("artifact_id") if isinstance(item, dict) else None
+            if isinstance(artifact_id, str):
+                selected.add(roots.get(artifact_id, artifact_id))
+        outputs = meta.get("output_artifacts")
+        if tool_of.get(step_id) == _SANDBOX_STEP and isinstance(outputs, list):
+            from_sandbox.update(
+                output["artifact_id"] for output in outputs if isinstance(output, dict) and isinstance(output.get("artifact_id"), str)
+            )
+    if not selected:
+        return set()
+    return {artifact_id for artifact_id, root in roots.items() if artifact_id in from_sandbox and root not in selected}

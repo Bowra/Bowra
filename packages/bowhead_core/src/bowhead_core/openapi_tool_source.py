@@ -702,6 +702,10 @@ async def connect_remote_mcp(
     from bowhead_core.ssrf_guard import build_guarded_async_client
 
     log_token = _MCP_TRANSPORT_LOGS_SUPPRESSED.set(True)
+    last_post = _LastPostStatus()
+    response_hooks: list[Any] = [last_post.record]
+    if response_bytes_limit is not None:
+        response_hooks.append(functools.partial(_limit_mcp_response_bytes, limit=response_bytes_limit))
     try:
         client = build_guarded_async_client(
             follow_redirects=False,
@@ -715,31 +719,56 @@ async def connect_remote_mcp(
                 connect=timeout,
             ),
             auth=auth,
-            event_hooks=(
-                {
-                    "response": [
-                        functools.partial(
-                            _limit_mcp_response_bytes,
-                            limit=response_bytes_limit,
-                        )
-                    ]
-                }
-                if response_bytes_limit is not None
-                else None
-            ),
+            event_hooks={"response": response_hooks},
         )
-        async with (
-            client,
-            streamable_http_client(base_url, http_client=client) as (
-                read,
-                write,
-            ),
-            _ClientSession(read, write) as session,
-        ):
-            await asyncio.wait_for(session.initialize(), timeout)
-            yield session
+        try:
+            async with (
+                client,
+                streamable_http_client(base_url, http_client=client) as (
+                    read,
+                    write,
+                ),
+                _ClientSession(read, write) as session,
+            ):
+                await asyncio.wait_for(session.initialize(), timeout)
+                yield session
+        except Exception as exc:
+            status_error = last_post.status_error()
+            if status_error is None:
+                raise
+            raise status_error from exc
     finally:
         _MCP_TRANSPORT_LOGS_SUPPRESSED.reset(log_token)
+
+
+class _LastPostStatus:
+    """The HTTP status of the newest MCP POST, kept so a failure can name it.
+
+    The MCP SDK turns any non-2xx POST without a JSON-RPC error body into a generic
+    ``MCPError("Server returned an error response")``, dropping the status and headers. A rate
+    limit (429 + ``Retry-After``) or a rejected credential (401/403) then reads as a bare protocol
+    error. Only POSTs carry calls: a stateless server may answer the SDK's optional GET stream or
+    session DELETE with 405, which is not a call failure. A later successful POST clears the record,
+    so an intermediate 401 that the OAuth provider recovered from is never blamed.
+    """
+
+    def __init__(self) -> None:
+        self._failed: httpx2.Response | None = None
+
+    async def record(self, response: httpx2.Response) -> None:
+        if response.request.method != "POST":
+            return
+        self._failed = response if response.status_code >= 400 else None
+
+    def status_error(self) -> httpx2.HTTPStatusError | None:
+        response = self._failed
+        if response is None:
+            return None
+        return httpx2.HTTPStatusError(
+            f"remote MCP server answered HTTP {response.status_code}",
+            request=response.request,
+            response=response,
+        )
 
 
 class RemoteMcpToolClient:

@@ -110,6 +110,28 @@ async def test_resolution_checks_the_exact_source_and_its_version(tmp_path, monk
     assert (await resolve_selected_skill(ctx, "report"))["error_kind"] == "selected_skill_changed"
 
 
+@pytest.mark.parametrize("failures", [1, 2])
+async def test_an_access_change_during_resolution_is_checked_again(tmp_path, monkeypatch, failures):
+    """A group change by another session mid-check is checked once more, not reported as an edited Skill."""
+    team = _skill(tmp_path, "team", "TEAM METHOD")
+    calls = []
+
+    class Sources:
+        async def prepare_runtime_package(self, resource, *, scope):
+            calls.append(resource.id)
+            if len(calls) <= failures:
+                raise SkillReadResolutionError("reference_skill_source_changed")
+            return SimpleNamespace(path=team, proof=SimpleNamespace(name="report"))
+
+    monkeypatch.setattr(ordinary_lead_material, "_sources", lambda ctx, resource, name: Sources())
+    result = await resolve_selected_skill(_ctx(tmp_path), "report")
+    assert len(calls) == 2
+    if failures == 1:
+        assert result.source_dir == team
+    else:
+        assert result["error_kind"] == "selected_skill_changed"
+
+
 async def test_registered_tools_skip_the_name_cache_and_name_gate_for_a_selected_skill(tmp_path, monkeypatch):
     personal, team = _skill(tmp_path, "personal", "PERSONAL DRAFT"), _skill(tmp_path, "team", "TEAM METHOD")
 

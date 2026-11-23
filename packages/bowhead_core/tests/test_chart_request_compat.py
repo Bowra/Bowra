@@ -265,3 +265,81 @@ async def test_a_grouped_bar_keeps_its_axes() -> None:
     ctx, canvas = context(regions)
     result = await _add_chart(args(force_kind="bar", axes={"x": "营业额_亿", "y": ["区域"], "x_scale": "category"}, group_by=["月份"]), ctx)
     assert "axes_swapped" not in [entry["code"] for entry in result.get("presentation_fallbacks", [])]
+
+
+@pytest.mark.parametrize(
+    ("axes", "path"),
+    [
+        ({"x": ["营业额_亿", "客流量_万"], "y": ["门店"]}, "/axes/x"),
+        ({"x": [], "y": ["门店"]}, "/axes/x"),
+        ({"x": {"field": "门店"}, "y": ["营业额_亿"]}, "/axes/x"),
+        ({"x": "门店", "y": {"field": "营业额_亿"}}, "/axes/y"),
+        ({"x": "门店", "y": '["营业额_亿"]'}, "/axes/y"),
+        ({"x": "门店", "y": [["营业额_亿"]]}, "/axes/y"),
+    ],
+    ids=["x-two-keys", "x-empty-list", "x-object", "y-object", "y-json-text", "y-nested-list"],
+)
+async def test_an_axis_value_without_one_reading_is_refused_as_arguments_not_a_crash(axes: dict, path: str) -> None:
+    """116 (1.7.63): axes={'x': ['销售额_亿元'], 'y': ['年份']} raised TypeError (unhashable list) inside the
+    compatibility pass, so the call failed as an unexpected error instead of telling the model what to correct.
+    One listed key is read since (below); every other shape reaches validation and is refused at its path."""
+    ctx, canvas = context(STORES)
+    result = await _add_chart(args(force_kind="hbar", axes={**axes, "x_scale": "category"}, group_by=[], column_units=AMOUNTS), ctx)
+    assert "error" in result, result
+    assert (result.get("error_kind"), result.get("path")) == ("invalid_chart_expression", path)
+    assert "presentation_fallbacks" not in result
+    assert canvas.appended_payload is None
+
+
+@pytest.mark.parametrize(
+    ("axes", "paths"),
+    [
+        ({"x": ["门店"], "y": ["营业额_亿"]}, ["/axes/x"]),
+        ({"x": "门店", "y": "营业额_亿"}, ["/axes/y"]),
+        ({"x": ["门店"], "y": "营业额_亿"}, ["/axes/x", "/axes/y"]),
+    ],
+    ids=["x-as-list", "y-as-text", "both"],
+)
+async def test_one_axis_field_written_in_the_other_container_is_read(axes: dict, paths: list[str]) -> None:
+    """116 since 2026-11-16: 4 of 421 calls listed the one x field and 1 wrote the one y field as text."""
+    ctx, canvas = context(STORES)
+    result = await _add_chart(args(force_kind="bar", axes={**axes, "x_scale": "category"}, group_by=[], column_units=AMOUNTS), ctx)
+    assert "error" not in result, result
+    assert canvas.appended_payload["spec"]["explicit_presentation"]["axes"] == {"x": "门店", "y": ["营业额_亿"], "x_scale": "category"}
+    assert [(entry["code"], entry["path"]) for entry in result["presentation_fallbacks"]] == [("axis_field_shape_read", path) for path in paths]
+
+
+async def test_a_right_axis_field_written_as_text_is_read() -> None:
+    ctx, canvas = context(STORES)
+    axes = {"x": "门店", "y": ["营业额_亿"], "y_right": "客流量_万", "x_scale": "category"}
+    result = await _add_chart(args(force_kind="dual_axis", axes=axes, group_by=[], column_units=AMOUNTS), ctx)
+    assert "error" not in result, result
+    assert right_axis(canvas.appended_payload["spec"]) == ["客流量_万"]
+    assert [(entry["code"], entry["path"]) for entry in result["presentation_fallbacks"]] == [("axis_field_shape_read", "/axes/y_right")]
+
+
+async def test_the_bar_written_as_it_looks_with_x_as_a_list_is_drawn() -> None:
+    """The live request (an observed execution): hbar, the value field listed in x, the category in y, a linear x scale."""
+    ctx, canvas = context(STORES)
+    request = args(force_kind="hbar", axes={"x": ["营业额_亿"], "y": ["门店"], "x_scale": "linear"}, group_by=[], column_units=AMOUNTS)
+    result = await _add_chart(request, ctx)
+    assert "error" not in result, result
+    assert canvas.appended_payload["spec"]["explicit_presentation"]["axes"] == {"x": "门店", "y": ["营业额_亿"], "x_scale": "category"}
+    assert codes(result) == ["axis_field_shape_read", "x_scale_set", "axes_swapped"]
+
+
+@pytest.mark.parametrize(
+    ("fields", "path"),
+    [
+        ({"force_kind": ["bar"]}, "/force_kind"),
+        ({"force_kind": {"kind": "bar"}}, "/force_kind"),
+        ({"force_kind": "bar", "columns": [{"key": "门店"}]}, "/columns"),
+    ],
+    ids=["kind-list", "kind-object", "columns-of-objects"],
+)
+async def test_a_kind_or_columns_value_of_the_wrong_shape_is_refused_at_its_path(fields: dict, path: str) -> None:
+    """Like the x list, these unhashable values raised inside the compatibility pass instead of reaching validation."""
+    ctx, canvas = context(STORES)
+    result = await _add_chart(args(axes={"x": "门店", "y": ["营业额_亿"], "x_scale": "category"}, group_by=[], **fields), ctx)
+    assert (result.get("error_kind"), result.get("path")) == ("invalid_chart_expression", path), result
+    assert canvas.appended_payload is None

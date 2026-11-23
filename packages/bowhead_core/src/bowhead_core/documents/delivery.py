@@ -305,7 +305,8 @@ class DocumentDeliveryStore:
             raise DocumentRequestError("document_draft_invalid")
         prepared_files = {}
         if domain_layout_active(self.path):
-            async with open_shared_ctx(self.path) as preflight:
+            # A pure preflight; ``record_draft`` fences again in its own authority write.
+            async with open_pooled_read_ctx(self.path) as preflight:
                 await preflight.execute("BEGIN")
                 await _fence(preflight, scope, job_id, owner)
                 async with preflight.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
@@ -454,7 +455,8 @@ class DocumentDeliveryStore:
             return value
 
     async def read_file(self, *, scope: DocumentScope, job_id: str, name: str, preview: bool) -> tuple[bytes, str]:
-        async with open_shared_ctx(self.path) as db:
+        # Pure reads, as in `get`: on the read-only pool the membership checks take no authority lease.
+        async with open_pooled_read_ctx(self.path) as db:
             await db.execute("BEGIN")
             job = await _scope(db, scope, job_id, write=False)
             execution = await _execution(db, job_id)
@@ -483,7 +485,7 @@ class DocumentDeliveryStore:
             raise DocumentRequestError("document_draft_unavailable") from None
         if len(content) != file["size_bytes"] or hashlib.sha256(content).hexdigest() != file["sha256"]:
             raise DocumentRequestError("document_draft_hash_mismatch")
-        async with open_shared_ctx(self.path) as db:
+        async with open_pooled_read_ctx(self.path) as db:
             await db.execute("BEGIN")
             job = await _scope(db, scope, job_id, write=False)
             current = await _execution(db, job_id)
@@ -512,8 +514,9 @@ class DocumentDeliveryStore:
             return 0
         if not 1 <= limit <= 100:
             raise ValueError("Publication repair limit must be between 1 and 100")
+        # The candidate list is a pure read; each repair rechecks its job in its own authority write.
         async with (
-            open_shared_ctx(self.path) as db,
+            open_pooled_read_ctx(self.path) as db,
             db.execute(
                 """WITH outputs AS (
                   SELECT f.job_id,f.artifact_id FROM document_draft_files f JOIN document_executions e ON e.job_id=f.job_id
@@ -624,7 +627,8 @@ class DocumentDeliveryStore:
 
     async def _confirm_execution(self, *, scope: DocumentScope, job_id: str, command_id: str, draft_digest: str) -> dict:
         _command_id(command_id)
-        async with open_shared_ctx(self.path) as db:
+        # A pure preflight; ``publish`` checks the job, the command and the files again in its own authority write.
+        async with open_pooled_read_ctx(self.path) as db:
             await db.execute("BEGIN")
             job = await _scope(db, scope, job_id, write=False)
             async with db.execute("SELECT * FROM document_confirmations WHERE job_id=?", (job_id,)) as cursor:

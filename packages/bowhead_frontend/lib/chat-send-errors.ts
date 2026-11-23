@@ -31,6 +31,7 @@ export const CHAT_SEND_BACKEND_CODES = [
   "skill_selection_unavailable",
   "selected_skill_unavailable",
   "selected_skill_changed",
+  "selected_skill_check_interrupted",
   "selected_skill_too_large",
   "plan_execution_claim_lost",
   "source_projection_unavailable",

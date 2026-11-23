@@ -438,6 +438,76 @@ async def test_final_files_show_only_the_newest_copy_a_helper_rewrote(store: Can
     assert len(await log.list_events("t_rewrite")) == 8
 
 
+async def test_a_draft_beside_the_declared_deck_is_not_a_result(store: CanvasStore, art_store: ArtifactStore) -> None:
+    """Observed execution: the declared deck and fix.pptx, a draft its failed call wrote, showed as two
+    results and the finished line counted two presentations. Results and the run trace keep the draft."""
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    await store.ensure_canvas(session_id="s_deck", workspace_id="w", user_id="u")
+    deck = await _put_deliverable(art_store, turn="t_draft", filename="业绩回顾.pptx")
+    draft = await _put_deliverable(art_store, turn="t_draft", filename="fix.pptx")
+    log = TurnLogStore(str(art_store.db_path))
+    await log.initialize()
+    declaration = {"origin": "producer_declared", "items": [{"artifact_id": deck.id}]}
+    for step_id, artifact, meta, state in [
+        ("step_deck", deck, {"artifact_presentation": declaration}, "success"),
+        ("step_fix", draft, {}, "failure"),
+    ]:
+        outputs = [{"artifact_id": artifact.id, "filename": artifact.filename, "mime": artifact.mime}]
+        assert await log.record(turn_id="t_draft", event_type="step_started", payload={"step_id": step_id, "tool_name": "python_sandbox"}) is not None
+        done = {"step_id": step_id, "state": state, "result_meta": {**meta, "output_artifacts": outputs}}
+        assert await log.record(turn_id="t_draft", event_type="step_done", payload=done) is not None
+    ctx = SimpleNamespace(canvas_store=store, artifact_store=art_store)
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, ctx, "t_draft")
+    assert [item["id"] for item in payload["inline_artifacts"]] == [deck.id]
+    assert payload["outputs"] == [{"kind": "presentation", "count": 1}]
+    assert await art_store.get(draft.id) is not None
+
+
+async def test_presenting_an_intermediate_version_keeps_the_current_file(
+    store: CanvasStore, art_store: ArtifactStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    await store.ensure_canvas(session_id="s_deck", workspace_id="w", user_id="u")
+    first = await _put_deliverable(art_store, turn="t_previous", filename="report.html", mime="text/html")
+    selected = await _put_deliverable(art_store, turn="t_previous", filename="report.html", mime="text/html")
+    latest = await _put_deliverable(art_store, turn="t_current", filename="report.html", mime="text/html")
+    draft = await _put_deliverable(art_store, turn="t_current", filename="draft.html", mime="text/html")
+    latest = replace(latest, lineage_id=first.id, version_no=3)
+
+    async def current_files(turn_id):
+        assert turn_id == "t_current"
+        return [latest, draft]
+
+    async def versions(artifact_ids, *, user_id):
+        assert user_id == "u"
+        assert artifact_ids == [latest.id]
+        return {latest.id: ([first.id, selected.id, latest.id], False)}
+
+    monkeypatch.setattr(art_store, "list_deliverables_for_turn", current_files)
+    monkeypatch.setattr(art_store, "lineage_overview", versions)
+    log = TurnLogStore(str(art_store.db_path))
+    await log.initialize()
+    records = [
+        ("step_started", {"step_id": "write", "tool_name": "python_sandbox"}),
+        ("step_done", {"step_id": "write", "result_meta": {"output_artifacts": [{"artifact_id": latest.id}, {"artifact_id": draft.id}]}}),
+        (
+            "step_done",
+            {"step_id": "present", "result_meta": {"artifact_presentation": {"origin": "explicit_tool", "items": [{"artifact_id": selected.id}]}}},
+        ),
+    ]
+    for event_type, payload in records:
+        assert await log.record(turn_id="t_current", event_type=event_type, payload=payload) is not None
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, SimpleNamespace(canvas_store=store, artifact_store=art_store), "t_current")
+    assert [item["id"] for item in payload["inline_artifacts"]] == [latest.id]
+    assert payload["outputs"] == [{"kind": "web_page", "count": 1}]
+
+
 async def test_pptx_deliverable_emits_chip_when_report_worthy(
     store: CanvasStore,
     art_store: ArtifactStore,
@@ -674,3 +744,16 @@ async def test_outputs_count_delivered_files_by_type(store: CanvasStore, art_sto
         {"kind": "image", "count": 1},
         {"kind": "file", "count": 1},
     ]
+
+
+async def test_outputs_do_not_call_saved_code_beside_a_deck_a_report(store: CanvasStore, art_store: ArtifactStore) -> None:
+    # an observed execution: a deck plus the code blocks its runs saved read "1 份报告 · 1 份演示文稿", while the
+    # report body shows no code block (`done.report_sections_saved` 0). Mutation: count `report` from
+    # `is_report_worthy` alone → this test fails (a deliverable always keeps the Canvas).
+    c = await store.ensure_canvas(session_id="s_out_code", workspace_id="w", user_id="u")
+    for code in ("print(1)", "print(2)"):
+        await store.append_section(canvas_id=c.id, kind="code_block", payload={"code": code, "language": "python"}, by_turn_id="t_out_code")
+    await _put_deliverable(art_store, turn="t_out_code", filename="deck.pptx", mime=_PPTX_MIME, content=b"deck")
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, SimpleNamespace(canvas_store=store, artifact_store=art_store), "t_out_code")
+    assert payload["outputs"] == [{"kind": "presentation", "count": 1}]

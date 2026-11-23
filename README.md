@@ -14,6 +14,7 @@ Bowra is an MIT-licensed, self-hosted AI agent platform for business data and do
 </p>
 
 <p align="center">
+  <a href="https://bowra.ai/examples/q2-gross-profit/">Reproduce the $9M Q2 demo</a> ·
   <a href="#get-started">Get started</a> ·
   <a href="examples/community/README.md">Examples</a> ·
   <a href="docs/README.md">Documentation</a> ·
@@ -37,7 +38,7 @@ ChromaDB has unresolved upstream dependency advisories. See the [current assessm
 
 ## Current source snapshot
 
-**Bowra 1.7.63** shows live code in the run trace, supports Skill package file editing, and improves generated presentation delivery. [Release notes](docs/help/release-notes/releases/v1.7.63.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
+**Bowra 1.7.64** refines selected results, credit feedback, chart inputs, and Skill script execution. [Release notes](docs/help/release-notes/releases/v1.7.64.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
 
 SQLite upgrades coordinate twelve database files. Stop every writer and preserve instance keys, databases and objects before upgrading. Automatic migration backups cover registered SQLite files and layout metadata; keep complete recovery snapshots separately. Restoring a snapshot from before account deletion can restore that account. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

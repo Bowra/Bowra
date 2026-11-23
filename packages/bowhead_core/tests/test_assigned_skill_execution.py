@@ -154,6 +154,21 @@ async def test_exact_user_source_reads_and_runs_pinned_copy_despite_builtin_coll
     assert case.ctx.assigned_skill_material is None
 
 
+@pytest.mark.parametrize(
+    "script,expected",
+    [("run.py", "run.py"), ("scripts/run.py", "run.py"), ("./scripts/run.py", "run.py"), ("scripts/missing.py", None), ("../scripts/run.py", None)],
+)
+async def test_entry_script_may_be_written_as_skill_md_links_it(assigned_case, script, expected):
+    """116 2026-11-22: SKILL.md said "run scripts/build.py" and the model passed that path; it names the entry build.py."""
+    case = assigned_case
+    result = await invoke(case, args={"name": "method", "script": script, "input": {"inputs": {}}})
+    if expected is None:
+        assert result["error_kind"] == "invalid_args" and result["available"] == ["run.py"] and not case.calls
+    else:
+        assert result["ok"] is True
+        assert case.calls[0]["input"]["_skill_entry"] == expected and case.calls[0]["staged"] is None
+
+
 async def test_exact_copies_live_under_the_data_root_and_stale_ones_are_removed(assigned_case):
     from bowhead_core import assigned_skill_execution
 

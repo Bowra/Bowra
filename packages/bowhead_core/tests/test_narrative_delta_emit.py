@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from bowhead_core.agents.lead_orchestrator import _emit_narrative_delta
+from bowhead_core.agents.lead_orchestrator import _emit_narrative_delta, _shown_with_held_whitespace
 from bowhead_core.agents.prompts.peer_block import PeerEntry
 from bowhead_core.agents.response_kind_scanner import (
     feed as scanner_feed,
@@ -208,3 +208,14 @@ async def test_pipeline_card_id_matches_turn_id(
     assert len(narr) == 1
     assert narr[0].payload["card_id"] == "t_card_match"
     assert narr[0].turn_id == "t_card_match"
+
+
+def test_whitespace_streamed_on_its_own_waits_for_the_prose_that_follows() -> None:
+    """an observed execution: the line break after a heading and the space before a number are chunks of their own."""
+    held, started, deltas = "", False, []
+    for chunk in ["\n\n", "第1步：定时间", "\n\n", "第", " ", "1", " ", "步是把会议定下来。", "\n"]:
+        shown, held = _shown_with_held_whitespace(held, chunk, reply_shown=started)
+        started = started or bool(shown)
+        deltas.append(shown)
+    assert [delta for delta in deltas if delta] == ["第1步：定时间", "\n\n第", " 1", " 步是把会议定下来。"]
+    assert held == "\n"  # no prose followed it; the caller drops it when the reply ends

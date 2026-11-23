@@ -73,6 +73,90 @@ async def test_partial_receipt_preserves_text_and_actual_stop_reason(stop_reason
     assert "a run limit" not in receipt["directive"]
 
 
+@pytest.mark.parametrize(
+    ("denial", "fact", "action"),
+    [
+        ("team_pool_exhausted", "the Team's credit pool is used up", "a Team owner or administrator adds Team credits"),
+        ("user_credit_exhausted", "the user's own credit allowance is used up", "allocates more credits to the user"),
+        (None, "stopped at the available credit", None),
+    ],
+)
+async def test_a_credit_stop_tells_lead_which_balance_ran_out_and_who_restores_it(denial: str | None, fact: str, action: str | None) -> None:
+    """Observed execution: told only "the available credit", Lead dispatched another helper into the same stop
+    and offered to "continue" without saying credits had to be added. Replayed with these facts, 8 of 8 answers named
+    the Team credits and who adds them (0 of 8 before)."""
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    partial = SubagentResult(
+        profile="compute",
+        subagent_id="sub_credit",
+        ok=False,
+        completion="partial",
+        final_answer="",
+        stop_reason="budget",
+        partial_done="Template structure read.",
+        credit_denial=denial,
+    )
+    ctx = ToolExecutionContext(
+        workspace_id="ws_test",
+        member_uid="member",
+        user_id="user",
+        turn_id="t_credit",
+        datarc=None,
+        subagent_runner=_CapturingRunner(partial),
+        parent_bus=_FakeBus(),
+    )
+    invocation = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Fill the template."}, ctx)
+    directive = invocation.result["directive"]
+    assert fact in directive
+    assert ("every helper dispatched in this turn stops after its first step" in directive) is bool(denial)
+    if action:
+        assert action in directive
+    assert "Do not dispatch this task again in this turn." in directive
+
+
+@pytest.mark.parametrize(
+    ("balances", "denial", "action"),
+    [
+        ((5000, 0), "team_pool_exhausted", "a Team owner or administrator adds Team credits"),
+        ((0, 5000), "user_credit_exhausted", "a Team owner or administrator allocates more credits to the user"),
+        ((5000, 5000), None, None),
+    ],
+)
+async def test_no_helper_is_started_while_the_turns_credit_is_used_up(balances: tuple[int, int], denial: str | None, action: str | None) -> None:
+    """Observed execution: after a credit stop Lead dispatched again and that helper stopped after one step.
+    Replayed with this refusal, 8 of 8 runs answered at once and 7 of 8 named the Team credits and who adds them."""
+    from bowhead_core import agent_run_limits as rl
+
+    async def read_balances():
+        return balances
+
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    runner = _CapturingRunner()
+    ctx = ToolExecutionContext(
+        workspace_id="ws_test",
+        member_uid="member",
+        user_id="user",
+        turn_id="t_credit_dispatch",
+        datarc=None,
+        subagent_runner=runner,
+        parent_bus=_FakeBus(),
+    )
+    token = rl.set_credit_gate(rl.TurnCreditGate(read_balances, lambda: 0))
+    try:
+        invocation = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Fill the template."}, ctx)
+    finally:
+        rl.reset_credit_gate(token)
+    result = invocation.result
+    if denial is None:
+        assert result["ok"] is True and runner.kwargs
+        return
+    assert (result["ok"], result["error_kind"], result["credit_denial"]) == (False, "credit_exhausted", denial)
+    assert "no helper was started" in result["error"] and action in result["error"]
+    assert runner.kwargs == {}
+
+
 async def _spawn_with(args: dict, bus: _FakeBus | None = None) -> _CapturingRunner:
     registry = build_default_registry()
     register_subagent_tool(registry)

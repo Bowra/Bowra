@@ -573,7 +573,7 @@ async def materialize_reference_steer_head(
     from dataclasses import replace
     from pathlib import Path
 
-    from bowhead_core._db import open_shared_ctx
+    from bowhead_core._db import open_pooled_read_ctx
     from bowhead_core.chat_reference_preparation import (
         prepare_reference_system_start_admission,
         prepare_reference_team_start_admission,
@@ -609,7 +609,8 @@ async def materialize_reference_steer_head(
         workspace_id=workspace_id,
         session_id=session_id,
     )
-    async with open_shared_ctx(db_path) as db:
+    # A preflight that always rolls back; the committing write repeats it, so it needs no authority lease.
+    async with open_pooled_read_ctx(db_path) as db:
         await db.execute("BEGIN")
         try:
             policy_epoch = await require_reference_request_scope(
@@ -2098,7 +2099,7 @@ async def _prepare_reference_bi_resume(orchestrator: Any, turn_req: Any):
     from pathlib import Path
 
     import aiosqlite
-    from bowhead_core._db import open_shared_ctx
+    from bowhead_core._db import open_pooled_read_ctx
     from bowhead_core.chat_reference_bi_continuation import decision, open_checkpoint, pause_scope, read_pause, require_question
     from bowhead_core.chat_reference_continuation import is_lead
     from bowhead_core.chat_reference_lead_continuation import pause_ready as lead_pause_ready
@@ -2117,7 +2118,8 @@ async def _prepare_reference_bi_resume(orchestrator: Any, turn_req: Any):
     if os.environ.get("FEATURE_CHAT_REFERENCE_PRIMARY_RUNTIME", "1") != "1":
         raise ValueError("reference_continuation_unavailable")
     db_path = str(orchestrator.session_store._db_path)
-    async with open_shared_ctx(db_path) as db:
+    # A pure read of the paused continuation: the read-only pool takes no authority lease.
+    async with open_pooled_read_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN")
         if await is_lead(db, turn_req.turn_id):

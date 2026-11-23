@@ -180,10 +180,12 @@ async def load_disable_state(db_path: str, team_id: str, user_id: str | None) ->
     A setting that cannot be read or parsed falls back to its default and logs a warning; the
     defaults keep high-risk built-in Tools disabled.
     """
-    from bowhead_core._db import open_shared_ctx
+    from bowhead_core._db import open_pooled_read_ctx
 
     try:
-        async with open_shared_ctx(db_path) as db:
+        # A pure read: on the read-only pool it takes no core authority lease, so a concurrent settings
+        # write neither delays the Turn nor turns this read into the defaults below.
+        async with open_pooled_read_ctx(db_path) as db:
             team: dict[str, str] = {}
             async with db.execute(
                 "SELECT key, value FROM team_settings WHERE team_id=? AND key IN (?, ?)",

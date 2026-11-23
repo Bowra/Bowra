@@ -1294,3 +1294,29 @@ describe("★ density — 纯聊天轮收成单行（清点 §4 ② 的拍板）
     expect(m.history).toHaveLength(HISTORY_ROWS);
   });
 });
+
+describe("Turn visibility FR1: history rows say what the step did", () => {
+  it("adds the step's label to the tool name, as the trace row does", () => {
+    // Observed execution: the collapsed band read "运行代码 · 运行成功" twice while the trace
+    // read "运行代码 · 读取门店销售额…". Mutation: drop the label from `rowOf` → this test fails.
+    const m = buildBandModel({
+      steps: [
+        step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", label: "读取门店销售额并核对口径" }),
+        step({ stepId: "b", toolName: "read_attachment", headerZh: "读取附件", label: "store_sales_2026H1.csv" }),
+        step({ stepId: "c", state: "active" }),
+      ],
+    });
+    expect(m.history.map((r) => r.label)).toEqual(["运行代码 · 读取门店销售额并核对口径", "读取附件 · store_sales_2026H1.csv"]);
+  });
+
+  it("keeps the name alone when the label repeats it or is an internal string", () => {
+    const m = buildBandModel({
+      steps: [
+        step({ stepId: "a", label: "查询数据" }),
+        step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", label: '{"code": "print(1)"}' }),
+        step({ stepId: "c", state: "active" }),
+      ],
+    });
+    expect(m.history.map((r) => r.label)).toEqual(["查询数据", "运行代码"]);
+  });
+});

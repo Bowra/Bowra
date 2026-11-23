@@ -14,6 +14,7 @@ import fcntl
 import json
 import re
 import sqlite3
+import threading
 import time
 import weakref
 from collections.abc import Callable
@@ -140,6 +141,31 @@ _WRITER_GATE_SQL = "UPDATE main.alembic_version SET version_num=version_num WHER
 #: holds take 2–8 ms on 116 (the longest under 128 ms); the owner chose one second on 2026-11-22.
 IN_TRANSACTION_LEASE_WAIT_SECONDS = 1.0
 
+#: Connections of this process that wait for their own domain's exclusive lease while holding other domains'
+#: shared leases, as {id: (own domain, held domains)}. ``_closes_cycle`` reads it under the lock.
+_EXCLUSIVE_WAITERS: dict[int, tuple[str, frozenset[str]]] = {}
+_EXCLUSIVE_WAITERS_LOCK = threading.Lock()
+
+
+def _closes_cycle(own: str, held: frozenset[str]) -> bool:
+    """Whether waiting for ``own``'s exclusive lease while holding ``held`` would close a cycle of waits.
+
+    A waiter is held up by every connection holding its own domain's shared lease. Following those
+    waiters, a cycle closes when one of them waits for a domain whose shared lease this connection holds.
+    """
+    frontier, seen = [own], {own}
+    while frontier:
+        blocked_on = frontier.pop()
+        for waiter_own, waiter_held in _EXCLUSIVE_WAITERS.values():
+            if blocked_on not in waiter_held:
+                continue
+            if waiter_own in held:
+                return True
+            if waiter_own not in seen:
+                seen.add(waiter_own)
+                frontier.append(waiter_own)
+    return False
+
 
 def _opens_writer(sql: str) -> bool:
     words = re.findall(r"[a-z]+", sql.lower())
@@ -189,6 +215,9 @@ class DomainConnection(DiagnosticConnection):
         # a script started the attached snapshots before their leases. Both reset when no transaction is open.
         self._writer_begun = False
         self._attached_pinned = False
+        # True while a mutation guard asks for the exclusive lease: SQLite runs the guard inside a write to
+        # main, after it took this file's writer lock.
+        self._guarding_write = False
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         if not args:
@@ -224,7 +253,7 @@ class DomainConnection(DiagnosticConnection):
             try:
                 fcntl.flock(gate.fileno(), flags | fcntl.LOCK_NB)
             except BlockingIOError:
-                if not (self._may_wait(domain, mode, previous) and self._wait_for(gate, flags, domain, mode)):
+                if not (self._may_wait(domain, mode, previous) and self._wait_unless_cycle(gate, flags, domain, mode)):
                     raise
         except BlockingIOError:
             if previous == 1:
@@ -252,22 +281,43 @@ class DomainConnection(DiagnosticConnection):
                 sqlite_lease_wait.note_exclusive(domain, self.bowhead_connection_id, _lease_callsite())
 
     def _may_wait(self, domain: str, mode: int, previous: int) -> bool:
-        """Whether a refused lease may wait inside the open transaction without a stale read or a cycle.
+        """Whether a refused lease may wait without a stale read.
 
-        - Shared: the first lease of an attached domain whose snapshot has not started (no BEGIN IMMEDIATE
-          or script pinned it; SQLite starts it at the first read, after this lease), on a connection that
-          holds no exclusive lease.
-        - Exclusive: the connection's own domain, while its transaction holds that file's writer lock, so
-          no other connection can commit to the file meanwhile, and no other lease.
+        - Shared: inside a transaction, the first lease of an attached domain whose snapshot has not started
+          (no BEGIN IMMEDIATE or script pinned it; SQLite starts it at the first read, after this lease), on
+          a connection that holds no exclusive lease.
+        - Exclusive: the connection's own domain, while it holds that file's writer lock (a writer
+          transaction, or a mutation guard, which SQLite runs inside the write), so no other connection can
+          commit to the file meanwhile. ``_wait_unless_cycle`` refuses a wait that would close a cycle.
 
-        Whoever is waited on then holds an exclusive lease and waits for none, or holds only shared leases
-        and waits for no exclusive one, so waits cannot form a cycle.
+        A holder of an exclusive lease waits for no lease, and a shared waiter waits only for such a holder.
         """
-        if previous or not self.in_transaction:
+        if previous:
             return False
         if mode == 1:
-            return domain != self._domain and not self._attached_pinned and all(held != 2 for held in self._leases.values())
-        return domain == self._domain and self._writer_begun and not self._leases
+            return self.in_transaction and domain != self._domain and not self._attached_pinned and all(held != 2 for held in self._leases.values())
+        return domain == self._domain and (self._guarding_write or (self.in_transaction and self._writer_begun))
+
+    def _wait_unless_cycle(self, gate: Any, flags: int, domain: str, mode: int) -> bool:
+        """Wait as ``_wait_for``; refuse at once an exclusive wait that would close a cycle in this process.
+
+        An exclusive waiter that holds other domains' shared leases holds up their writers in turn. Two such
+        waiters can wait for each other (an execution write that read content beside a content write that read
+        execution). The second one fails at once with the busy error, as before waits existed, and its rollback
+        lets the first proceed. A cycle across processes, or through a file's writer lock, ends at the cap.
+        """
+        held = frozenset(other for other in self._leases if other != domain)
+        if mode == 1 or not held:
+            return self._wait_for(gate, flags, domain, mode)
+        with _EXCLUSIVE_WAITERS_LOCK:
+            if _closes_cycle(domain, held):
+                return False
+            _EXCLUSIVE_WAITERS[id(self)] = (domain, held)
+        try:
+            return self._wait_for(gate, flags, domain, mode)
+        finally:
+            with _EXCLUSIVE_WAITERS_LOCK:
+                _EXCLUSIVE_WAITERS.pop(id(self), None)
 
     def _wait_for(self, gate: Any, flags: int, domain: str, mode: int) -> bool:
         """Poll a refused lease for up to ``IN_TRANSACTION_LEASE_WAIT_SECONDS``; report the wait; never raise."""
@@ -511,10 +561,13 @@ class DomainConnection(DiagnosticConnection):
             raise sqlite3.OperationalError("Unknown SQLite domain authority")
         try:
             assert self._domain is not None
+            self._guarding_write = True
             self._acquire(self._domain, 2)
         except sqlite3.Error as error:
             self._callback_busy = error
             raise
+        finally:
+            self._guarding_write = False
         return 1
 
     def _mutation(self, table: str, operation: str) -> int:

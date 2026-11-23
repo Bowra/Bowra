@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.coach_operation_reference import COACH_OPERATION_EFFECTS, CoachOperationReference, operation_receipts
 from bowhead_core.types import ToolInvocation
@@ -184,7 +184,7 @@ async def load_history(db_path: str, scope: ReferenceRequestScope, before_turn_i
     if not scope.session_id:
         return unavailable
     try:
-        async with open_shared_ctx(db_path) as db:
+        async with open_pooled_read_ctx(db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             await require_reference_request_scope(db, scope)

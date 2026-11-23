@@ -58,12 +58,15 @@ def _accept_one(request: dict[str, Any], base: str, receipts: Receipts) -> None:
                 del request[key]
                 receipt(receipts, "table_plot_field_ignored", f"{base}/{key}", f"A Table shows its columns; ignored {key}.")
         return
-    if not isinstance(axes, dict) or kind not in PLOT_KINDS:
+    if not isinstance(axes, dict) or not isinstance(kind, str) or kind not in PLOT_KINDS:
         return
+    _read_axis_field_shapes(axes, base, receipts)
     groups = request.get("group_by")
-    bound = {axes.get("x"), *_strings(axes.get("y")), *_strings(axes.get("y_right")), *_strings(groups)}
+    # x is a single field, but a list or any other value must reach validation instead of failing here.
+    x = axes.get("x")
+    bound = {*([x] if isinstance(x, str) else _strings(x)), *_strings(axes.get("y")), *_strings(axes.get("y_right")), *_strings(groups)}
     columns = request.get("columns")
-    if isinstance(columns, list) and columns and set(columns) <= bound:
+    if isinstance(columns, list) and columns and len(_strings(columns)) == len(columns) and set(columns) <= bound:
         del request["columns"]
         receipt(receipts, "plot_columns_ignored", f"{base}/columns", "A plot shows its axes and group_by fields; ignored columns.")
     if kind == "combo" and axes.get("y_right"):
@@ -83,6 +86,23 @@ def _accept_one(request: dict[str, Any], base: str, receipts: Receipts) -> None:
             f"{base}/axes/x_scale",
             f"{kind} draws a {X_SCALE[kind]} x axis" + (f", not {given}." if given else "; set x_scale to it."),
         )
+
+
+def _read_axis_field_shapes(axes: dict[str, Any], base: str, receipts: Receipts) -> None:
+    """Read one field key written in the other container: `x` as a one-key list, `y` or `y_right` as text.
+
+    An observed request an hbar sent x=["销售额_亿元"] twice and x and y as text in between.
+    Any other shape is left for the existing refusal.
+    """
+    x = axes.get("x")
+    if isinstance(x, list) and len(x) == 1 and isinstance(x[0], str) and x[0]:
+        axes["x"] = x[0]
+        receipt(receipts, "axis_field_shape_read", f"{base}/axes/x", "x takes one field key; read the one listed key.")
+    for key in ("y", "y_right"):
+        value = axes.get(key)
+        if isinstance(value, str) and value.strip() and value.strip()[0] not in "[{":
+            axes[key] = [value]
+            receipt(receipts, "axis_field_shape_read", f"{base}/axes/{key}", f"{key} takes a list of field keys; read the one key as a list.")
 
 
 def _strings(value: Any) -> list[str]:

@@ -120,8 +120,25 @@ async def test_list_turn_spawns_joins_summary_with_task_and_skips_the_lead_itsel
     await _ev("t2", "agent_spawned", {"subagent_id": "sub_lead2", "profile": "lead", "task": "谢谢"})
     await _ev("t3", "lead.subagent_summary", {"spawn_id": "sub_z", "profile": "compute", "status": "succeeded"})
 
-    out = await store.list_turn_spawns(["t1", "t2", "t3", "t4", "t_missing"])
-    assert set(out) == {"t1", "t4"}
+    # Since 2026-11-22 both dispatch events record the declared sources; older events have none.
+    await _ev("t5", "agent_spawned", {"subagent_id": "sub_c5", "profile": "compute", "task": "读网页"})
+    await _ev(
+        "t5",
+        "lead.subagent_summary",
+        {
+            "spawn_id": "sub_c5",
+            "call_id": "call_5",
+            "profile": "compute",
+            "status": "succeeded",
+            "task": "读网页",
+            "required_source_urls": ["https://example.com/a"],
+        },
+    )
+
+    out = await store.list_turn_spawns(["t1", "t2", "t3", "t4", "t5", "t_missing"])
+    assert set(out) == {"t1", "t4", "t5"}
+    assert out["t5"][0].required_source_urls == ("https://example.com/a",)
+    assert out["t4"][0].required_source_urls is None and out["t1"][0].required_source_urls is None
     (r4,) = out["t4"]
     assert r4.task == "完整任务全文" and r4.delivery == "report" and r4.canvas_mode == "revise"
     assert out["t1"][0].delivery == "" and out["t1"][0].canvas_mode == ""

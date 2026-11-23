@@ -71,6 +71,29 @@ def test_code_output_facts_skip_stdout_and_read_nested_results() -> None:
     assert step_facts.output_facts("python_sandbox", only_stdout, succeeded=True) == {"v": 1, "kind": "code_outputs", "count": 0, "types": []}
 
 
+def test_code_output_facts_read_the_records_beside_the_bare_names() -> None:
+    # The sandbox Tool's real shape (an observed execution): top-level `outputs` holds only names, the stdout
+    # file among them; `output_artifacts` holds the records that mark it.
+    names = ["store_dashboard_2026H1.html", "top10.csv", "sandbox-stdout.txt"]
+    result = {
+        "ok": True,
+        "outputs": names,
+        "output_artifacts": [
+            {"artifact_id": "art_1", "name": names[0], "mime": "text/html"},
+            {"artifact_id": "art_2", "name": names[1], "mime": "text/csv"},
+            {"artifact_id": "art_3", "name": names[2], "mime": "text/plain", "data_role": "stdout"},
+        ],
+    }
+    assert step_facts.output_facts("python_sandbox", result, succeeded=True) == {"v": 1, "kind": "code_outputs", "count": 2, "types": ["html", "csv"]}
+    # A runner that lists names only still counts them.
+    assert step_facts.output_facts("python_sandbox", {"ok": True, "outputs": ["a.xlsx"]}, succeeded=True) == {
+        "v": 1,
+        "kind": "code_outputs",
+        "count": 1,
+        "types": ["xlsx"],
+    }
+
+
 @pytest.mark.parametrize(
     ("tool", "result", "succeeded"),
     [

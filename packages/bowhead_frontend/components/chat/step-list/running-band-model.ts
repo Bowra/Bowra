@@ -327,10 +327,14 @@ function toneOf(s: StepView): BandRow["tone"] {
 
 function rowOf(s: StepView): BandRow {
   const tone = toneOf(s);
+  // Turn visibility FR1: a history row names what the step did, as the trace row does
+  // ("运行代码 · 生成单文件交互式 HTML 看板", "读取附件 · sales.csv"); the row truncates with an ellipsis.
+  const name = humanLabel(s, tone === "active");
+  const detail = stripInternal(s.label);
   return {
     key: s.stepId,
     kind: "step",
-    label: humanLabel(s, tone === "active"),
+    label: name && detail && detail !== name ? `${name} · ${detail}` : name,
     meta: tone === "warn" ? "" : metaOf(s),
     tone,
     stepState: s.state,

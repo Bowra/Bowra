@@ -421,3 +421,13 @@ def test_a_document_written_by_a_declared_analysis_call_is_not_a_result_file(run
     # The deck preview rule and an omitted purpose keep the extension-based result file.
     assert runner._kind_for_output("deck-slide-01.png", analysis_declared=True) == "deck_preview"
     assert runner._kind_for_output("report.html") == "deliverable"
+
+
+def test_an_undeclared_document_of_a_declaring_call_is_not_a_result_file(runner: ModuleType) -> None:
+    """Observed execution: a call declared the filled deck but saved fix.pptx, which became a second result."""
+    declared = frozenset({"业绩回顾.pptx"})
+    assert runner._kind_for_output("fix.pptx", purpose="deliverable", deliverable_outputs=declared) is None
+    assert runner._kind_for_output("业绩回顾.pptx", purpose="deliverable", deliverable_outputs=declared) == "deliverable"
+    assert runner._kind_for_output("deck-slide-01.png", purpose="deliverable", deliverable_outputs=declared) == "deck_preview"
+    # A call that declares nothing keeps the extension-based result file.
+    assert runner._kind_for_output("report.html", purpose="deliverable") == "deliverable"

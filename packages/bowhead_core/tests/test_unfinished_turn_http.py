@@ -174,7 +174,8 @@ async def test_a_turn_stopped_while_its_answer_streams_keeps_what_it_had_written
             return False
 
         monkeypatch.setattr(session_store.SessionStore, "publish_stopped_turn_context", unavailable)
-    written = ["Region A earned 7. ", "Region B earned 9, and"]
+    # A line break and a space arrive as chunks of their own, as DeepSeek streams them.
+    written = ["Region A earned 7.", "\n\n", "Region B earned", " ", "9, and"]
     answer_streaming = asyncio.Event()
     lead_calls = []
 

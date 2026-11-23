@@ -3008,6 +3008,8 @@ function ArchivedTurnView({
     () => extractInlineArtifacts(archived.finalPayload, storeState?.steps),
     [archived.finalPayload, storeState?.steps],
   );
+  // Turn visibility FR12: a live Turn remounts here on done(completed), so the finished line reads the same counts.
+  const turnOutputs = useMemo(() => extractTurnOutputs(archived.finalPayload), [archived.finalPayload]);
 
   // Phase 1.7-B — beats snapshot captured at archive time (`unknown[]` in
   // types.ts; cast here to TurnBeat[] since the dispatcher writes only that
@@ -3124,6 +3126,7 @@ function ArchivedTurnView({
           onExpand={expandArchivedSteps}
           expanded={!stepsFolded}
           onCollapse={collapseArchivedSteps}
+          outputs={turnOutputs}
         />
       ) : null}
       {stepsFolded ? null : (

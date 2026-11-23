@@ -172,9 +172,18 @@ async def test_actual_model_call_deadline_uses_the_team_policy(monkeypatch, call
     assert not any(299 <= deadline <= 300 for deadline in deadlines)
 
 
-async def test_running_out_of_credit_stops_with_partial_work(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("user", "team", "denial", "fact"),
+    [
+        (0, 1000, "user_credit_exhausted", "the user's own credit allowance is used up"),
+        (1000, 0, "team_pool_exhausted", "the Team's credit pool is used up"),
+    ],
+)
+async def test_running_out_of_credit_stops_with_partial_work_naming_the_balance(
+    monkeypatch: pytest.MonkeyPatch, user: int, team: int, denial: str, fact: str
+) -> None:
     async def balances():
-        return 0, 1000
+        return user, team
 
     router = _LoopingRouter(steps_before_return=20, distinct=True)
     token = rl.set_credit_gate(rl.TurnCreditGate(balances, lambda: 0))
@@ -182,8 +191,8 @@ async def test_running_out_of_credit_stops_with_partial_work(monkeypatch: pytest
         result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=None, tool_call_limit=1000))
     finally:
         rl.reset_credit_gate(token)
-    assert (result.completion, result.stop_reason) == ("partial", "budget")
-    assert "available credit" in router.requests[-1].messages[-1].content
+    assert (result.completion, result.stop_reason, result.credit_denial) == ("partial", "budget", denial)
+    assert fact in router.requests[-1].messages[-1].content
 
 
 @pytest.mark.parametrize("limit", [1, 3, 5])

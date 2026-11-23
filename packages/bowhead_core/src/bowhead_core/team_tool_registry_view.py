@@ -16,9 +16,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 import httpx2
 from bowhead_router.types import ToolSchema
@@ -39,7 +42,7 @@ from bowhead_core.tool_registry import TeamToolExecutionBinding, ToolExecutionCo
 from bowhead_core.types import ToolAnnotations
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -86,29 +89,46 @@ def _upstream_auth_error(source_id: str) -> str:
     )
 
 
-def is_upstream_auth_error(exc: BaseException, _depth: int = 0) -> bool:
+def _wrapped_exceptions(exc: BaseException, _depth: int = 0) -> Iterator[BaseException]:
+    """Yield ``exc`` and every exception it wraps, depth-capped.
+
+    A remote MCP call raises inside the SDK's anyio task group, so the real failure may be
+    nested in an ``ExceptionGroup`` and/or chained via ``__cause__`` / ``__context__``."""
+    if _depth > 6:
+        return
+    yield exc
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            yield from _wrapped_exceptions(sub, _depth + 1)
+        return
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        yield from _wrapped_exceptions(cause, _depth + 1)
+
+
+def _upstream_status_error(exc: BaseException) -> httpx2.HTTPStatusError | None:
+    """The first HTTP status error ``exc`` is or wraps, if any."""
+    return next((e for e in _wrapped_exceptions(exc) if isinstance(e, httpx2.HTTPStatusError)), None)
+
+
+def _status_code(error: httpx2.HTTPStatusError | None) -> int | None:
+    if error is None:
+        return None
+    try:
+        return int(error.response.status_code)
+    except Exception:  # noqa: BLE001 — malformed error object: not classifiable
+        return None
+
+
+def is_upstream_auth_error(exc: BaseException) -> bool:
     """True when ``exc`` is (or wraps) an httpx2 HTTP 401/403 status error.
 
     A remote MCP team source (WP2/WP2b, incl. expired OAuth bearer) surfaces its
-    401 as an ``httpx2.HTTPStatusError`` raised inside the SDK's anyio task group —
-    i.e. possibly nested in ``ExceptionGroup`` and/or chained via ``__cause__`` —
-    so walk both, depth-capped."""
-    if _depth > 6:
-        return False
-    if isinstance(exc, httpx2.HTTPStatusError):
-        try:
-            return exc.response.status_code in (401, 403)
-        except Exception:  # noqa: S110 — malformed error object: not classifiable
-            return False
-    if isinstance(exc, BaseExceptionGroup):
-        return any(is_upstream_auth_error(sub, _depth + 1) for sub in exc.exceptions)
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and cause is not exc:
-        return is_upstream_auth_error(cause, _depth + 1)
-    return False
+    401 as an ``httpx2.HTTPStatusError`` raised inside the SDK's anyio task group."""
+    return any(_status_code(e) in (401, 403) for e in _wrapped_exceptions(exc) if isinstance(e, httpx2.HTTPStatusError))
 
 
-def _is_timeout_error(exc: BaseException, _depth: int = 0) -> bool:
+def _is_timeout_error(exc: BaseException) -> bool:
     """True when ``exc`` is (or wraps) a call timeout.
 
     mcp-connect-repair F1-a: a slow remote MCP tool now surfaces as ``TimeoutError`` (the caller's
@@ -116,16 +136,63 @@ def _is_timeout_error(exc: BaseException, _depth: int = 0) -> bool:
     path above, the SDK's anyio task group may nest it in an ``ExceptionGroup`` and/or chain it.
     Without this branch it lands in the generic ``protocol`` bucket, whose message
     ("ExceptionGroup") tells the model and the user nothing actionable."""
-    if _depth > 6:
-        return False
-    if isinstance(exc, TimeoutError | httpx2.TimeoutException):
-        return True
-    if isinstance(exc, BaseExceptionGroup):
-        return any(_is_timeout_error(sub, _depth + 1) for sub in exc.exceptions)
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and cause is not exc:
-        return _is_timeout_error(cause, _depth + 1)
-    return False
+    return any(isinstance(e, TimeoutError | httpx2.TimeoutException) for e in _wrapped_exceptions(exc))
+
+
+_MAX_RETRY_AFTER_SECONDS: Final = 24 * 60 * 60
+
+
+def _retry_after_seconds(error: httpx2.HTTPStatusError) -> int | None:
+    """Seconds from the response's ``Retry-After`` (delay-seconds or HTTP-date), or None."""
+    try:
+        raw = (error.response.headers.get("retry-after") or "").strip()
+    except Exception:  # noqa: BLE001 — malformed error object: no hint
+        return None
+    if not raw:
+        return None
+    if raw.isdigit():
+        seconds = int(raw)
+    else:
+        try:
+            when = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = math.ceil((when - datetime.now(UTC)).total_seconds())
+    return min(max(seconds, 0), _MAX_RETRY_AFTER_SECONDS)
+
+
+def _rate_limited_result(source_id: str, retry_after: int | None) -> dict[str, Any]:
+    wait = (
+        f"The service asked callers to wait {retry_after} seconds before calling again."
+        if retry_after is not None
+        else "The service did not say how long to wait."
+    )
+    result: dict[str, Any] = {
+        "ok": False,
+        "error_kind": "rate_limited",
+        "error": (
+            f"The tool service of TEAM tool source '{source_id}' refused this call because it is limiting "
+            f"how often it can be called (HTTP 429). The limit is the service's own and applies to every "
+            f"tool of this source; calls made before it resets are refused the same way. {wait}"
+        ),
+    }
+    if retry_after is not None:
+        result["retry_after_seconds"] = retry_after
+    return result
+
+
+def _upstream_status_result(source_id: str, status: int) -> dict[str, Any]:
+    if status >= 500:
+        detail = "a server-side error; whether this call took effect is unknown"
+    else:
+        detail = "the service refused the request"
+    return {
+        "ok": False,
+        "error_kind": "upstream_5xx" if status >= 500 else "upstream_4xx",
+        "error": f"The tool service of TEAM tool source '{source_id}' answered HTTP {status} ({detail}).",
+    }
 
 
 @dataclass(frozen=True)
@@ -249,8 +316,16 @@ def _make_team_handler(
             # OAuth) surfaces its 401/403 as a transport exception on this path — the
             # in-process engine's upstream_auth envelope never fires for it. Classify
             # here so both team-source shapes get the same admin attribution.
+            status_error = _upstream_status_error(e)
+            status = _status_code(status_error)
             if is_upstream_auth_error(e):
                 res: dict[str, Any] = {"ok": False, "error_kind": "upstream_auth", "error": _upstream_auth_error(source_id)}
+            elif status == 429 and status_error is not None:
+                # The service's own rate limit: name it and pass its Retry-After, so the model stops
+                # calling this source instead of reading a bare "ExceptionGroup" and trying other tools.
+                res = _rate_limited_result(source_id, _retry_after_seconds(status_error))
+            elif status is not None and status >= 400:
+                res = _upstream_status_result(source_id, status)
             elif _is_timeout_error(e):
                 # F1-a: name the actual failure. The tool is reachable and authorized; it just took
                 # too long. Retrying the same call verbatim will normally time out again.
@@ -263,6 +338,16 @@ def _make_team_handler(
                 }
             else:
                 res = {"ok": False, "error_kind": "protocol", "error": _scrub(type(e).__name__)}
+            innermost = [type(x).__name__ for x in _wrapped_exceptions(e)][-1]
+            logger.warning(
+                "team_tool.remote_call_failed team=%s source=%s tool=%s error_kind=%s http_status=%s exception=%s",
+                team_id,
+                source_id,
+                full_name,
+                res["error_kind"],
+                status,
+                innermost,
+            )
         else:
             if res is not None:
                 result = None

@@ -649,6 +649,18 @@ def test_spawn_rendering_is_deterministic_and_carries_no_relative_index() -> Non
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("sources", [(), ("https://example.com/a",)])
+def test_history_calls_carry_the_declared_sources_when_recorded(sources) -> None:
+    """A required argument absent from every earlier call was copied as absent (116 replay, 2026-11-22: 20 of 20)."""
+    th = build_turn_history([_turn(1)], exclude_turn_id=None, budget_tokens=0, spawns={"t1": [_spawn(required_source_urls=sources)]})
+    (tc,) = th.messages[1]["tool_calls"]
+    assert list(tc["arguments"].keys()) == ["profile", "rationale", "task", "required_source_urls"]
+    assert tc["arguments"]["required_source_urls"] == list(sources)
+    # A record from before the field stays three keys: no invented value.
+    assert list(render_spawn_arguments(_spawn()).keys()) == ["profile", "rationale", "task"]
+
+
+@pytest.mark.unit
 def test_spawn_records_without_call_id_are_ignored() -> None:
     th = build_turn_history([_turn(1)], exclude_turn_id=None, budget_tokens=0, spawns={"t1": [_spawn(call_id="")]})
     assert th.turn_sizes == [2] and len(th.messages) == 2

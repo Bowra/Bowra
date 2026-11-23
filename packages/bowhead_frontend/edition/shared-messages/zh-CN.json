@@ -14302,6 +14302,7 @@
       "skill_selection_unavailable": "Skill 暂时无法使用，草稿已保留。请稍后重试，或移除 Skill 后直接发送。",
       "selected_skill_unavailable": "所选 Skill 已不可用：它已被关闭，或你的访问权限已被移除。草稿已保留。请移除它或用 / 选择其他 Skill 后重新发送。",
       "selected_skill_changed": "所选 Skill 在你选择后已更新，草稿已保留。请用 / 重新选择它后发送。",
+      "selected_skill_check_interrupted": "检查所选 Skill 时，它的状态或你的访问权限正在变化，因此没有发送。草稿已保留，请稍后重新发送。",
       "selected_skill_too_large": "所选 Skill 的说明内容过大，无法发送。草稿已保留。请移除该 Skill，或请其负责人精简内容后重新发送。",
       "plan_execution_claim_lost": "计划状态已变化，请重新查看计划后再执行。",
       "attachment_bundle_mismatch": "附件包内容已变化，请重新上传后再发送。",

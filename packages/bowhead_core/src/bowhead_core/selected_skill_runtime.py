@@ -56,11 +56,13 @@ async def resolve_selected_skill(ctx: Any, name: str) -> Any:
         return None
     from bowhead_core.ordinary_lead_material import _scope, _sources
     from bowhead_core.skill_package_material import SkillPackageMaterialError
-    from bowhead_core.skill_read_resolution import SkillReadResolutionError
+    from bowhead_core.skill_read_resolution import SkillReadResolutionError, repeat_once_if_source_changed
 
     catalog_name = resource.id.removeprefix("builtin:") if resource.source_kind == "builtin" else ""
     try:
-        package = await _sources(ctx, resource, catalog_name).prepare_runtime_package(resource, scope=_scope(ctx))
+        sources = _sources(ctx, resource, catalog_name)
+        # Access that changed during the check (another session editing groups) is checked again, not reported as an edit.
+        package = await repeat_once_if_source_changed(lambda: sources.prepare_runtime_package(resource, scope=_scope(ctx)))
         if package.path is None or package.proof.name != name.strip():
             raise ValueError("selected_skill_source_unavailable")
         if resource.source_kind == "builtin":

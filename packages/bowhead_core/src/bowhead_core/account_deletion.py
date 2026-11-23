@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 import structlog
 
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
@@ -299,8 +300,9 @@ async def adopt_deleted_accounts(store: UserStore, *, now: datetime | None = Non
             await db.rollback()
             raise
     if domain_layout_active(store.db_path):
+        # The candidate list is a pure read; each repair rechecks its deletion under its own writer lock.
         async with (
-            diagnostic_connect(store.db_path) as core,
+            open_pooled_read_ctx(store.db_path) as core,
             core.execute(
                 "SELECT user_id,operation_id,requested_at,purge_after FROM account_deletions d WHERE state<>'completed' AND ("
                 "NOT EXISTS(SELECT 1 FROM chat_auth_user_generation_fences f WHERE f.user_id=d.user_id "

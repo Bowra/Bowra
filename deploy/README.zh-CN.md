@@ -4,6 +4,8 @@
 
 需要 Python 3.12、`uv`、Node.js 24 和 npm。所有命令从独立的社区版仓库根目录执行。已提交的 Gateway 与前端清单都必须选择 `community`；版本选择是构建输入。
 
+Python 依赖使用官方 PyPI 与 files.pythonhosted.org，并保留提交中锁定的版本和哈希。准备新环境时请允许访问这两个地址。Gateway 启动命令会在同一个 shell 中加载 `.env` 并启动服务，兼容 GNU Make 3.81。
+
 ## 安装与配置
 
 ```sh
@@ -36,6 +38,8 @@ PYTHON
 ```
 
 检查 `.env`。默认数据库相对路径为 `.data/sqlite/bowhead.db`，请保持工作目录稳定。升级和恢复时保存两个密钥与全部数据库、对象数据。恢复实例快照会恢复该快照中的账号状态；恢复账号删除前的快照可能恢复该账号。不要把商业版数据库用于首次 Owner 初始化。
+
+本地删除账本位于 `.privacy-ledger/deletions.db`，由 `.env.example` 中的 `BOWHEAD_PRIVACY_LEDGER_DB` 指定。该目录须保持可写，并独立于应用数据库回滚保留。请保留 `BOWHEAD_FERNET_KEY`；恢复应用快照时，不要用旧副本替换账本。账本及删除历史须保密。
 
 ## 运行时前提
 

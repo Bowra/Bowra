@@ -16,7 +16,12 @@ from pathlib import Path
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.skill_read_material import SkillReadMaterialError
-from bowhead_core.skill_read_resolution import SkillReadResolutionError, SkillReadSourceResolver
+from bowhead_core.skill_read_resolution import (
+    SOURCE_CHANGED,
+    SkillReadResolutionError,
+    SkillReadSourceResolver,
+    repeat_once_if_source_changed,
+)
 from bowhead_core.sqlite_domains import domain_database_path
 from fastapi import HTTPException, Request
 
@@ -26,6 +31,8 @@ logger = logging.getLogger(__name__)
 SELECTION_UNAVAILABLE = "skill_selection_unavailable"
 SKILL_UNAVAILABLE = "selected_skill_unavailable"
 SKILL_CHANGED = "selected_skill_changed"
+# The Skill's record or the sender's access kept changing while it was checked (not an edit of the Skill).
+SKILL_CHECK_INTERRUPTED = "selected_skill_check_interrupted"
 SKILL_TOO_LARGE = "selected_skill_too_large"
 
 
@@ -35,8 +42,10 @@ def _refused(code: str) -> HTTPException:
 
 def _code(error: Exception) -> str:
     text = str(error)
-    if text in {"reference_skill_version_changed", "reference_skill_source_changed"}:
+    if text == "reference_skill_version_changed":
         return SKILL_CHANGED
+    if text == SOURCE_CHANGED:
+        return SKILL_CHECK_INTERRUPTED
     if text == "reference_skill_material_too_large":
         return SKILL_TOO_LARGE
     return SKILL_UNAVAILABLE
@@ -69,7 +78,8 @@ async def admit_selected_skills(
         raise _refused(SELECTION_UNAVAILABLE) from None
     for skill in skills:
         try:
-            await sources.prepare(skill, scope=scope)
+            # A concurrent access change (another session editing groups) must not read as an edited Skill.
+            await repeat_once_if_source_changed(lambda skill=skill: sources.prepare(skill, scope=scope))
         except (SkillReadResolutionError, SkillReadMaterialError) as error:
             code = _code(error)
             logger.info("selected_skills.refused team_id=%s skill=%s code=%s reason=%s", team_id, skill.id, code, error)

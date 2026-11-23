@@ -259,6 +259,22 @@ async def test_spawn_id_matches_peer_dispatched() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("declared", [[], ["https://example.com/b", "https://example.com/a"]])
+async def test_both_events_record_the_sources_the_call_declared(declared) -> None:
+    """Lead history renders each earlier call with its required arguments (skill-bundle-read tech-design §13.3)."""
+    result = SubagentResult(profile="compute", subagent_id="ignored", ok=True, final_answer="done")
+    bus = _FakeBus()
+    ctx = _FakeCtx(bus)
+    ctx.subagent_runner = _FakeRunner(result)
+    registry = ToolRegistry()
+    register_subagent_tool(registry)
+    await registry.execute("subagent_spawn", arguments={"profile": "compute", "task": "t", "required_source_urls": declared}, ctx=ctx)
+    (dispatched,) = [e for e in bus.events if e.event_type == "peer_dispatched"]
+    (summary,) = [e for e in bus.events if e.event_type == "lead.subagent_summary"]
+    assert dispatched.payload["required_source_urls"] == summary.payload["required_source_urls"] == sorted(declared)
+
+
+@pytest.mark.unit
 async def test_summary_status_failed_with_reason() -> None:
     """ok=False → finite failed disclosure without result prose."""
     result = SubagentResult(
@@ -762,7 +778,7 @@ async def test_delivered_payload_still_gets_the_placeholder() -> None:
     assert res["final_answer"] == "（payload 已交给 composer 渲染）"
 
 
-# ── Structured bail envelopes must reach Lead (2026-08-27 dogfood on 116, t_1ee75cbfb876) ──
+# ── Structured bail envelopes must reach Lead (2026-08-27 dogfood on an observed execution) ──
 #
 # Peer uses the standard subagent_return(payload={"error":{"kind":...,"message":...}}) path;
 # validate_payload's bail branch requires a nonempty message and accepts it. Yet spawn's returned

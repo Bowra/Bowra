@@ -92,9 +92,10 @@ async def test_lead_stream_dropped_after_text_is_retried_and_withdrawn(http_star
             return httpx2.Response(
                 200,
                 headers={"content-type": "text/event-stream"},
-                stream=_DropsAfterText(["<response_kind>chat</response_kind><headline>Old title</headline>", "Partial ", "answer 😀"]),
+                # A space and a line break arrive as chunks of their own; the line break is still held when the stream drops.
+                stream=_DropsAfterText(["<response_kind>chat</response_kind><headline>Old title</headline>", "Partial", " ", "answer 😀", "\n\n"]),
             )
-        return _stream(["<response_kind>chat</response_kind><headline>New title</headline>", "Sales were ", "42."])
+        return _stream(["<response_kind>chat</response_kind><headline>New title</headline>", "Sales were", " ", "42."])
 
     with respx.mock(assert_all_called=False) as mock:
         mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
@@ -145,3 +146,61 @@ async def test_lead_stream_dropped_after_text_is_retried_and_withdrawn(http_star
     frames = [json.loads(line[6:]) for line in replay.text.splitlines() if line.startswith("data: ")]
     replayed = [frame for frame in frames if "discarded_narrative_chars" in frame]
     assert [frame["discarded_narrative_chars"] for frame in replayed] == [len("Partial answer 😀")]
+
+
+async def test_whitespace_a_reply_streams_on_its_own_is_shown_between_its_prose_only(http_start, monkeypatch):
+    """an observed execution: a line break after a heading and a space before a number arrive as chunks of their
+    own. They are shown with the prose that follows them; before a reply's first prose and after its last
+    there is nothing to separate, so a reply that goes on to a Tool call leaves none for the next reply."""
+    case = http_start
+    case.client.headers["Content-Type"] = "application/json"
+    enable_lead_writer(case, monkeypatch)
+    orch = case.app.state.orchestrator
+    from bowhead_router import AgentBinding
+
+    orch.router.bind(AgentBinding(agent_type="echo", primary=("primary", "large")))
+    monkeypatch.setattr(events, "_default_registry", orch.event_registry)
+    calls = []
+    markers = "<response_kind>chat</response_kind><headline>Sales</headline>"
+
+    def respond(request):
+        body = json.loads(request.content)
+        if not body.get("tools"):
+            if not body.get("stream"):
+                return httpx2.Response(
+                    200, json={"choices": [{"message": {"role": "assistant", "content": "Sales"}, "finish_reason": "stop"}], "usage": _USAGE}
+                )
+            return _stream(["Sales"])
+        calls.append(body)
+        if len(calls) == 1:
+            # The call is refused for its arguments, so the Lead answers in a second reply.
+            call = {"index": 0, "id": "call_1", "type": "function", "function": {"name": "subagent_spawn", "arguments": "{}"}}
+            frames = [_frame({"content": text}) for text in (markers, "\n\n", "Step 1", "\n\n", "Checking", " ", "2 regions.", "\n\n")]
+            body = b"".join(frames) + _frame({"tool_calls": [call]}) + _frame({}, "tool_calls", _USAGE) + b"data: [DONE]\n\n"
+            return httpx2.Response(200, content=body, headers={"content-type": "text/event-stream"})
+        return _stream(["Sales were", " ", "42.", "\n"])
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post("/api/v1/chat/send", json={"workspace_id": case.fixture.scope.workspace_id, "message": "Show sales."})
+        assert accepted.status_code == 200, accepted.text
+        turn_id = accepted.json()["turn_id"]
+        await settled(turn_id)
+
+    turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
+    assert turn["status"] == "completed", turn["error"]
+    persisted = [(row["event_type"], json.loads(row["payload_json"])) for row in rows(case, "turn_events") if row["turn_id"] == turn_id]
+    replies, shown = [], []
+    for kind, payload in persisted:
+        if kind == "narrative.delta":
+            shown.append(payload["delta"])
+        elif kind == "llm.call_timing" and payload.get("profile") == "lead":
+            replies.append(shown)
+            shown = []
+    # The first reply keeps the line break after its heading and the space before its number, and
+    # shows neither the line breaks before its first prose nor the ones after its last.
+    assert "".join(replies[0]) == "Step 1\n\nChecking 2 regions."
+    # What the first reply still held when it went on to its Tool call is not shown with the next reply.
+    assert len(replies) > 1
+    assert {"".join(reply) for reply in replies[1:]} == {"Sales were 42."}
+    assert all(delta.strip() for reply in replies for delta in reply)

@@ -14,6 +14,7 @@ Bowra 是一个采用 MIT 许可、可自托管的 AI Agent 平台，用于业�
 </p>
 
 <p align="center">
+  <a href="https://bowra.ai/examples/q2-gross-profit/">复算 Q2 毛利 900 万美元示例</a> ·
   <a href="#开始使用">开始使用</a> ·
   <a href="examples/community/README.zh-CN.md">示例</a> ·
   <a href="docs/README.zh-CN.md">文档</a> ·
@@ -37,7 +38,7 @@ ChromaDB 仍有未修复的上游依赖安全公告，详见[当前评估和部�
 
 ## 当前源码版本
 
-**Bowra 1.7.63** 支持运行过程实时显示代码、编辑 Skill 包文件，并改进生成演示文稿的交付。[发布说明](docs/help/release-notes/releases/v1.7.63.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
+**Bowra 1.7.64** 改进已选成果、额度提示、图表输入和 Skill 脚本调用。[发布说明](docs/help/release-notes/releases/v1.7.64.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
 
 SQLite 升级统一协调十二个数据库文件。升级前停止全部写入，并备份实例密钥、数据库和存储对象。自动迁移备份只包含登记的 SQLite 文件与布局元数据，完整恢复快照需单独保存。恢复账号删除前的快照可能恢复该账号。Community 保留已审核沙箱源码与基础文档技能，原生模板创作 helper 需要单独验证执行环境。
 

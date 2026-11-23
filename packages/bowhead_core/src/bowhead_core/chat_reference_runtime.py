@@ -21,7 +21,7 @@ import aiosqlite
 import anyio
 from bowhead_router.types import ImageRef
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
 from bowhead_core.chat_reference_execution import read_reference_primary_in_connection, read_reference_skill_primary_in_connection
 from bowhead_core.chat_reference_runtime_store import (
@@ -149,8 +149,7 @@ class _ReferenceTaskModelInput(RequiredSkillModelInput):
         if self.checkpoint is not None:
             from bowhead_core.reference_mcp_runtime import require_saved_mcp_reads
 
-            async with open_shared_ctx(domain_database_path(str(self.runtime.bindings.db_path), "execution")) as db:
-                await db.execute("PRAGMA query_only=ON")
+            async with open_pooled_read_ctx(domain_database_path(str(self.runtime.bindings.db_path), "execution")) as db:
                 await db.execute("BEGIN")
                 try:
                     await require_saved_mcp_reads(db, checkpoint=self.checkpoint, scope=self.runtime.scope, cipher=self.runtime.cipher)
@@ -411,12 +410,15 @@ class ReferencePrimaryRuntime:
             content += "\n" + _IMAGE_OUTPUT_REQUIREMENT
         return ReferenceLeadModelInput(content, "sha256:" + hashlib.sha256(content.encode()).hexdigest(), self)
 
+    # The pure reads below (``is_postdispatch_resume``, ``can_capture_primary_question``, ``lead_resume_answer``,
+    # ``validate_lead``) open a deferred transaction and never write, so they read on the read-only pool, which
+    # takes no authority lease.
     async def is_postdispatch_resume(self) -> bool:
         if self.generation <= 1:
             return False
         from bowhead_core.chat_reference_lead_postdispatch import read_pause, require_resume
 
-        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             row = await read_pause(db, self.turn_id)
@@ -430,7 +432,7 @@ class ReferencePrimaryRuntime:
         from bowhead_core.chat_reference_delegation import CONTRACT
         from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
 
-        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             primary = await self._read(db)
@@ -449,7 +451,7 @@ class ReferencePrimaryRuntime:
         from bowhead_core.chat_reference_lead_continuation import all_answers as predispatch_answers
         from bowhead_core.chat_reference_lead_postdispatch import all_answers as postdispatch_answers
 
-        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             row = await require_resume(db, turn_id=self.turn_id, generation=self.generation)
@@ -573,7 +575,7 @@ class ReferencePrimaryRuntime:
     async def validate_lead(self) -> ReferencePrimaryInput:
         from bowhead_core.chat_reference_delegation import CONTRACT
 
-        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
+        async with open_pooled_read_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             primary = await self._read(db, read_output=True)
