@@ -14,7 +14,6 @@ Bowra 是一个采用 MIT 许可、可自托管的 AI Agent 平台，用于业�
 </p>
 
 <p align="center">
-  <a href="https://bowra.ai/examples/q2-gross-profit/">复算 Q2 毛利 900 万美元示例</a> ·
   <a href="#开始使用">开始使用</a> ·
   <a href="examples/community/README.zh-CN.md">示例</a> ·
   <a href="docs/README.zh-CN.md">文档</a> ·

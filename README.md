@@ -14,7 +14,6 @@ Bowra is an MIT-licensed, self-hosted AI agent platform for business data and do
 </p>
 
 <p align="center">
-  <a href="https://bowra.ai/examples/q2-gross-profit/">Reproduce the $9M Q2 demo</a> ·
   <a href="#get-started">Get started</a> ·
   <a href="examples/community/README.md">Examples</a> ·
   <a href="docs/README.md">Documentation</a> ·
