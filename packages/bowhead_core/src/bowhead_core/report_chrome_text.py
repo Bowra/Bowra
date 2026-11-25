@@ -169,6 +169,29 @@ for _locale, _message in {
     _CHROME[_locale]["delivery_unconfirmed_gaps"] = _message
 
 
+# A Plan Turn's completion when its chat reply could not be written (plan_chat_reply.py); the report pointer follows.
+for _locale, _done, _partial in (
+    (
+        "en-US",
+        "The plan finished all {n} steps.",
+        "The plan finished: {done} steps completed and {partial} only in part; the gaps are listed at the end of the report.",
+    ),
+    ("zh-CN", "计划已执行完成，共 {n} 步。", "计划已执行完成：{done} 步完成，{partial} 步只完成了一部分，缺口见报告末尾。"),
+    (
+        "de-DE",
+        "Der Plan hat alle {n} Schritte abgeschlossen.",
+        "Der Plan ist abgeschlossen: {done} Schritte erledigt, {partial} nur teilweise; die Lücken stehen am Ende des Berichts.",
+    ),
+    (
+        "fr-FR",
+        "Le plan a terminé ses {n} étapes.",
+        "Le plan est terminé : {done} étapes réalisées, {partial} seulement en partie ; les lacunes figurent à la fin du rapport.",
+    ),
+):
+    _CHROME[_locale]["plan_done"] = _done
+    _CHROME[_locale]["plan_done_partial"] = _partial
+
+
 def delivery_gaps_notice(gaps: list[str], lang: str, *, unconfirmed: bool = False) -> str:
     """One sentence listing the unmet requirements, in the language ``chrome_text`` would use.
 

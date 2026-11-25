@@ -2,6 +2,8 @@
 
 Les propriétaires et administrateurs peuvent ajouter un outil MCP dans **Paramètres de l’équipe → Sources d’outils** pour que les Agents utilisent certaines capacités d’un service externe. Vous ajoutez le service et ses outils sélectionnés ; cela ne donne pas automatiquement aux membres un accès à un compte de ce service.
 
+Si chaque membre doit utiliser son propre compte sur le service plutôt qu’un compte partagé, les membres peuvent s’authentifier dans **Mes connexions** ; voir [Connecter un service MCP personnel](personal-mcp.fr-FR.md).
+
 ## Ajouter le service et sélectionner les outils
 
 1. Ouvrez **Paramètres de l’équipe → Sources d’outils → Ajouter un outil MCP**.
@@ -29,6 +31,12 @@ Lorsqu’un service MCP ajoute ou retire des outils, choisissez **Actualiser la 
 Aucune modification n’est appliquée avant que vous sélectionniez **Mettre à jour la liste des outils** ; **Annuler** conserve l’état actuel. Si la liste des outils ou leur utilisation change pendant votre vérification, Bowra la récupère à nouveau et vous demande d’examiner les nouvelles modifications. Si aucun outil n’a été ajouté, supprimé ni modifié, l’aperçu indique que la liste des outils est à jour.
 
 Un service MCP qui nécessite une autorisation doit être autorisé avant l’actualisation de sa liste d’outils.
+
+## Quand une autorisation prend fin
+
+Un service autorisé continue de fonctionner sans intervention : Bowhead renouvelle l’accès quand c’est nécessaire, une seule fois pour toute l’équipe, même si plusieurs conversations utilisent le service en même temps. Si le service n’accepte plus l’autorisation (par exemple parce qu’elle a expiré après une longue période sans utilisation, que quelqu’un a retiré l’accès de Bowhead dans le service ou que le service a changé de serveur de connexion), la carte de la source affiche **Autorisation nécessaire** avec un bouton **Autoriser**. Les appels des conversations ne sont alors pas envoyés, et l’Agent invite l’utilisateur à contacter un administrateur de l’équipe.
+
+Sélectionnez **Autoriser** et reconnectez-vous au service ; les outils importés sont conservés. Tant que l’autorisation est en attente, vous pouvez toujours désactiver la source. **Actualiser la liste des outils** est de nouveau disponible une fois la source autorisée.
 
 ## Choisir les outils à importer
 

@@ -74,6 +74,8 @@ class LeadTurnTransient(TypedDict, total=False):
     _resume_glossary: dict[str, str]
     _resume_answer_context: str | None
 
+    answer_card_entry: bool
+
     # === V4 streaming event surface ===
     # Sprint phase-plan-removal: 6 turn.plan/phase.update fields removed
     # (_v4_phase_plan / _v4_turn_plan_emitted / _v4_phase_seq /
@@ -130,6 +132,32 @@ def init_lead_transient(
     Idempotent: safe to call multiple times (always overwrites). But the
     convention is one call per turn, at peer_ctx construction.
     """
+    from bowhead_core.answer_cards import enabled as answer_cards_enabled
+
+    ctx.answer_card_entry = (
+        answer_cards_enabled()
+        and getattr(request, "execution_generation", 1) == 1
+        and getattr(request, "planning_mode", None) != "planning"
+        and getattr(getattr(request, "agent_binding", None), "binding_source", "lead") == "lead"
+        and not any(
+            getattr(request, field, None)
+            for field in (
+                "selected_skills",
+                "attachments",
+                "scheduled_run",
+                "reference_runtime",
+                "bound_workflow",
+                "resume_turn_id",
+                "plan_execution_id",
+                "document_revision_target",
+                "configuration_settings_target",
+                "coach_canvas_target",
+                "agent_draft_target",
+                "context_maintenance",
+            )
+        )
+    )
+
     # Identity + LLM provider hints. Request is a dataclass; getattr is
     # belt-and-suspenders for tests that pass loose stubs.
     ctx.paradigm_v2 = bool(getattr(request, "paradigm_v2", False))  # type: ignore[attr-defined]

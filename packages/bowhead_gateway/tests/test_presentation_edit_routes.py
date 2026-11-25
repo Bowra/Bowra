@@ -75,7 +75,8 @@ async def stores(tmp_path):
 @pytest.fixture
 def client(stores, monkeypatch):
     store, sessions = stores
-    monkeypatch.setenv("FEATURE_PPTX_INLINE_EDIT", "1")
+    # Unset: the switch defaults to on.
+    monkeypatch.delenv("FEATURE_PPTX_INLINE_EDIT", raising=False)
     app = FastAPI()
     app.include_router(results_routes.owner_router, prefix="/api/v1")
     app.state.artifact_store = store
@@ -239,6 +240,37 @@ async def test_an_upload_is_saved_as_a_new_file_that_later_edits_version(stores,
     )
 
 
+async def test_reopening_an_upload_offers_the_copy_a_helper_made_from_it(stores, client):
+    """pptx dogfood 2026-11-25: a helper's revised copy records the upload, so the editor leads to it, not to a second copy."""
+    store, _ = stores
+    http, _, _ = client
+    upload = await store.put_bytes(
+        content=_deck("上传的模板"),
+        filename="客户模板.pptx",
+        mime=PPTX,
+        created_by="u_owner",
+        source="upload",
+        kind="user_upload",
+        session_id="s_e",
+        workspace_id="ws_e",
+    )
+    copy = await store.put_bytes(
+        content=_deck("助手改过"),
+        filename="客户模板（已修改）.pptx",
+        mime=PPTX,
+        created_by="u_owner",
+        source="python_sandbox",
+        kind="deliverable",
+        created_by_turn="t1",
+        session_id="s_e",
+        workspace_id="ws_e",
+        derived_from=upload.id,
+    )
+    await _agent_deck(store)
+    inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": upload.id}).json()
+    assert inventory["edited_copies"] == [{"artifact_id": copy.id, "filename": "客户模板（已修改）.pptx", "version_no": 1}]
+
+
 async def test_the_owner_fences_hide_other_sessions_and_denied_spaces(stores, client):
     store, sessions = stores
     http, access, _ = client
@@ -263,7 +295,7 @@ async def test_the_owner_fences_hide_other_sessions_and_denied_spaces(stores, cl
     assert http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": deck.id}).status_code == 404
 
 
-def test_results_offer_editing_only_for_owned_decks_when_switched_on(monkeypatch):
+def test_results_offer_editing_only_for_owned_decks_unless_switched_off(monkeypatch):
     from bowhead_gateway.results_query_service import _presentation_editable
 
     fields = {"mime": PPTX, "filename": "deck.pptx"}
@@ -271,7 +303,7 @@ def test_results_offer_editing_only_for_owned_decks_when_switched_on(monkeypatch
     upload = SimpleNamespace(kind="user_upload", producer_kind="upload", source="upload", **fields)
     template = SimpleNamespace(kind="deliverable", producer_kind="template_document_v1", source="x", **fields)
     pdf = SimpleNamespace(kind="deliverable", producer_kind="python_sandbox", source="python_sandbox", mime="application/pdf", filename="deck.pdf")
-    monkeypatch.setenv("FEATURE_PPTX_INLINE_EDIT", "1")
+    monkeypatch.delenv("FEATURE_PPTX_INLINE_EDIT", raising=False)
     assert _presentation_editable(deck) and _presentation_editable(upload)
     assert not _presentation_editable(template) and not _presentation_editable(pdf)
     monkeypatch.setenv("FEATURE_PPTX_INLINE_EDIT", "0")

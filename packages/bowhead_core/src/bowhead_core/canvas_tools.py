@@ -1194,7 +1194,7 @@ async def _remove_chart(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
 # ─────────────────────────────────────────────────────────────
 # caption/alt are LLM prose; strip citation/inline markers (dual-path rule:
 # [ref:]/[num:] belong only to Canvas rendering, [cite:]/[data:] only to chat; captions are
-# terminal display text and must leak neither). Match render_deck.py _MARK_CITE pattern.
+# terminal display text and must leak neither).
 _CAPTION_MARKER_RE = re.compile(r"\[(?:ref|cite|chart|num|data):[^\]]*\]|\[\d+\]", re.IGNORECASE)
 # Inline raster allowlist (same set as gateway files.py inline disposition).
 _IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")

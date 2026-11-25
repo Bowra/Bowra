@@ -133,8 +133,10 @@ async def edited_copies(store: ArtifactStore, *, session_id: str, user_id: str, 
 
     The editor offers them before a second save would split the person's work across files.
     Each entry is the newest live version of a file whose first version records the upload.
+    A helper's revised copy of the upload records it too (pptx dogfood 2026-11-25), and its
+    newest version may come from either producer.
     """
-    rows, _ = await store.find_session_results(session_id=session_id, user_id=user_id, sources=["presentation_edit"], limit=50)
+    rows, _ = await store.find_session_results(session_id=session_id, user_id=user_id, sources=["presentation_edit", "python_sandbox"], limit=50)
     copies: list[dict[str, Any]] = []
     for row in rows:
         root = row if row.lineage_root == row.id else await store.get(row.lineage_root)

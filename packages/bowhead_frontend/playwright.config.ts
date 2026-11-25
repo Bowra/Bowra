@@ -58,6 +58,7 @@ const CROSS_BROWSER_SPECS = [
   "**/settings-group-layout.spec.ts",
   "**/settings-page-routes.spec.ts",
   "**/workbench-ui-refresh.spec.ts",
+  "**/narrow-desktop-layout.spec.ts",
   "**/workbench-behavior.spec.ts",
   "**/canvas-ui-refresh.spec.ts",
   "**/canvas-behavior.spec.ts",
@@ -90,6 +91,7 @@ const LIVE_E2E_SPECS = [
 ];
 
 const SSE_E2E_SPECS = [
+  "**/break-even-card.spec.ts",
   "**/chat-web-links.spec.ts",
   "**/model-failure-replay.spec.ts",
   "**/office-context-replay.spec.ts",

@@ -277,27 +277,6 @@ def test_new_versions_come_from_this_dispatch_declarations() -> None:
     assert facts["new_files"] == [{"artifact_id": "art_new", "name": "report.html", "recorded_as_version": False}]
 
 
-def test_a_revised_deck_counts_from_its_render_receipt() -> None:
-    """render_deck names its registered file at the top level, without output_artifacts.
-
-    Missing it made the directive report a revised deck as "not revised".
-    """
-    from bowhead_core.delivered_files import FileTarget, revised_files_facts
-
-    target = FileTarget(artifact_id="art_deck_v1", name="consultant-deck.pptx", type="pptx")
-    rendered = SimpleNamespace(
-        tool_name="render_deck",
-        error=None,
-        arguments={"slides": []},
-        result={"ok": True, "artifact_id": "art_deck_v2", "filename": "consultant-deck.pptx"},
-        nested=[],
-    )
-    failed = SimpleNamespace(tool_name="render_deck", error=None, arguments={}, result={"ok": False, "error": "deck_registration_failed"}, nested=[])
-    helper = SimpleNamespace(tool_name="subagent_return", error=None, arguments={}, result={"ok": True}, nested=[failed, rendered])
-    facts = revised_files_facts([target], [helper])
-    assert facts["new_files"] == [{"artifact_id": "art_deck_v2", "name": "consultant-deck.pptx", "recorded_as_version": False}]
-
-
 def test_inventory_names_a_checkpoint_only_when_unique() -> None:
     from bowhead_core.delivered_files import render_delivered_files_block
 

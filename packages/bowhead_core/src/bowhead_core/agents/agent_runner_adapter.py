@@ -47,10 +47,8 @@ from bowhead_core.subagent import (
 
 from .registry import _SYSTEM_PROMPT_DIR, AgentRegistry
 from .task_spec import (
-    PLAN_STEP_DELIVERY_FAILURE_CODES,
     PlanStepAgentBindingError,
     PlanStepBailError,
-    PlanStepDeliveryError,
     PlanStepEmptyOutputError,
     PlanStepModelError,
     PlanStepNeedsUserError,
@@ -732,30 +730,6 @@ def make_legacy_agent_runner_fn(
         except BaseException:
             reset_current_peer_name(peer_token)
             raise
-        if "render_deck" in manifest.tools.allow:
-            # Same new-deck preparation as subagent_spawn for an Agent granted the native renderer
-            # (the Tool still admits only its server-stamped deck peer). The binding lives on this
-            # step's own context copy; parallel steps share parent_ctx and must never see it.
-            from copy import copy
-
-            from bowhead_core.deck_render_inputs import prepare_deck_render_inputs
-
-            peer_ctx = copy(peer_ctx)
-            peer_ctx.deck_render_binding = None
-            try:
-                deck_block = await prepare_deck_render_inputs(
-                    canvas_store=getattr(peer_ctx, "canvas_store", None),
-                    artifact_store=getattr(peer_ctx, "artifact_store", None),
-                    session_id=getattr(peer_ctx, "session_id", "") or "",
-                    user_id=getattr(peer_ctx, "user_id", None),
-                    mode="consultant",
-                    context=peer_ctx,
-                )
-            except Exception:
-                logger.warning("plan.consultant_deck_inputs_failed task=%s", spec.task_id, exc_info=True)
-                deck_block = None
-            if deck_block:
-                extra = deck_block + ("\n\n" + extra if extra else "")
         try:
             # graph-mode batch 4 D-A (derive): plan-step subagent_id derives from step ID.
             # (spec.task_id=step id, plan_reify.step_to_task)——tool_result/
@@ -814,9 +788,6 @@ def make_legacy_agent_runner_fn(
                 # The model call still failed after the Router's retries: keep its own
                 # classification instead of a generic internal error.
                 raise PlanStepModelError(result.llm_reason_code)
-            if err_msg in PLAN_STEP_DELIVERY_FAILURE_CODES:
-                # The Agent finished without the file it owes: keep the delivery code as the step kind.
-                raise PlanStepDeliveryError(err_msg)
             raise RuntimeError(err_msg)
 
         # SubagentResult.payload → dict expected by orchestrate_v2.

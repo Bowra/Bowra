@@ -42,18 +42,6 @@ def test_flags_failed_blocked_pending_not_done_or_skipped() -> None:
     assert "compliance-analyst" not in joined  # skipped = user excluded
 
 
-def test_a_step_without_its_deck_names_the_missing_file_and_the_way_forward() -> None:
-    """an observed execution: the Consultant's analysis was on the canvas, yet the caveat read
-    "「consultant」这步执行失败(RuntimeError),本报告未包含其分析结果"."""
-    step = SimpleNamespace(
-        agent_name="consultant", status="failed", error_kind="deck_delivery_missing", objective="基于2025年各品类大类销售额结果，撰写一份HTML简报"
-    )
-    (caveat,) = _plan_report_gap_caveats([_s("compute", "done"), step])
-    assert "「基于2025年各品类大类销售额结果，撰写一份HTML简报」这一步要交付一份新的 PPT 文件，但没有生成文件" in caveat
-    assert "修订重试" in caveat and "继续执行" in caveat
-    assert "deck_delivery_missing" not in caveat and "未包含其分析结果" not in caveat
-
-
 def test_all_done_no_caveats() -> None:
     steps = [_s("financial-analyst", "done"), _s("business-analyst", "done")]
     assert _plan_report_gap_caveats(steps) == []

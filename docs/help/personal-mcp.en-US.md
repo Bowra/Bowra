@@ -10,6 +10,27 @@ Connect a remote MCP service to let an Agent you own use external tools when you
 
 Saved credentials cannot be read back. Leave credentials blank while editing to retain them; enter new credentials when changing the authentication method. Bowra supports remote HTTP(S) MCP services, not local commands. Cloud deployments require public HTTPS; internal deployments may use internal addresses. Use trusted services and least-privilege credentials.
 
+## Sign in to a service with your own account
+
+Some MCP services ask you to sign in with your own account instead of giving you a token, for example Notion, Linear, Sentry or n8n. When your deployment offers it, choose **Sign in to the service** under **Authentication**. If you leave **No authentication** and the service asks for a sign-in, the dialog switches to it and names where you will sign in.
+
+1. Enter a name and the remote MCP address, then choose **Continue to Sign In**.
+2. Sign in at the service and approve the access it asks for. Some services let you narrow what Bowhead may do (for example read only); the tools that work later follow that choice.
+3. Back in **My Connections**, select the tools you need and save. The connection shows where you signed in.
+
+Bowhead keeps your sign-in for this connection only and renews it when needed; it survives restarts and is never shown to anyone. If the service ends the sign-in (for example after a long time unused, or because Bowhead's access was removed there), the connection shows that your sign-in has ended: choose **Sign In Again**. Your tool selections and Agent bindings are kept; tools whose definition changed need to be selected again. Until then your Agents keep running with their other tools, and a call to this connection's tools is not sent: the Agent tells you to sign in again.
+
+A sign-in that was cancelled or not finished shows **Sign-in not finished** with **Continue Sign-in**. Editing a signed-in connection changes its name only; to use another address, add a new connection. Deleting it makes Bowhead forget your sign-in; to remove Bowhead's access at the service too, remove it from the service's connected apps.
+
+Some services only accept apps registered by their administrator (for example GitHub, Google and Microsoft). Bowhead cannot sign in to those yet; use a personal token or API key if the service offers one.
+
+| Situation                                                           | Where to connect                        | Whose account the service sees                  |
+| ------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------- |
+| The team shares one service account managed by an administrator     | Team settings → Tool Sources            | The administrator's sign-in, shared by the team |
+| Each person should act as themselves and the service offers sign-in | My Connections → Sign in to the service | Your own                                        |
+| The service gives you a personal token or API key                   | My Connections → Bearer Token / API Key | Your own                                        |
+| Slack                                                               | My Connections → Connect My Slack       | Your own, through the team's Slack app          |
+
 ## Connect your Slack
 
 When the team administrator has enabled Slack and the deployment has made this capability available, **Connect my Slack** appears in **My Connections**. Complete authorization with your own Slack account. The connection and token belong only to you; team owners and administrators cannot view or use them.
@@ -39,4 +60,4 @@ External services can make irreversible changes. Personal ownership does not per
 
 ## Repair, disable, or delete
 
-Use **Edit connection / Refresh tools** to repair authentication or rediscover tools. Refreshing clears tool selections and requires new confirmation of affected bindings. Disabling or deleting blocks future calls; a started call may finish. Deletion clears credentials but retains minimal call records; before you confirm, the page lists your agents still bound to that connection's tools. Verify an unknown external outcome in the external service before approving the same action again.
+Use **Edit connection / Refresh tools** to repair authentication or rediscover tools. When the service rejects a connection's credential, the connection shows that its authentication expired; your Agents keep running with their other tools, and a call to this connection's tools is not sent: the Agent tells you to update the credential first. Refreshing clears tool selections and requires new confirmation of affected bindings. Disabling or deleting blocks future calls; a started call may finish. Deletion clears credentials but retains minimal call records; before you confirm, the page lists your agents still bound to that connection's tools. Verify an unknown external outcome in the external service before approving the same action again.

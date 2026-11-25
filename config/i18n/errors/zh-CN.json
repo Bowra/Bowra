@@ -744,5 +744,15 @@
   "tool_execution_timeout": "本次操作超时，结果尚未确认。对于会修改数据的操作，请先核对实际结果再决定是否重试。",
   "tool_execution_unknown": "本次操作的结果尚未确认。请先核实操作是否已经生效，再决定是否再次执行。",
   "tool_execution_failed": "工具未能完成本步骤。请查看已记录的执行结果；若原因仍不可见，可复制诊断信息交给管理员排查。",
-  "tool_delivery_review_required": "交付尚未核实。智能体需要核对失败步骤并说明未完成的要求，再结束本次任务。"
+  "tool_delivery_review_required": "交付尚未核实。智能体需要核对失败步骤并说明未完成的要求，再结束本次任务。",
+  "personal_mcp_needs_oauth": "该服务要求你在 {provider_host} 登录。",
+  "personal_mcp_admin_app_required": "{provider_host} 只接受管理员预先注册的应用，Bowhead 暂时无法登录。如果该服务提供个人 Token 或 API Key，可改用它们连接。",
+  "personal_mcp_callback_refused": "{provider_host} 不接受 Bowhead 的返回地址 {callback}。如果该地址不是 HTTPS，请联系团队负责人登记 HTTPS 公开入口后重试。",
+  "personal_mcp_public_entry_required": "Bowhead 无法确定服务登录后应返回的地址。请联系团队负责人登记公开入口后重试。",
+  "personal_mcp_sign_in_start_failed": "无法开始登录 {provider_host}。请检查地址后重试；若持续失败，请查看该服务的状态。",
+  "personal_mcp_sign_in_ended": "你在该服务的登录已失效，请重新登录后使用此连接。",
+  "personal_mcp_sign_in_renewal_unavailable": "续期登录时服务没有响应。你的登录仍然有效，请稍后重试。",
+  "personal_mcp_oauth_endpoint_locked": "登录式连接不能修改地址。如需使用其他地址，请新建连接。",
+  "personal_mcp_oauth_sign_in_required": "此连接需要通过登录服务来创建，请点击「继续登录」。",
+  "personal_mcp_oauth_unavailable": "当前部署暂不支持登录式连接。"
 }

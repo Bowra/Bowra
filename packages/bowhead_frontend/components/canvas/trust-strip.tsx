@@ -18,7 +18,7 @@ import {
   useState,
 } from "react";
 import { useTranslations } from "next-intl";
-import { FileText, Info, Link } from "@/components/icons";
+import { AlertTriangle, FileText, Info, Link } from "@/components/icons";
 import type { ReportSection } from "@/lib/types";
 import { computeReportTrust, scrollToFirstUnverified } from "@/lib/report-trust";
 import { projectSourceLinkage } from "@/lib/source-linkage-presentation";
@@ -150,39 +150,55 @@ export function SourceLinkageStrip({
   const sourceCount = presentation.sourceCount ?? 0;
   if (isStreaming) {
     tokens.push(
-      <span className="rc-trust-item" key="collecting">
+      <span className="rc-trust-item rc-trust-collecting" key="collecting" title={t("collecting")}>
         <span className="rc-spinner legacy-rc-spinner--sm" aria-hidden />
-        <span>{t("collecting")}</span>
+        <span className="rc-trust-full">{t("collecting")}</span>
       </span>,
     );
   }
+  // Each count renders its full phrase and a short form (icon + number). The report toolbar shows the
+  // short form when it is narrow (`data-fit` trust-short / figures-short, narrow desktop layout design §4);
+  // the full phrase then stays as visually hidden text and tooltip, so the accessible name is unchanged.
   if (citationCount > 0) {
+    const label = t("citation_count", { count: citationCount });
     tokens.push(
-      <span className="rc-trust-item citation-linkage" key="citations">
+      <span className="rc-trust-item citation-linkage" key="citations" title={label}>
         {!isStreaming ? <Link size={12} aria-hidden /> : null}
-        <span>{t("citation_count", { count: citationCount })}</span>
+        <span className="rc-trust-full">{label}</span>
+        <span className="rc-trust-short" aria-hidden>
+          {/* While writing the full form has no icon; the bare number still needs one to say what it counts. */}
+          {isStreaming ? <Link size={12} aria-hidden /> : null}
+          {citationCount}
+        </span>
       </span>,
     );
   }
   if (figureReviewCount > 0) {
+    const label = t("figure_review_count", { count: figureReviewCount });
     tokens.push(
       <button
         type="button"
         className="rc-trust-item figure-review"
         onClick={() => scrollToFirstUnverified()}
         title={t("review_jump")}
-        aria-label={t("review_jump")}
+        aria-label={t("review_jump_count", { count: figureReviewCount })}
         key="review"
       >
-        {t("figure_review_count", { count: figureReviewCount })}
+        <span className="rc-trust-full">{label}</span>
+        <span className="rc-trust-short" aria-hidden>
+          <AlertTriangle size={12} aria-hidden />
+          {figureReviewCount}
+        </span>
       </button>,
     );
   }
   if (!isStreaming && sourceCount > 0) {
+    const label = t("source_count", { count: sourceCount });
     tokens.push(
-      <span className="rc-trust-item source-count" key="sources">
+      <span className="rc-trust-item source-count" key="sources" title={label}>
         <FileText size={12} aria-hidden />
-        <span>{t("source_count", { count: sourceCount })}</span>
+        <span className="rc-trust-full">{label}</span>
+        <span className="rc-trust-short" aria-hidden>{sourceCount}</span>
       </span>,
     );
   }

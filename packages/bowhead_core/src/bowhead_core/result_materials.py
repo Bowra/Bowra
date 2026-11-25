@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 MAX_ITEMS = 32
 MAX_BYTES = 8192
+MAX_NAME = 255
 logger = logging.getLogger(__name__)
 
 
@@ -45,9 +46,15 @@ class MaterialReference(BaseModel):
     observed_version: dict[str, Any] = Field(default_factory=dict)
     relation: Literal["created", "updated", "read", "reused"]
     origin: MaterialOrigin
+    # The stored file name of an artifact. A result that listed file names in one place and bare identifiers in
+    # another left the reader to pair them: on 116 (1.7.74, `an observed task`) Lead paired a CSV's name with a
+    # sandbox-stdout identifier and the next helper parsed console text as that CSV for ~30 calls.
+    name: str | None = Field(default=None, min_length=1, max_length=MAX_NAME)
 
     @model_validator(mode="after")
     def validate_locator(self):
+        if self.name is not None and self.kind != "artifact":
+            raise ValueError("Only an artifact reference carries a file name")
         expected = {"canvas_section": {"canvas_id", "section_id"}, "canvas": {"canvas_id"}, "artifact": {"artifact_id"}}
         if self.kind == "coach_operation":
             from bowhead_core.coach_operation_reference import OPERATION_REFERENCE
@@ -185,7 +192,8 @@ async def capture_material_references(inv: Any, ctx: Any, *, turn_id: str, produ
                 artifact = await ctx.artifact_store.get(identity, check_created_by=ctx.user_id, reject_null_owner=True)
                 if artifact is None:
                     raise ValueError("Native Artifact receipt unavailable")
-                items.append(MaterialReference(kind="artifact", locator={"artifact_id": identity}, relation="created", origin=origin))
+                name = str(getattr(artifact, "filename", None) or "").strip()[:MAX_NAME] or None
+                items.append(MaterialReference(kind="artifact", locator={"artifact_id": identity}, relation="created", origin=origin, name=name))
         else:
             for receipt in operation_receipts([inv]):
                 items.append(

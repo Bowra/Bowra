@@ -162,3 +162,27 @@ def test_auth_detection_walks_groups_and_causes() -> None:
 
     assert is_upstream_auth_error(BaseExceptionGroup("g", [ValueError("x"), chained]))
     assert not is_upstream_auth_error(BaseExceptionGroup("g", [_status_error(429)]))
+
+
+@pytest.mark.asyncio
+async def test_ended_oauth_sign_in_reads_as_team_reauthorization() -> None:
+    """A refused sign-in renewal is not an "HTTP 400": the call was not sent and an admin must re-authorize."""
+    from bowhead_core.oauth_token_broker import OAuthGrantRejected
+
+    res = await _spec(_Raising(ExceptionGroup("g", [OAuthGrantRejected("invalid_grant")]))).handler({}, _ctx())
+    assert res["ok"] is False and res["error_kind"] == "upstream_auth"
+    assert "not sent" in res["error"] and "re-authoriz" in res["error"] and _SRC in res["error"]
+    assert "invalid_grant" not in res["error"]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_sign_in_renewal_is_retryable_and_not_sent() -> None:
+    from bowhead_core.oauth_token_broker import OAuthRefreshUnavailable
+    from bowhead_core.tool_registry import _DETERMINISTIC_NOT_APPLIED_ERROR_KINDS
+
+    res = await _spec(_Raising(OAuthRefreshUnavailable("http_503"))).handler({}, _ctx())
+    assert res["error_kind"] == "auth_refresh_unavailable" and "not sent" in res["error"] and "still valid" in res["error"]
+    assert "auth_refresh_unavailable" in _DETERMINISTIC_NOT_APPLIED_ERROR_KINDS
+
+    limited = await _spec(_Raising(OAuthRefreshUnavailable("rate_limited", retry_after_seconds=7))).handler({}, _ctx())
+    assert limited["error_kind"] == "rate_limited" and limited["retry_after_seconds"] == 7 and "not sent" in limited["error"]

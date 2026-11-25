@@ -1693,20 +1693,6 @@ tools:
     risk: artifact_write
     allowed_roles: [analyst]
 
-  - canonical: render_deck
-    display_zh: 创建新演示稿
-    display_en: Create New Presentation
-    blurb_zh: "从提供的内容新建可编辑 PPTX，不修改上传 PPT 的原页面。"
-    blurb_en: "Create a new editable PPTX from supplied content, without editing an uploaded presentation's existing slides."
-    display_de: "Neue Präsentation erstellen"
-    blurb_de: "Eine neue bearbeitbare PPTX aus bereitgestellten Inhalten erstellen, ohne vorhandene Folien einer hochgeladenen Präsentation zu ändern."
-    display_fr: "Créer une nouvelle présentation"
-    blurb_fr: "Créer un nouveau PPTX modifiable à partir du contenu fourni, sans modifier les diapositives d’une présentation importée."
-    sigil: "📊"
-    category: compute
-    kind: part
-    allowed_roles: [analyst]
-
   - canonical: template_document_submit
     display_zh: 编辑模板文档
     display_en: Edit Template Document
@@ -1783,6 +1769,22 @@ tools:
     blurb_fr: "Découper une tâche en plusieurs étapes en un plan à confirmer."
     sigil: "🗺"
     category: orchestrate
+    kind: part
+    role_binding: false
+
+  # render_deck was removed on 2026-11-24 (new decks are written in the Python sandbox). Display only, so the
+  # steps of earlier Turns keep their name.
+  - canonical: render_deck
+    display_zh: 创建新演示稿
+    display_en: Create New Presentation
+    blurb_zh: "从提供的内容新建可编辑 PPTX，不修改上传 PPT 的原页面。"
+    blurb_en: "Create a new editable PPTX from supplied content, without editing an uploaded presentation's existing slides."
+    display_de: "Neue Präsentation erstellen"
+    blurb_de: "Eine neue bearbeitbare PPTX aus bereitgestellten Inhalten erstellen, ohne vorhandene Folien einer hochgeladenen Präsentation zu ändern."
+    display_fr: "Créer une nouvelle présentation"
+    blurb_fr: "Créer un nouveau PPTX modifiable à partir du contenu fourni, sans modifier les diapositives d’une présentation importée."
+    sigil: "📊"
+    category: compute
     kind: part
     role_binding: false
 

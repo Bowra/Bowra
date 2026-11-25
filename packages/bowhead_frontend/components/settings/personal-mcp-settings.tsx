@@ -14,6 +14,7 @@ import { ChevronDown } from "@/components/icons";
 import { appPath } from "@/lib/base-path";
 import { formatDateTime } from "@/lib/locale";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
+import { codedErrorMessage } from "@/lib/user-facing-error";
 
 type PersonalMcpTab = "connections" | "agents" | "history";
 type SlackNotice =
@@ -25,6 +26,71 @@ type SlackNotice =
   | "oauthExchangeFailed"
   | "toolDiscoveryFailed"
   | "failed";
+
+type OAuthNotice =
+  | "signedIn"
+  | "signedInAgain"
+  | "authorizationDenied"
+  | "sessionExpired"
+  | "oauthExchangeFailed"
+  | "toolDiscoveryFailed"
+  | "connectionUnavailable"
+  | "unavailable"
+  | "failed";
+
+const OAUTH_FAILURE_NOTICES: Record<string, OAuthNotice> = {
+  authorization_denied: "authorizationDenied",
+  session_expired: "sessionExpired",
+  oauth_exchange_failed: "oauthExchangeFailed",
+  tool_discovery_failed: "toolDiscoveryFailed",
+  connection_unavailable: "connectionUnavailable",
+  unavailable: "unavailable",
+};
+
+/** The return from a service's sign-in page (`/personal-mcp/oauth/callback`). */
+function oauthNoticeFromQuery(result: string | null, reason: string | null): OAuthNotice | null {
+  if (result === "connected") return reason === "signed_in_again" ? "signedInAgain" : "signedIn";
+  if (result !== "failed") return null;
+  return OAUTH_FAILURE_NOTICES[reason ?? ""] ?? "failed";
+}
+
+/** Coded personal MCP errors carry catalog copy; anything else keeps the generic message. */
+function personalMcpError(cause: unknown, fallback: string): string {
+  return codedErrorMessage(cause, fallback, ["personal_mcp_"]);
+}
+
+function errorCode(cause: unknown): string | undefined {
+  const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** Notices that name the service or the connection the member just signed in to. */
+const OAUTH_NOTICES_NAMING_CONNECTION = new Set<OAuthNotice>([
+  "authorizationDenied",
+  "oauthExchangeFailed",
+  "toolDiscoveryFailed",
+]);
+
+function OAuthReturnNotice({
+  notice,
+  connection,
+  loaded,
+}: {
+  notice: OAuthNotice;
+  connection: PersonalMcpConnection | undefined;
+  loaded: boolean;
+}) {
+  const t = useTranslations("personalMcp");
+  const namesConnection = OAUTH_NOTICES_NAMING_CONNECTION.has(notice);
+  if (namesConnection && !loaded) return null;
+  // The connection may be gone by now; say what happened without naming it.
+  const shown: OAuthNotice = namesConnection && !connection ? "failed" : notice;
+  return (
+    <p role={shown === "signedIn" || shown === "signedInAgain" ? "status" : "alert"}>
+      {t(`oauthNotice.${shown}`, { host: connection?.provider_host ?? "", name: connection?.name ?? "" })}
+    </p>
+  );
+}
 
 function slackNoticeFromQuery(result: string | null, reason: string | null): SlackNotice | null {
   if (result === "connected") return "connected";
@@ -44,6 +110,7 @@ export function PersonalMcpSettings() {
   const [connections, setConnections] = useState<PersonalMcpConnection[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [slackConnectable, setSlackConnectable] = useState(false);
+  const [oauthConnectable, setOauthConnectable] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PersonalMcpConnection | null>(null);
   const [name, setName] = useState("");
@@ -53,9 +120,13 @@ export function PersonalMcpSettings() {
   const [value, setValue] = useState("");
   const [header, setHeader] = useState("X-API-Key");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [formMessage, setFormMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const [notice, setNotice] = useState("");
   const [slackNotice, setSlackNotice] = useState<SlackNotice | null>(null);
+  const [oauthNotice, setOauthNotice] = useState<OAuthNotice | null>(null);
+  const [oauthNoticeConnection, setOauthNoticeConnection] = useState<string | null>(null);
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
   const [changes, setChanges] = useState<Record<string, string[]> | null>(null);
   const load = useCallback(async () => {
     const data = await personalMcpApi<{ connections: PersonalMcpConnection[] }>(
@@ -66,43 +137,50 @@ export function PersonalMcpSettings() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const result = params.get("slack");
-    const nextNotice = slackNoticeFromQuery(result, params.get("slack_reason"));
-    if (!nextNotice) return;
+    const nextNotice = slackNoticeFromQuery(params.get("slack"), params.get("slack_reason"));
+    const nextOAuthNotice = oauthNoticeFromQuery(params.get("mcp_oauth"), params.get("mcp_oauth_reason"));
+    if (!nextNotice && !nextOAuthNotice) return;
     setSlackNotice(nextNotice);
+    setOauthNotice(nextOAuthNotice);
+    setOauthNoticeConnection(params.get("connection"));
     const url = new URL(window.location.href);
-    url.searchParams.delete("slack");
-    url.searchParams.delete("slack_reason");
+    for (const key of ["slack", "slack_reason", "mcp_oauth", "mcp_oauth_reason", "connection"]) {
+      url.searchParams.delete(key);
+    }
     window.history.replaceState({}, "", url.toString());
   }, []);
   useEffect(() => {
     let active = true;
-    void personalMcpApi<{ enabled: boolean; slack_connectable?: boolean }>("/capabilities")
+    void personalMcpApi<{ enabled: boolean; slack_connectable?: boolean; oauth_connectable?: boolean }>("/capabilities")
       .then((capability) => {
         if (!active || !capability.enabled) return null;
         setEnabled(true);
         setSlackConnectable(Boolean(capability.slack_connectable));
+        setOauthConnectable(Boolean(capability.oauth_connectable));
         return personalMcpApi<{ connections: PersonalMcpConnection[] }>("");
       })
       .then((data) => {
-        if (active && data) setConnections(data.connections);
+        if (active && data) {
+          setConnections(data.connections);
+          setConnectionsLoaded(true);
+        }
       })
       .catch(() => {
-        if (active) setError(true);
+        if (active) setError(t("error"));
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [t]);
   async function act(action: () => Promise<unknown>) {
     setBusy(true);
-    setError(false);
+    setError(null);
     setNotice("");
     try {
       await action();
       await load();
-    } catch {
-      setError(true);
+    } catch (cause) {
+      setError(personalMcpError(cause, t("error")));
     } finally {
       setBusy(false);
     }
@@ -115,6 +193,7 @@ export function PersonalMcpSettings() {
     setEndpoint("");
     setAuthType("none");
     setHeader("X-API-Key");
+    setFormMessage(null);
   }
   function closeForm() {
     if (!busy) resetForm();
@@ -127,13 +206,60 @@ export function PersonalMcpSettings() {
   function connectSlack() {
     if (busy) return;
     setBusy(true);
-    setError(false);
+    setError(null);
     void personalMcpApi<{ authorize_url: string }>("/slack/connect", "POST")
       .then(({ authorize_url }) => window.location.assign(authorize_url))
       .catch(() => {
         setBusy(false);
-        setError(true);
+        setError(t("error"));
       });
+  }
+  /** New connection ({name, endpoint}) or an existing signed-in one ({connection_id, version}). */
+  function startSignIn(body: Record<string, unknown>, inForm: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setFormMessage(null);
+    void personalMcpApi<{ authorize_url: string }>("/oauth/authorize", "POST", body)
+      .then(({ authorize_url }) => window.location.assign(authorize_url))
+      .catch((cause) => {
+        setBusy(false);
+        const text = personalMcpError(cause, t("error"));
+        if (inForm) setFormMessage({ text, tone: "error" });
+        else setError(text);
+      });
+  }
+  async function submitConnection() {
+    setBusy(true);
+    setError(null);
+    setFormMessage(null);
+    setNotice("");
+    try {
+      const discovered = await personalMcpApi<{
+        changes: Record<string, string[]>;
+      }>(editing ? `/${editing.id}` : "", editing ? "PUT" : "POST", {
+        name,
+        endpoint,
+        auth_type: authType,
+        ...(value && authType !== "oauth" ? { value, header } : {}),
+        ...(editing ? { version: editing.version } : {}),
+      });
+      setChanges(discovered.changes);
+      setNotice(t("discovered"));
+      resetForm();
+      await load();
+    } catch (cause) {
+      if (errorCode(cause) === "personal_mcp_needs_oauth" && oauthConnectable && !editing) {
+        // The service wants a sign-in: keep the member's input and offer it in place.
+        setAuthType("oauth");
+        setValue("");
+        setFormMessage({ text: personalMcpError(cause, t("signInHint")), tone: "info" });
+      } else {
+        setFormMessage({ text: personalMcpError(cause, t("error")), tone: "error" });
+      }
+    } finally {
+      setBusy(false);
+    }
   }
   function edit(connection: PersonalMcpConnection) {
     setEditing(connection);
@@ -142,6 +268,7 @@ export function PersonalMcpSettings() {
     setAuthType(connection.auth_type);
     setValue("");
     setHeader("X-API-Key");
+    setFormMessage(null);
     setFormOpen(true);
   }
   function refresh(connection: PersonalMcpConnection) {
@@ -158,7 +285,7 @@ export function PersonalMcpSettings() {
       setNotice(t("discovered"));
     });
   }
-  if (!enabled) return error ? <p role="alert">{t("error")}</p> : null;
+  if (!enabled) return error ? <p role="alert">{error}</p> : null;
   const hasConnections = connections.length > 0;
   const tabs: Array<[PersonalMcpTab, string]> = [
     ["connections", t("title")],
@@ -185,7 +312,14 @@ export function PersonalMcpSettings() {
             <strong>{t("riskTitle")}</strong>
             <p>{t("riskNotice")}</p>
           </div>
-          {error ? <p role="alert">{t("error")}</p> : null}
+          {error ? <p role="alert">{error}</p> : null}
+          {oauthNotice ? (
+            <OAuthReturnNotice
+              notice={oauthNotice}
+              connection={connections.find((item) => item.id === oauthNoticeConnection)}
+              loaded={connectionsLoaded}
+            />
+          ) : null}
           {slackNotice ? (
             <p role={slackNotice === "connected" ? "status" : "alert"}>
               {t(`slackNotice.${slackNotice}`)}
@@ -229,6 +363,8 @@ export function PersonalMcpSettings() {
                   key={`${connection.id}:${connection.version}`}
                   connection={connection}
                   busy={busy}
+                  signInAvailable={oauthConnectable}
+                  onSignIn={() => startSignIn({ connection_id: connection.id, version: connection.version }, false)}
                   onEdit={() => edit(connection)}
                   onRefresh={() => refresh(connection)}
                   onSave={(status, selected) =>
@@ -269,29 +405,21 @@ export function PersonalMcpSettings() {
                 className="personal-mcp-dialog-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void act(async () => {
-                    const discovered = await personalMcpApi<{
-                      changes: Record<string, string[]>;
-                    }>(
-                      editing ? `/${editing.id}` : "",
-                      editing ? "PUT" : "POST",
-                      {
-                        name,
-                        endpoint,
-                        auth_type: authType,
-                        ...(value ? { value, header } : {}),
-                        ...(editing ? { version: editing.version } : {}),
-                      },
-                    );
-                    setChanges(discovered.changes);
-                    setNotice(t("discovered"));
-                    resetForm();
-                  });
+                  if (authType === "oauth" && !editing) {
+                    startSignIn({ name, endpoint }, true);
+                    return;
+                  }
+                  void submitConnection();
                 }}
               >
                 <p className="personal-mcp-dialog-hint">
-                  {t("connectionFormHint")}
+                  {authType === "oauth" ? t("signInHint") : t("connectionFormHint")}
                 </p>
+                {formMessage ? (
+                  <p role={formMessage.tone === "error" ? "alert" : "status"} className={`personal-mcp-dialog-message is-${formMessage.tone}`}>
+                    {formMessage.text}
+                  </p>
+                ) : null}
                 <fieldset disabled={busy} className="personal-mcp-form-fields">
                   <label>
                     {t("name")}
@@ -313,21 +441,30 @@ export function PersonalMcpSettings() {
                       autoComplete="off"
                       spellCheck={false}
                       value={endpoint}
+                      // A signed-in connection keeps its address; another address is a new connection.
+                      readOnly={editing?.auth_type === "oauth"}
+                      aria-describedby={editing?.auth_type === "oauth" ? "personal-mcp-address-locked" : undefined}
                       onChange={(event) => setEndpoint(event.target.value)}
                     />
+                    {editing?.auth_type === "oauth" ? (
+                      <small id="personal-mcp-address-locked">{t("addressLocked")}</small>
+                    ) : null}
                   </label>
                   <label>
                     {t("auth")}
                     <select
                       name="authType"
                       value={authType}
-                      onChange={(event) =>
-                        setAuthType(event.target.value as typeof authType)
-                      }
+                      disabled={editing?.auth_type === "oauth"}
+                      onChange={(event) => {
+                        setAuthType(event.target.value as typeof authType);
+                        setFormMessage(null);
+                      }}
                     >
                       <option value="none">{t("none")}</option>
                       <option value="bearer">Bearer Token</option>
                       <option value="api_key">API Key</option>
+                      {oauthConnectable || editing?.auth_type === "oauth" ? <option value="oauth">{t("authSignIn")}</option> : null}
                     </select>
                   </label>
                   {authType === "api_key" ? (
@@ -343,7 +480,7 @@ export function PersonalMcpSettings() {
                       />
                     </label>
                   ) : null}
-                  {authType !== "none" ? (
+                  {authType !== "none" && authType !== "oauth" ? (
                     <label>
                       {t("credential")}
                       <input
@@ -370,7 +507,9 @@ export function PersonalMcpSettings() {
                         ? t("working")
                         : editing
                           ? t("refreshSave")
-                          : t("connect")}
+                          : authType === "oauth"
+                            ? t("continueSignIn")
+                            : t("connect")}
                     </button>
                   </div>
                 </fieldset>
@@ -395,15 +534,36 @@ export function PersonalMcpSettings() {
   );
 }
 
+function connectionStatusText(
+  t: ReturnType<typeof useTranslations>,
+  connection: PersonalMcpConnection,
+  signInAvailable: boolean,
+): string {
+  if (connection.auth_type === "oauth") {
+    if (!signInAvailable && connection.status !== "disabled") return t("signInOff");
+    if (connection.status === "ready") return t("signedInAt", { host: connection.provider_host ?? "" });
+    if (connection.status === "authorizing") return t("signInNotFinished");
+    if (connection.status === "needs_reauth") return t("signInEnded");
+  }
+  if (connection.status === "ready") return t("ready");
+  if (connection.status === "needs_reauth") return t("needsReauth");
+  if (connection.status === "unreachable") return t("unreachable");
+  return t("disabled");
+}
+
 function ConnectionEditor({
   connection,
   busy,
+  signInAvailable,
+  onSignIn,
   onEdit,
   onRefresh,
   onSave,
 }: {
   connection: PersonalMcpConnection;
   busy: boolean;
+  signInAvailable: boolean;
+  onSignIn: () => void;
   onEdit: () => void;
   onRefresh: () => void;
   onSave: (status: string, selected: string[]) => void;
@@ -441,18 +601,19 @@ function ConnectionEditor({
       setAffectedAgents([]);
     };
   }, [deleting, connection.tools]);
+  const signedIn = connection.auth_type === "oauth";
+  const authorizing = signedIn && connection.status === "authorizing";
+  // A signed-in connection whose sign-in ended, or that never finished signing in, waits for the owner.
+  const waitingForSignIn = authorizing || (signedIn && connection.status === "needs_reauth");
+  const offerSignIn = signedIn && signInAvailable;
+  // Enabling cannot stand in for signing in again: a connection waiting for sign-in can only be turned off.
+  const canEnable = connection.status !== "ready" && !waitingForSignIn;
   return (
     <fieldset disabled={busy} className="personal-mcp-connection">
       <legend>{connection.name}</legend>
       <p>{connection.endpoint}</p>
       <p className={`personal-mcp-connection-status is-${connection.status}`}>
-        {connection.status === "ready"
-          ? t("ready")
-          : connection.status === "needs_reauth"
-            ? t("needsReauth")
-            : connection.status === "unreachable"
-              ? t("unreachable")
-              : t("disabled")}
+        {connectionStatusText(t, connection, signInAvailable)}
       </p>
       {connection.tools.map((tool) => (
         <label key={tool.id}>
@@ -476,41 +637,57 @@ function ConnectionEditor({
           </span>
         </label>
       ))}
-      <div className="personal-mcp-tool-selection-actions">
-        <button
-          className="personal-mcp-connection-save"
-          type="button"
-          onClick={() => onSave("ready", [...selected])}
-        >
-          {t("saveTools")}
-        </button>
-      </div>
+      {waitingForSignIn ? null : (
+        <div className="personal-mcp-tool-selection-actions">
+          <button
+            className="personal-mcp-connection-save"
+            type="button"
+            onClick={() => onSave("ready", [...selected])}
+          >
+            {t("saveTools")}
+          </button>
+        </div>
+      )}
       <div className="personal-mcp-connection-actions">
-        <button type="button" onClick={onRefresh}>
-          {t("refreshTools")}
-        </button>
-        <button
-          type="button"
-          className={
-            connection.status === "ready"
-              ? "personal-mcp-connection-disable"
-              : "personal-mcp-connection-enable"
-          }
-          onClick={() =>
-            onSave(connection.status === "ready" ? "disabled" : "ready", [
-              ...selected,
-            ])
-          }
-        >
-          {connection.status === "ready" ? t("disable") : t("enable")}
-        </button>
-        <button
-          className="personal-mcp-connection-edit"
-          type="button"
-          onClick={onEdit}
-        >
-          {t("editConnectionAction")}
-        </button>
+        {offerSignIn && waitingForSignIn ? (
+          <button className="personal-mcp-connection-sign-in" type="button" onClick={onSignIn}>
+            {authorizing ? t("continueSignInAction") : t("signInAgain")}
+          </button>
+        ) : null}
+        {waitingForSignIn ? null : (
+          <button type="button" onClick={onRefresh}>
+            {t("refreshTools")}
+          </button>
+        )}
+        {offerSignIn && !waitingForSignIn ? (
+          <button type="button" onClick={onSignIn}>
+            {t("signInAgain")}
+          </button>
+        ) : null}
+        {authorizing ? null : (
+          <>
+            <button
+              type="button"
+              className={
+                canEnable
+                  ? "personal-mcp-connection-enable"
+                  : "personal-mcp-connection-disable"
+              }
+              onClick={() =>
+                onSave(canEnable ? "ready" : "disabled", [...selected])
+              }
+            >
+              {canEnable ? t("enable") : t("disable")}
+            </button>
+            <button
+              className="personal-mcp-connection-edit"
+              type="button"
+              onClick={onEdit}
+            >
+              {t("editConnectionAction")}
+            </button>
+          </>
+        )}
         <button
           className="personal-mcp-connection-delete"
           type="button"
@@ -522,6 +699,7 @@ function ConnectionEditor({
       {deleting ? (
         <div>
           <p>{t("deleteNotice")}</p>
+          {signedIn ? <p>{t("deleteSignInNotice")}</p> : null}
           {affectedAgents.length ? (
             <p>
               {t("deleteAffectsAgents", {

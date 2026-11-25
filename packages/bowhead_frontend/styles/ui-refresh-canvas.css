@@ -2265,3 +2265,100 @@
 :root:root .result-file-viewer .artifact-viewer-note.error {
   color: var(--c-err-ink);
 }
+
+/* ═══ Narrow desktop layout (docs/sprints/narrow-desktop-layout-2026-11-24, design §4): measured priority overflow ═══
+ * lib/use-toolbar-fit.ts writes `data-fit` tokens on the desktop report toolbar, first to last: a transient
+ * mode row (`mode-status` / `mode-edit`), then trust-short, export-icon, edit-icon, figures-short,
+ * export-menu, share-menu. Nothing is clipped; compressed items keep their full label as visually hidden text. */
+:root:root .results-report-unified-toolbar > .results-report-source-summary {
+  flex: 0 1 auto;
+}
+/* An idle status group holds only the visually hidden announcer: no width, no gap of its own. */
+:root:root .results-report-unified-toolbar > .results-report-status-group:not(:has(> :not(.rc-toolbar-sr-only))) {
+  flex: 0 0 0;
+  min-width: 0;
+}
+:root:root .rc-trust-short,
+:root:root .report-edit-icon {
+  display: none;
+}
+:root:root .results-report-unified-toolbar[data-fit~="trust-short"] :is(.citation-linkage, .source-count) > .rc-trust-short,
+:root:root .results-report-unified-toolbar[data-fit~="figures-short"] .figure-review > .rc-trust-short {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+:root:root .results-report-unified-toolbar[data-fit~="trust-short"] :is(.citation-linkage, .source-count, .rc-trust-collecting) > .rc-trust-full,
+:root:root .results-report-unified-toolbar[data-fit~="figures-short"] .figure-review > .rc-trust-full,
+:root:root .results-report-unified-toolbar[data-fit~="export-icon"] .ws-export > .ws-export-label,
+:root:root .results-report-unified-toolbar[data-fit~="edit-icon"] .v2-edit-toggle-btn > .report-edit-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root:root .results-report-unified-toolbar[data-fit~="edit-icon"] .v2-edit-toggle-btn > .report-edit-icon {
+  display: block;
+}
+:root:root .results-report-unified-toolbar[data-fit~="export-menu"] .ws-menu-wrap:has(> .ws-export),
+:root:root .results-report-unified-toolbar[data-fit~="share-menu"] .results-report-share {
+  display: none;
+}
+/* Mode row: a flex line break, then the writing hint and the active mode group share the second row. */
+:root:root .results-report-unified-toolbar:is([data-fit~="mode-status"], [data-fit~="mode-edit"])::after {
+  content: "";
+  flex-basis: 100%;
+  height: 0;
+  order: 23;
+}
+:root:root .results-report-unified-toolbar:is([data-fit~="mode-status"], [data-fit~="mode-edit"]) > .results-report-source-summary {
+  margin-right: auto;
+}
+:root:root .results-report-unified-toolbar:is([data-fit~="mode-status"], [data-fit~="mode-edit"]) > .results-report-writing-hint {
+  order: 24;
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  align-self: center;
+}
+:root:root .results-report-unified-toolbar[data-fit~="mode-status"] > .results-report-status-group {
+  order: 25;
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+:root:root .results-report-unified-toolbar[data-fit~="mode-edit"] > .results-report-actions {
+  display: contents;
+}
+:root:root .results-report-unified-toolbar[data-fit~="mode-edit"] .results-report-edit-controls {
+  order: 25;
+  margin-left: auto;
+}
+/* File header (design §5): the meta line never paints past its box; action labels become icons in the order
+   more-icon, full-icon, reference-icon, edit-icon; `stacked` puts title over actions only as the last resort.
+   Download keeps its label. The ≤640 px stacked block and the phone toolbar keep their own rules. */
+:root:root .artifact-viewer-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .artifact-viewer-head[data-fit~="more-icon"] [data-fit-key="more"] > .result-action-label,
+:root:root .artifact-viewer-head[data-fit~="full-icon"] [data-fit-key="full"] > .result-action-label,
+:root:root .artifact-viewer-head[data-fit~="reference-icon"] [data-fit-key="reference"] > .result-action-label,
+:root:root .artifact-viewer-head[data-fit~="edit-icon"] [data-fit-key="edit"] > .result-action-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root:root .artifact-viewer-head[data-fit~="stacked"] {
+  flex-direction: column;
+  align-items: stretch;
+}
+:root:root .artifact-viewer-head[data-fit~="stacked"] .artifact-viewer-actions {
+  justify-content: flex-start;
+}

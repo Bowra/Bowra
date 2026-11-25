@@ -869,6 +869,23 @@ def _not_in_body(sections: list[Any]) -> dict[str, Any]:
     return {"not_in_body": left, "not_in_body_note": _NOT_IN_BODY_NOTE} if left else {}
 
 
+def _another_titled_chapter(section: Any, chapters: list[Any]) -> bool:
+    """One titled chapter whose title differs from the writer's only titled section: another chapter, not a rewrite.
+
+    The continuation guard rewrote the writer's only section with any single chapter, so a writer that added its
+    chapters one call at a time replaced the previous one (116, 1.7.73, `an observed task` lost 品类销售额排名).
+    The same title, or an untitled side, is still a rewrite in place.
+    """
+    from bowhead_core.report_chapters import normalize_title
+
+    if len(chapters) != 1 or chapters[0].is_lead:
+        return False
+    payload = getattr(section, "payload", None)
+    meta = payload.get("_meta") if isinstance(payload, dict) else None
+    current = normalize_title(str((meta or {}).get("chapter_title") or "")) if isinstance(meta, dict) else ""
+    return bool(current) and current != normalize_title(chapters[0].title)
+
+
 async def _reconcile_chapters(
     canvas_store: Any,
     ctx: Any,
@@ -924,7 +941,7 @@ async def _reconcile_chapters(
         "chapters": len(payloads),
         "owner": writer,
         # B2-2: old text recommended canvas_delete_section, unavailable to compute (canvas-writer only): unreachable tool.
-        "hint": "整篇重投已按章合并：同标题的章就地更新，新章追加在末尾，旧章保留、不会自动删除。",
+        "hint": "已按章标题合并：同标题的章就地更新，新标题的章追加在你已有的章之后；旧章保留，不会自动删除。",
         **_not_in_body([s for s in existing if s.id not in touched]),
     }
 
@@ -1069,6 +1086,10 @@ async def _remove_report_sections(args: dict[str, Any], ctx: Any) -> dict[str, A
             for sid in deleted:
                 await _emit_section_removed(ctx, canvas.id, sid)
         _forget_removed_sections(ctx, writer, deleted_ids)
+        from bowhead_core.report_read_material import forget_removed_report_sections
+
+        # A read of these sections earlier in this Turn must not end the Turn once they are gone.
+        forget_removed_report_sections(ctx, deleted_ids)
     result: dict[str, Any] = {
         "ok": bool(removed),
         "removed": removed,
@@ -1392,7 +1413,7 @@ async def _write_report_section(args: dict[str, Any], ctx: Any) -> dict[str, Any
                 # recorded sections were deleted → drop stale mapping, append fresh.
                 if my is not None:
                     my.pop(key, None)
-            elif _chapters is not None and (len(alive) > 1 or len(_chapters) > 1):
+            elif _chapters is not None and (len(alive) > 1 or len(_chapters) > 1 or _another_titled_chapter(by_id[alive[0]], _chapters)):
                 # canvas-elements step 2 (§2.3): whole-document resubmit reconciles chapters: same title patch, new append, old retained.
                 _res = await _reconcile_chapters(
                     canvas_store, ctx, canvas.id, turn_id, writer, kind, [by_id[sid] for sid in alive], _chapters, payload, _baked_unv

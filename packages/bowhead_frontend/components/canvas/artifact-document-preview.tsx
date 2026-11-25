@@ -75,6 +75,10 @@ type DocumentProfile = "pdf" | "docx" | "pptx";
 export type DocumentPreviewCache = {
   pdfData?: ArrayBuffer;
   pdfRenderedThru?: number;
+  /** The page most in view, kept up to date while pages show (a deck editor opens on it). */
+  visiblePage?: number;
+  /** Scroll to this page once it renders, then forget it (leaving a deck editor, design §13.1). */
+  focusPage?: number;
   docxHtml?: string;
   docxWarningCount?: number;
 };
@@ -87,6 +91,7 @@ export function ArtifactDocumentPreview({
   onError,
   cacheRef,
   thumbnails = false,
+  onReferencePage,
 }: {
   profile: DocumentProfile;
   href: string;
@@ -95,6 +100,8 @@ export function ArtifactDocumentPreview({
   onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
   cacheRef: MutableRefObject<DocumentPreviewCache>;
   thumbnails?: boolean;
+  /** A deck's pages each offer 「引用这一页」 (design §13.2). */
+  onReferencePage?: (page: number) => void;
 }) {
   if (profile !== "docx") {
     return (
@@ -106,6 +113,7 @@ export function ArtifactDocumentPreview({
         cacheRef={cacheRef}
         presentation={profile === "pptx"}
         thumbnails={thumbnails}
+        onReferencePage={profile === "pptx" ? onReferencePage : undefined}
       />
     );
   }
@@ -127,6 +135,7 @@ function PdfArtifactPreview({
   cacheRef,
   presentation,
   thumbnails,
+  onReferencePage,
 }: {
   href: string;
   title: string;
@@ -135,9 +144,23 @@ function PdfArtifactPreview({
   cacheRef: MutableRefObject<DocumentPreviewCache>;
   presentation: boolean;
   thumbnails: boolean;
+  onReferencePage?: (page: number) => void;
 }) {
   const t = useTranslations("artifact_viewer");
   const pagesRef = useRef<HTMLDivElement>(null);
+  // Pages are drawn outside React; their buttons read the latest handler and copy from here.
+  const pageActionRef = useRef<PageAction | null>(null);
+  const pageStatusRef = useRef<HTMLSpanElement>(null);
+  pageActionRef.current = onReferencePage
+    ? {
+        label: t("reference_page"),
+        labelFor: (page) => t("reference_page_label", { page }),
+        doneLabelFor: (page) => t("referenced_page_label", { page }),
+        doneLabel: t("referenced_page"),
+        onSelect: onReferencePage,
+        announce: (text) => { if (pageStatusRef.current) pageStatusRef.current.textContent = text; },
+      }
+    : null;
   const pdfRef = useRef<PdfDocumentLike | null>(null);
   const cancelledRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -194,13 +217,19 @@ function PdfArtifactPreview({
         setPageCount(pdf.numPages);
         setLoading(false);
         const end = Math.min(
-          Math.max(PDF_PAGES_PER_BATCH, cacheRef.current.pdfRenderedThru ?? 0),
+          Math.max(PDF_PAGES_PER_BATCH, cacheRef.current.pdfRenderedThru ?? 0, cacheRef.current.focusPage ?? 0),
           pdf.numPages,
         );
-        await renderPdfPages(pdf, 1, end, pagesRef.current, () => cancelled, title, presentation);
+        await renderPdfPages(pdf, 1, end, pagesRef.current, () => cancelled, title, presentation, () => pageActionRef.current);
         if (!cancelled) {
           cacheRef.current.pdfRenderedThru = end;
           setRenderedThru(end);
+          const focus = cacheRef.current.focusPage;
+          cacheRef.current.focusPage = undefined;
+          if (focus) {
+            pagesRef.current?.querySelector<HTMLElement>(`[data-page="${focus}"]`)?.scrollIntoView({ block: "start" });
+            cacheRef.current.visiblePage = focus;
+          }
         }
       } catch (cause) {
         if (presentation && cause instanceof PresentationPreviewBusyError) {
@@ -237,6 +266,7 @@ function PdfArtifactPreview({
         () => cancelledRef.current,
         title,
         presentation,
+        () => pageActionRef.current,
       );
       if (!cancelledRef.current) {
         cacheRef.current.pdfRenderedThru = end;
@@ -249,6 +279,22 @@ function PdfArtifactPreview({
       if (!cancelledRef.current) setLoadingMore(false);
     }
   };
+
+  // The page most in view, for a deck editor opened from here.
+  useEffect(() => {
+    const container = pagesRef.current;
+    if (!presentation || !container || typeof IntersectionObserver === "undefined") return;
+    const ratios = new Map<number, number>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) ratios.set(Number((entry.target as HTMLElement).dataset.page), entry.intersectionRatio);
+      let best = 0;
+      let bestRatio = 0;
+      for (const [page, ratio] of ratios) if (ratio > bestRatio || (ratio === bestRatio && ratio > 0 && page < best)) { best = page; bestRatio = ratio; }
+      if (best) cacheRef.current.visiblePage = best;
+    }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
+    container.querySelectorAll<HTMLElement>("[data-page]").forEach((figure) => observer.observe(figure));
+    return () => observer.disconnect();
+  }, [cacheRef, presentation, renderedThru]);
 
   if (error) {
     return (
@@ -269,6 +315,7 @@ function PdfArtifactPreview({
 
   return (
     <div className="artifact-document-preview" data-testid="artifact-preview-pdf">
+      <span className="sr-only" role="status" ref={pageStatusRef} />
       <div className="artifact-document-status" aria-live="polite">
         {loading
           ? loadingMessage
@@ -301,6 +348,21 @@ type PdfDocumentLike = {
   }>;
 };
 
+type PageAction = {
+  label: string;
+  /** Names start with the visible text (WCAG 2.5.3): 「引用这一页 · 第 N 页」, then 「已引用 · 第 N 页」. */
+  labelFor: (page: number) => string;
+  doneLabelFor: (page: number) => string;
+  /** Shown on the button for a moment after it is used, instead of a toast over the header. */
+  doneLabel: string;
+  onSelect: (page: number) => void;
+  announce: (text: string) => void;
+};
+
+const PAGE_DONE_ICON = '<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>';
+
+const PAGE_ACTION_ICON = '<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
 async function renderPdfPages(
   pdf: PdfDocumentLike,
   start: number,
@@ -309,8 +371,12 @@ async function renderPdfPages(
   isCancelled: () => boolean,
   title: string,
   presentation: boolean,
+  pageAction: () => PageAction | null = () => null,
 ): Promise<void> {
   if (!container) return;
+  // One id prefix per list of pages, so page-number ids stay unique when two previews are open.
+  container.dataset.pagesId ||= `pdf-pages-${Math.random().toString(36).slice(2, 8)}`;
+  const pageIdPrefix = container.dataset.pagesId;
   for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
     if (isCancelled()) return;
     const page = await pdf.getPage(pageNumber);
@@ -323,9 +389,52 @@ async function renderPdfPages(
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
+    canvas.setAttribute("role", "img");
     canvas.setAttribute("aria-label", `${title} · ${pageNumber}`);
+    figure.dataset.page = String(pageNumber);
     const caption = document.createElement("figcaption");
-    caption.textContent = String(pageNumber);
+    const number = document.createElement("span");
+    number.textContent = String(pageNumber);
+    // The figure is named by its page number, not by the caption's button.
+    number.id = `${pageIdPrefix}-${pageNumber}`;
+    figure.setAttribute("aria-labelledby", number.id);
+    caption.append(number);
+    const action = pageAction();
+    if (action) {
+      caption.className = "has-action";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "artifact-pdf-page-action";
+      const show = (done: boolean) => {
+        const current = pageAction() ?? action;
+        button.setAttribute("aria-label", done ? current.doneLabelFor(pageNumber) : current.labelFor(pageNumber));
+        button.innerHTML = done ? PAGE_DONE_ICON : PAGE_ACTION_ICON;
+        button.append(document.createTextNode(done ? current.doneLabel : current.label));
+        if (done) button.dataset.referenced = "true";
+        else delete button.dataset.referenced;
+      };
+      show(false);
+      let timer: number | undefined;
+      button.addEventListener("click", () => {
+        const current = pageAction();
+        if (!current) return;
+        current.onSelect(pageNumber);
+        // One reference per file: the page used last is the one confirmed.
+        container.querySelectorAll<HTMLButtonElement>(".artifact-pdf-page-action[data-referenced]").forEach((other) => {
+          if (other !== button) other.dispatchEvent(new CustomEvent("page-action-reset"));
+        });
+        show(true);
+        current.announce(current.doneLabelFor(pageNumber));
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => show(false), 2500);
+      });
+      button.addEventListener("page-action-reset", () => {
+        window.clearTimeout(timer);
+        show(false);
+      });
+      caption.prepend(document.createElement("span"));
+      caption.append(button);
+    }
     figure.append(canvas, caption);
     container.appendChild(figure);
     const context = canvas.getContext("2d");

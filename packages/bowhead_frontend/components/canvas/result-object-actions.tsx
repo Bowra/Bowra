@@ -49,6 +49,7 @@ export function ResultObjectActions({
   feedbackRecorded = false,
   compact,
   onReference,
+  referenceLabel,
   onDownload,
   onModeChange,
   onOpenHistory,
@@ -65,6 +66,8 @@ export function ResultObjectActions({
   feedbackRecorded?: boolean;
   compact?: CompactResultActions;
   onReference?: () => void;
+  /** Replaces 「在对话中引用」 where it would be ambiguous, such as a deck's whole file. */
+  referenceLabel?: string;
   onDownload?: () => void;
   onModeChange?: (mode: ResultsViewerMode) => void;
   onOpenHistory?: (trigger?: HTMLElement) => void;
@@ -126,16 +129,17 @@ export function ResultObjectActions({
           </button>
         ) : null}
         {canEditPresentation && !compact ? (
-          <button type="button" className="result-object-action-primary"
+          <button type="button" className="result-object-action-primary" data-fit-key="edit" title={t("edit_presentation")}
             onClick={(event) => onEditPresentation?.(event.currentTarget)}>
             <Edit size={13} aria-hidden="true" />
-            {t("edit_presentation")}
+            <span className="result-action-label">{t("edit_presentation")}</span>
           </button>
         ) : null}
         {canReference && !compact ? (
-          <button type="button" className="result-object-action-primary" onClick={onReference}>
+          <button type="button" className="result-object-action-primary" data-fit-key="reference"
+            title={referenceLabel ?? t("reference_in_chat")} onClick={onReference}>
             <Chat size={13} aria-hidden="true" />
-            {t("reference_in_chat")}
+            <span className="result-action-label">{referenceLabel ?? t("reference_in_chat")}</span>
           </button>
         ) : null}
         {downloadIsPrimary && canDownload ? (
@@ -159,10 +163,11 @@ export function ResultObjectActions({
               className="result-object-actions-trigger"
               aria-label={menuLabel}
               title={menuLabel}
+              data-fit-key="more"
               {...menu.getReferenceProps()}
             >
               <MoreH size={15} aria-hidden="true" />
-              {compact ? null : <span>{menuLabel}</span>}
+              {compact ? null : <span className="result-action-label">{menuLabel}</span>}
             </button>
             <MenuFloating menu={menu}>
               <div
@@ -182,7 +187,7 @@ export function ResultObjectActions({
                 {compact && canReference && onReference ? (
                   <ResultMenuButton onSelect={onReference}>
                     <Chat size={13} aria-hidden="true" />
-                    {t("reference_in_chat")}
+                    {referenceLabel ?? t("reference_in_chat")}
                   </ResultMenuButton>
                 ) : null}
                 {downloadInMenu ? (

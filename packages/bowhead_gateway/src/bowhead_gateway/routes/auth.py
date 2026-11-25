@@ -149,6 +149,11 @@ def _agent_eval_alignment_feature_on() -> bool:
     return alignment_enabled()
 
 
+def _agent_release_bar_feature_on() -> bool:
+    """FEATURE_AGENT_RELEASE_BAR: the Agent workbench shows the release bar (rollout register: Agent release bar)."""
+    return os.environ.get("FEATURE_AGENT_RELEASE_BAR", "0").strip().lower() in {"1", "true", "yes"}
+
+
 def _shopify_plugin_feature_on() -> bool:
     from bowhead_core.builtin_shopify_tool import feature_enabled
 
@@ -2703,6 +2708,7 @@ async def me(
             "team_onboarding": False,
             "space_admin_v2": False,
             "subagent_management_v2": False,
+            "agent_release_bar": False,
             "subagent_authoring": {
                 "authoring": False,
                 "draft_chat_edit": False,
@@ -2820,6 +2826,8 @@ async def me(
         "shopify_plugin": shopify_enabled,
         # Deployment switch for the Coach alignment loop: its Chat cards, review lines and held-out controls.
         "agent_eval_alignment": _agent_eval_alignment_feature_on(),
+        # Deployment switch for the Agent workbench release bar (replaces the release cards and summaries).
+        "agent_release_bar": _agent_release_bar_feature_on(),
         # The notification center is on (BOWHEAD_NOTIFICATION_CENTER): the three keys gate the
         # Notifications help, the task form's "only when flagged" and the reminder-email switch.
         "notification_reach": _notification_center_on(),

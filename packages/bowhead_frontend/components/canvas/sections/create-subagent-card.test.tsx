@@ -6,8 +6,6 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderIntl } from "@/__tests__/intl-render";
 import zhMessages from "@/messages/zh-CN.json";
 import type { TeamSubagentOwnerManagerDetail } from "@/lib/team-subagents-api";
-import type { ConfigDraftResult } from "@/lib/config-drafts-api";
-import type { CreateSubagentCardProps } from "./create-subagent-card";
 
 // cca P3 — CreateSubagentCard edit mode: prefill an existing subagent + PATCH (not create),
 // with name + visibility read-only. The create path must stay unchanged.
@@ -116,149 +114,12 @@ afterEach(() => {
 });
 
 describe("CreateSubagentCard edit mode", () => {
-  it("only describes Chat as connected when this editor receives its Chat draft", () => {
+  it("tells the user Chat is not connected to a manual creation card", () => {
     getToolsCatalogMock.mockResolvedValue({ team_tools: [], native_tools: [], text_only_allowed: false });
     renderIntl(<CreateSubagentCard onClose={() => {}} />);
     expect(screen.getByText(/当前对话未连接这份创建配置/)).toBeTruthy();
-    cleanup();
-
-    const chatDraft = {
-      status: "ok", form_id: "team_subagent", fields: { description: "只分析月度销售" },
-      field_meta: { description: { origin: "generated", needs_confirm: false, note: null } },
-      issues: [], notes: {}, clarification: null, secret_redacted: false,
-    } as ConfigDraftResult;
-    renderIntl(<CreateSubagentCard editing={EXISTING} initialDraft={chatDraft}
-      draftSubscribe={() => () => {}} onClose={() => {}} />);
-    expect(screen.getByText(/当前对话已连接此智能体/)).toBeTruthy();
   });
 
-  it("saves a revisioned agent as a working copy while preserving unrelated definition, listing and audience", async () => {
-    saveAgentWorkingCopyMock.mockResolvedValue({ id: "awc_1" });
-    const audience = { schema_version: 1, effective_mode: "private", user_ids: [], group_ids: [] };
-    const definition = { system_prompt: "你是销售分析师", tool_refs: ["bi_query"], max_iterations: 12,
-      model: "analyst", output_schema: null, skill_grants: [], primary_capability_ref: "cap_visualize@1" };
-    const revisioned = {
-      detail: {
-        working_copy: null,
-        live: { definition, listing: { display_name: "销售助手", description: "分析销售数据", source_locale: "zh-CN", taxonomy: { domain: "sales" } }, audience },
-      },
-      catalog: {
-        tools: [{ stable_ref: "bi_query", source_kind: "native", selectable: true, risk: "read", description: "查询", locked_reason: null }],
-        skills: [], model_policy: { allowed_roles: ["analyst"], effective_role: "analyst" },
-      },
-    } as unknown as NonNullable<CreateSubagentCardProps["revisioned"]>;
-    renderIntl(<CreateSubagentCard editing={EXISTING} revisioned={revisioned} onClose={() => {}} />);
-    fireEvent.click(screen.getByText(/下一步 · 选择工具/));
-    fireEvent.click(screen.getByText(/下一步 · 配置/));
-    await waitFor(() => expect(screen.getByText("保存修改")).not.toHaveProperty("disabled", true));
-    fireEvent.click(screen.getByText("保存修改"));
-    await waitFor(() => expect(saveAgentWorkingCopyMock).toHaveBeenCalledWith("sa_1", expect.objectContaining({
-      definition: expect.objectContaining({ primary_capability_ref: "cap_visualize@1", tool_refs: ["bi_query"] }),
-      listing: expect.objectContaining({ taxonomy: { domain: "sales" } }),
-      audience,
-      expected_row_version: null,
-    })));
-    expect(patchSubagentMock).not.toHaveBeenCalled();
-  });
-  it("offers Plugins when editing a revisioned agent and writes only changed selections", async () => {
-    saveAgentWorkingCopyMock.mockResolvedValue({ id: "awc_1" });
-    const audience = { schema_version: 1, effective_mode: "private", user_ids: [], group_ids: [] };
-    const definition = { system_prompt: "你是销售分析师", tool_refs: ["bi_query"], max_iterations: 12,
-      model: "analyst", output_schema: null, skill_grants: [], builtin_plugin_ids: ["builtin:designs"] };
-    const revisioned = {
-      detail: { working_copy: null, live: { definition, listing: { display_name: "销售助手", description: "分析销售数据" }, audience } },
-      catalog: {
-        tools: [{ stable_ref: "bi_query", source_kind: "native", selectable: true, risk: "read", description: "查询", locked_reason: null }],
-        skills: [], model_policy: { allowed_roles: ["analyst"], effective_role: "analyst" },
-        plugins: {
-      builtin: [
-        {
-          id: "builtin:designs", name: "designs", version: 1, family: "general",
-          listing: { "zh-CN": { name: "设计稿", description: "创建设计稿" } }, tools: ["canvas_create_design"], prompt_modules: [],
-          ready: true, unavailable_tools: [], selectable: true, locked_reason: null, team_disabled: false, my_disabled: false,
-        },
-        {
-          id: "builtin:web-research", name: "web-research", version: 1, family: "general",
-          listing: { "zh-CN": { name: "联网研究", description: "搜索网页" } }, tools: ["web_search"], prompt_modules: [],
-          ready: true, unavailable_tools: [], selectable: true, locked_reason: null, team_disabled: false, my_disabled: false,
-        },
-      ],
-      team: [],
-    },
-      },
-    } as unknown as NonNullable<CreateSubagentCardProps["revisioned"]>;
-    renderIntl(<CreateSubagentCard editing={EXISTING} revisioned={revisioned} onClose={() => {}} />);
-    fireEvent.click(screen.getByText(/下一步 · 选择工具/));
-    expect(screen.getByRole("list", { name: "已选插件" }).textContent).toContain("设计稿");
-    fireEvent.click(screen.getByRole("button", { name: "+ 联网研究" }));
-    fireEvent.click(screen.getByText(/下一步 · 配置/));
-    await waitFor(() => expect(screen.getByText("保存修改")).not.toHaveProperty("disabled", true));
-    fireEvent.click(screen.getByText("保存修改"));
-    await waitFor(() => expect(saveAgentWorkingCopyMock).toHaveBeenCalledWith("sa_1", expect.objectContaining({
-      definition: expect.objectContaining({ builtin_plugin_ids: ["builtin:designs", "builtin:web-research"] }),
-    })));
-    expect(saveAgentWorkingCopyMock.mock.calls[0][1].definition).not.toHaveProperty("capability_ids");
-  });
-  it("explains skill audience and dependency restrictions in the revisioned editor", async () => {
-    const audience = { schema_version: 1, effective_mode: "teamwide", user_ids: [], group_ids: [] };
-    const grant = { source_kind: "team", stable_ref: "skill@1", version: 1 };
-    const revisioned = {
-      detail: {
-        working_copy: null,
-        live: {
-          definition: { system_prompt: "你是销售分析师", tool_refs: ["bi_query"], max_iterations: 12, model: "analyst", skill_grants: [] },
-          listing: { display_name: "销售助手", description: "分析销售数据" }, audience,
-        },
-      },
-      catalog: {
-        tools: [{ stable_ref: "bi_query", source_kind: "native", selectable: true, risk: "read", description: "查询", locked_reason: null }],
-        skills: [
-          { name: "private-sop", description: "个人流程", source_kind: "user", allowed_audiences: ["private"], grant },
-          { name: "sales-sop", description: "销售流程", source_kind: "team", allowed_audiences: ["teamwide"], required_skills: ["base-sop"], grant },
-          { name: "base-sop", description: "基础流程", source_kind: "team", allowed_audiences: ["teamwide"], grant },
-        ],
-        model_policy: { allowed_roles: ["analyst"], effective_role: "analyst" },
-      },
-    } as unknown as NonNullable<CreateSubagentCardProps["revisioned"]>;
-    renderIntl(<CreateSubagentCard editing={EXISTING} revisioned={revisioned} onClose={() => {}} />);
-    fireEvent.click(screen.getByText(/下一步 · 选择工具/));
-    fireEvent.click(screen.getByText(/下一步 · 配置/));
-    fireEvent.click(screen.getByText("自动读取的技能"));
-    expect(screen.getByText(/此技能的可用范围未覆盖智能体的所有使用者/)).toBeTruthy();
-    expect(within(screen.getByText("private-sop").closest("label")!).getByRole("checkbox")).toHaveProperty("disabled", true);
-    expect(screen.getByText(/还需选择依赖技能：base-sop/)).toBeTruthy();
-  });
-  it("only overlays suggested fields and protects a manual edit from later chat updates", async () => {
-    getToolsCatalogMock.mockResolvedValue({ team_tools: [], native_tools: ["bi_query"], text_only_allowed: false });
-    let apply: ((draft: ConfigDraftResult) => { filled: number }) | undefined;
-    const draft = (fields: Record<string, unknown>): ConfigDraftResult => ({
-      status: "ok", form_id: "team_subagent", fields,
-      field_meta: Object.fromEntries(Object.keys(fields).map((key) => [key, { origin: "generated", needs_confirm: false, note: null }])),
-      issues: [], notes: {}, clarification: null, secret_redacted: false,
-    } as ConfigDraftResult);
-    renderIntl(<CreateSubagentCard editing={EXISTING} initialDraft={draft({ description: "只分析月度销售" })}
-      draftSubscribe={(callback) => { apply = callback; return () => { apply = undefined; }; }} onClose={() => {}} />);
-    await waitFor(() => expect(screen.getByDisplayValue("只分析月度销售")).toBeTruthy());
-    expect(screen.getByDisplayValue("你是销售分析师")).toBeTruthy();
-    fireEvent.change(screen.getByDisplayValue("只分析月度销售"), { target: { value: "我手动写的说明" } });
-    act(() => { apply?.(draft({ description: "AI 再次改写", system_prompt: "请先校验口径" })); });
-    expect(screen.getByDisplayValue("我手动写的说明")).toBeTruthy();
-    expect(screen.getByDisplayValue("请先校验口径")).toBeTruthy();
-  });
-  it("clears an existing output schema when chat explicitly proposes null", async () => {
-    getToolsCatalogMock.mockResolvedValue({ team_tools: [], native_tools: ["bi_query"], text_only_allowed: false });
-    const draft = {
-      status: "ok", form_id: "team_subagent", fields: { output_schema: null },
-      field_meta: { output_schema: { origin: "generated", needs_confirm: false, note: null } },
-      issues: [], notes: {}, clarification: null, secret_redacted: false,
-    } as ConfigDraftResult;
-    renderIntl(<CreateSubagentCard editing={{ ...EXISTING, output_schema: { type: "object" } }} initialDraft={draft}
-      draftSubscribe={() => () => {}} onClose={() => {}} />);
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "输出格式" })).toHaveProperty("value", ""));
-    await waitFor(() => expect(screen.getByText("保存修改")).not.toHaveProperty("disabled", true));
-    fireEvent.click(screen.getByText("保存修改"));
-    await waitFor(() => expect(patchSubagentMock).toHaveBeenCalledWith("sa_1", expect.objectContaining({ output_schema: null }), EXISTING.etag));
-  });
   it("requires work instructions before leaving the first step", () => {
     getToolsCatalogMock.mockResolvedValue({ team_tools: [], native_tools: ["bi_query"] });
     renderIntl(<CreateSubagentCard onClose={() => {}} />);

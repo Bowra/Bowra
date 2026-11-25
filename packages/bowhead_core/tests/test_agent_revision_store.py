@@ -37,6 +37,7 @@ from bowhead_core.agent_safety_check_service import (
     AgentSafetyCheckService,
     PersistedAgentSemanticEvidenceResolver,
 )
+from bowhead_core.agent_version_service import read_agent_version_workbench_conn
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.catalog_localization import (
     CatalogLocalizationStore,
@@ -2563,6 +2564,16 @@ async def test_reject_records_self_review_truthfully_and_releases_name(tmp_path)
         ).fetchone()
     assert decision == ("rejected", 0, "policy_not_met")
     assert claim is None
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        workbench = await read_agent_version_workbench_conn(db, team_id="team_release", agent_id="osa_release", actor_user_id="user_owner")
+    assert workbench["latest_decision"] == {
+        "candidate_id": str(pending.candidate_id),
+        "decided_at": workbench["latest_decision"]["decided_at"],
+        "reason_code": "policy_not_met",
+        "state": "rejected",
+    }
+    assert workbench["latest_decision"]["decided_at"]
 
 
 @pytest.mark.asyncio

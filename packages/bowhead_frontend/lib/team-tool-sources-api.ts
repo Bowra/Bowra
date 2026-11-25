@@ -96,6 +96,8 @@ export interface TeamToolSourcePublic {
   status: string;
   tools_count: number;
   prompts_count?: number;
+  /** OAuth sources only: the service stopped renewing the sign-in; an administrator must authorize again. */
+  oauth_sign_in_ended?: boolean;
   /** The real N imported operations (= selected_op_ids.length) — the success-screen count. */
   op_count: number;
   /** Present on create: operations currently advertised to Agents. */

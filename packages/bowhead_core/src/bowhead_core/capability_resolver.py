@@ -384,17 +384,13 @@ class CapabilityResolver:
                 if source is None or not source.base_url:
                     continue
                 headers = await auth.get_headers(team_id, source_id)
-                oauth_provider: Any = None
+                header_source: Any = None
                 if source.auth_type == "oauth":
-                    from bowhead_core.mcp_oauth import (
-                        FernetTokenStorage,
-                        build_mcp_oauth_provider,
-                    )
+                    from bowhead_core.mcp_oauth import team_oauth_header_source
 
-                    oauth_provider = build_mcp_oauth_provider(
-                        source.base_url,
-                        FernetTokenStorage(store, team_id, source_id),
-                    )
+                    # Access tokens come from the process-wide broker at call time: one refresh per
+                    # source however many Turns call it, so rotating refresh tokens survive.
+                    header_source = team_oauth_header_source(store, team_id, source_id, source.base_url)
                     headers = {}
                 # mcp-connect-repair F1-b: connects per call in the dispatching task (no session on
                 # the turn stack — that was an anyio cross-task cancel-scope violation). Still zero
@@ -402,7 +398,7 @@ class CapabilityResolver:
                 lazy = RemoteMcpToolClient(
                     source.base_url,
                     headers,
-                    auth=oauth_provider,
+                    header_source=header_source,
                 )
                 specs.extend(
                     build_team_specs(

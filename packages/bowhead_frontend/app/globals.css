@@ -11211,8 +11211,34 @@ textarea {
 }
 .artifact-pdf-page figcaption {
   margin-top: 5px;
-  color: var(--c-ink-3);
+  color: var(--c-ink-2);
   font: 0.625rem var(--font-v2-mono);
+}
+.artifact-pdf-page figcaption.has-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.artifact-pdf-page-action {
+  justify-self: end;
+  min-height: 28px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  font: 500 0.75rem var(--font-v2-sans, inherit);
+  cursor: pointer;
+}
+.artifact-pdf-page-action:hover { background: var(--c-fill-1); color: var(--c-ink); }
+.artifact-pdf-page-action[data-referenced] { background: var(--c-accent-soft, color-mix(in srgb, var(--c-accent) 10%, transparent)); color: var(--c-accent); }
+.artifact-pdf-page-action:focus-visible { outline: 2px solid var(--c-focus, #1754db); outline-offset: 1px; }
+@media (max-width: 639px) {
+  .artifact-pdf-page-action { min-height: 44px; font-size: 0.875rem; }
 }
 .artifact-document-load-more {
   min-height: 40px;

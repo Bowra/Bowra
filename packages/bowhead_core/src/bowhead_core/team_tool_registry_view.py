@@ -27,6 +27,7 @@ import httpx2
 from bowhead_router.types import ToolSchema
 
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
+from bowhead_core.oauth_token_broker import OAuthGrantRejected, OAuthRefreshUnavailable
 from bowhead_core.openapi_tool_source import TeamToolEntry
 from bowhead_core.scrub import scrub as _scrub
 from bowhead_core.team_tool_confirmation import (
@@ -87,6 +88,51 @@ def _upstream_auth_error(source_id: str) -> str:
         f"personal account, and do NOT retry (the same credential will fail again). "
         f"Tell the user to ask a team admin to update this tool source's credential."
     )
+
+
+def _sign_in_ended_error(source_id: str) -> str:
+    """LLM-facing text when the provider refused to renew a TEAM OAuth source's sign-in. Fixed text, for
+    the same reason as ``_upstream_auth_error``: provider messages are untrusted."""
+    return (
+        f"This call was not sent: the team's sign-in to TEAM tool source '{source_id}' has ended — the "
+        f"service no longer accepts it (expired, revoked, or never completed). Only a team admin can fix "
+        f"this by re-authorizing the source in Team settings · Tool Sources. Do NOT retry and do NOT suggest "
+        f"the user reconfigure a personal account. Tell the user to ask a team admin to re-authorize it."
+    )
+
+
+def _sign_in_renewal_result(source_id: str, failure: OAuthRefreshUnavailable) -> dict[str, Any]:
+    """The renewal of a still-valid TEAM OAuth sign-in failed for a transient reason; nothing was sent."""
+    if failure.reason == "rate_limited":
+        wait = (
+            f"The service asked callers to wait {failure.retry_after_seconds} seconds."
+            if failure.retry_after_seconds is not None
+            else "The service did not say how long to wait."
+        )
+        result: dict[str, Any] = {
+            "ok": False,
+            "error_kind": "rate_limited",
+            "error": (
+                f"This call was not sent: renewing the team's sign-in to TEAM tool source '{source_id}' was refused "
+                f"because the service is limiting requests (HTTP 429). {wait}"
+            ),
+        }
+        if failure.retry_after_seconds is not None:
+            result["retry_after_seconds"] = failure.retry_after_seconds
+        return result
+    return {
+        "ok": False,
+        "error_kind": "auth_refresh_unavailable",
+        "error": (
+            f"This call was not sent: renewing the team's sign-in to TEAM tool source '{source_id}' failed because "
+            f"the service's sign-in server did not answer. The sign-in itself is still valid. Try again later."
+        ),
+    }
+
+
+def _oauth_grant_failure(exc: BaseException) -> OAuthGrantRejected | OAuthRefreshUnavailable | None:
+    """The sign-in failure ``exc`` is or wraps, if the call failed before it was sent."""
+    return next((e for e in _wrapped_exceptions(exc) if isinstance(e, (OAuthGrantRejected, OAuthRefreshUnavailable))), None)
 
 
 def _wrapped_exceptions(exc: BaseException, _depth: int = 0) -> Iterator[BaseException]:
@@ -318,8 +364,15 @@ def _make_team_handler(
             # here so both team-source shapes get the same admin attribution.
             status_error = _upstream_status_error(e)
             status = _status_code(status_error)
-            if is_upstream_auth_error(e):
-                res: dict[str, Any] = {"ok": False, "error_kind": "upstream_auth", "error": _upstream_auth_error(source_id)}
+            grant_failure = _oauth_grant_failure(e)
+            res: dict[str, Any]
+            if isinstance(grant_failure, OAuthGrantRejected):
+                # The broker refused before connecting: the provider will not renew the sign-in.
+                res = {"ok": False, "error_kind": "upstream_auth", "error": _sign_in_ended_error(source_id)}
+            elif isinstance(grant_failure, OAuthRefreshUnavailable):
+                res = _sign_in_renewal_result(source_id, grant_failure)
+            elif is_upstream_auth_error(e):
+                res = {"ok": False, "error_kind": "upstream_auth", "error": _upstream_auth_error(source_id)}
             elif status == 429 and status_error is not None:
                 # The service's own rate limit: name it and pass its Retry-After, so the model stops
                 # calling this source instead of reading a bare "ExceptionGroup" and trying other tools.

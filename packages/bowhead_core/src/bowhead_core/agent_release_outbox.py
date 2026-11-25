@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import urlencode
 
 import aiosqlite
 
@@ -407,6 +408,9 @@ def _notification_projection(delivery: AgentReleaseOutboxDelivery) -> dict[str, 
     if title is None:
         raise ValueError("Unsupported Agent release notification type")
     url = f"/agents/detail/?id={delivery.agent_id}"
+    if delivery.notification_type == "agent.release.rejected":
+        # The Owner fixes a declined release from the workbench, where the release bar shows the reason.
+        url = "/agents/manage/?" + urlencode({"agent_id": delivery.agent_id, "section": "release"})
     return {
         "category": "updates",
         "priority": ("p1" if delivery.notification_type in {"agent.release.high_risk", "agent.release.audience_contracted"} else "p2"),

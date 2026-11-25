@@ -84,6 +84,8 @@ class AmbiguousToolEffectOutcomeError(RuntimeError):
 
 _DETERMINISTIC_NOT_APPLIED_ERROR_KINDS = frozenset(
     {
+        # an OAuth sign-in renewal failed before the call was sent
+        "auth_refresh_unavailable",
         "blocked",
         "rate_limited",
         "team_denied",
@@ -448,7 +450,7 @@ def _repeat_guarded(cached: Any, hits: int) -> Any:
     """命中缓存到第 `_BI_REPEAT_WARN_AT` 次起，在结果里明说「别再查了」。
 
     ⚠ 缓存本身**已经**挡住了重复取数的开销（116 实测 21 次调用只落了 5 个 artifact、
-    18 次命中缓存），挡不住的是**循环本身**：`t_a091c1b59a78` 里同一参数连发 16 次，
+    18 次命中缓存），挡不住的是**循环本身**：`an observed task` 里同一参数连发 16 次，
     每次都要一个完整的 LLM 往返，51 秒的轮次几乎全耗在这里。
     模型缺的不是数据，是一句「这条已经查过了，再查不会变」。
 
@@ -1092,8 +1094,6 @@ class ToolExecutionContext:
     document_caller_execution_id: str | None = field(default=None, repr=False)
     document_admission_guard: Any | None = field(default=None, repr=False)
     document_turn_state: Any | None = field(default=None, repr=False)
-    # Server-admitted new-presentation inputs; shared by per-call copies only.
-    deck_render_binding: Any | None = field(default=None, repr=False)
     document_revision_target: DocumentRevisionTarget | None = field(default=None, repr=False)
     # ArtifactStore: bi_fetch_rows writes CSV to artifact_store and returns artifact_id,
     # letting python_sandbox load it through inputs (instead of the LLM typing it verbatim into code)
@@ -1115,6 +1115,7 @@ class ToolExecutionContext:
     session_store: Any | None = None
     session_id: str = ""
     # Set only by the actual user-entry runner dispatch; helper runs clear it.
+    answer_card_entry: bool = False
     artifact_presentation_entry: bool = False
     artifact_presentation_call: tuple[str, str] | None = field(default=None, repr=False)
     # Set per call by SubagentRunner._execute_tool on its private copy of the context.
@@ -3258,7 +3259,7 @@ def build_default_registry() -> ToolRegistry:
         if sub.get("_parse"):
             wrapped["_parse"] = sub["_parse"]
         # empty fast-path: forward the success-but-empty signal and hints. Without this the
-        # whitelist strips them (prod t_711b31fecee1 masked the empty-result signal).
+        # whitelist strips them (prod an observed task masked the empty-result signal).
         # `data_source` names the Datarc workspace the rows came from (prompts point the model at it).
         for _ek in ("_no_data", "_no_data_hint", "_preflight_hint", "_units", "chart_catalog", "data_source"):
             if sub.get(_ek) is not None:
@@ -3515,7 +3516,7 @@ def build_default_registry() -> ToolRegistry:
     # bi-workspace-list direction ① (2026-09-03): soft cap for inspection within one turn, not a hard cap;
     # only switch hint variants; server rejects no calls. Value comes from actual iteration budget: Lead
     # max_iterations=12; each workspace inspection takes two iterations (switch+bi_schema), minus one each for list
-    # and closing ⇒ ~5 workspaces per turn (live 116 t_619ab802b174: forcing 32 workspaces exhausted the cap).
+    # and closing ⇒ ~5 workspaces per turn (live an observed execution: forcing 32 workspaces exhausted the cap).
     _WORKSPACE_TOUR_SOFT_LIMIT = 5
 
     # ─── tool_list_workspaces（bi-workspace-list，2026-09-02）────────
@@ -3567,7 +3568,7 @@ def build_default_registry() -> ToolRegistry:
             "用户同意后再调 tool_switch_context；不要自己切换。"
         )
         if len(names) > _WORKSPACE_TOUR_SOFT_LIMIT:
-            # Live 116 evidence (1.2.17, t_619ab802b174): full inspection of 32 workspaces cannot structurally fit
+            # Live 116 evidence (1.2.17, an observed task): full inspection of 32 workspaces cannot structurally fit
             # one turn; first blindly switch 31 in parallel, then inspect correctly, iter=12 reaches Lead cap and user receives
             # "本次分析未能完成". Scale guidance changes only plan shape, not a hard limit: server rejects nothing;
             # model chooses based on user intent (focus / batch / plan_propose).

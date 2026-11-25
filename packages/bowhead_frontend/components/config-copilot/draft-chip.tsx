@@ -34,9 +34,7 @@ export function DraftChip({ draftId, onOpen }: { draftId: string; onOpen: (draft
   }, [draftId]);
 
   if (state === "consumed") {
-    return result?.kind === "team_subagent"
-      ? <SubagentConsumedReceipt name={result.label ?? null} refId={result.ref_id ?? null} workingCopy={result.stage === "working_copy"} />
-      : <ConsumedReceipt name={result?.name ?? null} nextRunAt={result?.next_run_at ?? null} />;
+    return <ConsumedReceipt name={result?.name ?? null} nextRunAt={result?.next_run_at ?? null} />;
   }
   if (state === "discarded") {
     return (
@@ -59,25 +57,11 @@ export function DraftChip({ draftId, onOpen }: { draftId: string; onOpen: (draft
   return (
     <div className="lite-1" data-testid="draft-chip">
       <span className="ic ai"><Sparkles size={14} /></span>
-      <b>{t(payload.form_id === "team_subagent" ? "subagent_chip_title" : "chip_title")}</b>
+      <b>{t("chip_title")}</b>
       <span className="sp" />
       <button type="button" className="lnk" onClick={() => onOpen(draftId)}>
         {t("chip_open")}
       </button>
-    </div>
-  );
-}
-
-function SubagentConsumedReceipt({ name, refId, workingCopy }: { name: string | null; refId: string | null; workingCopy: boolean }) {
-  const t = useTranslations("settings.config_copilot_drawer");
-  const router = useAppRouter();
-  return (
-    <div className="draft-receipt-wrap" data-testid="draft-receipt">
-      <div className="receipt">
-        <span className="ic"><Check size={15} /></span>
-        <b>{t(workingCopy ? "subagent_working_copy_saved" : "subagent_receipt_named", { name: name ?? "" })}</b>
-        {refId ? <button type="button" className="lnk" onClick={() => router.push(`/agents/manage/?agent_id=${encodeURIComponent(refId)}`)}>{t("view")}</button> : null}
-      </div>
     </div>
   );
 }

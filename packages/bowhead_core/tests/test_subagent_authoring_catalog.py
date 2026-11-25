@@ -382,7 +382,7 @@ def test_memory_tools_are_not_offered_for_agent_authoring() -> None:
 def test_pickers_list_only_user_visible_tools_with_a_declared_risk() -> None:
     """A listed built-in Tool is `kind: tool` with a risk; system parts never show as locked rows nobody can unlock.
 
-    render_deck, tool_switch_context and find_results are parts that reached the list through role bindings
+    tool_switch_context and find_results are parts that reached the list through role bindings
     (Plugin editor walkthrough on 116, 2026-11-15). They stay in the allowlist for dependency compilation.
     """
     from bowhead_core.agents._generated.tool_kinds import TOOL_KINDS
@@ -393,8 +393,8 @@ def test_pickers_list_only_user_visible_tools_with_a_declared_risk() -> None:
     assert [tool.stable_ref for tool in listed if TOOL_KINDS.get(tool.stable_ref) != "tool"] == []
     assert [tool.stable_ref for tool in listed if tool.risk == "unknown"] == []
     hidden = {tool.stable_ref for tool in native_authoring_tools() if not tool.discoverable}
-    assert {"render_deck", "tool_switch_context", "find_results"} <= hidden
-    assert {"render_deck", "tool_switch_context", "find_results"} <= NATIVE_ALLOWLIST
+    assert {"tool_switch_context", "find_results"} <= hidden
+    assert {"tool_switch_context", "find_results"} <= NATIVE_ALLOWLIST
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEffect, useState } from "react";
 
 import { renderIntl } from "@/__tests__/intl-render";
+import { setAgentReleaseBarCapabilityForTest } from "@/lib/use-agent-release-bar-capability";
 import {
   getAgentAuthoringCatalog,
   getAgentEvalManager,
@@ -41,12 +42,12 @@ vi.mock("@/lib/feedback-candidates-api", async () => {
 vi.mock("@/lib/composer-handoff", () => ({ handoffAgentToNewChat: vi.fn() }));
 vi.mock("./agent-localization-panel", () => ({ AgentLocalizationPanel: () => null }));
 vi.mock("./agent-taxonomy-panel", () => ({ AgentTaxonomyPanel: () => null }));
-vi.mock("./agent-version-workbench", () => ({ AGENT_PENDING_ANCHOR: "agent-pending-changes", AgentVersionWorkbenchPanel: ({ onAvailability, onResultWaiting, view, agentName }: { onAvailability: (availability: "enabled" | "disabled") => void; onResultWaiting?: (resultAt: string | null) => void; view: string; agentName: string }) => {
+vi.mock("./agent-version-workbench", () => ({ AGENT_PENDING_ANCHOR: "agent-pending-changes", AgentVersionWorkbenchPanel: ({ onAvailability, onResultWaiting, view, agentName, releaseBar }: { onAvailability: (availability: "enabled" | "disabled") => void; onResultWaiting?: (resultAt: string | null) => void; view: string; agentName: string; releaseBar?: { shared: boolean; dirty: boolean } | null }) => {
   // Like the real workbench, availability is probed once when the panel mounts.
   const [availability] = useState(() => versionWorkbenchMock.availability);
   useEffect(() => onAvailability(availability), [availability, onAvailability]);
   useEffect(() => onResultWaiting?.(versionWorkbenchMock.resultAt), [onResultWaiting]);
-  return <div data-testid="version-workbench-view" data-view={view} data-agent-name={agentName} />;
+  return <div data-testid="version-workbench-view" data-view={view} data-agent-name={agentName} data-release-bar={releaseBar ? (releaseBar.shared ? "shared" : "private") : "off"} />;
 } }));
 
 vi.mock("@/lib/content-share-api", () => ({
@@ -516,6 +517,53 @@ describe("AgentReleaseManager", () => {
     expect(screen.queryByText(/^已发布 v1 · /)).toBeNull();
     expect(screen.queryByRole("heading", { name: "编辑智能体配置" })).toBeNull();
     expect(screen.queryByText("草稿", { selector: ".am-release-task-heading span" })).toBeNull();
+  });
+
+  it("hands the workbench the release bar host and drops the Configure rail's save card (FEATURE_AGENT_RELEASE_BAR)", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    try {
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      const panel = await screen.findByTestId("version-workbench-view");
+      expect(panel.dataset.releaseBar).toBe("private");
+      expect(document.querySelector(".am-release-sidebar")).toBeNull();
+      expect(document.querySelector(".am-rb-slot")).not.toBeNull();
+      expect(screen.getByRole("tab", { name: "版本" })).toBeTruthy();
+    } finally {
+      setAgentReleaseBarCapabilityForTest(null);
+    }
+  });
+
+  it("gives the Canvas-hosted editor the release band and keeps its own save bar (FEATURE_AGENT_RELEASE_BAR)", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    try {
+      const hosted = { controllerRef: { current: null }, onClose: vi.fn(), onActivate: vi.fn(), onSaved: vi.fn(), readOnly: false };
+      renderIntl(<AgentReleaseManager agentId="osa_1" hosted={hosted} />);
+      const prompt = await screen.findByDisplayValue("Analyze the monthly result.");
+      fireEvent.change(prompt, { target: { value: "Changed in the canvas" } });
+      expect(screen.getByTestId("version-workbench-view").dataset.releaseBar).toBe("private");
+      expect(document.querySelector(".am-rb-slot")).not.toBeNull();
+      // Saving stays with the Canvas save bar; the band never offers a second Save.
+      expect(screen.getAllByRole("button", { name: "保存" }).length).toBeGreaterThan(0);
+    } finally {
+      setAgentReleaseBarCapabilityForTest(null);
+    }
+  });
+
+  it("shows an archived Agent's release bar with restore instead of the header button (FEATURE_AGENT_RELEASE_BAR)", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    try {
+      vi.mocked(getAgentWorkingCopy).mockResolvedValue(detail({
+        aggregate: { name: "finance-helper", status: "disabled", lifecycle_state: "archived" },
+        actions: { edit: false, publish: false, enable: false, disable: false, archive: false, restore: true },
+      }));
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      const region = await screen.findByRole("region", { name: "发布进度" });
+      expect(within(region).getByText("已归档 · 配置只读")).toBeTruthy();
+      expect(within(region).getByRole("button", { name: "取消归档" })).toBeTruthy();
+      expect(document.querySelector(".am-release-resource-actions .settings-button--primary")).toBeNull();
+    } finally {
+      setAgentReleaseBarCapabilityForTest(null);
+    }
   });
 
   it("keeps a private Agent's Configure in plain words and folds the main responsibility under Advanced", async () => {

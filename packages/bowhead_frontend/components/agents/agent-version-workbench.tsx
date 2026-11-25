@@ -46,7 +46,7 @@ import { lineDiff } from "@/lib/line-diff";
 import { useMergeWindowClock, useWorkbenchRefresh, workbenchShouldPoll } from "@/lib/use-workbench-refresh";
 import { CardStatus, useCiFormat, type CardStatusValue } from "./agent-ci-shared";
 import { MemberFeedbackView, memberFeedbackKey } from "./agent-member-feedback";
-import { AgentVersionValidation, type TestChangeState } from "./agent-version-validation";
+import { AgentVersionValidation, type ReleaseBarHost, type TestChangeState } from "./agent-version-validation";
 import { CoachChangesSection } from "./coach-changes-section";
 import { casePoints } from "./agent-eval-points";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
@@ -148,6 +148,7 @@ export function AgentVersionWorkbenchPanel({
   suitesRefreshKey = 0,
   onAddCases,
   onTestState,
+  releaseBar = null,
 }: {
   agentId: string;
   agentName: string;
@@ -189,6 +190,8 @@ export function AgentVersionWorkbenchPanel({
   onAddCases?: () => void;
   /** The test card's state, so the page can leave out an evidence card that would repeat it. */
   onTestState?: (state: TestChangeState) => void;
+  /** FEATURE_AGENT_RELEASE_BAR: the release bar's host; every view then renders the bar above the tabs. */
+  releaseBar?: ReleaseBarHost | null;
 }) {
   const t = useTranslations("agents_marketplace");
   const [workbench, setWorkbench] = useState<AgentVersionWorkbench | null>(null);
@@ -316,6 +319,28 @@ export function AgentVersionWorkbenchPanel({
       {view === "proposals" ? (
         <ProposalsView agentId={agentId} workbench={workbench} workingCopy={workingCopy} released={released} reload={reload} onChanged={onChanged} onOpenRelease={onOpenRelease} />
       ) : null}
+      {view === "proposals" && releaseBar ? (
+        // Configure shows no test card; this instance renders only the release bar and its dialogs.
+        <AgentVersionValidation
+          surface="bar"
+          agentId={agentId}
+          agentName={agentName}
+          workbench={workbench}
+          workingCopy={workingCopy}
+          editorDirty={editorDirty}
+          liveActivatedAt={liveActivatedAt}
+          reload={reload}
+          onChanged={onChanged}
+          onOpenConfig={onOpenConfig}
+          onOpenEvaluate={onOpenEvaluate}
+          onOpenRelease={onOpenRelease}
+          onOpenHistory={onOpenHistory}
+          onAskCoach={onAskCoach}
+          readOnly={readOnly}
+          suitesRefreshKey={suitesRefreshKey}
+          releaseBar={releaseBar}
+        />
+      ) : null}
       {view === "validation" || view === "canvas" ? (
         <AgentVersionValidation
           agentId={agentId}
@@ -334,6 +359,7 @@ export function AgentVersionWorkbenchPanel({
           ciMerge={merges[0] ?? null}
           readOnly={readOnly}
           suitesRefreshKey={suitesRefreshKey}
+          releaseBar={view === "validation" || view === "canvas" ? releaseBar : null}
         />
       ) : null}
       {view === "evaluate" ? (
@@ -356,6 +382,7 @@ export function AgentVersionWorkbenchPanel({
           suitesRefreshKey={suitesRefreshKey}
           onAddCases={onAddCases}
           onTestState={onTestState}
+          releaseBar={releaseBar}
         />
       ) : null}
     </div>

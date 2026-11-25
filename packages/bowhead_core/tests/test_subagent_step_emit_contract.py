@@ -1276,8 +1276,7 @@ def test_host_path_redaction_leaves_urls_and_relative_paths_alone(monkeypatch, r
 @pytest.mark.parametrize(
     ("tool_name", "result", "code"),
     [
-        # 116 s_beffa22dce1f: both showed "failed without a specific error".
-        ("render_deck", {"ok": False, "error": "deck_render_not_admitted", "message": "Needs the original assignment."}, "deck_render_not_admitted"),
+        # 116 s_beffa22dce1f: a listed code used to show "failed without a specific error".
         ("agent_message", {"ok": False, "error": "collaboration_coordination_reply_only"}, "collaboration_coordination_reply_only"),
         ("agent_message", {"ok": False, "error": "some unlisted prose"}, "tool_execution_failed"),
     ],
@@ -1313,14 +1312,16 @@ def test_cap_reason_names_the_counted_failures_instead_of_guessing_datarc() -> N
 
     invocations = [
         *[
-            ToolInvocation(tool_name="render_deck", arguments={}, call_id=f"r{i}", result={"ok": False, "error": "deck_render_not_admitted"})
+            ToolInvocation(
+                tool_name="agent_message", arguments={}, call_id=f"r{i}", result={"ok": False, "error": "collaboration_recipient_unavailable"}
+            )
             for i in range(3)
         ],
         ToolInvocation(tool_name="subagent_return", arguments={}, call_id="s", result={"ok": False, "error": "collaboration_unresolved"}),
         ToolInvocation(tool_name="bi_query", arguments={}, call_id="b", result={"ok": True}),
         ToolInvocation(tool_name="python_sandbox", arguments={}, call_id="p", error="exit_code=1"),
     ]
-    assert _tool_failure_summary(invocations) == "render_deck: deck_render_not_admitted ×3, python_sandbox ×1"
+    assert _tool_failure_summary(invocations) == "agent_message: collaboration_recipient_unavailable ×3, python_sandbox ×1"
     assert _tool_failure_summary([]) == "no Tool failure recorded"
 
 

@@ -56,7 +56,7 @@ def is_results_internal_artifact(
     if producer_kind in INTERNAL_PRODUCERS:
         return True
 
-    # deck_render_inputs persists the structured Canvas input with this exact
+    # The removed deck renderer (until 2026-11-24) persisted the structured Canvas input with this exact
     # semantic shape.  Historical rows were backfilled to kind=tool_data.
     return (
         str(getattr(artifact, "source", "") or "") == "canvas_export"

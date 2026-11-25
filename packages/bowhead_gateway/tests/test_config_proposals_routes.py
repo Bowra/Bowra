@@ -578,7 +578,7 @@ def test_form_draft_get_consume_discard(client: TestClient, app: FastAPI) -> Non
     assert client.post(f"/api/v1/config-drafts/{other}/consume", json={"result": {"job_id": "x"}}).status_code == 409
 
 
-def test_form_draft_dto_projects_target_only_when_present(client: TestClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_form_draft_dto_projects_target_only_when_present(client: TestClient, app: FastAPI) -> None:
     """批 3（3-0c，§4.5）：`_form_draft_dto` 是白名单投影——不加这两键，刷新/重连后抽屉
     就不知道在改谁（r1-P1-5）。
 
@@ -588,16 +588,13 @@ def test_form_draft_dto_projects_target_only_when_present(client: TestClient, ap
     plain = client.get(f"/api/v1/config-drafts/{_seed_form(app)}").json()
     assert set(plain) == {"draft_id", "form_id", "status", "workspace_id", "fields", "field_meta", "notes", "result", "row_version"}
 
-    # Collection surface `team_subagent` registers only with FEATURE_CONFIG_EDIT=1; otherwise its drafts are hidden
-    # with 404 (9bee5570d). This test pins DTO projection, so explicitly enable the flag and register the form again.
-    monkeypatch.setenv("FEATURE_CONFIG_EDIT", "1")
-    register_gateway_forms(app)
+    # The projection is form-agnostic: any form draft that carries the keys returns them.
     asyncio.run(
         app.state.config_draft_store.create_form_draft(
             draft_id="ccd_tgt",
             team_id="team_1",
             owner_user_id="u_1",
-            form_id="team_subagent",
+            form_id="scheduled_job",
             workspace_id=None,
             turn_id="t_1",
             session_id="s_2",
@@ -611,6 +608,28 @@ def test_form_draft_dto_projects_target_only_when_present(client: TestClient, ap
     body = client.get("/api/v1/config-drafts/ccd_tgt").json()
     assert body["target"] == {"id": "osa_a", "label": "分析助手"}
     assert body["changed_fields_cumulative"] == ["description"]
+
+
+def test_removed_agent_edit_drafts_stay_hidden(client: TestClient, app: FastAPI) -> None:
+    """Drafts saved while chat edits of existing Agents existed never reopen after that form was removed."""
+    asyncio.run(
+        app.state.config_draft_store.create_form_draft(
+            draft_id="ccd_agent_edit",
+            team_id="team_1",
+            owner_user_id="u_1",
+            form_id="team_subagent",
+            workspace_id=None,
+            turn_id="t_1",
+            session_id="s_2",
+            fields={"description": "新描述"},
+            field_meta={},
+            notes={},
+            target={"id": "osa_a", "label": "分析助手"},
+            changed_fields_cumulative=["description"],
+        )
+    )
+    assert client.get("/api/v1/config-drafts/ccd_agent_edit").status_code == 404
+    assert client.post("/api/v1/config-drafts/ccd_agent_edit/consume", json={"result": {"name": "x"}}).status_code == 404
 
 
 def test_form_draft_isolation_and_kind_guard(client: TestClient, app: FastAPI, user_box: dict[str, Any]) -> None:

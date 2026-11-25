@@ -1,5 +1,6 @@
 import type { FieldContract } from "./configuration-field-guidance";
 import { randomUuid } from "@/lib/random-id";
+import { notifyResultTargetsChanged } from "@/lib/result-pin-events";
 import { appFetch as fetch, appPath } from "@/lib/base-path";
 import type { KbParseStatus } from "./kb-api";
 
@@ -1906,6 +1907,7 @@ export async function deleteFile(fileId: string): Promise<void> {
     }
     throw error;
   }
+  notifyResultTargetsChanged();
 }
 
 /**
@@ -1963,6 +1965,7 @@ export async function purgeFiles(
     body: JSON.stringify({ artifact_ids: fileIds }),
   });
   if (!r.ok) throw await readApiError(r);
+  notifyResultTargetsChanged();
   return r.json();
 }
 
@@ -1984,6 +1987,7 @@ export async function restoreFile(fileId: string): Promise<FileDTO> {
     method: "POST",
   });
   if (!r.ok) throw await readApiError(r);
+  notifyResultTargetsChanged();
   return r.json();
 }
 
@@ -2500,6 +2504,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
     { method: "DELETE", headers: spaceHeader() },
   );
   if (!response.ok) throw await readSessionArchiveError(response);
+  notifyResultTargetsChanged();
 }
 
 /**
@@ -2530,6 +2535,7 @@ export async function undeleteSession(sessionId: string): Promise<void> {
     { method: "POST", headers: spaceHeader() },
   );
   if (!response.ok) throw await readSessionArchiveError(response);
+  notifyResultTargetsChanged();
 }
 
 async function readSessionArchiveError(
@@ -2648,6 +2654,7 @@ export async function clearCanvas(canvasId: string): Promise<void> {
     { method: "POST" },
   );
   if (!r.ok) throw new HttpStatusError("clear canvas", r);
+  notifyResultTargetsChanged();
 }
 
 /** P4.1: delete the entire canvas + sections + revisions.
@@ -2661,6 +2668,7 @@ export async function deleteCanvas(
     method: "DELETE",
   });
   if (!r.ok) throw new HttpStatusError("delete canvas", r);
+  notifyResultTargetsChanged();
 }
 
 /** P4.2: list user's canvases across sessions.

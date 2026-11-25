@@ -744,5 +744,15 @@
   "tool_execution_timeout": "Der Vorgang hat das Zeitlimit überschritten; das Ergebnis ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob Änderungen wirksam wurden.",
   "tool_execution_unknown": "Das Ergebnis des Vorgangs ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob er wirksam wurde.",
   "tool_execution_failed": "Das Tool konnte diesen Schritt nicht abschließen. Prüfen Sie das Ergebnis oder kopieren Sie die Diagnose für Ihren Administrator.",
-  "tool_delivery_review_required": "Die Lieferung ist noch ungeprüft. Der Agent muss fehlgeschlagene Schritte und offene Anforderungen vor dem Abschluss prüfen."
+  "tool_delivery_review_required": "Die Lieferung ist noch ungeprüft. Der Agent muss fehlgeschlagene Schritte und offene Anforderungen vor dem Abschluss prüfen.",
+  "personal_mcp_needs_oauth": "Dieser Dienst verlangt, dass Sie sich bei {provider_host} anmelden.",
+  "personal_mcp_admin_app_required": "{provider_host} akzeptiert nur Apps, die seine Administration registriert hat, daher kann sich Bowhead dort noch nicht anmelden. Verwenden Sie ein persönliches Token oder einen API-Schlüssel, falls der Dienst diese anbietet.",
+  "personal_mcp_callback_refused": "{provider_host} hat die Rücksprungadresse von Bowhead ({callback}) nicht akzeptiert. Wenn diese Adresse kein HTTPS verwendet, bitten Sie den Teaminhaber, einen HTTPS-Öffentlichen Einstieg zu registrieren, und versuchen Sie es dann erneut.",
+  "personal_mcp_public_entry_required": "Bowhead konnte nicht ermitteln, an welche Adresse der Dienst Sie zurückleiten soll. Bitten Sie den Teaminhaber, einen Öffentlichen Einstieg zu registrieren, und versuchen Sie es dann erneut.",
+  "personal_mcp_sign_in_start_failed": "Bowhead konnte die Anmeldung bei {provider_host} nicht starten. Prüfen Sie die Adresse und versuchen Sie es erneut; wenn es weiterhin fehlschlägt, prüfen Sie den Status des Dienstes.",
+  "personal_mcp_sign_in_ended": "Ihre Anmeldung bei diesem Dienst ist abgelaufen. Melden Sie sich erneut an, um diese Verbindung zu verwenden.",
+  "personal_mcp_sign_in_renewal_unavailable": "Der Dienst hat nicht geantwortet, während Bowhead Ihre Anmeldung erneuert hat. Ihre Anmeldung ist weiterhin gültig; versuchen Sie es später erneut.",
+  "personal_mcp_oauth_endpoint_locked": "Eine angemeldete Verbindung behält ihre Adresse. Um eine andere Adresse zu verwenden, fügen Sie eine neue Verbindung hinzu.",
+  "personal_mcp_oauth_sign_in_required": "Diese Verbindung wird durch die Anmeldung beim Dienst erstellt. Wählen Sie „Weiter zur Anmeldung“.",
+  "personal_mcp_oauth_unavailable": "Anmeldeverbindungen sind in dieser Bereitstellung nicht verfügbar."
 }

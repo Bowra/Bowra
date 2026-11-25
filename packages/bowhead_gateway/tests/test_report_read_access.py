@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import jwt
 import pytest
 from bowhead_core._db import open_shared_ctx
-from bowhead_core.agents.report_tools import _read_report
+from bowhead_core.agents._lead_context import reset_current_peer_name, set_current_peer_name
+from bowhead_core.agents.report_tools import _read_report, _remove_report_sections, _write_report
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.context_dependencies import ContextSourceObservations, capture_context_dependencies, validate_context_dependencies
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
@@ -88,6 +89,32 @@ async def test_direct_read_and_retained_dependency_survive_normal_edit_but_not_r
         await db.commit()
     with pytest.raises(OrdinaryContinuationUnavailable):
         await validate_context_dependencies(ctx, dependencies)
+
+
+async def test_a_read_before_the_writer_removes_its_section_stays_valid_but_other_deletions_do_not(report_case):
+    """an observed execution: the writer read its report, removed one of its sections, and the Turn failed."""
+    ctx, _section, canvas, _request = report_case
+    token = set_current_peer_name("compute")
+    try:
+        ctx.ordinary_call_identity = ("sub_writer", "write")
+        written = await _write_report({"kind": "narrative", "content": "## Store tiers\n\nFirst.\n\n## Margin spread\n\nSecond.\n"}, ctx)
+        kept, removed = written["section_ids"]
+        ctx.ordinary_call_identity = ("sub_writer", "read")
+        assert (await _read_report({"include_full": True}, ctx)).get("ok")
+        read = ctx.context_source_observations.tool_materials[("sub_writer", "read")]
+        result_hash = read["result_hash"]
+        ctx.ordinary_call_identity = ("sub_writer", "remove")
+        assert (await _remove_report_sections({"section_ids": [removed]}, ctx))["ok"]
+    finally:
+        reset_current_peer_name(token)
+
+    await validate_context_dependencies(ctx, capture_context_dependencies(ctx))
+    observed = [section["id"] for section in read["observation"]["sections"]]
+    assert removed not in observed and kept in observed and read["result_hash"] == result_hash
+
+    await ctx.canvas_store.delete_section(section_id=kept, by_turn_id=ctx.turn_id, canvas_id=canvas.id)
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        await validate_context_dependencies(ctx, capture_context_dependencies(ctx))
 
 
 async def test_outline_selection_unknown_ids_and_no_mutations(report_case):
@@ -767,7 +794,7 @@ async def test_one_validation_pass_reads_a_report_once_and_the_next_pass_reads_a
 
 
 async def test_history_and_supplement_recheck_read_recorded_sources_once_per_pass(report_case, monkeypatch):
-    """116 1.7.49: before every Lead model call, a 24-Turn conversation re-read its ~20k events once per
+    """an observed deployment: before every Lead model call, a 24-Turn conversation re-read its ~20k events once per
     Report section reference and authorized each file on its own; the Lead waited minutes. One pass now
     reads the recorded sources once and authorizes each Turn's files in one batch, with the same answers."""
     from pathlib import Path

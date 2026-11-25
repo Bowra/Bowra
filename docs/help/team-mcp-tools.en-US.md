@@ -2,6 +2,8 @@
 
 Team owners and administrators can add an MCP tool in **Team settings → Tool Sources** so team Agents can use selected capabilities from an external service. You add an MCP service and selected tools from it; this does not automatically grant team members access to an account in that service.
 
+If each member should use their own account at the service instead of a shared one, members can sign in on **My Connections**; see [Connect a personal MCP service](personal-mcp.en-US.md).
+
 ## Add an MCP service and select tools
 
 1. Open **Team settings → Tool Sources** and select **Add MCP tool**.
@@ -27,6 +29,12 @@ When an MCP service adds or retires tools, choose **Refresh Tool List** from the
 Nothing changes until you select **Update tool list**; **Cancel** leaves everything as it was. If the tool list or its usage changes while you review it, Bowra reads it again and asks you to review the new changes. When nothing was added, removed, or changed, the preview says the tool list is up to date.
 
 An MCP service that requires authorization must be authorized before you can refresh its tool list.
+
+## When an authorization ends
+
+An authorized service keeps working without you: Bowhead renews its access when needed, once for the whole team even when several conversations use the service at the same time. If the service stops accepting the authorization (for example, it expired after a long time unused, someone removed Bowhead's access in the service, or the service changed its sign-in server), the source's card shows **Needs authorization** with an **Authorize** button. Calls from conversations are then not sent, and the Agent tells the user to ask a team administrator.
+
+Select **Authorize** and sign in to the service again; the imported tools stay as they are. While the authorization is pending you can still turn the source off. **Refresh Tool List** is available again once the source is authorized.
 
 ## Choose which tools to import
 

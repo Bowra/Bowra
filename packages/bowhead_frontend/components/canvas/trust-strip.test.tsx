@@ -61,9 +61,29 @@ describe("SourceLinkageStrip", () => {
     document.body.append(article);
 
     renderIntl(<SourceLinkageStrip sections={[narrative("No citations", ["19"])]} />);
-    fireEvent.click(screen.getByRole("button", { name: "定位到第一个待核对数字" }));
+    // The name carries the visible count, so a compressed toolbar ("⚠ 1") still matches its name.
+    fireEvent.click(screen.getByRole("button", { name: "1 个数字待核对，定位到第一个" }));
     expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
     article.remove();
+  });
+
+  it("renders each count in full and as a hidden short form for a narrow toolbar", () => {
+    const { container } = renderIntl(
+      <SourceLinkageStrip sections={[narrative("A [1] B [2]", ["19"]), sources(2)]} />,
+      { locale: "zh-CN" },
+    );
+    const citation = container.querySelector(".citation-linkage")!;
+    const source = container.querySelector(".source-count")!;
+    const review = container.querySelector(".figure-review")!;
+    for (const item of [citation, source, review]) {
+      // The short form is decorative; the full phrase stays readable and names the item.
+      expect(item.querySelector(".rc-trust-full")?.textContent).toBeTruthy();
+      expect(item.querySelector(".rc-trust-short")?.getAttribute("aria-hidden")).toBe("true");
+    }
+    expect(source.getAttribute("title")).toBe("2 条来源");
+    expect(source.querySelector(".rc-trust-short")?.textContent).toBe("2");
+    expect(citation.getAttribute("title")).toBe(citation.querySelector(".rc-trust-full")?.textContent);
+    expect(review.querySelector(".rc-trust-short")?.textContent).toBe("1");
   });
 
   it("hides an empty terminal strip", () => {

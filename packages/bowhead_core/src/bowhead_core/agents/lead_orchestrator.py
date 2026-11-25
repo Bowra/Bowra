@@ -2850,13 +2850,64 @@ def _plan_step_partial(step: Any) -> dict | None:
     return partial if isinstance(partial, dict) else None
 
 
-# Plan steps that failed because their Agent returned without a file it owes (PlanStepDeliveryError kinds).
-_PLAN_STEP_DELIVERY_GAPS = {
-    "deck_delivery_missing": (
-        "「{step}」这一步要交付一份新的 PPT 文件，但没有生成文件，这一步没有完成。"
-        "不需要 PPT 时，可以在计划卡上点「修订重试」，把这一步交给其他专家；需要 PPT 时，点「继续执行」重新运行这一步。"
-    ),
-}
+async def _plan_report_chat_text(
+    runtime: Any,
+    sctx: Any,
+    *,
+    objective: str,
+    final_steps: list[Any],
+    done: int,
+    partial: int,
+    usage_out: list[tuple[int, int, int]],
+) -> str:
+    """The chat answer of a Plan Turn that saved a report: a model-written reply, then the report pointer.
+
+    The reply is written from this Turn's report sections, each step's result and the saved files
+    (docs/sprints/plan-chat-reply-2026-11-24/design.md). When it cannot be written, the completion
+    is stated in the report's language instead. The canonical pointer is appended as for an
+    ordinary report Turn, so the phantom-pointer reconcile treats both the same way.
+    """
+    from bowhead_core.effective_language import effective_output_language
+    from bowhead_core.plan_chat_reply import generate_plan_reply, plan_reply_facts
+    from bowhead_core.plan_store import is_retired_plan_agent
+    from bowhead_core.report_chrome_text import chrome_lang, chrome_text
+
+    ctx = runtime.parent_ctx
+    language_context = getattr(ctx, "language_context", None)
+    reply = ""
+    try:
+        canvas_store = getattr(ctx, "canvas_store", None)
+        sections = list(await canvas_store.list_sections_appended_by_turn(sctx.turn_id)) if canvas_store is not None else []
+        artifact_store = getattr(ctx, "artifact_store", None)
+        files = (
+            [a.filename for a in await artifact_store.list_result_artifacts_for_turn(sctx.turn_id) if a.filename]
+            if artifact_store is not None
+            else []
+        )
+        steps = [
+            {
+                "agent": getattr(s, "agent_name", ""),
+                "status": str(getattr(s, "status", "")),
+                "objective": getattr(s, "objective", ""),
+                "payload": getattr(s, "payload_json", None),
+            }
+            for s in final_steps
+            if str(getattr(s, "status", "")) not in {"skipped", "superseded"} and not is_retired_plan_agent(getattr(s, "agent_name", ""))
+        ]
+        reply = await generate_plan_reply(
+            getattr(runtime, "router", None),
+            facts=plan_reply_facts(objective=objective, sections=sections, steps=steps, files=files),
+            language=effective_output_language(bus=runtime.parent_bus, language_context=language_context),
+            trace_id=sctx.turn_id,
+            usage_out=usage_out,
+        )
+    except Exception:
+        logger.warning("plan_chat_reply.facts_unavailable turn=%s", sctx.turn_id, exc_info=True)
+    lang = chrome_lang(language_context)
+    reply = _strip_canvas_pointer(reply) or (
+        chrome_text("plan_done_partial", lang, done=done - partial, partial=partial) if partial else chrome_text("plan_done", lang, n=done)
+    )
+    return reply.rstrip() + "\n\n" + chrome_text("canvas_pointer", lang)
 
 
 def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
@@ -2924,12 +2975,6 @@ def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
                         )
             continue
         ek = getattr(s, "error_kind", None) or ""
-        if st == "failed" and ek in _PLAN_STEP_DELIVERY_GAPS:
-            # The Agent may have returned analysis before the delivery check failed it, so the caveat names
-            # the missing file and the way forward instead of claiming the report lacks its results.
-            _step = str(getattr(s, "objective", "") or "").strip()[:80] or str(getattr(s, "agent_name", "?"))
-            out.append(_GAP + _PLAN_STEP_DELIVERY_GAPS[ek].format(step=_step))
-            continue
         out.append(
             _GAP + f"「{getattr(s, 'agent_name', '?')}」这步{_why.get(st, '未完成')}" + (f"({ek})" if ek else "") + ",本报告未包含其分析结果。"
         )
@@ -4050,11 +4095,21 @@ async def _run_plan_execution_turn(
                 text = text.rstrip() + "\n\n" + "\n".join(c.removeprefix(PLAN_GAP_CAVEAT_PREFIX) for c in _plan_report_gap_caveats(_partial_steps))
             done_status, resp_kind, ts, err, ek = ("completed", "chat", TurnStatus.COMPLETED, None, None)
         elif (not _pv2()) or _content_kinds:
-            text = (
-                f"计划执行完成:{outcome.done - len(_partial_steps)} 步完成,{len(_partial_steps)} 步只完成了一部分(缺口见报告末尾),报告已生成在 canvas。"
-                if _partial_steps
-                else f"计划执行完成:{outcome.done} 步成功,报告已生成在 canvas。"
-            )
+            _reply_usage: list[tuple[int, int, int]] = []
+            try:
+                text = await _plan_report_chat_text(
+                    runtime,
+                    sctx,
+                    objective=_plan_objective,
+                    final_steps=_final,
+                    done=outcome.done,
+                    partial=len(_partial_steps),
+                    usage_out=_reply_usage,
+                )
+            finally:
+                # The reply call is part of this Turn's work (writing convergence T4).
+                tin += sum(_u[0] for _u in _reply_usage)
+                tout += sum(_u[1] for _u in _reply_usage)
             done_status, resp_kind, ts, err, ek = ("completed", "canvas", TurnStatus.COMPLETED, None, None)
         elif _prior_report_exists:
             # review P2 (WP-5): retry/fallback already rendered—report on canvas from prior turn;
@@ -5424,59 +5479,6 @@ async def _compose_turn_output_unchecked(
             "chat_fabrication_guard_failed turn=%s err=%s",
             sctx.turn_id,
             _fab_e,
-        )
-
-    # Sprint followup-context-deck (P0-B over-claim guard) — a consultant deck
-    # turn that produced NO downloadable .pptx must not let the chat claim
-    # "可下载 PPT 见画布". Live dogfood (2026-06-11): when render_deck fails and
-    # the consultant hard-bails, it ignores the "never claim success on failure" guidance and the
-    # chat over-claims a nonexistent deck—the "nothing delivered" symptom in a new
-    # form. The backend registers the real deck as a kind=deliverable artifact
-    # (subagent.py:2172) ONLY on render success, so its absence is the truth
-    # signal. Append an honest caveat. Flag + best-effort.
-    try:
-        if text_for_chat and os.environ.get("BOWHEAD_DECK_OVERCLAIM_GUARD", "1") == "1":
-            from bowhead_core.deck_render_inputs import (
-                deck_overclaim_caveat_needed,
-            )
-
-            _as_deck = getattr(runtime.parent_ctx, "artifact_store", None)
-            _sid_deck = getattr(sctx, "session_id", None)
-            _arts_deck: list[Any] = []
-            if _as_deck is not None and _sid_deck:
-                _arts_deck = (
-                    await _as_deck.list_for_session(
-                        session_id=_sid_deck,
-                        user_id=getattr(sctx, "user_id", "") or "",
-                    )
-                    or []
-                )
-            if deck_overclaim_caveat_needed(
-                tool_invocations=result.tool_invocations,
-                turn_artifacts=_arts_deck,
-                turn_id=sctx.turn_id,
-            ):
-                logger.warning(
-                    "lead.deck_overclaim_guard turn=%s — consultant deck spawn but no .pptx deliverable registered; appending honest caveat",
-                    sctx.turn_id,
-                )
-                text_for_chat = text_for_chat.rstrip() + (
-                    "\n\n_注：本次 PPT 自动生成未成功，以上为画布报告内容；可以重试，或上传一个 .pptx 模板后再让我生成演示稿。_"
-                )
-                try:
-                    from bowhead_core import metrics as _m_deck
-
-                    _m_deck.inc(
-                        "bowhead_lead_deck_overclaim_caveated_total",
-                        help="P0-B: consultant deck turn produced no .pptx; appended honest caveat instead of over-claiming.",
-                    )
-                except Exception:  # noqa: S110
-                    pass
-    except Exception as _oce:
-        logger.debug(
-            "deck_overclaim_guard_failed turn=%s err=%s",
-            sctx.turn_id,
-            _oce,
         )
 
     # said-not-done Seam B: the Turn's stored outputs, read for the worked-but-produced-nothing signal.
@@ -8218,6 +8220,15 @@ async def _lead_loop(
     # skipped (canvas sections still emit; only the V1 final markdown path
     # is suppressed). Validation fail / timeout → fall through to existing
     # V1 markdown + composer path (line 1605+ below).
+    from bowhead_core.answer_cards import completed_card
+
+    answer_card = (
+        completed_card(getattr(result, "tool_invocations", ()), runtime.parent_ctx)
+        if result.ok
+        and getattr(result, "completion", "complete") == "complete"
+        and not (isinstance(aggregated_payload, dict) and (aggregated_payload.get("error") or aggregated_payload.get("completion") == "partial"))
+        else None
+    )
     _v4_final_emit_enabled = os.environ.get("BOWHEAD_V4_FINAL_PAYLOAD_EMIT", "1") == "1"
     # chat-v4 W4-fix CTO P1-B — bail-with-partial still emits V4.
     # Previously `error` non-empty short-circuited to bail prose path,
@@ -8267,6 +8278,7 @@ async def _lead_loop(
                 )
 
                 payload_dict = dict(aggregated_payload)
+                payload_dict.pop("answer_card", None)
                 _ok, _errs = await asyncio.wait_for(
                     _validate_final_report_payload(runtime.parent_ctx, runtime.parent_bus, sctx.turn_id, payload_dict),
                     timeout=_timeout_sec,
@@ -8326,6 +8338,8 @@ async def _lead_loop(
                         sctx.turn_id,
                     )
 
+                    if answer_card is not None:
+                        payload_dict.update(answer_card=answer_card, execution_generation=runtime.parent_ctx.execution_generation)
                     await _emit_event(
                         runtime.parent_bus,
                         sctx.turn_id,
@@ -8685,13 +8699,10 @@ async def _lead_loop(
         # Without card_id, dispatcher early-returns → no answer beat → dedup
         # against runner.answer fails because beatAnswerExists=false → user
         # sees narrative + fallback bubble (2 copies of same prose).
-        await _emit_event(
-            runtime.parent_bus,
-            sctx.turn_id,
-            "final_answer",
-            {"text": text_for_chat, "card_id": sctx.turn_id},
-        )
-        _had_final_answer_event = True
+        _text_payload = {"text": text_for_chat, "card_id": sctx.turn_id}
+        # Precommit card-bearing text only after its matching payload is durable.
+        if answer_card is None:
+            await _emit_event(runtime.parent_bus, sctx.turn_id, "final_answer", _text_payload)
         # ─── chat-v4 W3W4-rewrite: lookup short-path lead.final.payload ──
         # When the turn finished WITHOUT spawning a peer (`aggregated_payload`
         # is None), no upstream CHANGE-W4.1 lead.final.payload emit ran. Build
@@ -8725,7 +8736,7 @@ async def _lead_loop(
             if _should_emit_minimal_final_payload(
                 already_emitted=_lookup_already_emitted,
                 aggregated_payload=aggregated_payload,
-                has_inline_artifacts=bool(_lookup_arts),
+                has_inline_artifacts=bool(_lookup_arts) or answer_card is not None,
             ):
                 _lookup_payload = build_lookup_minimal_payload(
                     text_for_chat=text_for_chat,
@@ -8744,8 +8755,13 @@ async def _lead_loop(
                     _lookup_payload["inline_artifacts"] = _lookup_arts
                 if _lookup_outputs := await _collect_turn_outputs(runtime.parent_ctx, sctx.turn_id):
                     _lookup_payload["outputs"] = _lookup_outputs
+                if answer_card is not None:
+                    _lookup_payload.update(answer_card=answer_card, execution_generation=runtime.parent_ctx.execution_generation)
                 _lookup_art_count = len(_lookup_arts)
-                await _v4_emit_event("lead.final.payload", _lookup_payload)
+                if streaming_enabled:
+                    await _v4_emit_event("lead.final.payload", _lookup_payload)
+                else:
+                    await _emit_event(runtime.parent_bus, sctx.turn_id, "lead.final.payload", _lookup_payload)
                 runtime.parent_ctx._v4_final_payload_emitted = True
                 logger.info(
                     "v4.final_payload_lookup_minimal turn=%s len=%d arts=%d",
@@ -8753,11 +8769,16 @@ async def _lead_loop(
                     len(text_for_chat),
                     _lookup_art_count,
                 )
-        except Exception:
+        except Exception as exc:
+            if answer_card is not None:
+                raise TerminalDurabilityAbort("answer card publication is incomplete") from exc
             logger.exception(
                 "v4.final_payload_lookup_emit_failed turn=%s",
                 sctx.turn_id,
             )
+        if answer_card is not None:
+            await _emit_event(runtime.parent_bus, sctx.turn_id, "final_answer", _text_payload, required=True)
+        _had_final_answer_event = True
     elif _silent_done_fallback_enabled:
         # Emit honest fallback instead of empty bubble. 0.40.1: include card_id.
         await _emit_event(
@@ -10460,7 +10481,7 @@ def _record_answer_language(bus: Any, turn_id: str) -> None:
         )
 
 
-async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict) -> None:
+async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict, *, required: bool = False) -> None:
     """Emit turn-level SSE event via OrchestratorEvent envelope.
 
     Phase 7.5-E P0 #1 fix: TurnEventBus.emit takes a single OrchestratorEvent
@@ -10780,6 +10801,11 @@ async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict)
         # narrative hallucination of double-underscore tool names → regex
         # post-process never had anything to match. This was the bandage user
         # called out ("using regex as a patch-up worker"), now structurally redundant.
+    if required or (name == "lead.final.payload" and "answer_card" in payload):
+        from bowhead_core.events import emit_required_event
+
+        await emit_required_event(bus, OrchestratorEvent(event_type=name, turn_id=turn_id, payload=payload, persist_before_delivery=True))
+        return
     try:
         await bus.emit(
             OrchestratorEvent(

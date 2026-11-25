@@ -407,6 +407,17 @@
   font-size: 0.8125rem;
   line-height: 1.6;
 }
+.personal-mcp-dialog-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.personal-mcp-dialog-message.is-info {
+  color: var(--c-ink-2);
+}
+.personal-mcp-dialog-message.is-error {
+  color: var(--c-err);
+}
 .personal-mcp-dialog-form .personal-mcp-form-fields {
   display: grid;
   gap: 12px;
@@ -660,6 +671,16 @@
 }
 .personal-mcp-tool-selection-actions
   .personal-mcp-connection-save:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+/* A connection waiting for sign-in: signing in is the next step. */
+.personal-mcp-connection-actions .personal-mcp-connection-sign-in {
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.personal-mcp-connection-actions
+  .personal-mcp-connection-sign-in:hover:not(:disabled) {
   background: var(--c-accent-hover);
 }
 .personal-mcp-connection-actions button {

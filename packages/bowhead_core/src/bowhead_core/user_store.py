@@ -2666,6 +2666,45 @@ class UserStore:
             return {}
         return decrypt_llm_config(row["auth_ref"])
 
+    async def get_team_tool_oauth_auth_versioned(self, team_id: str, source_id: str) -> tuple[str, dict[str, Any]] | None:
+        """(stored ciphertext, decrypted auth) of an OAuth source; the ciphertext is the grant version.
+
+        None when the source is not an OAuth source or holds no stored auth. team-bound read."""
+        from bowhead_core.llm_config_crypto import decrypt_llm_config
+
+        async with diagnostic_connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT auth_ref FROM team_tool_source WHERE id=? AND team_id=? AND auth_type='oauth'",
+                (source_id, team_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or not row["auth_ref"]:
+            return None
+        return str(row["auth_ref"]), decrypt_llm_config(row["auth_ref"])
+
+    @repeat_when_authority_busy(spent=None, kind="turn")
+    async def replace_team_tool_oauth_auth(self, team_id: str, source_id: str, auth: dict[str, Any], *, expected_auth_ref: str) -> bool:
+        """Write an OAuth source's auth only over ``expected_auth_ref``; False when it changed meanwhile.
+
+        Token renewals are not configuration changes, so ``updated_at`` stays as it is. Same F14 guard as
+        ``update_team_tool_source_auth``: never store plaintext credentials. ``auth_ref`` is fenced, so the
+        write repeats while a running Turn holds the core lease; the compare-and-set is the precondition
+        each attempt rechecks. A spent wait re-raises the conflict and the broker keeps the rotated token."""
+        from bowhead_core.llm_config_crypto import encrypt_llm_config
+
+        token = encrypt_llm_config(auth)
+        if token.startswith("PLAIN:"):
+            raise RuntimeError("BOWHEAD_FERNET_KEY required to store tool auth credentials (refusing to persist plaintext)")
+        async with diagnostic_connect(self.db_path) as db:
+            async with db.execute(
+                "UPDATE team_tool_source SET auth_ref=? WHERE id=? AND team_id=? AND auth_type='oauth' AND auth_ref=?",
+                (token, source_id, team_id, expected_auth_ref),
+            ) as cursor:
+                changed = cursor.rowcount == 1
+            await db.commit()
+            return changed
+
     async def get_team_builtin_tool(self, team_id: str, provider: str) -> TeamBuiltinTool | None:
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -2962,15 +3001,22 @@ class UserStore:
             )
             await db.commit()
 
-    async def take_mcp_oauth_pending(self, state: str) -> dict[str, Any] | None:
+    async def take_mcp_oauth_pending(self, state: str, *, personal: bool = False) -> dict[str, Any] | None:
         """Consume a pending OAuth authorization EXACTLY ONCE (WP2b-2, CSRF single-use): delete the
         row for ``state`` and return its fields, or None if absent / already used / expired. Uses
         ``DELETE … RETURNING`` so the consume is ATOMIC (review P2) — two concurrent callbacks with the
         same ``state`` can't both read the row before it's deleted; only one gets the record, the
-        other gets None. Replay of a used ``state`` is a no-op."""
+        other gets None. Replay of a used ``state`` is a no-op.
+
+        Team sources and personal connections share the table; a personal connection's id always starts
+        with ``pcm_`` (its table CHECK), so each callback consumes only states of its own kind."""
+        kind = "LIKE" if personal else "NOT LIKE"
         async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("DELETE FROM mcp_oauth_pending WHERE state=? RETURNING *", (state,)) as cur:
+            async with db.execute(
+                f"DELETE FROM mcp_oauth_pending WHERE state=? AND source_id {kind} 'pcm\\_%' ESCAPE '\\' RETURNING *",  # noqa: S608 - fixed operator
+                (state,),
+            ) as cur:
                 row = await cur.fetchone()
             await db.commit()
         if row is None:

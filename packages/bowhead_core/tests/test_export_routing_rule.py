@@ -55,11 +55,7 @@ def test_pdf_xlsx_routing_rule_present_in_every_path(label: str, builder) -> Non
     ],
 )
 def test_pptx_still_routes_to_consultant(label: str, builder) -> None:
-    """回归：新增 PDF/Excel 规则不能把既有的 PPT→consultant 规则挤掉。
-
-    consultant + render_deck.py 是今天**唯一**能产出可下载文件的路径
-    （23 次「要文件」里那 4 次成功全走它），弄丢它比没加 PDF 规则更糟。
-    """
+    """Regression: the PDF and Excel rules must not displace the existing PPT -> consultant rule."""
     prompt = builder()
     assert "new PPT slide deck" in prompt  # b594341e0: English, new-deck-only wording
     assert "consultant" in prompt

@@ -15,7 +15,6 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { RoutineDrawer } from "@/components/settings/scheduled";
-import { CreateSubagentCard } from "@/components/canvas/sections/create-subagent-card";
 import type { ConfigDraftResult } from "@/lib/config-drafts-api";
 import {
   consumeDraft,
@@ -28,13 +27,6 @@ import {
   type ConfigDraftDto,
 } from "@/lib/config-copilot-draft";
 import type { ScheduledJobDTO, WorkspaceDTO } from "@/lib/api";
-import { getSubagentManager, type TeamSubagentOwnerManagerDetail } from "@/lib/team-subagents-api";
-import {
-  getAgentAuthoringCatalog,
-  getAgentWorkingCopy,
-  type AgentAuthoringCatalog,
-  type AgentWorkingCopyDetail,
-} from "@/lib/agents-api";
 import { readSpaces } from "@/lib/use-space";
 
 export type ConfigDrawerLayout = "overlay" | "column" | "sheet";
@@ -76,8 +68,6 @@ export function ConfigDrawer({
   const [dto, setDto] = useState<ConfigDraftDto | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceDTO[]>([]);
   const [loadError, setLoadError] = useState(false);
-  const [manager, setManager] = useState<TeamSubagentOwnerManagerDetail | null>(null);
-  const [revisioned, setRevisioned] = useState<{ detail: AgentWorkingCopyDetail; catalog: AgentAuthoringCatalog } | null>(null);
   const [updatedFlash, setUpdatedFlash] = useState(false);
   const applyRef = useRef<((draft: ConfigDraftResult) => unknown) | null>(null);
   const seenFieldsRef = useRef<string | null>(null);
@@ -89,12 +79,9 @@ export function ConfigDrawer({
   }, [draftId, onClose]);
 
   const payload = getDraftPayload(draftId);
-  const liveTargetId = payload?.target?.id;
   useEffect(() => {
     let alive = true;
     setDto(null);
-    setManager(null);
-    setRevisioned(null);
     setLoadError(false);
     void fetchDraft(draftId)
       .then((next) => { if (alive) setDto(next); })
@@ -103,55 +90,9 @@ export function ConfigDrawer({
       .then((result) => { if (alive) setWorkspaces(result.items); })
       .catch(() => { /* Unavailable space list never blocks manual input (failure-must-not-block rule). */ });
     return () => { alive = false; };
-  }, [draftId, liveTargetId]);
+  }, [draftId]);
 
-  const activeDto = dto && (!liveTargetId || dto.target?.id === liveTargetId) ? dto : null;
-  const targetId = activeDto?.form_id === "team_subagent" ? activeDto.target?.id : undefined;
-  useEffect(() => {
-    if (!targetId) return;
-    let alive = true;
-    setManager(null);
-    setRevisioned(null);
-    setLoadError(false);
-    void getSubagentManager(targetId)
-      .then(async (detail) => {
-        if (!detail.actions.edit) throw new Error("subagent not editable");
-        if (detail.definition_mode !== "revisioned") {
-          if (alive) setManager(detail);
-          return;
-        }
-        const [working, catalog] = await Promise.all([getAgentWorkingCopy(targetId), getAgentAuthoringCatalog()]);
-        if (!working.actions.edit) throw new Error("working copy not editable");
-        if (!alive) return;
-        const source = working.working_copy ?? working.live;
-        const definition = source.definition;
-        const listing = source.listing;
-        const refs = definition.tool_refs ?? definition.tool_refs_json;
-        const grants = definition.skill_grants;
-        const schema = definition.output_schema ?? definition.output_schema_json;
-        const parsedRefs = typeof refs === "string" ? JSON.parse(refs) as unknown : refs;
-        const parsedSchema = typeof schema === "string" ? JSON.parse(schema) as unknown : schema;
-        const legacySkills = definition.skills ?? definition.skills_json;
-        const parsedSkills = typeof legacySkills === "string" ? JSON.parse(legacySkills) as unknown : legacySkills;
-        setManager({
-          ...detail,
-          display_name: typeof listing.display_name === "string" ? listing.display_name : detail.display_name,
-          description: typeof listing.description === "string" ? listing.description : detail.description,
-          system_prompt: typeof definition.system_prompt === "string" ? definition.system_prompt : detail.system_prompt,
-          tool_refs: Array.isArray(parsedRefs) ? parsedRefs.filter((ref): ref is string => typeof ref === "string") : detail.tool_refs,
-          max_iterations: typeof definition.max_iterations === "number" ? definition.max_iterations : detail.max_iterations,
-          skills: Array.isArray(grants) ? grants.flatMap((grant) => {
-            if (!grant || typeof grant !== "object") return [];
-            const ref = (grant as { skill_ref?: { name?: unknown } }).skill_ref;
-            return typeof ref?.name === "string" ? [ref.name] : [];
-          }) : Array.isArray(parsedSkills) ? parsedSkills.filter((name): name is string => typeof name === "string") : detail.skills,
-          output_schema: parsedSchema && typeof parsedSchema === "object" && !Array.isArray(parsedSchema) ? parsedSchema as Record<string, unknown> : null,
-        });
-        setRevisioned({ detail: working, catalog });
-      })
-      .catch(() => { if (alive) setLoadError(true); });
-    return () => { alive = false; };
-  }, [targetId]);
+  const activeDto = dto;
 
   // Shell handles Esc uniformly across three forms; embedded RoutineDrawer handler disabled.
   useEffect(() => {
@@ -173,11 +114,11 @@ export function ConfigDrawer({
   // **any** later fields count as deltas (R2 review P1-B: old early return before form readiness omitted stamp,
   // discarding real first chat update as initial frame).
   useEffect(() => {
-    if (activeDto) seenFieldsRef.current = JSON.stringify([activeDto.target?.id, activeDto.fields]);
+    if (activeDto) seenFieldsRef.current = JSON.stringify(activeDto.fields);
   }, [activeDto]);
   useEffect(() => {
     if (!payload || !formReady || !applyRef.current || seenFieldsRef.current === null) return;
-    const stamp = JSON.stringify([payload.target?.id, payload.fields]);
+    const stamp = JSON.stringify(payload.fields);
     if (seenFieldsRef.current === stamp) return;
     seenFieldsRef.current = stamp;
     const receipt = applyRef.current(toDraftResult(payload)) as { filled?: number } | undefined;
@@ -207,45 +148,8 @@ export function ConfigDrawer({
     close();
   }, [draftId, close]);
 
-  const onSubagentSaved = useCallback((name: string, _toolCount: number, displayName?: string) => {
-    if (!manager) return;
-    const savedTargetId = manager.id;
-    const targetStillCurrent = () => {
-      const latestTargetId = getDraftPayload(draftId)?.target?.id;
-      return !latestTargetId || latestTargetId === savedTargetId;
-    };
-    // Chat may have switched this draft to another agent while the old save was in flight.
-    // The server rejects a mismatched consume; keep the new editor open as well.
-    if (!targetStillCurrent()) return;
-    void consumeDraft(draftId, {
-      kind: "team_subagent", ref_id: savedTargetId, label: displayName || manager.display_name || name,
-      ...(revisioned ? { stage: "working_copy" as const } : {}),
-    })
-      .catch(() => { /* The configuration save already succeeded; keep the existing draft expiry fallback. */ })
-      .finally(() => {
-        if (!targetStillCurrent()) return;
-        markDraftDismissed(draftId);
-        onClose();
-      });
-  }, [draftId, manager, revisioned, onClose]);
-
-  const isSubagent = activeDto?.form_id === "team_subagent" || payload?.form_id === "team_subagent";
   const body = loadError ? (
-    <div className="dr-load-err">{t(isSubagent ? "subagent_load_failed" : "load_failed")}</div>
-  ) : initialDraft && activeDto?.form_id === "team_subagent" ? (
-    manager ? (
-      <CreateSubagentCard
-        key={manager.id}
-        embedded
-        hideClose
-        editing={manager}
-        revisioned={revisioned}
-        initialDraft={initialDraft}
-        draftSubscribe={draftSubscribe}
-        onClose={close}
-        onSaved={onSubagentSaved}
-      />
-    ) : <div className="dr-load-err" aria-busy>{t("loading")}</div>
+    <div className="dr-load-err">{t("load_failed")}</div>
   ) : initialDraft ? (
     <RoutineDrawer
       mode="new"
@@ -272,7 +176,7 @@ export function ConfigDrawer({
       <aside
         className={`ccp cc-drawer cc-drawer-${layout}`}
         data-testid="config-drawer"
-        aria-label={t(isSubagent ? "subagent_title" : "title")}
+        aria-label={t("title")}
         // overlay/column nonmodal: chat is second editing channel; keyboard must Tab back to composer.
         // sheet covers chat fullscreen → restore modal semantics (R2 review P2-4).
         {...(isSheet ? { role: "dialog" as const, "aria-modal": true } : {})}
@@ -284,9 +188,9 @@ export function ConfigDrawer({
             </button>
           ) : null}
           <div className="ti">
-            <div className="e">{t(isSubagent ? "subagent_eyebrow" : "eyebrow")}</div>
+            <div className="e">{t("eyebrow")}</div>
             <div className="t">
-              {t(isSubagent ? "subagent_title" : "title")}
+              {t("title")}
               <span className="badge-src"><Sparkles size={10} />{t("from_chat")}</span>
             </div>
           </div>
@@ -303,12 +207,7 @@ export function ConfigDrawer({
           {updatedFlash ? <span className="badge-upd" data-testid="drawer-updated">{t("updated")}</span> : null}
         </div>
         <div className="dr-body">{body}</div>
-        {isSubagent && activeDto?.status === "draft" ? (
-          <button type="button" className="lnk" onClick={onDiscard} style={{ alignSelf: "flex-start", margin: "8px 18px 12px" }}>
-            {t("discard")}
-          </button>
-        ) : null}
-        {layout === "overlay" && !isSubagent ? (
+        {layout === "overlay" ? (
           <div className="dr-back-hint"><ArrowLeft size={13} />{t("close_returns_report")}</div>
         ) : null}
       </aside>

@@ -10,6 +10,8 @@
 import { useTranslations } from "next-intl";
 import React from "react";
 
+import { Edit } from "@/components/icons";
+
 export function EditModeToggle({
   isEditMode,
   onToggle,
@@ -78,7 +80,8 @@ export function EditModeToggle({
       <button
         type="button"
         disabled={disabled}
-        title={disabled ? disabledReason : undefined}
+        // A narrow report toolbar shows only the pencil (narrow desktop layout design §4); the label stays as tooltip and name.
+        title={disabled ? disabledReason : isEditMode ? undefined : t("edit_this_report")}
         onClick={() => {
           if (disabled) return;
           // Batch B (P1-2): remove old AC8 confirm("退出会丢失…"); "完成" now exits only after
@@ -91,7 +94,12 @@ export function EditModeToggle({
           isEditMode ? "report-edit-btn--active" : disabled ? "report-edit-btn--unavailable" : null,
         ].filter(Boolean).join(" ")}
       >
-        {isEditMode ? t("edit_done") : t("edit_this_report")}
+        {isEditMode ? t("edit_done") : (
+          <>
+            <Edit width={14} height={14} className="report-edit-icon" aria-hidden />
+            <span className="report-edit-label">{t("edit_this_report")}</span>
+          </>
+        )}
       </button>
     </div>
   );

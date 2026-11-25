@@ -148,7 +148,9 @@ export function AttachmentChip({
   const locale = useLocale();
   const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext, locale) : null;
   const elementLabel = item.presentationSelection
-    ? t("presentation_element", { page: item.presentationSelection.slideIndex, name: item.presentationSelection.elementName })
+    ? item.presentationSelection.elementName === undefined
+      ? t("presentation_slide", { page: item.presentationSelection.slideIndex })
+      : t("presentation_element", { page: item.presentationSelection.slideIndex, name: item.presentationSelection.elementName })
     : null;
   const kind: "file" | "bundle" = item.kind ?? "file";
   const [menuOpen, setMenuOpen] = useState(false);

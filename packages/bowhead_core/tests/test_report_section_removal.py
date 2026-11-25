@@ -163,3 +163,26 @@ def test_lead_is_not_offered_sections_a_helper_removed() -> None:
     ]
 
     assert [entry["id"] for entry in _canvas_sections_from_invocations(invocations)] == ["sec_kept"]
+
+
+async def test_a_chapter_written_on_its_own_after_another_is_added_beside_it(ctx) -> None:
+    """116 (1.7.73, `an observed task`): a writer added chapters one call at a time and each replaced the previous one."""
+    first = await _as("compute", _write_report, {"kind": "narrative", "content": "## 品类销售额排名\n\n女装居首。\n"}, ctx)
+    second = await _as("compute", _write_report, {"kind": "narrative", "content": "## 品类利润率\n\n整体 17.45%。\n"}, ctx)
+
+    assert second["ok"] and second["appended"] and second["section_id"] != first["section_id"]
+    assert second["not_in_body"] == [{"section_id": first["section_id"], "title": "品类销售额排名"}]
+    third = await _as("compute", _write_report, {"kind": "narrative", "content": "## 品类毛利与利润率对比\n\n四种组合。\n"}, ctx)
+    await _as("compute", _remove_report_sections, {"section_ids": [second["section_id"]]}, ctx)
+
+    titles = [section["content"].split("\n")[0] for section in await _narrative(ctx)]
+    assert titles == ["## 品类销售额排名", "## 品类毛利与利润率对比"]
+    assert third["section_ids"][0] == first["section_id"]
+
+
+async def test_the_same_chapter_title_on_its_own_still_rewrites_it_in_place(ctx) -> None:
+    first = await _as("compute", _write_report, {"kind": "narrative", "content": "## 结论\n\n女装托底。\n"}, ctx)
+    again = await _as("compute", _write_report, {"kind": "narrative", "content": "## 结论\n\n女装与鞋包托底。\n"}, ctx)
+
+    assert again["ok"] and again["section_id"] == first["section_id"] and not again.get("appended")
+    assert [section["content"].strip() for section in await _narrative(ctx)] == ["## 结论\n\n女装与鞋包托底。"]

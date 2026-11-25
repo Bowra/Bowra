@@ -744,5 +744,15 @@
   "tool_execution_timeout": "Le délai de l’opération a expiré et son résultat n’est pas confirmé. Vérifiez les effets avant de répéter une opération qui modifie des données.",
   "tool_execution_unknown": "Le résultat de l’opération n’est pas confirmé. Vérifiez si elle a pris effet avant de la répéter.",
   "tool_execution_failed": "L’outil n’a pas terminé cette étape. Consultez le résultat ou copiez le diagnostic pour votre administrateur.",
-  "tool_delivery_review_required": "La livraison reste à vérifier. L’agent doit examiner les étapes en échec et les demandes non satisfaites avant de terminer."
+  "tool_delivery_review_required": "La livraison reste à vérifier. L’agent doit examiner les étapes en échec et les demandes non satisfaites avant de terminer.",
+  "personal_mcp_needs_oauth": "Ce service vous demande de vous connecter sur {provider_host}.",
+  "personal_mcp_admin_app_required": "{provider_host} n’accepte que les applications enregistrées par son administrateur ; Bowhead ne peut donc pas encore s’y connecter. Utilisez un jeton personnel ou une clé d’API si le service en propose.",
+  "personal_mcp_callback_refused": "{provider_host} n’a pas accepté l’adresse de retour de Bowhead ({callback}). Si cette adresse n’est pas en HTTPS, demandez au propriétaire de l’équipe d’enregistrer un point d’accès public HTTPS, puis réessayez.",
+  "personal_mcp_public_entry_required": "Bowhead n’a pas pu déterminer l’adresse vers laquelle le service doit vous renvoyer. Demandez au propriétaire de l’équipe d’enregistrer un point d’accès public, puis réessayez.",
+  "personal_mcp_sign_in_start_failed": "Bowhead n’a pas pu commencer la connexion à {provider_host}. Vérifiez l’adresse et réessayez ; si l’échec persiste, consultez l’état du service.",
+  "personal_mcp_sign_in_ended": "Votre connexion à ce service a pris fin. Reconnectez-vous pour utiliser cette connexion.",
+  "personal_mcp_sign_in_renewal_unavailable": "Le service n’a pas répondu pendant que Bowhead renouvelait votre connexion. Votre connexion reste valide ; réessayez plus tard.",
+  "personal_mcp_oauth_endpoint_locked": "Une connexion authentifiée conserve son adresse. Pour utiliser une autre adresse, ajoutez une nouvelle connexion.",
+  "personal_mcp_oauth_sign_in_required": "Cette connexion se crée en se connectant au service. Choisissez « Continuer vers la connexion ».",
+  "personal_mcp_oauth_unavailable": "Les connexions par authentification ne sont pas disponibles sur ce déploiement."
 }

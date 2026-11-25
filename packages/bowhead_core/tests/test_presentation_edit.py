@@ -167,6 +167,18 @@ def test_the_inventory_lists_what_can_be_edited_and_why_the_rest_cannot(inventor
     assert inventory["slides"][0]["slide_id"] != inventory["slides"][1]["slide_id"]
 
 
+def test_the_inventory_names_each_slides_title_and_a_tables_grid(inventory: dict) -> None:
+    table = next(element for element in inventory["slides"][0]["elements"] if element["kind"] == "table")
+    assert table["col_widths"] == [0.33333] * 3 and table["row_heights"] == [0.33333] * 3
+    assert inventory["slides"][0]["title"] is None
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "区域表现：\n5 个省份"
+    buffer = io.BytesIO()
+    prs.save(buffer)
+    assert build_inventory(buffer.getvalue())["slides"][0]["title"] == "区域表现： 5 个省份"
+
+
 def test_a_box_inside_a_scaled_group_is_placed_on_the_slide(inventory: dict) -> None:
     grouped = _element(inventory, "组内说明")
     width, height = inventory["slide_width"], inventory["slide_height"]

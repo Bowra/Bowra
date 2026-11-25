@@ -102,7 +102,6 @@ _PARADIGM_V2_ROLE_MAP: dict[str, frozenset[str]] = {
     "remember": frozenset({"analyst", "composer", "lead"}),
     "remove_chart": frozenset({"analyst"}),
     "remove_report_section": frozenset({"analyst"}),
-    "render_deck": frozenset({"analyst"}),
     "routine_notify": frozenset({"lead"}),
     "send_email": frozenset({"lead"}),
     "skill_invoke": frozenset({"analyst"}),

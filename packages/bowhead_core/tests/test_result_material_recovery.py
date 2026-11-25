@@ -124,6 +124,29 @@ async def test_acknowledged_artifacts_survive_partial_failure_without_reexecutio
     assert invocation.result is result
 
 
+async def test_a_helper_result_names_each_file_it_identifies(recovery):
+    """116 (1.7.74, `an observed task`): names and identifiers arrived unpaired, and Lead paired a CSV with stdout."""
+    files = {"art_csv": "store_sales_per_sqm.csv", "art_out": "sandbox-stdout.txt"}
+    recovery.artifact_store = SimpleNamespace(
+        get=AsyncMock(side_effect=lambda identity, **kwargs: SimpleNamespace(id=identity, filename=files[identity]))
+    )
+    run = ToolInvocation("python_exec", {}, call_id="compute", result={"output_artifacts": [{"artifact_id": key} for key in files]})
+    await capture_material_references(run, recovery, turn_id="turn", producer_id="child")
+    spawn = ToolInvocation("subagent_spawn", {}, call_id="spawn", result={"summary": "Chapter saved"}, nested=[run])
+    await capture_material_references(spawn, recovery, turn_id="turn", producer_id=None)
+
+    items = json.loads(_serialize(spawn))["material_refs"]["items"]
+
+    assert {item["locator"]["artifact_id"]: item["name"] for item in items} == files
+    stored = spawn.material_refs.model_dump(exclude_none=True)
+    assert parse_references(stored) == spawn.material_refs
+    unnamed = parse_references({**stored, "items": [{k: v for k, v in item.items() if k != "name"} for item in stored["items"]]})
+    assert [item.name for item in unnamed.items] == [None, None]
+    origin = MaterialOrigin(kind="tool", turn_id="turn", producer_id="child", call_id="write")
+    with pytest.raises(ValueError):
+        MaterialReference(kind="canvas_section", locator={"canvas_id": "cv", "section_id": "sec"}, relation="created", origin=origin, name="x")
+
+
 async def test_native_tool_dispatch_emits_the_same_receipt_as_model_projection(recovery):
     import asyncio
 

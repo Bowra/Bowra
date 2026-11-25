@@ -503,16 +503,16 @@ def _public_tool_result(tool_name: str, result: Any) -> tuple[Any, str | None]:
 
 # said-not-done WP-0: register Canvas export skill outputs.
 #
-# Gap (observed in 116 prod on 2026-08-05): repository's sole skill-output collector required all three:
-# profile.deck_inputs (consultant only), script==render_deck.py, and .pptx output.
+# Gap (observed in 116 prod on 2026-08-05): the repository's sole skill-output collector then required the
+# consultant profile, the pptx Skill's deck script and a .pptx output.
 # But all three dedicated export skills (canvas-pptx / canvas-pdf / canvas-xlsx) use
 # render_from_canvas.py, and SkillRuntime does not automatically pin outputs like python_sandbox.
 # Successful files therefore landed in sandbox workdir and **vanished**, never becoming downloadable artifacts.
 # Observed consequence: two July 23 export-Canvas-to-PDF calls returned skill_invoke ok and answers claimed PDF export success,
 # but the turn had zero artifacts; users received no file.
-# Only four of 23 file requests actually produced files, all via consultant+render_deck.py.
+# Only four of 23 file requests actually produced files, all through that consultant deck script.
 #
-# This function expands collection from render_deck.py+.pptx to render_from_canvas.py's pptx/pdf/xlsx outputs.
+# This function collects render_from_canvas.py's pptx/pdf/xlsx outputs.
 # Registering kind=deliverable + created_by_turn automatically exposes download chips
 # (lead_orchestrator inline-artifact collector uses list_deliverables_for_turn,
 # already format-independent: original comment says any deliverable artifact (deck/xlsx/docx/pdf/…)).
@@ -906,7 +906,7 @@ class SubagentProfile:
     # Ordinary execution follows the selected model; explicit task limits remain numeric.
     max_output_tokens: int | None = None
     description: str = ""  # subagent-unification: Lead routing discovery + spawn enum
-    deck_inputs: bool = False  # subagent-unification: deck-input hook flag replaces profile==compute
+    deck_inputs: bool = False  # The manifest declares PPTX output (`produces: [pptx]`).
     # cca P3 (subagent-creator) — opt-in team-tool subset. None = built-in/system
     # profile → full team-overlay union (byte-identical, compute/consultant rely on
     # it). A concrete tuple = a P3 team subagent's declared SUBSET of teammcp.* names
@@ -1513,6 +1513,7 @@ PUBLIC_STEP_ERROR_CODES = frozenset(
         "collaboration_recipient_unavailable",
         "collaboration_execution_unavailable",
         "collaboration_owner_unavailable",
+        # render_deck was removed on 2026-11-24; its codes stay so steps stored before then keep their copy.
         "deck_render_not_admitted",
         "deck_storage_unavailable",
         "invalid_deck_arguments",
@@ -1523,7 +1524,7 @@ PUBLIC_STEP_ERROR_CODES = frozenset(
 
 
 def _tool_failure_summary(invocations: list[Any]) -> str:
-    """Name the failures that tripped the cap, e.g. `render_deck: deck_render_not_admitted ×3`."""
+    """Name the failures that tripped the cap, as `<tool>: <error code> ×<count>`."""
     counts: dict[str, int] = {}
     for inv in invocations:
         result = inv.result if isinstance(inv.result, dict) else {}
@@ -1690,9 +1691,7 @@ def get_compute_profile() -> SubagentProfile:
         # M137 follow-up: subagent_return payload includes 3–5 insights + recommendations,
         # with total JSON typically 3–6 KB ≈2500–5000 tokens. Old 2000 truncated it directly.
         max_output_tokens=None,
-        # subagent-unification: forward preparation (data-only). Phase 1 deck hook still uses
-        # profile==compute string comparison; explicitly set True here so Phase 4 hook switching
-        # cannot silently lose deck capability (tech-design §1/§7: no default-configuration regression).
+        # Mirrors compute.yaml `produces: [pptx]`.
         deck_inputs=True,
     )
 
@@ -3573,6 +3572,18 @@ class SubagentRunner:
         # review P0-1: production uses **per-run parameters** (Lead passes them, peer spawn does not);
         # constructor field only matters for custom/exclusive runners, unioned with run parameters.
         _run_tool_deny = self.tool_deny | tool_deny
+        from bowhead_core import answer_cards
+
+        parent_ctx.answer_card_entry = (
+            getattr(parent_ctx, "answer_card_entry", False)
+            and artifact_presentation_entry
+            and profile.name == "lead"
+            and required_model_input is None
+            and not forced_tool_calls
+            and getattr(parent_ctx, "_reference_runtime", None) is None
+        )
+        if not parent_ctx.answer_card_entry:
+            _run_tool_deny = _run_tool_deny | {answer_cards.TOOL}
         from bowhead_core.result_materials import recovery_enabled
 
         if profile.name == "lead" and (not recovery_enabled() or getattr(parent_ctx, "report_read_access", None) is None):
@@ -6765,22 +6776,6 @@ class SubagentRunner:
                         )
                     )
                     continue
-                if (
-                    profile.name == "consultant"
-                    and parent_ctx.deck_render_binding is not None
-                    and tc.name == "skill_invoke"
-                    and tc.arguments.get("name") == "pptx"
-                    and str(tc.arguments.get("script", "")).rsplit("/", 1)[-1] == "render_deck.py"
-                ):
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content="Use the native render_deck Tool for this new presentation. Do not pass template/output paths to Skill invocation.",
-                            tool_call_id=tc.id,
-                            name=tc.name,
-                        )
-                    )
-                    continue
                 if _kb_closing and tc.name not in {"subagent_return", "write_report"}:
                     messages.append(
                         Message(
@@ -7671,6 +7666,21 @@ class SubagentRunner:
                 )
                 break
 
+            if parent_ctx.answer_card_entry and len(invocations) == 1 and len(resp.tool_calls) == 1 and not source_urls:
+                receipt = answer_cards.native_receipt(invocations[0], parent_ctx)
+                if receipt is not None:
+                    text = receipt["text"]
+                    gate = getattr(parent_ctx, "_final_answer_gate", None)
+                    correction = await gate(text, profile.name, invocations) if gate is not None else None
+                    if correction is None and (collaboration is None or await collaboration.completion_guidance() is None):
+                        final_answer = text
+                        _chat_direct_delivered = True
+                        break
+                    if correction is not None:
+                        messages.append(
+                            Message(role="user", content=correction.instruction if isinstance(correction, FinalAnswerCorrection) else correction)
+                        )
+
             # Batch 5 chat direct (third sentinel family): peer supplied a short chat answer; backend **deterministically**
             # promotes it to this turn's final answer, saving another Lead LLM repetition call (old path used prose
             # directive to reuse final_answer without numeric rewriting, relying on model discipline).
@@ -7925,16 +7935,9 @@ class SubagentRunner:
                 duration_ms=dur,
             )
 
-        # subagent-unification (consultant capstone): the deck is made downloadable
-        # ONLY here — the BACKEND registers the render_deck output as a kind=deliverable
-        # artifact and is the SINGLE SOURCE OF TRUTH for the consultant deck deliverable.
-        # render_deck runs via SkillRuntime (skill name="pptx"), which — unlike
-        # python_sandbox — does NOT auto-pin its output, so the consultant has NO real
-        # artifact_id to echo. Prompts therefore tell it to OMIT deliverables; but even
-        # if the model emits a (necessarily bogus) deliverable, we OVERWRITE it with the
-        # backend-registered one (do NOT honor an LLM-emitted deliverable — review C1/
-        # ROUTE-1/ROUTE-4: the old `not _already` skip orphaned the deck). The output
-        # path is backend-tracked from the invocation, not LLM-emitted (SEC-1 safe).
+        # Bowra document Skills run through SkillRuntime, which does not pin outputs the way
+        # python_sandbox does, so the backend registers their current-turn outputs here. Output
+        # paths come from tracked invocations, never from deliverable IDs the model reports.
         community_documents = read_document_profile() == "bowra-v1"
         has_bowra_call = any(
             getattr(inv, "tool_name", "") == "skill_invoke"
@@ -7966,107 +7969,6 @@ class SubagentRunner:
             except Exception:
                 raise_if_terminal_bus_failed(parent_bus)
                 logger.warning("document_skill.registration_failed sub=%s", subagent_id, exc_info=True)
-        if parent_ctx.deck_render_binding is not None and profile.name == "consultant" and isinstance(returned_payload, dict):
-            returned_payload.pop("deliverables", None)
-        if (
-            not community_documents
-            and parent_ctx.deck_render_binding is None
-            and returned_payload is not None
-            and isinstance(returned_payload, dict)
-            and getattr(profile, "deck_inputs", False)
-        ):
-            try:
-                from pathlib import Path as _DeckP
-
-                _astore = getattr(parent_ctx, "artifact_store", None)
-                _uid = getattr(parent_ctx, "user_id", None)
-                # latest render_deck.py output.pptx across this turn's skill_invokes
-                # (render_deck.py is unique to the pptx skill — script is the reliable key).
-                _deck_path, _slides = None, None
-                for _inv in invocations:
-                    if getattr(_inv, "tool_name", "") != "skill_invoke":
-                        continue
-                    if (getattr(_inv, "arguments", None) or {}).get("script") != "render_deck.py":
-                        continue
-                    _r = getattr(_inv, "result", None)
-                    if not isinstance(_r, dict) or not _r.get("ok"):
-                        continue
-                    for _o in _r.get("outputs") or []:
-                        if str(_o).endswith(".pptx") and _DeckP(str(_o)).is_file():
-                            _deck_path = str(_o)  # last match wins
-                            _slides = (_r.get("result_json") or {}).get("slides")
-                if _deck_path and _astore is not None and _uid:
-                    raise_if_terminal_bus_failed(parent_bus)
-                    _art = await _astore.put_bytes(
-                        content=_DeckP(_deck_path).read_bytes(),
-                        filename="consultant-deck.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        source="consultant_deck",
-                        kind="deliverable",
-                        session_id=getattr(parent_ctx, "session_id", "") or "",
-                        created_by=_uid,
-                        created_by_turn=parent_turn_id,
-                        producer_kind="consultant_deck",
-                    )
-                    raise_if_terminal_bus_failed(parent_bus)
-                    # AUTHORITATIVE: overwrite any LLM-emitted deliverable with the real one.
-                    returned_payload["deliverables"] = [
-                        {
-                            "kind": "pptx",
-                            "artifact_id": _art.id,
-                            "filename": "consultant-deck.pptx",
-                            **({"slide_count": _slides} if _slides else {}),
-                        }
-                    ]
-                    logger.info(
-                        "consultant.deck_deliverable_registered sub=%s aid=%s slides=%s",
-                        subagent_id,
-                        _art.id,
-                        _slides,
-                    )
-                elif _deck_path and not _uid:
-                    # SEC-4: never register a downloadable deliverable with no owner
-                    # (created_by=NULL bypasses the download ownership check → world-readable).
-                    logger.warning(
-                        "consultant.deck_deliverable_skipped_no_owner sub=%s (user_id absent)",
-                        subagent_id,
-                    )
-            except Exception as _de:
-                raise_if_terminal_bus_failed(parent_bus)
-                logger.warning(
-                    "consultant.deck_deliverable_register_failed sub=%s err=%s",
-                    subagent_id,
-                    _de,
-                )
-
-        from bowhead_core.deck_render_tool import DeckRenderBinding, deck_target
-
-        _deck_binding = parent_ctx.deck_render_binding
-        if type(_deck_binding) is DeckRenderBinding and _deck_binding.target == deck_target(parent_ctx) and profile.name == "consultant":
-            if isinstance(returned_payload, dict) and _deck_binding.receipts:
-                returned_payload["deliverables"] = [
-                    {"kind": "pptx", "artifact_id": r["artifact_id"], "filename": r["filename"], "slide_count": r["slide_count"]}
-                    for r in list(_deck_binding.receipts.values())[-1:]
-                ]
-            # An optional binding (an uploaded deck makes inspection possible) demands a file
-            # only after the consultant actually attempted rendering.
-            _deck_due = _deck_binding.required or any(getattr(inv, "tool_name", "") == "render_deck" for inv in invocations)
-            if not isinstance(returned_payload, dict) or (_deck_due and not returned_payload.get("error") and not _deck_binding.receipts):
-                _ν_cleanup_ctx()
-                return SubagentResult(
-                    profile=profile.name,
-                    subagent_id=subagent_id,
-                    ok=False,
-                    final_answer="",
-                    error="deck_delivery_missing",
-                    tool_invocations=invocations,
-                    tokens_input=tokens_in,
-                    tokens_output=tokens_out,
-                    tokens_cached=tokens_cached,
-                    duration_ms=dur,
-                    model_turn_count=iteration + 1,
-                    model_turn_limit=profile.max_iterations + 1,
-                )
 
         # said-not-done WP-0: register Canvas export skill (canvas-pptx/pdf/xlsx) outputs.
         # See _collect_canvas_export_deliverables: these skills' outputs previously never became
@@ -8075,8 +7977,6 @@ class SubagentRunner:
         # **No profile gate**: collect any render_from_canvas.py caller's output. compute also has skill_invoke,
         # so profile gating repeats the old single-output-path mistake
         # (deck overclaim guard missed those August 4 turns that way).
-        # **No conflict** with consultant deck collection: different scripts (render_deck.py vs render_from_canvas.py),
-        # so one invocation cannot be collected by both.
         # Kill switch: BOWHEAD_CANVAS_EXPORT_DELIVERABLE=0 immediately restores old behavior without deployment rollback.
         if os.environ.get("BOWHEAD_CANVAS_EXPORT_DELIVERABLE", "1") == "1":
             try:
@@ -8091,8 +7991,7 @@ class SubagentRunner:
                 )
                 raise_if_terminal_bus_failed(parent_bus)
                 if _cx_delivs:
-                    # Append, never replace: consultant deck path is **authoritative**, never overwritten here
-                    # (C1/ROUTE-1). Outputs have different sources and may legitimately coexist.
+                    # Append, never replace: deliverables registered earlier in this closeout stay as they are.
                     if returned_payload is not None and isinstance(returned_payload, dict):
                         _existing = returned_payload.get("deliverables")
                         _existing = list(_existing) if isinstance(_existing, list) else []
@@ -10223,6 +10122,14 @@ class SubagentRunner:
             _native_presentation = None
         _phi_result_inline = _result_inline_capped(public_result)
         _event_result_meta = _tool_result_meta(public_result)
+        from bowhead_core.answer_cards import native_receipt
+
+        card_receipt = native_receipt(inv, ctx) if running_profile == "lead" else None
+        if card_receipt is not None:
+            _event_result_meta = {
+                **(_event_result_meta or {}),
+                "answer_card": {**card_receipt["answer_card"], "ignored_fields": card_receipt.ignored},
+            }
         if _native_presentation is not None:
             _event_result_meta = {**(_event_result_meta or {}), **_native_presentation.result_metadata()}
         if _coach_receipt_meta is not None and _coach_receipt_meta.receipts:
@@ -10265,7 +10172,7 @@ class SubagentRunner:
             },
             # ρ Phase E — peer scope (Lead path stays None).
             parent_agent_id=subagent_id if running_profile != "lead" else None,
-            persist_before_delivery=_native_presentation is not None,
+            persist_before_delivery=_native_presentation is not None or card_receipt is not None,
         )
         # An exact replay already has its ordered durable receipt. Keep the
         # current step projection, but never insert a second declaration.
@@ -13458,22 +13365,16 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         # Phase tracking event was decorative; FE shape gate now uses
         # v4HasDispatched signal set by peer_dispatched arrival.
 
-        # Only the dedicated deck peer implies deck preparation. A PPTX in
-        # session history is available material, not a request to generate one.
-        # Ordinary compute tasks retain their own Tools and delivery contract.
+        # Community presentation consultant: state the Bowra deck contract, which depends on
+        # whether an uploaded PowerPoint is in scope. Other editions add nothing here.
         if profile == "consultant":
-            ctx.deck_render_binding = None
             try:
-                from bowhead_core.deck_render_inputs import prepare_deck_render_inputs
+                from bowhead_core.document_runtime import community_consultant_guidance
 
-                _deck_block = await prepare_deck_render_inputs(
-                    canvas_store=getattr(ctx, "canvas_store", None),
+                _deck_block = await community_consultant_guidance(
                     artifact_store=getattr(ctx, "artifact_store", None),
                     session_id=getattr(ctx, "session_id", "") or "",
                     user_id=getattr(ctx, "user_id", None),
-                    mode="consultant",
-                    context=ctx,
-                    require_delivery=delivery == "report",
                 )
                 if _deck_block:
                     extra_in = _deck_block + ("\n\n" + extra_in if extra_in else "")
@@ -13631,6 +13532,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 if _file_targets:
                     # Per-dispatch copy: eager report cards skip this helper's payload.
                     _run_kwargs["parent_ctx"].revision_target_files = tuple(target.artifact_id for target in _file_targets)
+                    # This person's uploads among the targets: {upload id: (upload name, revised copy name)}.
+                    _run_kwargs["parent_ctx"].revision_upload_copies = {
+                        target.artifact_id: (target.name, target.copy_name) for target in _file_targets if target.copy_name
+                    }
                 result = await runner.run(**_run_kwargs)
             raise_if_terminal_bus_failed(bus)
             if result.ok and result.document_outcome is not None:
@@ -14119,21 +14024,6 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     payload=result.payload if isinstance(result.payload, dict) else None,
                 )
 
-        from bowhead_core.deck_render_tool import DeckRenderBinding, deck_target
-
-        _native_deck_receipts: list[dict[str, Any]] = []
-        _binding = getattr(ctx, "deck_render_binding", None)
-        if result.ok and result.profile == "consultant" and type(_binding) is DeckRenderBinding and _binding.target == deck_target(ctx):
-            _rendered_ids = {
-                inv.result.get("artifact_id")
-                for inv in result.tool_invocations
-                if inv.tool_name == "render_deck" and inv.error is None and isinstance(inv.result, dict) and inv.result.get("ok") is True
-            }
-            _native_deck_receipts = [dict(receipt) for receipt in _binding.receipts.values() if receipt.get("artifact_id") in _rendered_ids]
-            # A deck re-rendered with revises is the next version of the same file: hand Lead the latest version only.
-            _superseded_decks = {receipt.get("revises") for receipt in _native_deck_receipts}
-            _native_deck_receipts = [receipt for receipt in _native_deck_receipts if receipt.get("artifact_id") not in _superseded_decks]
-
         _retained_artifacts: list[dict[str, str]] = []
         if not result.ok:
             from bowhead_core.artifact_presentation import retained_failure_artifacts
@@ -14173,13 +14063,6 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 payload["retrieval"] = retrieval_receipt(result.tool_invocations)
                 payload["directive"] = (payload.get("directive") or "") + (
                     " If reporting retrieval counts, use only the actual retrieval receipt, not counts claimed in model prose or the search budget."
-                )
-            if _native_deck_receipts and payload.get("ok") and not (result.payload or {}).get("error"):
-                payload["delivered"] = "files"
-                payload["deliverables"] = _native_deck_receipts
-                payload["directive"] = (
-                    "The downloadable PPTX has been registered and read-verified. Report the original file receipt and concise task summary. "
-                    "No Canvas report is required; do not claim there is no deliverable or render again."
                 )
             if _produced_facts:
                 payload["produced"] = _produced_facts
@@ -14490,7 +14373,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             )
             # Regression check N8: a title-only revision patches the report title on the helper's behalf; it is delivery.
             _title_patched = any(item.get("kind") == "h1" for item in (_canvas_changes or {}).get("patched") or [] if isinstance(item, dict))
-            _delivered_nothing = not (ins_n or recs_n or kpis_n or _drew_canvas or _native_deck_receipts or _title_patched)
+            _delivered_nothing = not (ins_n or recs_n or kpis_n or _drew_canvas or _title_patched)
             return _with_facts(
                 {
                     "subagent_id": result.subagent_id,
@@ -14501,8 +14384,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     # a **literal delivery assertion** contradicting `delivered:"none"` in the same dict.
                     # The placeholder is valid only with actual delivery; leave empty for zero output, letting directive and
                     # `payload_summary.exec_summary` speak. If the peer wrote prose (nonempty `fa`), keep it unchanged.
-                    "final_answer": fa
-                    or (_peer_exec_summary if _native_deck_receipts else "" if _delivered_nothing else "（payload 已交给 composer 渲染）"),
+                    "final_answer": fa or ("" if _delivered_nothing else "（payload 已交给 composer 渲染）"),
                     "tokens_input": result.tokens_input,
                     "tokens_output": result.tokens_output,
                     "tokens_cached": result.tokens_cached,
@@ -14568,7 +14450,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                             "The specialist edited a chart. Report only the confirmed edit receipt and, when available, canvas_changes; "
                             "do not claim a new report or analysis was generated or require new numerical findings."
                         )
-                        if _confirmed_chart_edit and not (ins_n or recs_n or kpis_n or _native_deck_receipts)
+                        if _confirmed_chart_edit and not (ins_n or recs_n or kpis_n)
                         else (
                             "The helper returned a report payload for composition. Summarize only findings actually visible in this result, "
                             "in the user's language. Counts and summaries do not contain omitted recommendations or body text. "

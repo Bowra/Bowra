@@ -51,14 +51,12 @@ import { renderRefreshSvg } from "@/components/icon-refresh";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { listTeamPlugins, type TeamPlugin } from "@/lib/team-plugins-api";
-import { agentResourceCounts, toolSelectionLockedReasonKey, withoutSkillOperationToolRefs, withoutSkillOperationTools, type AgentResourceCounts } from "@/lib/agent-tool-selection";
+import { agentResourceCounts, toolSelectionLockedReasonKey, withoutSkillOperationToolRefs, type AgentResourceCounts } from "@/lib/agent-tool-selection";
 import { registerSubagentDraftNavigationGuard } from "@/lib/canvas-navigation-guard";
 import { useAppRouter } from "@/lib/use-app-router";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import { handoffAgentToNewChat } from "@/lib/composer-handoff";
 import { confirmCanvasNavigation } from "@/lib/canvas-navigation-guard";
-import { useCopilotFields } from "@/lib/use-copilot-fields";
-import type { ConfigDraftResult } from "@/lib/config-drafts-api";
 import { randomUuid } from "@/lib/random-id";
 import { ErrorDiagnosticsInline, type ShownError, shownError } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
@@ -100,10 +98,7 @@ import {
 import {
   getAgentAuthoringCatalog,
   getAgentWorkingCopy,
-  saveAgentWorkingCopy,
-  type AgentAuthoringCatalog,
   type AgentAuthoringPluginSection,
-  type AgentWorkingCopyDetail,
 } from "@/lib/agents-api";
 import { ResourcePluginPicker, ResourceToolPicker, pluginsFromCatalog } from "@/components/ui/resource-picker";
 
@@ -133,8 +128,6 @@ export interface CreateSubagentCardProps {
   onAccessDenied?: () => void;
   /** Render flush inside the right-side creation pane. */
   embedded?: boolean;
-  /** ConfigDrawer owns the close control when this editor is nested in it. */
-  hideClose?: boolean;
   /** one-line purpose hint from the cca.subagent_creator_open event (prefills description). */
   purposeHint?: string | null;
   /** name the user explicitly stated in chat (from the same event); prefills the slug. */
@@ -143,10 +136,6 @@ export interface CreateSubagentCardProps {
   displayNameHint?: string | null;
   /** edit mode (cca P3 settings): an existing subagent to prefill + PATCH instead of create. */
   editing?: TeamSubagentOwnerManagerDetail | null;
-  /** Chat edit draft; only its changed fields overlay the freshly fetched manager detail. */
-  initialDraft?: ConfigDraftResult | null;
-  draftSubscribe?: (apply: (draft: ConfigDraftResult) => { filled: number }) => () => void;
-  revisioned?: { detail: AgentWorkingCopyDetail; catalog: AgentAuthoringCatalog } | null;
   unifiedDraftEnabled?: boolean;
   manualDraft?: ManualSubagentDraftDetail | null;
   refreshVersion?: number | null;
@@ -183,8 +172,6 @@ export interface AgentDraftEditorPort {
 }
 
 type Step = "describe" | "tools" | "configure" | "success";
-type CopilotField = "display_name" | "description" | "system_prompt" | "tool_refs" | "skills" | "output_schema";
-type FieldSnapshot = { field: CopilotField; value: unknown };
 type ManualConflictField = "name" | "display_name" | "description" | "system_prompt"
   | "tool_refs" | "skill_grants" | "capability_ids" | "model" | "max_iterations" | "output_schema_text" | "text_only_confirmed";
 const MANUAL_CONFLICT_FIELDS: { key: ManualConflictField; label: string }[] = [
@@ -586,7 +573,7 @@ function RiskBadge({ risk }: { risk: TeamToolPickerEntry["risk"] }) {
 
 export function CreateSubagentCard({
   presentation = "card",
-  purposeHint, nameHint, displayNameHint, embedded = false, hideClose = false, editing, initialDraft, draftSubscribe, revisioned,
+  purposeHint, nameHint, displayNameHint, embedded = false, editing,
   unifiedDraftEnabled = false, manualDraft: initialManualDraft, refreshVersion = null,
   chatDraftEditEnabled = false, onDraftChange, onManualDraftSaved,
   continuous = false, controllerRef, onActivate, onAccessDenied,
@@ -701,16 +688,11 @@ export function CreateSubagentCard({
     () => Boolean(initialManualDraft?.warnings.some((warning) => warning.code === "subagent_text_only_confirmation")),
   );
   const [boundSkills, setBoundSkills] = useState<NonNullable<ManualSubagentDraftDefinition["skill_grants"]>>(() => initialManualDraft?.definition.skill_grants ?? []);
-  // Editing a revisioned Agent starts from its working copy (or live) Plugin selections.
-  const revisionedPluginIds = (key: "capability_ids" | "builtin_plugin_ids"): string[] => {
-    const value = (revisioned?.detail.working_copy ?? revisioned?.detail.live)?.definition[key];
-    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
-  };
-  const [boundPlugins, setBoundPlugins] = useState<string[]>(() => initialManualDraft?.definition.capability_ids ?? revisionedPluginIds("capability_ids"));
+  const [boundPlugins, setBoundPlugins] = useState<string[]>(() => initialManualDraft?.definition.capability_ids ?? []);
   // Plugins the draft generator picked from the request: marked "Recommended" in the creation draft only.
   const [recommendedPlugins] = useState<ReadonlySet<string>>(() => new Set(initialManualDraft?.definition.builtin_plugin_ids ?? []));
   const [builtinPlugins, setBuiltinPlugins] = useState<string[]>(
-    () => initialManualDraft?.definition.builtin_plugin_ids ?? revisionedPluginIds("builtin_plugin_ids"),
+    () => initialManualDraft?.definition.builtin_plugin_ids ?? [],
   );
   const [pluginSection, setPluginSection] = useState<AgentAuthoringPluginSection | undefined>(undefined);
   useEffect(() => {
@@ -764,7 +746,6 @@ export function CreateSubagentCard({
   const [skillsOpen, setSkillsOpen] = useState(() => !!(editing?.skills && editing.skills.length));
   const [skillsCatalog, setSkillsCatalog] = useState<SkillsCatalog | null>(null);
   const [skillsCatErr, setSkillsCatErr] = useState<ShownError | null>(null);
-  const [suggestedFields, setSuggestedFields] = useState<string[]>([]);
   // Canvas presentation (Canvas Objects Spec part 2, screens 5–7).
   const canvasMode = presentation === "canvas" && !isEditing;
   const canvasIdBase = useId().replace(/[^A-Za-z0-9_-]/g, "_");
@@ -779,103 +760,30 @@ export function CreateSubagentCard({
   const [slugEdited, setSlugEdited] = useState(() => Boolean(editing?.name || initialManualDraft?.definition.name || nameHint));
   const { confirmDiscard, dialog: guardDialog } = useCanvasCloseGuard();
 
-  const copilot = useCopilotFields<CopilotField, FieldSnapshot>({
-    enabled: !!editing && !!draftSubscribe,
-    fields: ["display_name", "description", "system_prompt", "tool_refs", "skills", "output_schema"],
-    snapshotOf: (field) => ({
-      field,
-      value: ({
-        display_name: displayName, description: desc, system_prompt: persona,
-        tool_refs: [...sel], skills: [...skillSel], output_schema: schemaText,
-      })[field],
-    }),
-    restoreSnapshot: ({ field, value }) => {
-      if (field === "display_name") setDisplayName(value as string);
-      if (field === "description") setDesc(value as string);
-      if (field === "system_prompt") setPersona(value as string);
-      if (field === "tool_refs") setSel(new Set(value as string[]));
-      if (field === "skills") setSkillSel(new Set(value as string[]));
-      if (field === "output_schema") setSchemaText(value as string);
-    },
-  });
-
-  const applyAiDraft = (draft: ConfigDraftResult): { filled: number } => {
-    const fields = draft.fields;
-    setSuggestedFields((previous) => [...new Set([...previous, ...Object.keys(fields)])]);
-    const session = copilot.beginApply(draft);
-    const admit = session.admit;
-    if (typeof fields.display_name === "string" && admit("display_name", "display_name")) setDisplayName(fields.display_name.slice(0, MAX_DISPLAY));
-    if (typeof fields.description === "string" && admit("description", "description")) setDesc(fields.description.slice(0, MAX_DESC));
-    if (typeof fields.system_prompt === "string" && admit("system_prompt", "system_prompt")) setPersona(fields.system_prompt.slice(0, MAX_PROMPT));
-    if (Array.isArray(fields.tool_refs) && fields.tool_refs.every((item) => typeof item === "string") && admit("tool_refs", "tool_refs")) setSel(new Set(fields.tool_refs as string[]));
-    if (Array.isArray(fields.skills) && fields.skills.every((item) => typeof item === "string") && admit("skills", "skills")) { setSkillSel(new Set(fields.skills as string[])); setSkillsOpen(true); }
-    if ((fields.output_schema === null || (typeof fields.output_schema === "object" && !Array.isArray(fields.output_schema))) && admit("output_schema", "output_schema")) {
-      setSchemaText(fields.output_schema ? JSON.stringify(fields.output_schema, null, 2) : "");
-      setSchemaOpen(true);
-    }
-    return session.commit(["display_name", "description", "system_prompt", "tool_refs", "skills", "output_schema"]);
-  };
-  const applyDraftRef = useRef(applyAiDraft);
-  applyDraftRef.current = applyAiDraft;
   useEffect(() => {
-    if (!initialDraft || !editing) return;
-    applyDraftRef.current(initialDraft);
-    const keys = Object.keys(initialDraft.fields);
-    const counts = [
-      keys.filter((key) => ["display_name", "description", "system_prompt"].includes(key)).length,
-      keys.filter((key) => key === "tool_refs").length,
-      keys.filter((key) => ["skills", "output_schema"].includes(key)).length,
-    ];
-    setStep((["describe", "tools", "configure"] as const)[counts.indexOf(Math.max(...counts))]);
-  }, [initialDraft, editing]);
-  useEffect(() => draftSubscribe?.((draft) => applyDraftRef.current(draft)), [draftSubscribe]);
-
-  useEffect(() => {
-    if (revisioned) {
-      setCatalog({
-        text_only_allowed: true,
-        native_tools: withoutSkillOperationTools(revisioned.catalog.tools).filter((tool) => tool.source_kind === "native").map((tool) => tool.stable_ref),
-        team_tools: revisioned.catalog.tools.filter((tool) => tool.source_kind === "team_mcp").map((tool) => ({
-          tool_name: tool.stable_ref, operation_id: "", description: tool.description,
-          is_write: tool.risk === "external_write" || tool.risk === "destructive",
-          risk: tool.risk, selectable: tool.selectable, locked_reason: tool.locked_reason,
-          method: "", path: "",
-        })),
-      });
-      return;
-    }
     let live = true;
     getToolsCatalog(unifiedDraftEnabled ? requestContext.current : undefined)
       .then((c) => { if (live) setCatalog(c); })
       .catch((e) => { if (live) setCatalogErr(shownError(withHttpFailureReason(t("catalog_load_failed_plain"), e, { read: true }), e)); });
     return () => { live = false; };
-  }, [revisioned]);
+  }, []);
 
   useEffect(() => {
-    if (revisioned) {
-      setSkillsCatalog({
-        builtin: revisioned.catalog.skills.filter((skill) => skill.source_kind === "builtin"),
-        team_skills: revisioned.catalog.skills.filter((skill) => skill.source_kind === "team"),
-      });
-      return;
-    }
     let live = true;
     getSkillsCatalog(unifiedDraftEnabled ? requestContext.current : undefined)
       .then((c) => { if (live) setSkillsCatalog(c); })
       .catch((e) => { if (live) setSkillsCatErr(shownError(withHttpFailureReason(t("skills_load_failed_plain"), e, { read: true }), e)); });
     return () => { live = false; };
-  }, [revisioned]);
+  }, []);
 
   const toggle = useCallback((id: string) => {
-    copilot.touchField("tool_refs");
     setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
     setTextOnlyConfirmed(false);
-  }, [copilot]);
+  }, []);
 
   const toggleSkill = useCallback((name: string) => {
-    copilot.touchField("skills");
     setSkillSel((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
-  }, [copilot]);
+  }, []);
 
   const teamTools = catalog?.team_tools ?? [];
   const nativeTools = catalog?.native_tools ?? [];
@@ -907,19 +815,7 @@ export function CreateSubagentCard({
 
   const teamSkills = skillsCatalog?.team_skills ?? [];
   const builtinSkills = skillsCatalog?.builtin ?? [];
-  const personalSkills = revisioned?.catalog.skills.filter((skill) => skill.source_kind === "user") ?? [];
-  const skillStatus = (name: string) => {
-    const skill = revisioned?.catalog.skills.find((entry) => entry.name === name);
-    if (!skill) return { issue: undefined, disabled: false };
-    const audience = revisioned?.detail.working_copy?.audience.effective_mode ?? revisioned?.detail.live.audience.effective_mode;
-    const audienceBlocked = !audience || !skill.allowed_audiences.includes(audience);
-    const missing = (skill.required_skills ?? []).filter((required) => !skillSel.has(required));
-    return {
-      issue: audienceBlocked ? t("skill_audience_blocked") : missing.length ? t("skill_requires", { names: missing.join("、") }) : undefined,
-      disabled: audienceBlocked && !skillSel.has(name),
-    };
-  };
-  const knownSkillNames = new Set([...teamSkills, ...builtinSkills, ...personalSkills].map((s) => s.name));
+  const knownSkillNames = new Set([...teamSkills, ...builtinSkills].map((s) => s.name));
   const skillsLoading = skillsCatalog === null && !skillsCatErr;
   // selected names not in the loaded catalog. While the catalog is still loading this is ALL
   // selected names — render them (as plain rows) so prefilled skills are visible/removable
@@ -928,7 +824,7 @@ export function CreateSubagentCard({
   const extraSkills = [...skillSel].filter((n) => !knownSkillNames.has(n));
   const dependencyLabel = (item: AgentBlockedItem): string | undefined => {
     if (item.kind === "skill") {
-      return [...teamSkills, ...builtinSkills, ...personalSkills].find((skill) => skill.name === item.name)?.display_name || undefined;
+      return [...teamSkills, ...builtinSkills].find((skill) => skill.name === item.name)?.display_name || undefined;
     }
     if (item.kind !== "tool") return undefined;
     return nativeTools.includes(item.identity) || !item.identity.startsWith("teammcp.") ? nativeMeta(item.identity).title : undefined;
@@ -965,19 +861,7 @@ export function CreateSubagentCard({
     (!unifiedDraftEnabled || isEditing || catalog !== null && Boolean(manualDraft?.actions.edit)) &&
     iters >= MIN_ITER && iters <= MAX_ITER && schemaValid &&
     (!unifiedDraftEnabled || isEditing || skillSel.size === 0) &&
-    (!unifiedDraftEnabled || isEditing || sel.size > 0 || hasBoundResources || textOnlyConfirmed) &&
-    (!initialDraft || (catalog !== null && skillsCatalog !== null && extraSkills.length === 0 && !approvalLockedSelected)) &&
-    (!revisioned || (
-      [...sel].every((ref) => {
-        const tool = revisioned.catalog.tools.find((entry) => entry.stable_ref === ref);
-        return Boolean(tool && (tool.selectable || editing?.tool_refs.includes(ref)));
-      }) &&
-      [...skillSel].every((name) => {
-        const skill = revisioned.catalog.skills.find((entry) => entry.name === name);
-        return Boolean(skill && skill.allowed_audiences.includes(revisioned.detail.working_copy?.audience.effective_mode ?? revisioned.detail.live.audience.effective_mode)
-          && (skill.required_skills ?? []).every((required) => skillSel.has(required)));
-      })
-    ));
+    (!unifiedDraftEnabled || isEditing || sel.size > 0 || hasBoundResources || textOnlyConfirmed);
 
   const manualDefinition: ManualSubagentDraftDefinition = {
     name: slug.trim(), display_name: displayName.trim(), description: desc.trim(),
@@ -1402,50 +1286,6 @@ export function CreateSubagentCard({
       const output_schema = schemaText.trim()
         ? (JSON.parse(schemaText) as Record<string, unknown>) : null;
       if (editing) {
-        if (revisioned) {
-          const source = revisioned.detail.working_copy ?? revisioned.detail.live;
-          const outputSchema = output_schema;
-          const toolChanged = [...sel].sort().join("\0") !== [...editing.tool_refs].sort().join("\0");
-          const skillChanged = [...skillSel].sort().join("\0") !== [...editing.skills].sort().join("\0");
-          const teamConnectionIds = [...new Set([...sel].flatMap((ref) => {
-            const tool = revisioned.catalog.tools.find((entry) => entry.stable_ref === ref);
-            if (!tool || tool.source_kind !== "team_mcp") return [];
-            return [tool.connection_id || ref.split(".")[1]];
-          }).filter((id): id is string => Boolean(id)))].sort();
-          const grants = [...skillSel].map((name) => revisioned.catalog.skills.find((skill) => skill.name === name)?.grant);
-          if ((skillChanged || !Array.isArray(source.definition.skill_grants)) && grants.some((grant) => !grant)) throw new CreateAgentNotice(t("copilot_blocked"));
-          const nextDefinition = { ...source.definition };
-          // Plugin selections are written only when they changed; an empty built-in list is omitted.
-          const sameIds = (left: string[], right: string[]) => [...left].sort().join("\0") === [...right].sort().join("\0");
-          if (!sameIds(boundPlugins, revisionedPluginIds("capability_ids"))) nextDefinition.capability_ids = [...boundPlugins];
-          if (!sameIds(builtinPlugins, revisionedPluginIds("builtin_plugin_ids"))) {
-            if (builtinPlugins.length) nextDefinition.builtin_plugin_ids = [...builtinPlugins].sort();
-            else delete nextDefinition.builtin_plugin_ids;
-          }
-          delete nextDefinition.tool_refs_json;
-          delete nextDefinition.skills;
-          delete nextDefinition.skills_json;
-          delete nextDefinition.output_schema_json;
-          await saveAgentWorkingCopy(editing.id, {
-            definition: {
-              ...nextDefinition,
-              system_prompt: persona.trim(), output_schema: outputSchema,
-              model: typeof source.definition.model === "string" && revisioned.catalog.model_policy.allowed_roles.includes(source.definition.model)
-                ? source.definition.model : revisioned.catalog.model_policy.effective_role,
-              ...(toolChanged || !Array.isArray(source.definition.tool_refs)
-                ? { tool_refs: [...sel].sort(), team_tool_connections: toolChanged ? teamConnectionIds : source.definition.team_tool_connections ?? teamConnectionIds }
-                : {}),
-              ...(skillChanged || !Array.isArray(source.definition.skill_grants) ? { skill_grants: grants } : {}),
-            },
-            listing: { ...source.listing, display_name: displayName.trim(), description: desc.trim() },
-            audience: source.audience,
-            expected_row_version: revisioned.detail.working_copy?.row_version ?? null,
-          });
-          setSavedAgent({ id: editing.id, label: displayName.trim() || editing.name, visibility: editing.visibility });
-          onSaved?.(editing.name, sel.size, displayName.trim());
-          setStep("success");
-          return;
-        }
         // edit mode: PATCH. name is immutable + visibility is not patchable (the server has no field
         // for it); status is managed from the settings list toggle, so it's omitted (= kept).
         const sa = await patchSubagent(
@@ -1518,11 +1358,6 @@ export function CreateSubagentCard({
   };
 
   const stepIdx = step === "describe" ? 0 : step === "tools" ? 1 : step === "success" ? 3 : 2;
-  const suggestedLabels = suggestedFields.map((field) => ({
-    display_name: t("display_label"), description: t("desc_label"), system_prompt: t("persona_label"),
-    tool_refs: t("step_tools"), skills: t("skills_label"),
-    output_schema: t("schema_label"),
-  })[field as CopilotField]).filter(Boolean).join(" · ");
   const flush = embedded || presentation === "canvas";
   const wrap: React.CSSProperties = {
     border: flush ? "none" : "1px solid var(--c-line)",
@@ -1557,17 +1392,8 @@ export function CreateSubagentCard({
                 : manualDirty ? leavePromptOpen ? "draft_unsaved_paused" : "draft_unsaved"
                   : manualDraft && chatDraftEditEnabled ? "draft_chat_connected"
                   : manualDraft ? "draft_saved" : "draft_new")
-              : isEditing && initialDraft && draftSubscribe
-              ? t("chat_connected")
               : t(isEditing ? "chat_unbound_edit" : "chat_unbound_create")}
           </p>
-        ) : null}
-        {initialDraft && editing ? (
-          <div style={{ marginTop: 8, fontSize: "0.75rem", color: "var(--c-ink-2)" }}>
-            <strong>{t("copilot_target", { name: editing.display_name || editing.name })}</strong>
-            <div>{t("copilot_summary", { count: suggestedFields.length })}</div>
-            {suggestedLabels ? <div>{suggestedLabels}</div> : null}
-          </div>
         ) : null}
       </div>
       {unifiedDraftEnabled && !isEditing && step !== "success" ? (
@@ -1575,11 +1401,11 @@ export function CreateSubagentCard({
           onClick={() => void persistManual().catch((cause: unknown) => showError(cause))}
           style={{ ...btnGhost(), whiteSpace: "nowrap" }}>{t("draft_save")}</button>
       ) : null}
-      {!hideClose ? <button type="button" disabled={busy || manualSaveStatus === "saving"}
+      <button type="button" disabled={busy || manualSaveStatus === "saving"}
         aria-label={t("close_aria")} onClick={closeManual} style={{
         width: 28, height: 28, flex: "0 0 28px", border: "none", background: "transparent",
         color: "var(--c-ink-4)", cursor: "pointer", borderRadius: 8, display: "grid", placeItems: "center",
-      }}><Icon name="x" s={17} /></button> : null}
+      }}><Icon name="x" s={17} /></button>
     </div>
   );
 
@@ -1609,12 +1435,12 @@ export function CreateSubagentCard({
         </div>
         <div>
           <FieldLabel htmlFor={displayId} hint={t("display_hint")}>{t("display_label")}</FieldLabel>
-          <input id={displayId} value={displayName} maxLength={MAX_DISPLAY} onChange={(e) => { copilot.touchField("display_name"); setDisplayName(e.target.value); }}
+          <input id={displayId} value={displayName} maxLength={MAX_DISPLAY} onChange={(e) => { setDisplayName(e.target.value); }}
             placeholder={t("display_placeholder")} style={fieldInput()} />
         </div>
         <div>
           <FieldLabel htmlFor={descId} hint={t("desc_hint")}>{t("desc_label")}</FieldLabel>
-          <input id={descId} value={desc} maxLength={MAX_DESC} onChange={(e) => { copilot.touchField("description"); setDesc(e.target.value); }}
+          <input id={descId} value={desc} maxLength={MAX_DESC} onChange={(e) => { setDesc(e.target.value); }}
             placeholder={t("desc_placeholder")} style={fieldInput()} />
           {triedDescribeNext && !desc.trim() ? (
             <div style={{ fontSize: "0.6875rem", color: "var(--c-err)", marginTop: 5 }}>
@@ -1629,7 +1455,7 @@ export function CreateSubagentCard({
         <div>
           <FieldLabel htmlFor={personaId} hint={t("persona_hint")}>{t("persona_label")}</FieldLabel>
           <textarea id={personaId} className="bh-scroll" value={persona} rows={5} maxLength={MAX_PROMPT}
-            onChange={(e) => { copilot.touchField("system_prompt"); setPersona(e.target.value); }}
+            onChange={(e) => { setPersona(e.target.value); }}
             onBlur={() => setPersonaTouched(true)}
             placeholder={t("persona_placeholder")}
             style={{ width: "100%", resize: "vertical", border: "1.5px solid var(--c-line)",
@@ -1658,7 +1484,6 @@ export function CreateSubagentCard({
 
   // Compact Plugin picker (brief §4.10, E2), shared by the step flow and the Canvas layout.
   // Revisioned edits (owner card and configuration drawer) read the section from the catalog they already loaded.
-  const editPluginSection = isEditing ? revisioned?.catalog.plugins : undefined;
   // The draft heading and the creation receipt name each kind once: "1 Plugin · 3 Tools". A Plugin is never
   // counted as the Tools it brings, so the count matches the chips the user picked.
   const localResourceCounts = agentResourceCounts({
@@ -1672,12 +1497,12 @@ export function CreateSubagentCard({
     ].filter((part): part is string => Boolean(part));
     return parts.length ? parts.join(" · ") : t("resources_none");
   };
-  const builtinPluginPicker = (unifiedDraftEnabled && !isEditing && pluginSection) || editPluginSection ? (
+  const builtinPluginPicker = (unifiedDraftEnabled && !isEditing && pluginSection) ? (
     <ResourcePluginPicker
       density="compact"
-      plugins={pluginsFromCatalog(editPluginSection ?? pluginSection, locale)}
+      plugins={pluginsFromCatalog(pluginSection, locale)}
       selected={new Set([...builtinPlugins, ...boundPlugins])}
-      canManage={Boolean((editPluginSection ?? pluginSection)?.viewer_can_manage)}
+      canManage={Boolean(pluginSection?.viewer_can_manage)}
       recommended={isEditing ? undefined : recommendedPlugins}
       onToggle={(plugin) => plugin.kind === "builtin"
         ? setBuiltinPlugins((items) => items.includes(plugin.id) ? items.filter((id) => id !== plugin.id) : [...items, plugin.id].sort())
@@ -1688,7 +1513,7 @@ export function CreateSubagentCard({
   const nativeToolPicker = natF.length ? (
     <ResourceToolPicker
       tools={natF.map((name) => ({ ref: name, name: nativeMeta(name).title, description: nativeMeta(name).desc, selectable: true }))}
-      plugins={pluginsFromCatalog(editPluginSection ?? pluginSection, locale)}
+      plugins={pluginsFromCatalog(pluginSection, locale)}
       selected={sel}
       selectedPluginIds={new Set([...builtinPlugins, ...boundPlugins])}
       onToggle={toggle}
@@ -1873,7 +1698,7 @@ export function CreateSubagentCard({
           {schemaOpen ? (
             <div style={{ padding: "0 13px 13px" }}>
               <textarea className="bh-mono bh-scroll" spellCheck={false} rows={6} value={schemaText} aria-label={t("schema_label")}
-                onChange={(e) => { copilot.touchField("output_schema"); setSchemaText(e.target.value); }}
+                onChange={(e) => { setSchemaText(e.target.value); }}
                 placeholder={'{\n  "type": "object",\n  "properties": {\n    "summary": { "type": "string" }\n  },\n  "required": ["summary"]\n}'}
                 style={{ width: "100%", resize: "vertical", border: `1px solid ${schemaValid ? "var(--c-line)" : "var(--c-err)"}`,
                   borderRadius: "var(--r-1)", padding: "11px 12px", fontSize: "0.75rem", lineHeight: 1.6,
@@ -1907,7 +1732,7 @@ export function CreateSubagentCard({
           {skillsOpen ? (
             <div style={{ padding: "0 13px 13px", display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ fontSize: "0.71875rem", color: "var(--c-ink-4)", lineHeight: 1.5 }}>
-                {t.rich(revisioned ? "skills_hint_revisioned" : "skills_hint", { code: (chunks) => <code className="bh-mono">{chunks}</code> })}
+                {t.rich("skills_hint", { code: (chunks) => <code className="bh-mono">{chunks}</code> })}
               </div>
               {skillsCatErr ? (
                 <>
@@ -1920,17 +1745,7 @@ export function CreateSubagentCard({
                   <GroupHeader icon="folder" title={t("group_team_skills")} sub={t("count_n", { n: teamSkills.length })} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {teamSkills.map((s) => (
-                      <SkillToggleRow key={s.name} entry={s} badge={t("badge_team")} on={skillSel.has(s.name)} onToggle={() => toggleSkill(s.name)} {...skillStatus(s.name)} />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {personalSkills.length ? (
-                <div>
-                  <GroupHeader icon="user" title={t("group_personal_skills")} sub={t("count_n", { n: personalSkills.length })} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {personalSkills.map((s) => (
-                      <SkillToggleRow key={s.name} entry={s} badge={t("group_personal_skills")} on={skillSel.has(s.name)} onToggle={() => toggleSkill(s.name)} {...skillStatus(s.name)} />
+                      <SkillToggleRow key={s.name} entry={s} badge={t("badge_team")} on={skillSel.has(s.name)} onToggle={() => toggleSkill(s.name)} />
                     ))}
                   </div>
                 </div>
@@ -1940,7 +1755,7 @@ export function CreateSubagentCard({
                   <GroupHeader icon="sparkles" title={t("group_builtin_skills")} sub={t("count_n", { n: builtinSkills.length })} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {builtinSkills.map((s) => (
-                      <SkillToggleRow key={s.name} entry={s} badge={t("badge_builtin")} on={skillSel.has(s.name)} onToggle={() => toggleSkill(s.name)} {...skillStatus(s.name)} />
+                      <SkillToggleRow key={s.name} entry={s} badge={t("badge_builtin")} on={skillSel.has(s.name)} onToggle={() => toggleSkill(s.name)} />
                     ))}
                   </div>
                 </div>
@@ -1963,7 +1778,7 @@ export function CreateSubagentCard({
                   </div>
                 </div>
               ) : null}
-              {!teamSkills.length && !builtinSkills.length && !personalSkills.length && !extraSkills.length ? (
+              {!teamSkills.length && !builtinSkills.length && !extraSkills.length ? (
                 <div style={{ fontSize: "0.75rem", color: "var(--c-ink-4)", padding: "4px 2px" }}>
                   {skillsCatalog ? t("no_skills_available") : t("loading")}
                 </div>
@@ -1981,9 +1796,6 @@ export function CreateSubagentCard({
             <span style={{ fontSize: "0.71875rem", color: "var(--c-err)", maxWidth: 240, textAlign: "right", lineHeight: 1.4 }}>{error.message}</span>
           ) : null}
           {error ? <ErrorDiagnosticsInline error={error.error} surface="settings" /> : null}
-          {initialDraft && !canSubmit && !error ? (
-            <span style={{ fontSize: "0.71875rem", color: "var(--c-warn)", maxWidth: 240, textAlign: "right", lineHeight: 1.4 }}>{t("copilot_blocked")}</span>
-          ) : null}
           <button type="button" disabled={busy || !canSubmit || manualSaveStatus === "saving" || manualConflict !== null || unknownSave !== null || manualDraft?.actions.edit === false}
             style={btnPrimary(busy || !canSubmit || manualSaveStatus === "saving" || manualConflict !== null || unknownSave !== null)} onClick={doSubmit}>
             {busy
@@ -2004,7 +1816,7 @@ export function CreateSubagentCard({
     return catalog ? t("tool_unavailable") : nativeMeta(ref).title;
   }
   function pluginLabel(id: string): string | null {
-    if (id.startsWith("builtin:")) return pluginsFromCatalog(editPluginSection ?? pluginSection, locale).find((item) => item.id === id)?.name ?? null;
+    if (id.startsWith("builtin:")) return pluginsFromCatalog(pluginSection, locale).find((item) => item.id === id)?.name ?? null;
     return pluginCatalog.find((item) => item.id === id)?.name ?? null;
   }
   const fieldLabel = (field: string): string => ({
@@ -2179,20 +1991,20 @@ export function CreateSubagentCard({
               <Field id={displayId} label={t("display_label")} suggestion={suggestionFor(["display_name"])}>
                 <input id={displayId} className="settings-input" value={displayName} maxLength={MAX_DISPLAY}
                   placeholder={t("display_placeholder")}
-                  onChange={(event) => { copilot.touchField("display_name"); setDisplayName(event.target.value); }} />
+                  onChange={(event) => { setDisplayName(event.target.value); }} />
               </Field>
               <Field id={descId} label={t("desc_label")} hint={t("desc_hint")} suggestion={suggestionFor(["description"])}
                 error={triedDescribeNext && !desc.trim() ? t("desc_required") : undefined}>
                 <textarea id={descId} className={`settings-input ${canvasStyles.textarea}`} rows={2} value={desc} maxLength={MAX_DESC}
                   placeholder={t("desc_placeholder")} aria-describedby={fieldDescribedBy(descId, { hint: true, error: triedDescribeNext && !desc.trim() })}
-                  onChange={(event) => { copilot.touchField("description"); setDesc(event.target.value); }} />
+                  onChange={(event) => { setDesc(event.target.value); }} />
               </Field>
               <Field id={personaId} label={t("persona_label")} suggestion={suggestionFor(["system_prompt"])}
                 error={!persona.trim() && (personaTouched || triedDescribeNext) ? t("persona_required") : undefined}>
                 <textarea id={personaId} className={`settings-input ${canvasStyles.textarea}`} rows={5} value={persona} maxLength={MAX_PROMPT}
                   placeholder={t("persona_placeholder")} aria-describedby={fieldDescribedBy(personaId, { error: !persona.trim() && (personaTouched || triedDescribeNext) })}
                   onBlur={() => setPersonaTouched(true)}
-                  onChange={(event) => { copilot.touchField("system_prompt"); setPersona(event.target.value); }} />
+                  onChange={(event) => { setPersona(event.target.value); }} />
               </Field>
             </div>
           </CanvasSection>
@@ -2309,7 +2121,7 @@ export function CreateSubagentCard({
                 <Field id={`${canvasIdBase}-schema`} label={t("schema_label")} suggestion={suggestionFor(["output_schema_text"])}
                   hint={schemaValid ? t("schema_valid_hint") : undefined} error={schemaValid ? undefined : t("schema_invalid_hint")}>
                   <textarea id={`${canvasIdBase}-schema`} className={`settings-input ${canvasStyles.textarea}`} rows={6} spellCheck={false} value={schemaText}
-                    onChange={(event) => { copilot.touchField("output_schema"); setSchemaText(event.target.value); }} />
+                    onChange={(event) => { setSchemaText(event.target.value); }} />
                 </Field>
               </div>
             ) : null}

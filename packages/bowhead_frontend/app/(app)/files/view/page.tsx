@@ -10,8 +10,15 @@ import { ApiError } from "@/lib/api-client";
 import { useAuthRedirect } from "@/lib/auth/use-auth-redirect";
 import { getSharedHtml, sharedHtmlContentPath, type SharedHtml } from "@/lib/file-share";
 import { formatByteSize } from "@/lib/format";
+import type { ResultCapability } from "@/lib/results-workspace-model";
 import { useResultsCapabilities } from "@/lib/use-results-capabilities";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
+
+/**
+ * A file shared with the person is listed nowhere else, so this page is where it gets pinned (result pins acceptance
+ * F4). Its "⋯" pins the version shown: the link's lineage root may name a pruned first version.
+ */
+const SHARED_FILE_CAPABILITIES: ReadonlySet<ResultCapability> = new Set<ResultCapability>(["download", "pin_result"]);
 
 export default function SharedFilePage() {
   return <Suspense fallback={null}><SharedFileRoute /></Suspense>;
@@ -69,6 +76,8 @@ function SharedFileViewer({ fileId }: { fileId: string }) {
       sizeLabel={formatByteSize(file.size)}
       downloadHref={href}
       contentHref={href}
+      capabilities={SHARED_FILE_CAPABILITIES}
+      resultRole="deliverable"
       preview={null}
       onContentVersionChanged={refresh}
     />

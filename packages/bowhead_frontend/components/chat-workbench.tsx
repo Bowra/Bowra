@@ -54,6 +54,8 @@ import { useResultPinActions } from "@/lib/use-result-pin-actions";
 import { useSteerAcks } from "@/lib/use-steer-acks";
 import { useTurnAwaitingPlanApproval } from "@/lib/use-proposed-plan-gate";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { itemsOnOneLine, noOverflow, writeFitTokens, type FitStep } from "@/lib/toolbar-fit";
+import { useToolbarFit } from "@/lib/use-toolbar-fit";
 import { useRequestSidebarAutoCompact } from "@/lib/sidebar-auto-compact";
 import type { TurnRunnerState } from "@/lib/types";
 import type { StreamConnection } from "@/components/canvas/report-toolbar-status";
@@ -172,6 +174,53 @@ import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Three-state split gate (P2 batch 4: from 1024). */
 const DESKTOP_SPLIT_QUERY = "(min-width: 1024px)";
+
+/**
+ * Narrow desktop layout (design §4): what gives way on the desktop report toolbar, first to last. Results,
+ * ⋯, Expand and Close never move; Share moves last (the phone reading bar keeps it too). A transient mode
+ * (writing progress with Stop, a connection or interruption note, or the edit bar) first takes a
+ * deliberate second row (`mode-status` / `mode-edit`).
+ */
+const REPORT_TOOLBAR_FIT_STEPS: readonly FitStep[] = [
+  "trust-short",
+  "export-icon",
+  "edit-icon",
+  "figures-short",
+  "export-menu",
+  "share-menu",
+];
+
+function reportToolbarSecondRow(bar: HTMLElement): string {
+  const fit = bar.getAttribute("data-fit") ?? "";
+  return [
+    ".results-report-writing-hint",
+    fit.includes("mode-status") ? ".results-report-status-group" : null,
+    fit.includes("mode-edit") ? ".results-report-edit-controls" : null,
+  ].filter(Boolean).join(", ");
+}
+
+/** The control row and each group on one line, nothing painted past the toolbar. */
+function reportToolbarFits(bar: HTMLElement): boolean {
+  const skip = reportToolbarSecondRow(bar);
+  return itemsOnOneLine(bar, skip)
+    && itemsOnOneLine(bar.querySelector(".results-report-actions"), skip)
+    && itemsOnOneLine(bar.querySelector(".rc-trust"))
+    && itemsOnOneLine(bar.querySelector(".rc-toolbar-stream, .rc-toolbar-outcome"))
+    && itemsOnOneLine(bar.querySelector(".results-report-edit-controls .v2-report-edit-bar"))
+    && noOverflow(bar);
+}
+
+/** A transient mode takes the second row first, only when the row does not fit with it. */
+function reportToolbarModeRow(bar: HTMLElement): FitStep[] {
+  const mode = bar.querySelector(".results-report-status-group :is(.rc-toolbar-stream, .rc-toolbar-outcome)")
+    ? "mode-status"
+    : bar.querySelector(".results-report-edit-controls .report-edit-btn--active")
+      ? "mode-edit"
+      : null;
+  if (!mode) return [];
+  writeFitTokens(bar, []);
+  return reportToolbarFits(bar) ? [] : [mode];
+}
 /** Shared key of the work area in both desktop layouts, so React keeps the chat pane across a layout switch. */
 const WORK_AREA_KEY = "work-area";
 
@@ -760,6 +809,15 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     },
     placement: "bottom-end",
   });
+  // The share dialog returns focus to Share, or to ⋯ when a narrow toolbar moved Share there (narrow desktop layout §4.3).
+  const reportShareInMenuRef = useRef(false);
+  const reportShareReturnRef = useMemo<{ readonly current: HTMLElement | null }>(() => ({
+    get current() {
+      const share = reportShareButtonRef.current;
+      if (!reportShareInMenuRef.current && share?.isConnected) return share;
+      return (moreMenu.refs.domReference.current as HTMLElement | null) ?? share;
+    },
+  }), [moreMenu.refs.domReference]);
   // Export records also open from the export-progress notice (without the export menu); closing returns focus to `导出`.
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const artifactHistoryTriggerRef = useRef<HTMLElement | null>(null);
@@ -2110,13 +2168,14 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && selectedResult.route.artifactId !== dataFocusArtifactId,
   );
   // A deck element referenced from the editor: one reference per file, carrying the element (design §6.9).
-  const referencePresentationElement = useCallback((reference: AttachmentRef) => {
+  const referencePresentationElement = useCallback((reference: AttachmentRef, options?: { quiet?: boolean }) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
     setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId)
       ? current.map((ref) => (ref.fileId === reference.fileId ? reference : ref))
       : [...current, reference]);
     setChartFollowupReveal((count) => count + 1);
-    toast({ kind: "info", text: resultsT("referenced_in_chat") });
+    // A page's 「引用这一页」 confirms on its own button; the toast would cover the Results header.
+    if (!options?.quiet) toast({ kind: "info", text: resultsT("referenced_in_chat") });
   }, [readOnly, reportOnly, resultsT, runner.sessionId]);
   const referenceArtifactInChat = useCallback((artifact: ArtifactItem) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
@@ -3203,6 +3262,17 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && resultsSurface === "viewer"
     && !resultsMobileListOpen
     && !reportPhoneBar;
+  const reportToolbarRef = useRef<HTMLDivElement | null>(null);
+  const reportToolbarFit = useToolbarFit(reportToolbarRef, {
+    steps: REPORT_TOOLBAR_FIT_STEPS,
+    first: reportToolbarModeRow,
+    fits: reportToolbarFits,
+    enabled: reportUnifiedBar,
+  });
+  // Export also moves into ⋯ below 560 (existing rule); Share only when the measured toolbar needs it.
+  const reportExportInMenu = reportToolbarNarrow || reportToolbarFit.has("export-menu");
+  const reportShareInMenu = reportToolbarFit.has("share-menu");
+  reportShareInMenuRef.current = reportShareInMenu;
   const openResultsMobileList = () => {
     trackResultsWorkspace({
       action: "navigator_opened",
@@ -3228,7 +3298,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         {...exportMenu.getReferenceProps()}
       >
         <FileDown size={14} />
-        {t("hdr_export")}
+        <span className="ws-export-label">{t("hdr_export")}</span>
         <Caret className="legacy-ws-export-caret" />
       </button>
       <ExportMenu
@@ -3277,7 +3347,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             </WorkbenchMenuItem>
           ) : null}
           {/* Appearance refresh batch 4b remainder: `导出` submenu on narrow toolbars and `编辑` during mobile reading. */}
-          {reportToolbarNarrow ? (
+          {reportExportInMenu ? (
             exportBlockedByWriting || exportBusy || !canvas.canvasId ? (
               <DisabledMenuItem
                 label={t("hdr_export")}
@@ -3292,6 +3362,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                 />
               </MenuSubmenu>
             )
+          ) : null}
+          {/* Narrow desktop layout: Share leaves a toolbar that cannot hold it and appears here, after Export. */}
+          {reportShareInMenu && reportShareAction ? (
+            <WorkbenchMenuItem onSelect={() => setReportShareOpen(true)}>
+              {withConfirmEllipsis(t("hdr_share"))}
+            </WorkbenchMenuItem>
           ) : null}
           {!reportEditing && (resultsWorkspaceEnabled || reportPhoneReading) ? (
             <WorkbenchMenuItem onSelect={() => reportViewRef.current?.openHistory()}>
@@ -3838,7 +3914,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             segmented tabs · export dropdown (folds PDF/PPT/XLS) · fullscreen toggle ·
             collapse-to-chat (desktop) · "更多" menu (history / clear / delete).
             Chrome only — every export/clear/delete/history handler below is verbatim. */}
-        {compactArtifact ? null : <div className={clsx("v2-ws-right-head", { "results-report-object-toolbar results-report-unified-toolbar": reportUnifiedBar })}>
+        {compactArtifact ? null : <div ref={reportToolbarRef} className={clsx("v2-ws-right-head", { "results-report-object-toolbar results-report-unified-toolbar": reportUnifiedBar })}>
           {canvasObjectOpener ? <span ref={documentOpenerRef}>{canvasObjectOpener}</span> : null}
           {resultsWorkspaceShellEnabled ? (
             resultsHeadContext
@@ -3907,7 +3983,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             kind="report"
             resourceId={reportSessionId}
             label={canvas.title || resultsT("report")}
-            returnFocusRef={reportShareButtonRef}
+            returnFocusRef={reportShareReturnRef}
             onClose={() => setReportShareOpen(false)}
           />
         ) : null}

@@ -713,40 +713,6 @@ def settle_renders(run: VisualRun | None, renders: list[PendingRender]) -> None:
     del run.seen[:-_MAX_SEEN_RENDERS]
 
 
-_DECK_VIEW_REGISTERED = "The editable PPTX is registered and readable."
-_DECK_VIEW_NEXT = (
-    "Its rendered view comes with your next request. If the view shows a presentation defect you can fix through these "
-    "arguments without changing text, numbers or data, render again with presentation_fix true; otherwise call "
-    "subagent_return with a concise Chat summary."
-)
-
-
-async def attach_deck_view(receipt: dict[str, Any], ctx: Any, artifact: Any, *, presentation_fix: Any = None, deck_facts: str = "") -> dict[str, Any]:
-    """A ``render_deck`` receipt gains the result view and ``visual_view`` of its deck (§2).
-
-    ``deck_facts`` (such as a slide count other than the expected one) stays in the message
-    that announces the view.
-    """
-    found = run_for(ctx)
-    if found is None:
-        return receipt
-    if not found[0].enabled:
-        await attach_visual_view(receipt, ctx, artifact, kind="pptx", presentation_fix=presentation_fix)
-        return receipt
-    from bowhead_core.pptx_result_view import pptx_result_view
-
-    try:
-        rendered: dict[str, Any] = {}
-        receipt["result_view"] = await pptx_result_view(ctx, artifact, rendered=rendered)
-        await attach_visual_view(receipt, ctx, artifact, kind="pptx", rendered=rendered, presentation_fix=presentation_fix)
-    except Exception as exc:
-        _LOG.warning("visual_view.deck_view_failed error_type=%s", type(exc).__name__)
-        receipt["visual_view"] = {"status": "not_completed", "kind": "pptx", "reason": "render_failed"}
-    if receipt.get("visual_view", {}).get("status") == "shown":
-        receipt["message"] = " ".join(part for part in (_DECK_VIEW_REGISTERED, deck_facts, _DECK_VIEW_NEXT) if part)
-    return receipt
-
-
 # ------------------------------------------------------- delivery review (§7.2)
 
 
@@ -756,7 +722,7 @@ def visual_disclosure_calls(invocations: Any) -> dict[str, dict[str, Any]]:
     Derived from Tool results only, so live, persisted and replayed runs agree. For each
     file name, the latest save in the run counts: it is listed when it still carries
     ``content_changes`` (the file differs from the version the model saw), or when the file
-    is delivered (declared by its producer, from ``render_deck``, or presented) and its
+    is delivered (declared by its producer or presented) and its
     visual check did not complete. Undoing a change with a new save removes the item.
     """
     from bowhead_core.artifact_presentation import declared_deliverable_names
@@ -779,8 +745,6 @@ def visual_disclosure_calls(invocations: Any) -> dict[str, dict[str, Any]]:
                 )
             continue
         outputs = result.get("output_artifacts") if isinstance(result, dict) else None
-        if isinstance(result, dict) and getattr(invocation, "tool_name", None) == "render_deck" and "visual_view" in result:
-            outputs = [{**result, "name": result.get("filename")}]
         if not call_id or not isinstance(outputs, list):
             continue
         try:
@@ -789,7 +753,7 @@ def visual_disclosure_calls(invocations: Any) -> dict[str, dict[str, Any]]:
             declared = set()
         for entry in outputs:
             if isinstance(entry, dict) and isinstance(entry.get("visual_view"), dict) and isinstance(entry.get("name"), str):
-                latest[entry["name"]] = (call_id, entry, entry["name"] in declared or invocation.tool_name == "render_deck")
+                latest[entry["name"]] = (call_id, entry, entry["name"] in declared)
     calls: dict[str, dict[str, Any]] = {}
     for name, (call_id, entry, declared) in latest.items():
         if entry.get("content_changes"):

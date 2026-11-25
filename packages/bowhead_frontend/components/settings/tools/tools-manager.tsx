@@ -313,9 +313,11 @@ function SourceCard({
   const off = source.status === "disabled";
   // WP2b: an oauth source needs the browser authorize flow. tools_count===0 ⇒ never authorized
   // (a real OAuth server refuses an unauthenticated tools/list, so create left it empty) → prompt
-  // authorization; once tools exist it's established → offer re-authorization.
+  // authorization; once tools exist it's established → offer re-authorization. When the service
+  // stopped renewing the sign-in, the card prompts authorization again but keeps its tool counts.
   const isOauth = source.auth_type === "oauth";
-  const needsAuth = isOauth && source.tools_count === 0;
+  const neverAuthorized = isOauth && source.tools_count === 0;
+  const needsAuth = neverAuthorized || (isOauth && source.oauth_sign_in_ended === true);
   // Only MCP sources can re-list tools; an OAuth source must be authorized before it can list anything.
   const canRefresh = source.kind === "mcp" && !needsAuth;
   // Choosing needs a saved tool list to pick from.
@@ -352,7 +354,7 @@ function SourceCard({
                 an authorized OAuth/MCP source with 5 selected of 11 enumerated); otherwise show the
                 imported count. The translation keys retain their legacy names to avoid churn. */}
             <span>
-              {needsAuth
+              {neverAuthorized
                 ? t("exposed_pending")
                 : source.tools_count > source.op_count
                   ? t("exposed_of", { n: source.op_count, total: source.tools_count })
@@ -443,13 +445,14 @@ function SourceCard({
             className="tool-source-card-availability legacy-ai-tools-avail ai-tools-avail"
           >
             <span className="legacy-ai-tools-avail-label ai-tools-avail-label">
-              {off || failed || needsAuth ? t("status_disabled") : t("status_enabled")}
+              {off || failed || neverAuthorized ? t("status_disabled") : t("status_enabled")}
             </span>
-            {/* WP2b-3c: a never-authorized OAuth source has 0 tools → can't be enabled. */}
+            {/* WP2b-3c: a never-authorized OAuth source has 0 tools → can't be enabled. An ended sign-in
+                keeps its switch: the administrator may still turn the source off while re-authorizing. */}
             <StatusToggle
-              on={!off && !failed && !needsAuth}
+              on={!off && !failed && !neverAuthorized}
               busy={busy}
-              disabled={needsAuth}
+              disabled={neverAuthorized}
               label={t("toggle_aria", { name: source.name })}
               buttonRef={toggleRef}
               onToggle={onToggleStatus}

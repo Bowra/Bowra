@@ -12,12 +12,10 @@ tier-1（可 propose）契约：read_accessor 返回须含 "fields" 子字典
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal
 
-from bowhead_core.agent_release_read_store import AgentReleaseReadStore
 from bowhead_core.config_copilot import (
     POLICY_GENERATED,
     POLICY_SECRET,
@@ -28,19 +26,12 @@ from bowhead_core.config_copilot import (
     FormRegistration,
     LiteApplyError,
     MaterializeResult,
-    ResolvedTarget,
-    TargetResolution,
     register_form,
-    unregister_form,
 )
-from bowhead_core.entitlements import EntitlementDenied
 from bowhead_core.language_context import german_ai_output_enabled
 from bowhead_core.scheduled_store import MAX_ACTIVE_JOBS_PER_USER
 from bowhead_core.scheduler_loop import cron_validation_error, next_run_for_job
-from bowhead_core.share_service import grants_for_viewer
 from bowhead_core.space_governance import SpaceOperation
-from bowhead_core.team_subagent_access import TeamSubagentAccessResolver
-from bowhead_core.team_subagent_store import TeamSubagentStore
 from bowhead_core.theme_config import (
     KEY_APPEARANCE_THEME_CONFIG,
     KEY_TEAM_THEME_POLICY,
@@ -60,164 +51,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_gateway.access_context import AccessContextError, build_access_context
 from bowhead_gateway.routes.scheduled import ScheduledJobCreateDTO
-from bowhead_gateway.routes.team_subagents import _visible_to as _subagent_visible_to
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ME_SENTINEL = "__me__"
-
-
-class TeamSubagentEditDTO(BaseModel):
-    """Fields shared by legacy configuration and revisioned working-copy editors."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    display_name: str = Field(max_length=40)
-    description: str = Field(min_length=1, max_length=200)
-    system_prompt: str = Field(min_length=1, max_length=15000)
-    tool_refs: list[str]
-    skills: list[str]
-    output_schema: dict[str, Any] | None
-
-
-async def _visible_subagents(ctx: FormContext) -> tuple[list[Any], dict[str, Any]]:
-    store = ctx.deps["user_store"]
-    if store is None or not ctx.team_id:
-        raise RuntimeError("subagent store unavailable")
-    user = await store.get_user(ctx.user_id)
-    if user is None or user.team_id != ctx.team_id:
-        raise RuntimeError("subagent actor unavailable")
-    items = await store.list_team_subagent_summaries(ctx.team_id)
-    granted: frozenset[str] = frozenset()
-    access = ctx.deps.get("access_control_store")
-    if access is not None:
-        granted = await grants_for_viewer(access, team_id=ctx.team_id, user_id=ctx.user_id, kind="team_subagent")
-    visible = [item for item in items if _subagent_visible_to(item, user, granted)]
-    decisions = await TeamSubagentAccessResolver(store.db_path).resolve_many(
-        team_id=ctx.team_id,
-        actor_user_id=ctx.user_id,
-    )
-    return visible, decisions
-
-
-async def _subagent_write_reason(ctx: FormContext, *, requires_mcp: bool) -> str | None:
-    """Mirror the HTTP write gate using the DB-fresh team identity from chat."""
-    entitlements = ctx.deps.get("entitlements")
-    mode = ctx.deps.get("deployment_mode") or "saas"
-    if entitlements is None:
-        return "entitlement_unavailable" if mode == "local" else None
-    try:
-        await entitlements.assert_can_run_turn(ctx.team_id)
-    except EntitlementDenied as exc:
-        return exc.reason
-    if requires_mcp and not await entitlements.is_feature_licensed(ctx.team_id, "mcp"):
-        return "feature_unlicensed"
-    return None
-
-
-async def _subagent_read(ctx: FormContext) -> dict[str, Any]:
-    items, decisions = await _visible_subagents(ctx)
-    return {
-        "items": [
-            {
-                "name": item.name,
-                "display_name": item.display_name,
-                "owned_by_me": bool((decision := decisions.get(item.id)) is not None and decision.resolution.can_manage),
-            }
-            for item in items
-        ]
-    }
-
-
-async def _subagent_resolve(ctx: FormContext, intent: str) -> TargetResolution:
-    items, decisions = await _visible_subagents(ctx)
-    needle = intent.casefold().strip()
-    exact = [item for item in items if item.name.casefold() == needle or (item.display_name or "").casefold() == needle]
-    matches = exact or [item for item in items if needle in item.name.casefold() or needle in (item.display_name or "").casefold()]
-    if len(matches) == 1:
-        item = matches[0]
-        decision = decisions.get(item.id)
-        target = ResolvedTarget(id=item.id, label=item.display_name or item.name)
-        if decision is None or not decision.resolution.can_manage:
-            return TargetResolution(matched=target, not_writable_reason="not_owner")
-        reason = await _subagent_write_reason(ctx, requires_mcp=bool(getattr(item, "team_tool_count", 0)))
-        if reason:
-            return TargetResolution(matched=target, not_writable_reason=reason)
-        return TargetResolution(matched=target)
-    names = tuple((item.display_name or item.name) for item in (matches if matches else items))
-    return TargetResolution(candidates=names, ambiguous=len(matches) > 1)
-
-
-async def _subagent_target_read(ctx: FormContext) -> dict[str, Any]:
-    if ctx.target is None:
-        raise RuntimeError("subagent target missing")
-    visible, decisions = await _visible_subagents(ctx)
-    if ctx.target.id not in {item.id for item in visible}:
-        raise RuntimeError("subagent target not visible")
-    decision = decisions.get(ctx.target.id)
-    if decision is None or not decision.resolution.can_manage:
-        raise RuntimeError("subagent target not writable")
-    item_summary = next(item for item in visible if item.id == ctx.target.id)
-    if await _subagent_write_reason(ctx, requires_mcp=bool(getattr(item_summary, "team_tool_count", 0))):
-        raise RuntimeError("subagent target not writable")
-    store = ctx.deps["user_store"]
-    item = await store.get_team_subagent(ctx.team_id, ctx.target.id)
-    if item is None:
-        raise RuntimeError("subagent target missing")
-    release_state = await TeamSubagentStore(store.db_path).release_definition_state(
-        team_id=ctx.team_id,
-        subagent_id=item.id,
-    )
-    if release_state is not None and release_state[0] == "revisioned":
-        detail = await AgentReleaseReadStore(store.db_path).working_copy(
-            team_id=ctx.team_id,
-            agent_id=item.id,
-            actor_user_id=ctx.user_id,
-        )
-        source = detail["working_copy"] or detail["live"]
-        definition = source["definition"]
-        listing = source["listing"]
-        grants = definition.get("skill_grants") or []
-        refs = definition.get("tool_refs", definition.get("tool_refs_json")) or []
-        if isinstance(refs, str):
-            refs = json.loads(refs)
-        schema = definition.get("output_schema", definition.get("output_schema_json"))
-        if isinstance(schema, str):
-            schema = json.loads(schema)
-        return {
-            "display_name": listing.get("display_name") or item.display_name,
-            "description": listing.get("description") or item.description,
-            "system_prompt": definition.get("system_prompt") or item.system_prompt,
-            "tool_refs": refs,
-            "skills": [
-                grant["skill_ref"]["name"]
-                for grant in grants
-                if isinstance(grant, dict) and isinstance(grant.get("skill_ref"), dict) and isinstance(grant["skill_ref"].get("name"), str)
-            ]
-            if grants
-            else (json.loads(definition["skills_json"]) if isinstance(definition.get("skills_json"), str) else definition.get("skills") or []),
-            "output_schema": schema,
-        }
-    return {
-        "display_name": item.display_name,
-        "description": item.description,
-        "system_prompt": item.system_prompt,
-        "tool_refs": item.tool_refs,
-        "skills": item.skills,
-        "output_schema": item.output_schema,
-    }
-
-
-async def _subagent_context(_ctx: FormContext) -> str:
-    # context_provider enters the model's system prompt. Names are user-authored;
-    # the chat read tool has a sanitizer, but this prompt path does not.
-    return "只为用户明确点名且本人拥有的现有智能体起草修改；保存前由服务端重新确认目标和权限。"
-
-
-async def _subagent_materialize(_ctx: FormContext, data: dict[str, Any]) -> MaterializeResult:
-    return MaterializeResult(normalized=data)
 
 
 _SCHEDULED_GUIDANCE = """\
@@ -1118,33 +957,6 @@ def register_gateway_forms(app: FastAPI) -> None:
             lite_applier=_with_deps(_ws_i18n_lite_apply),
         )
     )
-
-    # Batch 3-a is gated at registration: with the flag off the collection
-    # branch is unreachable and the existing five forms remain unchanged.
-    if os.environ.get("FEATURE_CONFIG_EDIT", "0") == "1":
-        register_form(
-            FormRegistration(
-                form_id="team_subagent",
-                schema=TeamSubagentEditDTO,
-                guidance=(
-                    "只修改用户明确点名的现有子代理。target_intent 填原样名称，不编 ID；"
-                    "tool_refs 和 skills 只能选当前授权目录中的条目，权限由保存接口再次校验。"
-                    "配置草稿不会直接保存，用户需在右侧检查并点击保存。"
-                ),
-                field_policy=dict.fromkeys(TeamSubagentEditDTO.model_fields, POLICY_GENERATED),
-                context_provider=_with_deps(_subagent_context),
-                materializer=_with_deps(_subagent_materialize),
-                risk_tier=2,
-                read_accessor=_with_deps(_subagent_read),
-                write_descriptor="PATCH /api/v1/team-subagents/{id}/configuration (If-Match)",
-                chat_draft_supported=True,
-                target_resolver=_with_deps(_subagent_resolve),
-                target_read_accessor=_with_deps(_subagent_target_read),
-                target_noun="子代理",
-            )
-        )
-    else:
-        unregister_form("team_subagent")
 
     from bowhead_gateway.configuration_team_settings import register_team_configuration_forms
 

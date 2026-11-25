@@ -83,6 +83,30 @@ def note_report_read(ctx: Any, arguments: dict[str, Any], result: dict[str, Any]
     material_observations(ctx).tool_materials[ctx.ordinary_call_identity] = record
 
 
+def forget_removed_report_sections(ctx: Any, section_ids: set[str]) -> None:
+    """This Turn's recorded report reads stop requiring sections this Turn has removed.
+
+    A recorded read requires every section it observed to still exist when the conversation is
+    published or resumed. A writer that read its report and then removed one of its own sections
+    with ``remove_report_section`` made that removal itself; without this the Turn ended
+    ``clarification_resume_unavailable`` (116, 1.7.73, ``an observed task``). Only this Turn's
+    collectors change: a section removed in any other way still makes a read unavailable.
+    """
+    if not section_ids:
+        return
+    from bowhead_core.ordinary_lead_material import material_observations
+
+    collectors = {id(c): c for c in (material_observations(ctx), getattr(ctx, "context_source_observations", None)) if c is not None}
+    for collector in collectors.values():
+        for record in getattr(collector, "tool_materials", {}).values():
+            observation = record.get("observation") if isinstance(record, dict) and record.get("kind") == "report_read" else None
+            if not isinstance(observation, dict):
+                continue
+            kept = [section for section in observation.get("sections", []) if section.get("id") not in section_ids]
+            if len(kept) != len(observation.get("sections", [])):
+                record["observation"] = {**observation, "sections": kept}
+
+
 async def validate_report_read(ctx: Any, record: dict[str, Any]) -> None:
     try:
         observation = ReportReadObservation.model_validate(record["observation"])

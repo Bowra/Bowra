@@ -15,10 +15,6 @@ export type DraftServerState = "draft" | "consumed" | "discarded" | "expired" | 
 
 export interface DraftResultReceipt {
   job_id?: string;
-  kind?: "team_subagent";
-  stage?: "working_copy";
-  ref_id?: string;
-  label?: string;
   name?: string | null;
   human_schedule?: string | null;
   next_run_at?: string | null;

@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
-import { Lock, Undo } from "@/components/icons";
+import { Chat, Lock, Undo } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, fieldDescribedBy } from "@/components/ui/field";
@@ -18,6 +18,7 @@ import {
   type InventorySlide,
   type PendingEdit,
 } from "@/lib/presentation-edit";
+import { isComposing } from "./keys";
 import styles from "./presentation-editor.module.css";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -49,13 +50,17 @@ function kindLabel(element: InventoryElement, t: Translate): string {
 }
 
 export function ElementList({
-  slide, pending, fieldToken, keyboardHint, onSelect, hideHeading = false,
+  slide, pending, numbers, fieldToken, keyboardHint, onSelect, onReferencePage, hideHeading = false,
 }: {
   slide: InventorySlide;
   pending: ReadonlyArray<PendingEdit>;
+  /** Each changed element's number, matching the outline on the slide and the change list. */
+  numbers?: ReadonlyMap<string, number>;
   fieldToken: string;
   keyboardHint?: string;
   onSelect: (key: string) => void;
+  /** Reference the whole slide in chat (design §13.2). */
+  onReferencePage?: () => void;
   /** In a sheet whose title already names the slide. */
   hideHeading?: boolean;
 }) {
@@ -64,9 +69,17 @@ export function ElementList({
   return (
     <div className={styles.panel}>
       {hideHeading ? null : (
-        <div className={styles.panelHead}>
-          <h3 className={styles.panelTitle}>{t("page_list_title", { page: slide.index })}</h3>
-          <p className={styles.panelHint}>{t("page_list_hint")}</p>
+        <div className={styles.listHead}>
+          <div className={styles.panelHead}>
+            <h3 className={styles.panelTitle}>{t("page_list_title", { page: slide.index })}</h3>
+            <p className={styles.panelHint}>{t("page_list_hint")}</p>
+          </div>
+          {onReferencePage ? (
+            <Button size="sm" variant="secondary" onClick={onReferencePage} aria-label={t("reference_page_label", { page: slide.index })}>
+              <Chat size={13} aria-hidden="true" />
+              {t("reference_page")}
+            </Button>
+          ) : null}
         </div>
       )}
       {slide.elements.length ? (
@@ -77,7 +90,11 @@ export function ElementList({
                 data-list-key={element.key}>
                 <span className={styles.elementName}>{elementLabel(element, t, fieldToken)}</span>
                 <span className={styles.elementBadges}>
-                  {pendingKeys.has(element.key) ? <Badge tone="warning" size="sm">{t("unsaved_badge")}</Badge> : null}
+                  {pendingKeys.has(element.key) ? (
+                    numbers?.has(element.key)
+                      ? <Badge tone="warning" size="sm"><span aria-hidden="true">{numbers.get(element.key)}</span><span className="sr-only">{t("unsaved_numbered", { number: numbers.get(element.key) ?? 0 })}</span></Badge>
+                      : <Badge tone="warning" size="sm">{t("unsaved_badge")}</Badge>
+                  ) : null}
                   {element.editable
                     ? <Badge tone="neutral" size="sm">{kindLabel(element, t)}</Badge>
                     : <Badge tone="outline" size="sm">{t("unsupported_badge")}</Badge>}
@@ -94,12 +111,12 @@ export function ElementList({
 }
 
 function PanelHeader({ element, page, meta, onBack, onReference, t, fieldToken }: {
-  element: InventoryElement; page: number; meta?: string; onBack: () => void; onReference?: () => void; t: Translate; fieldToken: string;
+  element: InventoryElement; page: number; meta?: string; onBack?: () => void; onReference?: () => void; t: Translate; fieldToken: string;
 }) {
   return (
     <div className={styles.panelHead}>
       <span className={styles.panelHeadActions}>
-        <Button size="sm" variant="plain" className={styles.backButton} onClick={onBack}>{t("back_to_list")}</Button>
+        {onBack ? <Button size="sm" variant="plain" className={styles.backButton} onClick={onBack}>{t("back_to_list")}</Button> : <span />}
         {onReference ? <Button size="sm" variant="plain" onClick={onReference}>{t("reference_element")}</Button> : null}
       </span>
       <span className={styles.panelKind}><Badge tone="neutral" size="sm">{kindLabel(element, t)}</Badge></span>
@@ -125,7 +142,7 @@ function UndoButton({ onClick, label }: { onClick: () => void; label: string }) 
 }
 
 export function TextPanel({
-  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference,
+  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false,
 }: {
   element: InventoryElement;
   page: number;
@@ -136,16 +153,32 @@ export function TextPanel({
   onUndo: (id: string) => void;
   onBack: () => void;
   onReference?: () => void;
+  /** The text is edited on the slide (desktop, design §13.3): no fields here. */
+  inPlace?: boolean;
+  /** Inside a phone sheet, whose footer holds 「撤销这处」 and 「完成」. */
+  sheet?: boolean;
 }) {
   const t = useTranslations("presentation_edit");
   const baseId = useId();
   const edits = pending.filter((edit): edit is Extract<PendingEdit, { kind: "text" }> => edit.kind === "text" && edit.key === element.key);
   const paragraphs = element.paragraphs ?? [];
   const shown = paragraphs.map((paragraph, index) => ({ paragraph, index })).filter(({ paragraph }) => paragraph.text.trim() || paragraph.fields);
+  const mixed = paragraphs.some((paragraph) => paragraph.mixed_style);
   return (
     <div className={styles.panel}>
-      <PanelHeader element={element} page={page} onBack={onBack} onReference={onReference} t={t} fieldToken={fieldToken} />
-      <div className={styles.fields}>
+      <PanelHeader element={element} page={page} onBack={sheet ? undefined : onBack} onReference={onReference} t={t} fieldToken={fieldToken} />
+      {inPlace ? (
+        <>
+          <p className={styles.panelHint}>{t("in_place_text_hint")}</p>
+          {mixed ? <p className={styles.panelNote}>{t("mixed_style_hint")}</p> : null}
+          {edits.some((edit) => countFieldTokens(edit.text, fieldToken) !== countFieldTokens(edit.expect, fieldToken))
+            ? <p className="settings-field__error" role="alert">{t("field_error", { token: fieldToken })}</p> : null}
+          {edits.map((edit) => {
+            const refused = refusalMessage(refusals[pendingEditId(edit)], t);
+            return refused ? <p key={pendingEditId(edit)} className="settings-field__error" role="alert">{refused}</p> : null;
+          })}
+        </>
+      ) : <div className={styles.fields}>
         {shown.map(({ paragraph, index }) => {
           const id = `${baseId}-p${index}`;
           const edit = edits.find((item) => item.paragraph === index);
@@ -173,13 +206,13 @@ export function TextPanel({
             </Field>
           );
         })}
-      </div>
+      </div>}
       <ElementChanges title={t("changes_here")} rows={edits.map((edit) => ({
         id: pendingEditId(edit),
         location: shown.length > 1 ? t("paragraph_label", { number: edit.paragraph + 1 }) : t("text_label"),
         before: excerpt(edit.expect, fieldToken, 120),
         after: excerpt(edit.text, fieldToken, 120),
-      }))} onUndo={onUndo} undoLabel={t("undo_this")} />
+      }))} onUndo={sheet ? undefined : onUndo} undoLabel={t("undo_this")} />
     </div>
   );
 }
@@ -187,7 +220,8 @@ export function TextPanel({
 function ElementChanges({ title, rows, onUndo, undoLabel }: {
   title: string;
   rows: Array<{ id: string; location: ReactNode; before: string; after: string }>;
-  onUndo: (id: string) => void;
+  /** Absent in a phone sheet, whose footer undoes the element. */
+  onUndo?: (id: string) => void;
   undoLabel: string;
 }) {
   if (!rows.length) return null;
@@ -200,35 +234,47 @@ function ElementChanges({ title, rows, onUndo, undoLabel }: {
           location={row.location}
           before={row.before ? { kind: "text", text: row.before } : { kind: "empty" }}
           after={row.after ? { kind: "text", text: row.after } : { kind: "empty" }}
-          trailing={<UndoButton onClick={() => onUndo(row.id)} label={undoLabel} />}
+          trailing={onUndo ? <UndoButton onClick={() => onUndo(row.id)} label={undoLabel} /> : undefined}
         />
       ))}
     </section>
   );
 }
 
-/** Arrow keys move between cells (left and right at the ends of the text), Enter moves down. */
-function moveInGrid(event: KeyboardEvent<HTMLInputElement>, grid: HTMLElement | null) {
-  const input = event.currentTarget;
-  const row = Number(input.dataset.row);
-  const col = Number(input.dataset.col);
+/**
+ * Arrow keys move between cells (left and right at the ends of the text), Enter moves down. Locked
+ * cells take focus too, so a screen reader says why they cannot change.
+ */
+function moveInGrid(event: KeyboardEvent<HTMLElement>, grid: HTMLElement | null) {
+  if (isComposing(event)) return;
+  const cell = event.currentTarget;
+  const row = Number(cell.dataset.row);
+  const col = Number(cell.dataset.col);
   let target: [number, number] | null = null;
-  const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
-  const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+  const input = cell instanceof HTMLInputElement ? cell : null;
+  const atStart = !input || (input.selectionStart === 0 && input.selectionEnd === 0);
+  const atEnd = !input || (input.selectionStart === input.value.length && input.selectionEnd === input.value.length);
   if (event.key === "ArrowUp") target = [row - 1, col];
-  else if (event.key === "ArrowDown" || (event.key === "Enter" && !event.nativeEvent.isComposing)) target = [row + 1, col];
+  else if (event.key === "ArrowDown" || event.key === "Enter") target = [row + 1, col];
   else if (event.key === "ArrowLeft" && atStart) target = [row, col - 1];
   else if (event.key === "ArrowRight" && atEnd) target = [row, col + 1];
   if (!target || !grid) return;
-  const next = grid.querySelector<HTMLInputElement>(`input[data-row="${target[0]}"][data-col="${target[1]}"]`);
+  const next = grid.querySelector<HTMLElement>(`[data-row="${target[0]}"][data-col="${target[1]}"]`);
   if (!next) return;
   event.preventDefault();
   next.focus();
-  next.select();
+  if (next instanceof HTMLInputElement) next.select();
+}
+
+/** A cell's accessible name: its place and, below the first row, the column's heading. */
+function cellName(rows: ReadonlyArray<ReadonlyArray<{ text: string }>>, row: number, col: number, t: Translate, fieldToken: string): string {
+  const place = t("cell_label", { row: row + 1, col: col + 1 });
+  const heading = row > 0 ? excerpt(rows[0]?.[col]?.text ?? "", fieldToken, 24) : "";
+  return heading ? `${place} · ${heading}` : place;
 }
 
 export function TablePanel({
-  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference,
+  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false, rowForm = false, focusCell,
 }: {
   element: InventoryElement;
   page: number;
@@ -239,10 +285,19 @@ export function TablePanel({
   onUndo: (id: string) => void;
   onBack: () => void;
   onReference?: () => void;
+  /** Cells are edited on the slide (desktop, design §13.3): no grid here. */
+  inPlace?: boolean;
+  /** Inside a phone sheet, whose footer holds 「撤销这处」 and 「完成」. */
+  sheet?: boolean;
+  /** A table too wide for a phone is edited one row at a time. */
+  rowForm?: boolean;
+  /** The cell the person clicked, which takes focus. */
+  focusCell?: readonly [number, number] | null;
 }) {
   const t = useTranslations("presentation_edit");
   const baseId = useId();
   const gridRef = useRef<HTMLTableElement>(null);
+  const [formRow, setFormRow] = useState<number | null>(null);
   const rows = element.rows ?? [];
   const cols = rows[0]?.length ?? 0;
   const edits = pending.filter((edit): edit is Extract<PendingEdit, { kind: "cell" }> => edit.kind === "cell" && edit.key === element.key);
@@ -252,10 +307,84 @@ export function TablePanel({
       : refusalMessage(refusals[pendingEditId(edit)], t);
     return message ? [{ edit, message }] : [];
   });
+  const focus = focusCell && rows[focusCell[0]]?.[focusCell[1]]?.editable ? focusCell : null;
+  const firstEditable = (() => {
+    for (let row = 0; row < rows.length; row += 1) for (let col = 0; col < cols; col += 1) if (rows[row][col]?.editable) return [row, col] as const;
+    return null;
+  })();
+  const autofocusAt = focus ?? firstEditable;
+  const changes = <ElementChanges title={t("table_changes")} rows={edits.map((edit) => ({
+    id: pendingEditId(edit),
+    location: cellName(rows, edit.row, edit.col, t, fieldToken),
+    before: excerpt(edit.expect, fieldToken, 120),
+    after: excerpt(edit.text, fieldToken, 120),
+  }))} onUndo={sheet ? undefined : onUndo} undoLabel={t("undo_this")} />;
+  const errorLines = errors.map(({ edit, message }) => (
+    <p key={pendingEditId(edit)} className="settings-field__error" role="alert">
+      {t("cell_label", { row: edit.row + 1, col: edit.col + 1 })}{t("label_separator")}{message}
+    </p>
+  ));
+  const header = <PanelHeader element={element} page={page} t={t} fieldToken={fieldToken} onBack={sheet ? undefined : onBack} onReference={onReference}
+    meta={t("table_meta", { page, rows: rows.length, cols })} />;
+  if (inPlace) {
+    return (
+      <div className={styles.panel}>
+        {header}
+        <p className={styles.panelHint}>{t("in_place_table_hint")}</p>
+        {errorLines}
+        <ReviewLine>{t("table_formula_note")}</ReviewLine>
+        {rows.some((cells) => cells.some((cell) => !cell.editable)) ? <p className={styles.panelNote}>{t("table_locked_note")}</p> : null}
+        {changes}
+      </div>
+    );
+  }
+  if (rowForm) {
+    const heading = (col: number) => excerpt(rows[0]?.[col]?.text ?? "", fieldToken, 24) || t("column_label", { col: col + 1 });
+    return (
+      <div className={styles.panel}>
+        {header}
+        {formRow === null ? (
+          <>
+            <p className={styles.panelHint}>{t("row_form_hint", { cols })}</p>
+            <ul className={styles.elementList}>
+              {rows.map((cells, row) => (
+                <li key={row}>
+                  <button type="button" className={styles.elementRow} onClick={() => setFormRow(row)}>
+                    <span className={styles.elementName}>{t("row_label", { row: row + 1 })} · {excerpt(cells.find((cell) => cell.text.trim())?.text ?? "", fieldToken, 20)}</span>
+                    {edits.some((edit) => edit.row === row) ? <Badge tone="warning" size="sm">{t("unsaved_badge")}</Badge> : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <div className={styles.fields}>
+            <Button size="sm" variant="plain" className={styles.backButton} onClick={() => setFormRow(null)}>{t("back_to_rows")}</Button>
+            {rows[formRow].map((cell, col) => {
+              const id = `${baseId}-form-${formRow}-${col}`;
+              if (!cell.editable) {
+                return <p key={col} className={styles.panelNote}><strong>{heading(col)}</strong>{t("label_separator")}{t(`reason_${cell.reason ?? "multi_paragraph"}`)}</p>;
+              }
+              const edit = edits.find((item) => item.row === formRow && item.col === col);
+              return (
+                <Field key={col} id={id} label={heading(col)}>
+                  <input id={id} className="settings-input" value={edit?.text ?? cell.text}
+                    data-autofocus={col === rows[formRow].findIndex((item) => item.editable) || undefined}
+                    onChange={(event) => onChange(formRow, col, event.target.value)} />
+                </Field>
+              );
+            })}
+          </div>
+        )}
+        {errorLines}
+        <p className={styles.panelNote}>{t("table_formula_note")}</p>
+        {changes}
+      </div>
+    );
+  }
   return (
     <div className={styles.panel}>
-      <PanelHeader element={element} page={page} t={t} fieldToken={fieldToken} onBack={onBack} onReference={onReference}
-        meta={t("table_meta", { page, rows: rows.length, cols })} />
+      {header}
       <p className={styles.panelHint}>{t("table_hint")}</p>
       <div className={styles.gridFrame}>
         <table className={styles.grid} ref={gridRef}>
@@ -265,24 +394,26 @@ export function TablePanel({
               <tr key={row}>
                 {cells.map((cell, col) => {
                   const id = `${baseId}-${row}-${col}`;
-                  const label = t("cell_label", { row: row + 1, col: col + 1 });
+                  const label = cellName(rows, row, col, t, fieldToken);
+                  const Cell = row === 0 ? "th" : "td";
                   if (!cell.editable) {
                     return (
-                      <td key={col} className={styles.lockedCell}>
-                        <span aria-describedby={`${id}-reason`} tabIndex={-1}>
+                      <Cell key={col} className={styles.lockedCell} {...(row === 0 ? { scope: "col" } : {})}>
+                        <span aria-describedby={`${id}-reason`} tabIndex={-1} data-row={row} data-col={col}
+                          onKeyDown={(event) => moveInGrid(event, gridRef.current)}>
                           <Lock size={11} aria-hidden="true" />
                           <span className="sr-only">{label}</span>
                           {cell.reason === "covered_by_merge" ? "" : excerpt(cell.text, fieldToken, 18)}
                         </span>
                         <span id={`${id}-reason`} className="sr-only">{t(`reason_${cell.reason ?? "multi_paragraph"}`)}</span>
-                      </td>
+                      </Cell>
                     );
                   }
                   const edit = edits.find((item) => item.row === row && item.col === col);
                   const value = edit?.text ?? cell.text;
                   const failed = errors.some((item) => item.edit === edit);
                   return (
-                    <td key={col} data-pending={edit ? true : undefined}>
+                    <Cell key={col} data-pending={edit ? true : undefined} {...(row === 0 ? { scope: "col" } : {})}>
                       <input
                         id={id}
                         className={styles.cellInput}
@@ -291,11 +422,11 @@ export function TablePanel({
                         aria-invalid={failed || undefined}
                         data-row={row}
                         data-col={col}
-                        data-autofocus={(row === 0 && col === 0) || undefined}
+                        data-autofocus={(autofocusAt?.[0] === row && autofocusAt?.[1] === col) || undefined}
                         onKeyDown={(event) => moveInGrid(event, gridRef.current)}
                         onChange={(event) => onChange(row, col, event.target.value)}
                       />
-                    </td>
+                    </Cell>
                   );
                 })}
               </tr>
@@ -303,25 +434,93 @@ export function TablePanel({
           </tbody>
         </table>
       </div>
-      {errors.map(({ edit, message }) => (
-        <p key={pendingEditId(edit)} className="settings-field__error" role="alert">
-          {t("cell_label", { row: edit.row + 1, col: edit.col + 1 })}：{message}
-        </p>
-      ))}
+      {errorLines}
       <p className={styles.panelNote}>{t("table_formula_note")}</p>
       {rows.some((cells) => cells.some((cell) => !cell.editable)) ? <p className={styles.panelNote}>{t("table_locked_note")}</p> : null}
-      <ElementChanges title={t("table_changes")} rows={edits.map((edit) => ({
-        id: pendingEditId(edit),
-        location: t("cell_label", { row: edit.row + 1, col: edit.col + 1 }),
-        before: excerpt(edit.expect, fieldToken, 120),
-        after: excerpt(edit.text, fieldToken, 120),
-      }))} onUndo={onUndo} undoLabel={t("undo_this")} />
+      {changes}
+    </div>
+  );
+}
+
+/** The chart's values as a grid of fields, in the inspector, a phone sheet or the popover beside the chart. */
+export function ChartGrid({
+  element, pending, drafts, invalid, locale, fieldToken, onDraft,
+}: {
+  element: InventoryElement;
+  pending: ReadonlyArray<PendingEdit>;
+  drafts: ReadonlyArray<ReadonlyArray<string | undefined>> | undefined;
+  invalid: ReadonlyArray<ReadonlyArray<boolean>>;
+  locale: string;
+  fieldToken: string;
+  onDraft: (series: number, category: number, text: string) => void;
+}) {
+  const t = useTranslations("presentation_edit");
+  const baseId = useId();
+  const gridRef = useRef<HTMLTableElement>(null);
+  // A value that does not parse is announced once the field is left, not on every keystroke.
+  const [left, setLeft] = useState<ReadonlySet<string>>(() => new Set());
+  const chart = element.chart;
+  if (!chart) return null;
+  const edit = pending.find((item): item is Extract<PendingEdit, { kind: "chart" }> => item.kind === "chart" && item.key === element.key);
+  const values = edit?.values ?? chart.series.map((series) => series.values);
+  const example = formatChartValue(chart.series[0]?.values.find((value) => value !== null) ?? 1250, chart.series[0]?.format, locale);
+  return (
+    <div className={styles.gridFrame}>
+      <table className={styles.grid} ref={gridRef}>
+        <caption className="sr-only">{elementLabel(element, t, fieldToken)}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{t("chart_category")}</th>
+            {chart.series.map((series) => <th key={series.name} scope="col">{series.name}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {chart.categories.map((category, c) => (
+            <tr key={`${category}-${c}`}>
+              <th scope="row">{category}</th>
+              {chart.series.map((series, s) => {
+                const id = `${baseId}-${s}-${c}`;
+                const value = drafts?.[s]?.[c] ?? formatChartValue(values[s]?.[c] ?? null, series.format, locale);
+                const bad = invalid[s]?.[c] ?? false;
+                const shown = bad && left.has(id);
+                const changedHere = (values[s]?.[c] ?? null) !== series.values[c];
+                return (
+                  <td key={series.name} data-pending={changedHere || undefined}>
+                    <input
+                      id={id}
+                      className={styles.cellInput}
+                      inputMode="decimal"
+                      value={value}
+                      aria-label={t("chart_value_label", { category, series: series.name })}
+                      aria-invalid={bad || undefined}
+                      aria-describedby={shown ? `${id}-error` : undefined}
+                      data-autofocus={(s === 0 && c === 0) || undefined}
+                      data-row={c}
+                      data-col={s}
+                      onKeyDown={(event) => moveInGrid(event, gridRef.current)}
+                      onBlur={() => setLeft((current) => current.has(id) ? current : new Set(current).add(id))}
+                      onFocus={() => setLeft((current) => {
+                        if (!current.has(id)) return current;
+                        const next = new Set(current);
+                        next.delete(id);
+                        return next;
+                      })}
+                      onChange={(event) => onDraft(s, c, event.target.value)}
+                    />
+                    {shown ? <span id={`${id}-error`} className="settings-field__error" role="alert">{t("not_a_number", { example })}</span> : null}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 export function ChartPanel({
-  element, page, slide, pending, drafts, invalid, locale, fieldToken, onDraft, onUndo, onBack, onSelect, onReference,
+  element, page, slide, pending, drafts, invalid, locale, fieldToken, onDraft, onUndo, onBack, onSelect, onReference, inPlace = false, sheet = false,
 }: {
   element: InventoryElement;
   page: number;
@@ -337,9 +536,12 @@ export function ChartPanel({
   onBack: () => void;
   onSelect: (key: string) => void;
   onReference?: () => void;
+  /** The values are edited in a popover beside the chart (desktop, design §13.3). */
+  inPlace?: boolean;
+  /** Inside a phone sheet, whose footer holds 「撤销这处」 and 「完成」. */
+  sheet?: boolean;
 }) {
   const t = useTranslations("presentation_edit");
-  const baseId = useId();
   const chart = element.chart;
   if (!chart) return null;
   const edit = pending.find((item): item is Extract<PendingEdit, { kind: "chart" }> => item.kind === "chart" && item.key === element.key);
@@ -356,51 +558,12 @@ export function ChartPanel({
     .map((key) => ({ key, value: formatChartValue(change.before, change.series.format, "en-US"), id: `${key}:${change.s}:${change.c}` })));
   const firstRepeat = repeated[0];
   const repeatedElement = firstRepeat ? slide.elements.find((item) => item.key === firstRepeat.key) : undefined;
-  const example = formatChartValue(chart.series[0]?.values.find((value) => value !== null) ?? 1250, chart.series[0]?.format, locale);
   return (
     <div className={styles.panel}>
-      <PanelHeader element={element} page={page} t={t} fieldToken={fieldToken} onBack={onBack} onReference={onReference}
+      <PanelHeader element={element} page={page} t={t} fieldToken={fieldToken} onBack={sheet ? undefined : onBack} onReference={onReference}
         meta={t("chart_meta", { page, series: chart.series.length, categories: chart.categories.length })} />
-      <p className={styles.panelHint}>{t("chart_hint")}</p>
-      <div className={styles.gridFrame}>
-        <table className={styles.grid}>
-          <caption className="sr-only">{elementLabel(element, t, fieldToken)}</caption>
-          <thead>
-            <tr>
-              <th scope="col">{t("chart_category")}</th>
-              {chart.series.map((series) => <th key={series.name} scope="col">{series.name}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {chart.categories.map((category, c) => (
-              <tr key={`${category}-${c}`}>
-                <th scope="row">{category}</th>
-                {chart.series.map((series, s) => {
-                  const id = `${baseId}-${s}-${c}`;
-                  const value = drafts?.[s]?.[c] ?? formatChartValue(values[s]?.[c] ?? null, series.format, locale);
-                  const bad = invalid[s]?.[c] ?? false;
-                  return (
-                    <td key={series.name} data-pending={changed.some((item) => item.s === s && item.c === c) || undefined}>
-                      <input
-                        id={id}
-                        className={styles.cellInput}
-                        inputMode="decimal"
-                        value={value}
-                        aria-label={t("chart_value_label", { category, series: series.name })}
-                        aria-invalid={bad || undefined}
-                        aria-describedby={bad ? `${id}-error` : undefined}
-                        data-autofocus={(s === 0 && c === 0) || undefined}
-                        onChange={(event) => onDraft(s, c, event.target.value)}
-                      />
-                      {bad ? <span id={`${id}-error`} className="settings-field__error" role="alert">{t("not_a_number", { example })}</span> : null}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <p className={styles.panelHint}>{t(inPlace ? "in_place_chart_hint" : "chart_hint")}</p>
+      {inPlace ? null : <ChartGrid element={element} pending={pending} drafts={drafts} invalid={invalid} locale={locale} fieldToken={fieldToken} onDraft={onDraft} />}
       {firstRepeat && repeatedElement ? (
         <ReviewLine actions={[{ label: t("go_edit"), onSelect: () => onSelect(repeatedElement.key) }]}>
           {t("repeated_value", { name: elementLabel(repeatedElement, t, fieldToken), value: firstRepeat.value })}
@@ -417,7 +580,7 @@ export function ChartPanel({
               after={change.after === null ? { kind: "empty" } : { kind: "number", text: formatChartValue(change.after, change.series.format, locale) }}
             />
           ))}
-          <UndoButton onClick={() => onUndo(pendingEditId(edit))} label={t("undo_chart")} />
+          {sheet ? null : <UndoButton onClick={() => onUndo(pendingEditId(edit))} label={t("undo_chart")} />}
         </section>
       ) : null}
     </div>
@@ -466,7 +629,7 @@ export function UnsupportedPanel({
       <section className={styles.changes}>
         <h4 className={styles.changesTitle}>{t("unsupported_list_title")}</h4>
         <ul className={styles.plainList}>
-          {(["pictures", "smartart", "master", "notes", "layout", ...(phone ? ["phone_table"] as const : [])] as const).map((key) => <li key={key}>{t(`unsupported_list_${key}`)}</li>)}
+          {(["pictures", "smartart", "master", "notes", "layout"] as const).map((key) => <li key={key}>{t(`unsupported_list_${key}`)}</li>)}
         </ul>
       </section>
     </div>

@@ -92,7 +92,6 @@ def test_document_tools_advertise_their_actual_runtime_roles() -> None:
 
     assert _PARADIGM_V2_ROLE_MAP["template_document_submit"] == frozenset({"lead", "analyst"})
     assert TOOL_KINDS["template_document_submit"] == "tool"
-    assert _PARADIGM_V2_ROLE_MAP["render_deck"] == frozenset({"analyst"})
 
 
 def test_role_bindings_includes_legacy() -> None:

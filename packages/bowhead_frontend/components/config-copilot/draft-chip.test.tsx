@@ -66,17 +66,6 @@ afterEach(() => {
 });
 
 describe("DraftChip", () => {
-  it("shows a working-copy receipt without claiming the live agent changed", async () => {
-    apiMock.mockResolvedValueOnce(dto({
-      form_id: "team_subagent", status: "consumed",
-      result: { kind: "team_subagent", stage: "working_copy", ref_id: "osa_1", label: "销售助手" },
-    }));
-    applyDraftEvent({ ...PAYLOAD, form_id: "team_subagent", target: { id: "osa_1", label: "销售助手" } });
-    renderIntl(<DraftChip draftId="ccd_d1" onOpen={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText("智能体「销售助手」草稿已保存，发布后才会生效")).toBeTruthy());
-    fireEvent.click(screen.getByText("查看"));
-    expect(pushMock).toHaveBeenCalledWith("/agents/manage/?agent_id=osa_1");
-  });
   it("draft → 可打开的芯片，点击回调带 draftId", async () => {
     apiMock.mockResolvedValueOnce(dto());
     applyDraftEvent(PAYLOAD);

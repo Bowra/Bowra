@@ -699,15 +699,20 @@ async def emit_required_tool_result(bus: Any, event: OrchestratorEvent) -> None:
     """
     if event.event_type != "tool_result":
         raise ValueError("required tool result emitter accepts only tool_result")
+    await emit_required_event(bus, event)
+
+
+async def emit_required_event(bus: Any, event: OrchestratorEvent) -> None:
+    """Refuse terminal success after a rejected or indeterminate durable publication."""
     try:
         accepted = await bus.emit(event)
         if accepted is not True:
-            raise RuntimeError("tool result event was not accepted")
+            raise RuntimeError(f"{event.event_type} event was not accepted")
     except Exception as exc:
         latch = getattr(bus, "latch_fatal_error", None)
         if callable(latch):
             latch(exc)
-        raise TerminalDurabilityAbort("tool result receipt persistence is unknown") from exc
+        raise TerminalDurabilityAbort(f"{event.event_type} receipt persistence is unknown") from exc
 
 
 class TurnEventBus:

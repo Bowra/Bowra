@@ -746,6 +746,19 @@ export interface AgentVersionWorkbench {
    * Null for shared Agents and when there is nothing to release. Absent on older servers.
    */
   private_release?: AgentPrivateRelease | null;
+  /**
+   * The reviewer's decline of the latest submission against the live release, while no later submission or
+   * release superseded it. There is no reviewer note, only the reason code. Absent on older servers.
+   */
+  latest_decision?: AgentVersionLatestDecision | null;
+}
+
+export interface AgentVersionLatestDecision {
+  candidate_id: string;
+  decided_at: string | null;
+  /** One of the reviewer's reasons (`needs_changes`, `risk_not_justified`, `audience_too_broad`, `insufficient_evidence`) or another code. */
+  reason_code: string | null;
+  state: "rejected";
 }
 
 /** What the Owner is told about the test when releasing a private Agent; recorded on the release. */

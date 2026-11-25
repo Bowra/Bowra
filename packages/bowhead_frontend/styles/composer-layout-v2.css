@@ -255,50 +255,88 @@
   padding: 4px 8px 8px;
 }
 
-[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__tool-button,
-[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning,
-[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
-[data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn:not(.v2-send-btn--cancel),
-[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__tool-button,
-[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger,
-[data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn {
-  min-width: 44px;
-  width: 44px;
-  min-height: 44px;
-  height: 44px;
-}
+/* Narrow composers on touch keep 44 px targets. A narrow column on a mouse is not touch: it keeps desktop-sized
+   controls (narrow desktop layout design §6), as session rows do (app/globals.css, fine pointer 32 / touch 44). */
+@media (hover: none), (pointer: coarse) {
+  [data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__tool-button,
+  [data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning,
+  [data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
+  [data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn:not(.v2-send-btn--cancel),
+  [data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__tool-button,
+  [data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger,
+  [data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn {
+    min-width: 44px;
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
 
-[data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn--cancel {
-  width: auto;
-  min-width: 44px;
-  min-height: 44px;
-  height: 44px;
-}
+  [data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn--cancel {
+    width: auto;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
 
-[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
-[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger {
-  width: 100%;
-}
+  [data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
+  [data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger {
+    width: 100%;
+  }
 
-/* ★compact / ultra: reduce to a 44×44 icon trigger, **remaining in the toolbar**.
-   Currently a narrow column + auto/off removes the control from the toolbar into the ＋ panel;
-   DEFAULT_SPLIT_RATIO is still 0.4, so opening canvas makes the left column compact: this is no edge case. */
-[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning.is-compact,
-[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__planning.is-compact {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  padding: 0;
+  /* ★compact / ultra: reduce to a 44×44 icon trigger, **remaining in the toolbar**.
+     Currently a narrow column + auto/off removes the control from the toolbar into the ＋ panel;
+     DEFAULT_SPLIT_RATIO is still 0.4, so opening canvas makes the left column compact: this is no edge case. */
+  [data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning.is-compact,
+  [data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__planning.is-compact {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  [data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel {
+    width: 44px;
+    padding: 0;
+  }
 }
 
 [data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel span:last-child {
   display: none;
 }
 
-[data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel {
-  width: 44px;
-  padding: 0;
+@media (hover: hover) and (pointer: fine) {
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) :is(.composer-v2__tool-button, .composer-v2__planning) {
+    min-height: 32px;
+    height: 32px;
+  }
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) :is(.composer-v2__tool-button, .composer-v2__planning.is-compact) {
+    min-width: 32px;
+    width: 32px;
+    padding: 0;
+  }
+  /* The model picker keeps its pill: sized to its name, which ellipsizes when the row is short. */
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) .composer-v2__model-wrap {
+    flex: 0 1 auto;
+    width: auto;
+  }
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) .composer-v2__model-trigger {
+    width: auto;
+    min-width: 0;
+    min-height: 32px;
+    height: 32px;
+  }
+  /* Send and Stop share 40 px, so starting or stopping a Turn does not shift the toolbar. */
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) .v2-send-btn {
+    min-width: 40px;
+    min-height: 40px;
+    height: 40px;
+  }
+  [data-composer-layout-v2]:is([data-layout-mode="compact"], [data-layout-mode="ultra"]) .v2-send-btn:not(.v2-send-btn--cancel),
+  [data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel {
+    width: 40px;
+    padding: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

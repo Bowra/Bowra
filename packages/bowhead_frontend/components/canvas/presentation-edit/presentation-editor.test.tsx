@@ -111,16 +111,22 @@ describe("PresentationEditor", () => {
     });
     renderEditor();
 
-    const hit = await screen.findByRole("button", { name: /kind_text：季度复盘/ });
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
     fireEvent.click(hit);
+    // A click selects, also when the text is edited in the inspector; Enter starts editing
+    // without adding a new line to the field.
+    await waitFor(() => expect(hit).toHaveFocus());
     const field = await screen.findByRole("textbox");
-    expect(field).toHaveValue("季度复盘");
+    fireEvent.keyDown(hit, { key: "Enter" });
     await waitFor(() => expect(field).toHaveFocus());
+    expect(field).toHaveValue("季度复盘");
+    expect(screen.queryByText(/pending_count/)).not.toBeInTheDocument();
     expect(screen.getByText("mixed_style_hint")).toBeInTheDocument();
 
     fireEvent.change(field, { target: { value: "年度复盘" } });
     expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /kind_text：季度复盘 · unsaved_badge/ })).toHaveAttribute("data-pending", "true");
+    // The element's name carries the new text and its change number (design §13.3).
+    expect(screen.getByRole("button", { name: /kind_textlabel_separator年度复盘 · unsaved_numbered:\{"number":1\}/ })).toHaveAttribute("data-pending", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "save_version" }));
     await screen.findByText('saved_summary:{"count":1,"version":4,"previous":3}');
@@ -143,11 +149,11 @@ describe("PresentationEditor", () => {
     });
     renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: /kind_text：季度复盘/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ }));
     fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
     fireEvent.click(screen.getByRole("button", { name: "back_to_list" }));
-    fireEvent.click(screen.getByRole("button", { name: /kind_table：/ }));
-    fireEvent.change(await screen.findByRole("textbox", { name: 'cell_label:{"row":2,"col":1}' }), { target: { value: "产品线 B（华东）" } });
+    fireEvent.click(screen.getByRole("button", { name: /kind_tablelabel_separator/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: 'cell_label:{"row":2,"col":1} · 产品线' }), { target: { value: "产品线 B（华东）" } });
     fireEvent.click(screen.getByRole("button", { name: "save_version" }));
 
     expect(await screen.findByText(/^conflict_agent:/)).toHaveTextContent("把总结页改成三条要点");
@@ -166,20 +172,48 @@ describe("PresentationEditor", () => {
     stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
     renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: /kind_chart：Chart 3/ }));
-    const cell = await screen.findByRole("textbox", { name: 'chart_value_label:{"category":"1 月","series":"销售额"}' });
+    // A click selects the chart; a second click opens its data beside it (design §13.3).
+    const chart = await screen.findByRole("button", { name: /kind_chartlabel_separatorChart 3/ });
+    fireEvent.click(chart);
+    fireEvent.click(chart);
+    const popover = await screen.findByRole("dialog", { name: 'chart_popover_label:{"name":"Chart 3"}' });
+    const cell = within(popover).getByRole("textbox", { name: 'chart_value_label:{"category":"1 月","series":"销售额"}' });
     expect(cell).toHaveValue("1,180");
+    // Enter moves down a column, as in a table.
+    cell.focus();
+    fireEvent.keyDown(cell, { key: "Enter" });
+    expect(within(popover).getByRole("textbox", { name: 'chart_value_label:{"category":"2 月","series":"销售额"}' })).toHaveFocus();
+    cell.focus();
     fireEvent.change(cell, { target: { value: "一千" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("not_a_number");
+    // The error is announced once the field is left, not while typing.
+    expect(within(popover).queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.blur(cell);
+    expect(within(popover).getByRole("alert")).toHaveTextContent("not_a_number");
     expect(screen.getByText("invalid_pending")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "save_version" })).toBeDisabled();
+  });
+
+  it("keeps focus in the editor when PageDown turns the page, so the next PageUp still works", async () => {
+    const first = deck().slides[0];
+    const second = { ...first, slide_id: 257, index: 2, elements: [{ ...first.elements[0], key: "257:2", paragraphs: [{ text: "区域明细", mixed_style: false, fields: 0 }] }] };
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck({ slides: [first, second] }) })] });
+    renderEditor();
+
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    fireEvent.click(hit);
+    await waitFor(() => expect(hit).toHaveFocus());
+    fireEvent.keyDown(hit, { key: "PageDown" });
+    // The hit left with page 1; focus moves to the page (or its rail thumbnail) instead of the body.
+    await waitFor(() => expect(screen.getByRole("group", { name: 'page_of:{"page":2,"count":2}' })).toHaveFocus());
+    fireEvent.keyDown(document.activeElement as Element, { key: "PageUp" });
+    await waitFor(() => expect(screen.getByRole("group", { name: 'page_of:{"page":1,"count":2}' })).toHaveFocus());
   });
 
   it("explains a picture and offers the ways out", async () => {
     stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
     renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: /kind_picture：LOGO · unsupported_badge/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /kind_picturelabel_separatorLOGO · unsupported_badge/ }));
     expect(await screen.findByText("unsupported_title_picture")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "download" })).toBeInTheDocument();
     expect(screen.getByText("unsupported_list_notes")).toBeInTheDocument();
@@ -189,7 +223,7 @@ describe("PresentationEditor", () => {
     stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
     const onExit = renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: /kind_text：季度复盘/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ }));
     const field = await screen.findByRole("textbox");
     fireEvent.change(field, { target: { value: "年度复盘" } });
     fireEvent.keyDown(field, { key: "Escape" });
@@ -205,7 +239,7 @@ describe("PresentationEditor", () => {
     fireEvent.keyDown(screen.getByTestId("presentation-editor"), { key: "z", metaKey: true });
     expect(screen.queryByText('pending_count:{"count":1}')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "exit" }));
-    await waitFor(() => expect(onExit).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onExit).toHaveBeenCalledWith({ artifactId: "art_v3", close: false, page: 1 }));
   });
 
   it("offers the file already made from an upload before saving another copy", async () => {
@@ -228,7 +262,7 @@ describe("PresentationEditor", () => {
     // The viewer runs `then` once it shows the file, so the reference lands after the view settles.
     const onExit = renderEditor(vi.fn((exit: { then?: () => void } | null) => exit?.then?.()), onReferenceElement);
 
-    fireEvent.click(await screen.findByRole("button", { name: /kind_picture：LOGO · unsupported_badge/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /kind_picturelabel_separatorLOGO · unsupported_badge/ }));
     expect(screen.getByText('reference_element_note:{"page":1,"name":"LOGO"}')).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "reference_element" }));
     await waitFor(() => expect(onReferenceElement).toHaveBeenCalledWith({
@@ -236,7 +270,7 @@ describe("PresentationEditor", () => {
       mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       presentationSelection: { version: 1, artifactId: "art_v3", slideId: 256, slideIndex: 1, elementKey: "256:5", elementName: "LOGO", elementKind: "picture" },
     }));
-    expect(onExit).toHaveBeenCalledWith({ artifactId: "art_v3", close: true, then: expect.any(Function) });
+    expect(onExit).toHaveBeenCalledWith({ artifactId: "art_v3", close: true, page: 1, then: expect.any(Function) });
     expect(onExit.mock.invocationCallOrder[0]).toBeLessThan(onReferenceElement.mock.invocationCallOrder[0]);
   });
 
@@ -257,9 +291,14 @@ describe("PresentationEditor", () => {
     expect(screen.getByText('phone_page_pending:{"count":1}')).toBeInTheDocument();
     expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /kind_table：c0/ }));
+    // A table wider than 3 columns is edited one row at a time on a phone.
+    fireEvent.click(screen.getByRole("button", { name: /kind_tablelabel_separatorc0/ }));
     const table = await screen.findByRole("dialog", { name: /c0/ });
-    expect(within(table).getByText("phone_wide_table_title")).toBeInTheDocument();
+    expect(within(table).getByText('row_form_hint:{"cols":4}')).toBeInTheDocument();
     expect(within(table).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("presentation-editor").querySelector("[data-covered]")).not.toBeNull();
+    fireEvent.click(within(table).getByRole("button", { name: 'row_label:{"row":1} · c0' }));
+    fireEvent.change(within(table).getByRole("textbox", { name: "c2" }), { target: { value: "c2 new" } });
+    expect(screen.getByText('pending_count:{"count":2}')).toBeInTheDocument();
   });
 });

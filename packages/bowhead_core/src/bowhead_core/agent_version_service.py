@@ -962,7 +962,38 @@ async def read_agent_version_workbench_conn(db: aiosqlite.Connection, *, team_id
         row = await cursor.fetchone()
     if row is None:
         raise AgentRevisionForbiddenError("agent_not_found")
-    return _workbench_projection(row, facts=await _snapshot_facts_conn(db, row["snapshot_summary_json"]))
+    projection = _workbench_projection(row, facts=await _snapshot_facts_conn(db, row["snapshot_summary_json"]))
+    projection["latest_decision"] = await _latest_decision_conn(db, team_id=team_id, agent_id=agent_id)
+    return projection
+
+
+async def _latest_decision_conn(db: aiosqlite.Connection, *, team_id: str, agent_id: str) -> dict[str, Any] | None:
+    """The reviewer's decline of the latest submission against the live release, while it is the latest.
+
+    The workbench joins only active candidates, so a declined submission would otherwise vanish from the
+    Owner's page. A later submission, or a new live release, supersedes the decline and this returns None.
+    """
+    async with db.execute(
+        """
+        SELECT candidate.id,candidate.state,candidate.decision_reason_code,candidate.decided_at
+        FROM team_subagent_release_candidate candidate
+        JOIN team_subagent agent ON agent.team_id=candidate.team_id AND agent.id=candidate.subagent_id
+        WHERE candidate.team_id=? AND candidate.subagent_id=?
+          AND candidate.base_live_release_id IS agent.live_release_id
+        ORDER BY candidate.submitted_at DESC,candidate.rowid DESC
+        LIMIT 1
+        """,
+        (team_id, agent_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None or str(row["state"]) != "rejected":
+        return None
+    return {
+        "candidate_id": str(row["id"]),
+        "decided_at": row["decided_at"],
+        "reason_code": row["decision_reason_code"],
+        "state": "rejected",
+    }
 
 
 def release_tab_path(agent_id: str) -> str:

@@ -50,7 +50,7 @@ _FLAT_SANDBOX = ["python_exec"]
 # Full-edition inference fixtures; the Community consultant composition is checked separately.
 PROD_ALLOW = {
     "kb-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX, "kb_list_sources", "kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"],
-    "consultant": [*_BI_ONLY, *_FLAT_SANDBOX, "render_deck"],
+    "consultant": [*_BI_ONLY, *_FLAT_SANDBOX],
     "financial-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
     "business-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
     "compliance-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
@@ -321,20 +321,13 @@ def test_produces_defaults_empty_and_rejects_duplicates() -> None:
 
 
 def test_deck_inputs_derived_from_produces_is_byte_identical_to_the_name_set() -> None:
-    """★ 第 ④ 处名字硬编码退休，但**行为必须一个字节都不变**。
-
-    `deck_inputs` 不是展示位：它开着的时候，收尾会去把 render_deck.py 产出的
-    output.pptx 登记成 artifact（`subagent.py` 那段唯一从 skill 收产物的路径）。
-    多给一个 agent = 去翻它根本没有的产物；少给一个 = **用户拿不到文件**
-    （23 次「要文件」只出成 4 次那个 sprint 的老伤）。
-    所以这条钉的是集合相等，而不是"consultant 有就行"。
-    """
+    """`deck_inputs` follows `produces: [pptx]` exactly; it sets the PPTX output format an Agent lists."""
     from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
     from bowhead_core.agents.registry import AgentRegistry
 
     registry = AgentRegistry.bootstrap()
     with_deck = {n for n in registry.list_all() if manifest_to_profile(registry.get(n)).deck_inputs}
-    assert with_deck == {"compute", "consultant"}, "deck 钩子的归属变了——这是行为回归，不是重构"
+    assert with_deck == {"compute", "consultant"}
 
 
 def test_produces_by_agent_matches_manifests_and_isolates_breakage() -> None:

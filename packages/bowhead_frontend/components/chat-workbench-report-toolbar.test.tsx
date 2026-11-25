@@ -42,6 +42,9 @@ vi.mock("@/lib/use-results-capabilities", async (importOriginal) => {
 });
 const media = vi.hoisted(() => ({ matches: true }));
 vi.mock("@/lib/use-media-query", () => ({ useMediaQuery: (query: string) => query.includes("min-width") ? true : media.matches }));
+// Narrow desktop layout: jsdom has no layout, so tests set what the measured toolbar would have moved.
+const toolbarFit = vi.hoisted(() => ({ tokens: new Set<string>() }));
+vi.mock("@/lib/use-toolbar-fit", () => ({ useToolbarFit: () => toolbarFit.tokens }));
 vi.mock("./canvas/data-tab-files", () => ({
   DataTabFiles: () => <div data-testid="data-tab-files" />,
   useArtifactItems: () => ({ items: [], error: null, loading: false, retry: vi.fn() }),
@@ -451,6 +454,34 @@ describe("report toolbar share and status", () => {
     expect(dialog.getAttribute("data-return-focus")).toBe("分享报告");
     fireEvent.click(screen.getByRole("button", { name: "close-share" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "share-dialog" })).toBeNull());
+  });
+
+  it("a narrow toolbar moves Export and then Share into More, and the share dialog returns focus to More", async () => {
+    toolbarFit.tokens = new Set(["trust-short", "export-icon", "edit-icon", "figures-short", "export-menu", "share-menu"]);
+    try {
+      renderWorkbench();
+      await waitFor(() => expect(toolbar()).not.toBeNull());
+      fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+      const items = await screen.findAllByRole("menuitem");
+      const labels = items.map((item) => item.textContent?.trim());
+      // Moved items keep their toolbar order and labels; Share opens a dialog, so it ends in "…".
+      expect(labels.indexOf("导出")).toBeGreaterThanOrEqual(0);
+      expect(labels.indexOf("分享…")).toBe(labels.indexOf("导出") + 1);
+      fireEvent.click(screen.getByRole("menuitem", { name: "分享…" }));
+      const dialog = await screen.findByRole("dialog", { name: "share-dialog" });
+      expect(dialog.getAttribute("data-return-focus")).toBe("更多操作");
+    } finally {
+      toolbarFit.tokens = new Set();
+    }
+  });
+
+  it("a toolbar that fits keeps Export and Share out of More", async () => {
+    renderWorkbench();
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+    await screen.findByRole("menuitem", { name: "历史" });
+    expect(screen.queryByRole("menuitem", { name: "分享…" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "导出" })).toBeNull();
   });
 
   it("工具条有状态组，ReportView 拿到它作状态组宿主", async () => {

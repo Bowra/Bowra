@@ -25,7 +25,7 @@ from bowhead_core.agents.agent_runner_adapter import (
     register_manifest_as_profile,
 )
 from bowhead_core.agents.manifest import ToolsSpec
-from bowhead_core.agents.task_spec import BusRef, PlanStepDeliveryError, PlanStepModelError, TaskSpec
+from bowhead_core.agents.task_spec import BusRef, PlanStepModelError, TaskSpec
 from bowhead_core.agents.turn_context import (
     RuntimeTurnContext,
     SerializableTurnContext,
@@ -259,74 +259,6 @@ async def test_runner_fn_success_with_payload() -> None:
     assert tokens_out == 200
     assert stub_runner.captured["profile_name"] == "compute"
     assert stub_runner.captured["task"] == "近 30 天销量"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("document_profile", ["legacy", "bowra-v1"])
-async def test_plan_consultant_step_gets_new_deck_authority_on_its_own_context(tmp_path, monkeypatch, document_profile) -> None:
-    """Plan execution prepares the same new-deck authority as subagent_spawn, on a per-step copy."""
-    from bowhead_core.artifact_store import ArtifactStore, LocalBackend
-    from bowhead_core.deck_render_tool import DeckRenderBinding, deck_target
-
-    from bowhead_core import document_runtime
-
-    monkeypatch.setattr(document_runtime, "read_document_profile", lambda: document_profile)
-    from bowhead_core.session_store import SessionStore
-    from bowhead_core.tool_registry import ToolExecutionContext
-
-    sessions = SessionStore(tmp_path / "artifacts.db")
-    await sessions.initialize()
-    await sessions.ensure_session(session_id="s_a", workspace_id="ws_test", user_id="u_1")
-    await sessions.record_turn(turn_id="t_b", session_id="s_a", user_text="Create a new landscape deck.")
-    store = ArtifactStore(backend=LocalBackend(root_dir=tmp_path / "files"), db_path=tmp_path / "artifacts.db")
-    await store.initialize()
-    parent_ctx = ToolExecutionContext(
-        workspace_id="ws_test",
-        member_uid="m_test",
-        user_id="u_1",
-        team_id="team_test",
-        session_id="s_a",
-        turn_id="t_b",
-        role="analyst",
-        datarc=None,
-        artifact_store=store,
-    )
-    registry = AgentRegistry.bootstrap()
-    register_all_system_manifests(registry)
-    stub_runner = _StubRunner(
-        next_result=SubagentResult(profile="consultant", subagent_id="sub_x", ok=True, final_answer="", payload={"title": "deck"})
-    )
-    runner_fn = make_legacy_agent_runner_fn(
-        subagent_runner=stub_runner,  # type: ignore[arg-type]
-        parent_turn_id="t_b",
-        parent_bus=_StubBus(),  # type: ignore[arg-type]
-        parent_ctx=parent_ctx,
-        team_sourced_names=frozenset(),
-    )
-    # Exercise explicit native-renderer authority in either edition composition.
-    consultant = registry.get("consultant")
-    consultant = consultant.model_copy(update={"tools": ToolsSpec(allow=list(dict.fromkeys([*consultant.tools.allow, "render_deck"])))})
-    binding = None
-    try:
-        await runner_fn(consultant, TaskSpec(agent_name="consultant", user_question="Create a new landscape deck."), _mk_runtime_ctx())
-        step_ctx = stub_runner.captured["parent_ctx"]
-        binding = step_ctx.deck_render_binding
-        assert step_ctx is not parent_ctx and parent_ctx.deck_render_binding is None
-        if document_profile == "legacy":
-            assert isinstance(binding, DeckRenderBinding) and binding.target == deck_target(parent_ctx) and binding.required is True
-            assert "render_deck" in stub_runner.captured["extra"]
-        else:
-            assert binding is None
-            assert "bowra-pptx" in stub_runner.captured["extra"]
-
-        await runner_fn(registry.get("compute"), TaskSpec(agent_name="compute", user_question="Query sales."), _mk_runtime_ctx())
-        assert getattr(stub_runner.captured["parent_ctx"], "deck_render_binding", None) is None
-    finally:
-        import shutil
-        from pathlib import Path
-
-        if binding is not None:
-            shutil.rmtree(Path(binding.template_path).parent, ignore_errors=True)
 
 
 @pytest.mark.asyncio
@@ -612,30 +544,6 @@ async def test_runner_fn_keeps_the_model_failure_of_an_exhausted_step(llm_reason
     # The task runner records error_kind as the step's kind and the text as its reason.
     assert raised.value.error_kind == error_kind
     assert "Resume the plan" in str(raised.value) and "subagent_internal_error" not in str(raised.value)
-
-
-@pytest.mark.asyncio
-async def test_runner_fn_names_a_missing_deck_as_the_step_kind() -> None:
-    """an observed execution: a Consultant step returned analysis but no deck. The step stored the raw
-    `deck_delivery_missing` with kind `RuntimeError`, and the plan card showed both."""
-    registry = AgentRegistry.bootstrap()
-    register_all_system_manifests(registry)
-    manifest = registry.get("consultant")
-    stub_runner = _StubRunner(
-        next_result=SubagentResult(profile="consultant", subagent_id="sub_x", ok=False, final_answer="", error="deck_delivery_missing"),
-    )
-    runner_fn = make_legacy_agent_runner_fn(
-        subagent_runner=stub_runner,  # type: ignore[arg-type]
-        parent_turn_id="t_test",
-        parent_bus=_StubBus(),  # type: ignore[arg-type]
-        parent_ctx=_StubCtx(),  # type: ignore[arg-type]
-        team_sourced_names=frozenset(),
-    )
-    with pytest.raises(PlanStepDeliveryError) as raised:
-        await runner_fn(manifest, TaskSpec(agent_name="consultant", user_question="q"), _mk_runtime_ctx())
-    # The task runner records error_kind as the step's kind and the text as its reason.
-    assert raised.value.error_kind == "deck_delivery_missing"
-    assert "PowerPoint" in str(raised.value) and "deck_delivery_missing" not in str(raised.value)
 
 
 @pytest.mark.asyncio

@@ -4,28 +4,10 @@
  * close → dismissed (no reopening). Use the real RoutineDrawer (the actual embedded-variant decomposition).
  */
 
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
-
-const getManagerMock = vi.fn();
-const getWorkingMock = vi.fn();
-const getCatalogMock = vi.fn();
-vi.mock("@/lib/team-subagents-api", () => ({ getSubagentManager: (id: string) => getManagerMock(id) }));
-vi.mock("@/lib/agents-api", () => ({
-  getAgentWorkingCopy: (id: string) => getWorkingMock(id),
-  getAgentAuthoringCatalog: () => getCatalogMock(),
-}));
-vi.mock("@/components/canvas/sections/create-subagent-card", () => ({
-  CreateSubagentCard: ({ editing, initialDraft, onSaved }: {
-    editing: { id: string; name: string; description: string };
-    initialDraft: { fields: Record<string, unknown> };
-    onSaved: (name: string, count: number) => void;
-  }) => <button type="button" data-testid="subagent-edit" onClick={() => onSaved(editing.name, 0)}>
-    {editing.id}:{editing.description}:{String(initialDraft.fields.description)}
-  </button>,
-}));
 
 vi.mock("@/lib/api-client", () => {
   class ApiError extends Error {
@@ -72,10 +54,6 @@ function draftDto(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   resetDraftForTests();
-  getManagerMock.mockReset();
-  getWorkingMock.mockReset();
-  getCatalogMock.mockReset();
-  getManagerMock.mockImplementation(async (id: string) => ({ id, name: id, display_name: id, actions: { edit: true }, definition_mode: "legacy_mutable" }));
   apiJsonMock.mockReset();
   apiJsonMock.mockImplementation(async (input: RequestInfo | URL) => {
     if (String(input).endsWith("/config-drafts/ccd_d1")) return draftDto();
@@ -89,82 +67,6 @@ afterEach(() => {
 });
 
 describe("ConfigDrawer", () => {
-  it("prefills a revisioned editor from the current working copy", async () => {
-    apiJsonMock.mockImplementation(async (input: RequestInfo | URL) => String(input).endsWith("/config-drafts/ccd_d1")
-      ? draftDto({ form_id: "team_subagent", target: { id: "osa_a", label: "销售助手" },
-        fields: { description: "对话建议" }, field_meta: { description: { origin: "generated", needs_confirm: false, note: null } } })
-      : {});
-    getManagerMock.mockResolvedValue({ id: "osa_a", name: "sales-helper", display_name: "旧名称", description: "旧说明",
-      actions: { edit: true }, definition_mode: "revisioned" });
-    getWorkingMock.mockResolvedValue({ actions: { edit: true }, working_copy: {
-      definition: { system_prompt: "新版指令", tool_refs: ["bi_query"], max_iterations: 12, skill_grants: [], output_schema: null },
-      listing: { display_name: "新版名称", description: "工作副本说明" }, audience: { effective_mode: "private", user_ids: [], group_ids: [] }, row_version: 3,
-    }, live: {} });
-    getCatalogMock.mockResolvedValue({ tools: [], skills: [] });
-    renderIntl(<ConfigDrawer draftId="ccd_d1" layout="column" onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId("subagent-edit").textContent).toContain("工作副本说明"));
-    expect(getWorkingMock).toHaveBeenCalledWith("osa_a");
-  });
-  it("switches the right editor when chat retargets a draft, then consumes the saved agent", async () => {
-    let target = "osa_a";
-    apiJsonMock.mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/consume")) return draftDto({ form_id: "team_subagent", status: "consumed" });
-      if (String(input).endsWith("/config-drafts/ccd_d1")) return draftDto({
-        form_id: "team_subagent", target: { id: target, label: target },
-        fields: { description: `编辑 ${target}` },
-        field_meta: { description: { origin: "generated", needs_confirm: false, note: null } },
-      });
-      return {};
-    });
-    const event = (id: string) => ({
-      draft_id: "ccd_d1", turn_id: "t_1", form_id: "team_subagent", created: false,
-      updated_fields: ["description"], fields: { description: `编辑 ${id}` },
-      field_meta: { description: { origin: "generated" as const, needs_confirm: false, note: null } },
-      notes: {}, workspace_id: null, target: { id, label: id }, changed_fields_cumulative: ["description"],
-    });
-    applyDraftEvent(event(target));
-    const onClose = vi.fn();
-    renderIntl(<ConfigDrawer draftId="ccd_d1" layout="column" onClose={onClose} />);
-    await waitFor(() => expect(screen.getByTestId("subagent-edit").textContent).toContain("osa_a"));
-    target = "osa_b";
-    applyDraftEvent(event(target));
-    await waitFor(() => expect(screen.getByTestId("subagent-edit").textContent).toContain("osa_b"));
-    expect(getManagerMock).toHaveBeenCalledWith("osa_b");
-    fireEvent.click(screen.getByTestId("subagent-edit"));
-    await waitFor(() => expect(apiJsonMock.mock.calls.some((call) => String(call[0]).endsWith("/consume"))).toBe(true));
-    expect(onClose).toHaveBeenCalled();
-  });
-  it("keeps a newly selected target open when the previous target's save receipt races with chat", async () => {
-    let target = "osa_a";
-    let rejectConsume: ((reason: Error) => void) | undefined;
-    apiJsonMock.mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/consume")) return new Promise((_, reject) => { rejectConsume = reject; });
-      if (String(input).endsWith("/config-drafts/ccd_d1")) return draftDto({
-        form_id: "team_subagent", target: { id: target, label: target },
-        fields: { description: `编辑 ${target}` },
-        field_meta: { description: { origin: "generated", needs_confirm: false, note: null } },
-      });
-      return {};
-    });
-    const event = (id: string) => ({
-      draft_id: "ccd_d1", turn_id: "t_1", form_id: "team_subagent", created: false,
-      updated_fields: ["description"], fields: { description: `编辑 ${id}` },
-      field_meta: { description: { origin: "generated" as const, needs_confirm: false, note: null } },
-      notes: {}, workspace_id: null, target: { id, label: id }, changed_fields_cumulative: ["description"],
-    });
-    applyDraftEvent(event(target));
-    const onClose = vi.fn();
-    renderIntl(<ConfigDrawer draftId="ccd_d1" layout="column" onClose={onClose} />);
-    await waitFor(() => expect(screen.getByTestId("subagent-edit").textContent).toContain("osa_a"));
-    fireEvent.click(screen.getByTestId("subagent-edit"));
-    await waitFor(() => expect(rejectConsume).toBeDefined());
-    target = "osa_b";
-    act(() => applyDraftEvent(event(target)));
-    await waitFor(() => expect(screen.getByTestId("subagent-edit").textContent).toContain("osa_b"));
-    await act(async () => { rejectConsume?.(new Error("draft_result_target_mismatch")); });
-    expect(onClose).not.toHaveBeenCalled();
-    expect(isDraftDismissed("ccd_d1")).toBe(false);
-  });
   it("overlay 形态：类名 + scrim；非模态（无 aria-modal，键盘可离开）；含「关闭后回到报告」", async () => {
     const { container } = renderIntl(<ConfigDrawer draftId="ccd_d1" layout="overlay" onClose={vi.fn()} />);
     const drawer = await screen.findByTestId("config-drawer");

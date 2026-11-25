@@ -26,11 +26,11 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-import anyio
 import httpx2
 
 from bowhead_core._db import is_authority_busy
 from bowhead_core.builtin_tool_grants import BuiltinToolGrant, BuiltinToolGrantError, BuiltinToolGrantStore
+from bowhead_core.oauth_token_broker import OAuthGrantRejected, OAuthTokenBroker, RefreshedToken
 from bowhead_core.ssrf_guard import build_guarded_async_client
 
 logger = logging.getLogger(__name__)
@@ -278,30 +278,64 @@ def verify_identity(id_token: str | None, *, client_id: str, domain: str, expect
 # --------------------------------------------------------------------------- broker
 
 
-@dataclass
-class _CachedToken:
-    token: str
-    expires_at: float
+class _GoogleGrant:
+    """A member's Google grant, adapted for the shared broker."""
+
+    def __init__(self, broker: GoogleTokenBroker, grant: BuiltinToolGrant, *, tool_id: str, user_id: str, auth: dict[str, Any]) -> None:
+        self._broker = broker
+        self._grant = grant
+        self._tool_id = tool_id
+        self._user_id = user_id
+        self._auth = auth
+
+    async def read(self) -> tuple[str, str]:
+        try:
+            return await self._broker.grants.refresh_token_versioned(self._grant)
+        except BuiltinToolGrantError:
+            raise OAuthGrantRejected("grant_unreadable") from None
+
+    async def refresh(self, refresh_token: str) -> RefreshedToken:
+        try:
+            response = await refresh_access_token(
+                client_id=str(self._auth.get("client_id") or ""),
+                client_secret=str(self._auth.get("client_secret") or ""),
+                refresh_token=refresh_token,
+            )
+        except GoogleWorkspaceError as exc:
+            if exc.code == "google_reauth_required":
+                raise OAuthGrantRejected("invalid_grant") from exc
+            raise
+        # Google does not rotate refresh tokens; the stored one stays valid.
+        return RefreshedToken(response.access_token, response.expires_in)
+
+    async def store_rotated(self, refreshed: RefreshedToken, expected_version: str) -> bool:  # pragma: no cover - never rotated
+        return True
+
+    async def mark_rejected(self, reason: str, expected_version: str | None) -> None:
+        await self._broker._mark_needs_reauth(self._tool_id, self._user_id, expected_cipher=expected_version)
+
+    async def used(self) -> None:
+        await self._broker.grants.touch(self._tool_id, self._user_id)
 
 
 class GoogleTokenBroker:
     """Resolve a member's access token for one connection; refresh single-flight.
 
-    Access tokens are cached only in memory and dropped 60 s before expiry.
-    ``invalid_grant`` marks the grant ``needs_reauth`` — it is never retried as
-    a transient failure.
+    Access tokens are cached only in memory and dropped 60 s before expiry by the shared
+    :class:`OAuthTokenBroker`. ``invalid_grant`` marks the grant ``needs_reauth`` — it is never
+    retried as a transient failure.
     """
 
     def __init__(self, grants: BuiltinToolGrantStore) -> None:
         self.grants = grants
-        self._cache: dict[str, _CachedToken] = {}
-        self._locks: dict[str, anyio.Lock] = {}
-        # Bumped by forget(): a refresh that started before a reconnect must not cache its token.
-        self._generation: dict[str, int] = {}
+        self._broker = OAuthTokenBroker()
+
+    @property
+    def _cache(self) -> dict[str, Any]:
+        return self._broker._cache
 
     def forget(self, grant_id: str) -> None:
-        self._cache.pop(grant_id, None)
-        self._generation[grant_id] = self._generation.get(grant_id, 0) + 1
+        self._broker.forget(grant_id)
 
     async def _mark_needs_reauth(self, tool_id: str, user_id: str, *, expected_cipher: str | None = None) -> None:
         """Mark the grant stale; a spent lease wait must not replace the re-authorization error."""
@@ -320,33 +354,11 @@ class GoogleTokenBroker:
             raise GoogleWorkspaceError("google_reauth_required")
         if not all(bundle_granted(bundle, grant.granted_scopes) for bundle in required_bundles):
             raise GoogleWorkspaceError("google_scope_missing")
-        cached = self._cache.get(grant.id)
-        if cached and cached.expires_at > time.monotonic():
-            return cached.token, grant
-        lock = self._locks.setdefault(grant.id, anyio.Lock())
-        async with lock:
-            cached = self._cache.get(grant.id)
-            if cached and cached.expires_at > time.monotonic():
-                return cached.token, grant
-            generation = self._generation.get(grant.id, 0)
-            try:
-                refresh, version = await self.grants.refresh_token_versioned(grant)
-            except BuiltinToolGrantError:
-                await self._mark_needs_reauth(tool.id, user_id)
-                raise GoogleWorkspaceError("google_reauth_required") from None
-            try:
-                response = await refresh_access_token(
-                    client_id=str(auth.get("client_id") or ""), client_secret=str(auth.get("client_secret") or ""), refresh_token=refresh
-                )
-            except GoogleWorkspaceError as exc:
-                if exc.code == "google_reauth_required":
-                    await self._mark_needs_reauth(tool.id, user_id, expected_cipher=version)
-                    self.forget(grant.id)
-                raise
-            if self._generation.get(grant.id, 0) == generation:
-                self._cache[grant.id] = _CachedToken(response.access_token, time.monotonic() + max(response.expires_in - 60, 0))
-            await self.grants.touch(tool.id, user_id)
-            return response.access_token, grant
+        try:
+            token = await self._broker.access_token(grant.id, _GoogleGrant(self, grant, tool_id=tool.id, user_id=user_id, auth=auth))
+        except OAuthGrantRejected:
+            raise GoogleWorkspaceError("google_reauth_required") from None
+        return token, grant
 
 
 _brokers: dict[str, GoogleTokenBroker] = {}

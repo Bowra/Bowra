@@ -43,7 +43,7 @@ CANVAS_WRITE_TOOLS: frozenset[str] = frozenset(
     }
 )
 # A target profile must be able to write a new file version.
-FILE_PRODUCER_TOOLS: frozenset[str] = frozenset({"python_exec", "skill_invoke", "render_deck"})
+FILE_PRODUCER_TOOLS: frozenset[str] = frozenset({"python_exec", "skill_invoke"})
 REVISE_FILES_REASONS = frozenset(
     {"revise_files_invalid", "revise_files_not_found", "revise_files_document_flow", "revise_files_unavailable", "revise_files_not_latest"}
 )
@@ -157,6 +157,24 @@ class FileTarget:
     versionable: bool = False
     lineage_root: str = ""
     version_no: int = 1
+    # An upload of this person: its revised copy is a new file named like the deck editor's
+    # copy (「<name>（已修改）」) that records the upload in `derived_from`. Empty otherwise.
+    copy_name: str = ""
+
+
+def upload_copy_name(artifact: Artifact, *, user_id: str, ui_language: str) -> str:
+    """The name of a revised copy of this person's own upload; empty for anything else.
+
+    Uploads are never versioned (file-versions design §5). A helper that keeps the upload's
+    name would otherwise save a second file with the same name and no link to the upload,
+    so the deck editor, opened on the upload, would not find it (pptx dogfood 2026-11-25).
+    """
+    from bowhead_core.presentation_edit import edited_copy_filename
+    from bowhead_core.results_read_model import artifact_kind
+
+    if artifact_kind(artifact) != "user_upload" or not user_id or artifact.created_by != user_id:
+        return ""
+    return edited_copy_filename(artifact.filename, ui_language or "en-US")
 
 
 async def resolve_revise_files(ctx: Any, raw: Any) -> tuple[list[FileTarget], dict[str, Any] | None]:
@@ -169,6 +187,7 @@ async def resolve_revise_files(ctx: Any, raw: Any) -> tuple[list[FileTarget], di
     session_id = str(getattr(ctx, "session_id", "") or "")
     user_id = str(getattr(ctx, "user_id", "") or "")
     turn_id = str(getattr(ctx, "turn_id", "") or "")
+    ui_language = str(getattr(getattr(ctx, "language_context", None), "ui_language", "") or "")
     if store is None or not session_id or not user_id:
         return [], refusal("revise_files_unavailable", ids=ids)
     if not ids or len(ids) > MAX_REVISE_FILES:
@@ -201,6 +220,7 @@ async def resolve_revise_files(ctx: Any, raw: Any) -> tuple[list[FileTarget], di
                     versionable=versionable,
                     lineage_root=artifact.lineage_id or artifact.id,
                     version_no=artifact.version_no or 1,
+                    copy_name="" if versionable else upload_copy_name(artifact, user_id=user_id, ui_language=ui_language),
                 )
             )
         if not missing and not documents:
@@ -292,13 +312,14 @@ def file_target_context_line(targets: Sequence[FileTarget], parts: Iterable[Any]
     named = [quoted(part, 80) for part in parts if str(part or "").strip()]
     scope = f" The user named these parts of the file: {'; '.join(named)}." if named else ""
     versioned = [target for target in targets if target.versionable]
-    others = [target for target in targets if not target.versionable]
+    copies = [target for target in targets if not target.versionable and target.copy_name]
+    others = [target for target in targets if not target.versionable and not target.copy_name]
     versions = (
         # Regression check N10: the same file name is the same file, as a path is in coding harnesses.
         " In `python_exec`, a deliverable saved with the original's filename is recorded as its next version automatically; "
         "add `revises` only when the new file has a different name, e.g. "
         + ", ".join(f'`revises={{"<new name>": "{target.artifact_id}"}}`' for target in versioned)
-        + ". In `render_deck` pass `revises` with the deck's artifact_id."
+        + "."
         if versioned
         else ""
     )
@@ -308,12 +329,18 @@ def file_target_context_line(targets: Sequence[FileTarget], parts: Iterable[Any]
         if others
         else ""
     )
+    # An upload stays as uploaded; its revised copy is a new file linked to it (pptx dogfood 2026-11-25).
+    upload_copies = "".join(
+        f" 《{quoted(target.name, 80)}》 was uploaded and stays unchanged: a deliverable saved with its filename becomes a new file "
+        f"named 《{quoted(target.copy_name, 80)}》 that records the upload as its source."
+        for target in copies
+    )
     return (
         f"- **Revision target: delivered files** — the user is changing file(s) delivered earlier, not the Canvas report: {files}.{scope} "
         "Start from the original: pass its artifact_id in the sandbox `inputs`, or rerun the code that produced it when this run "
         "already holds it. Change only what the user asked and keep everything else as it is. Write the new version with the same "
         'filename, `purpose="deliverable"`, and list it in `deliverable_outputs`; read the output checks (such as '
-        "`html_static_check`) and fix reported problems before finishing." + versions + new_files + " Canvas tools are not available "
+        "`html_static_check`) and fix reported problems before finishing." + versions + upload_copies + new_files + " Canvas tools are not available "
         "for this request. Return `delivery_surface='chat'` with an `exec_summary` that names the new file and what changed."
     )
 
@@ -333,37 +360,40 @@ def revised_files_facts(targets: Sequence[FileTarget], invocations: Iterable[Any
         for artifact in recorded
         if artifact.lineage_root in by_root
     ]
-    new_files: dict[str, str] = {}
+    new_files: dict[str, dict[str, Any]] = {}
+    superseded: set[str] = set()
     for invocation in _flatten(invocations):
         result = getattr(invocation, "result", None)
         if getattr(invocation, "error", None) or not isinstance(result, dict):
-            continue
-        if getattr(invocation, "tool_name", "") == "render_deck":
-            # A deck receipt names its registered file at the top level; it has no output_artifacts.
-            artifact_id = result.get("artifact_id")
-            if result.get("ok") is True and isinstance(artifact_id, str) and artifact_id and artifact_id not in target_ids:
-                new_files[artifact_id] = str(result.get("filename") or "")
             continue
         for output in result.get("output_artifacts") or []:
             if not isinstance(output, dict) or output.get("data_role") == "stdout":
                 continue
             artifact_id = output.get("artifact_id")
             if isinstance(artifact_id, str) and artifact_id and artifact_id not in target_ids and _declared(invocation, output.get("name")):
-                new_files[artifact_id] = str(output.get("name") or "")
+                # A revised copy of an upload is saved under its own name (`saved_as`) and names the upload it came from.
+                entry: dict[str, Any] = {"name": str(output.get("saved_as") or output.get("name") or "")}
+                if isinstance(output.get("derived_from"), str) and output["derived_from"]:
+                    entry["based_on"] = output["derived_from"]
+                new_files[artifact_id] = entry
+        # A later save of the same new file in this dispatch is its next version: report only the newest.
+        for version in result.get("recorded_as_new_version") or []:
+            if isinstance(version, dict) and isinstance(version.get("previous_version"), str):
+                superseded.add(version["previous_version"])
     recorded_ids = {item["artifact_id"] for item in versions}
     return {
         "targets": [{"artifact_id": target.artifact_id, "name": target.name} for target in targets],
         "new_files": versions
         + [
-            {"artifact_id": artifact_id, "name": name, "recorded_as_version": False}
-            for artifact_id, name in new_files.items()
-            if artifact_id not in recorded_ids
+            {"artifact_id": artifact_id, **entry, "recorded_as_version": False}
+            for artifact_id, entry in new_files.items()
+            if artifact_id not in recorded_ids and artifact_id not in superseded
         ],
     }
 
 
 def _declared(invocation: Any, name: Any) -> bool:
-    """Only files the producer declared as deliverables count as new versions (render_deck is read from its receipt)."""
+    """Only files the producer declared as deliverables count as new versions."""
     arguments = getattr(invocation, "arguments", None) or {}
     inner = arguments.get("input", arguments) if isinstance(arguments, dict) else {}
     declared = inner.get("deliverable_outputs") if isinstance(inner, dict) and inner.get("purpose") == "deliverable" else None
@@ -385,7 +415,8 @@ def _flatten(invocations: Iterable[Any]) -> list[Any]:
 
 REVISED_FILES_DIRECTIVE = (
     " This dispatch revised delivered files, not the Canvas report. Tell the user the new file from revised_files.new_files by "
-    "name: when recorded_as_version is true, as version N of the original; otherwise as a new file. If new_files is empty, say the "
+    "name: when recorded_as_version is true, as version N of the original; otherwise as a new file (based_on names the upload it "
+    "was made from, which stays unchanged). If new_files is empty, say the "
     "file was not revised. Do not describe Canvas changes for it."
 )
 # Regression check M2: the dispatch also asked for a Canvas mode, which a file revision does not apply.

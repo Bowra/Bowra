@@ -1,15 +1,20 @@
+import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearCanvas, deleteCanvas, deleteFile, deleteSession, purgeFiles, restoreFile, undeleteSession } from "@/lib/api";
 import { readApiError } from "@/lib/api-client";
+import { RESULT_TARGETS_CHANGED_EVENT } from "@/lib/result-pin-events";
 import {
   findResultPin,
   pinResult,
   resetResultPinsForTests,
+  RESULT_PINS_RETURN_REFRESH_MS,
   resultPinFailure,
   resultPinLimit,
   resultPinRoute,
   resultPinTitle,
   unpinResult,
+  useResultPins,
   type ResultPin,
 } from "@/lib/result-pins";
 
@@ -129,5 +134,110 @@ describe("pin and unpin requests", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toContain("/api/v1/result-pins/report/cv_1");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("keeping the pinned group current", () => {
+  const fetchMock = vi.fn();
+  let lists: ResultPin[][];
+
+  function listRequests(): number {
+    return fetchMock.mock.calls.filter(([url, init]) => String(url).includes("/api/v1/result-pins") && !(init as RequestInit | undefined)?.method).length;
+  }
+
+  beforeEach(() => {
+    resetResultPinsForTests();
+    lists = [];
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes("/api/v1/result-pins") && !init?.method) return jsonResponse(200, { items: lists.shift() ?? [] });
+      if (String(url).includes("/restore")) return jsonResponse(200, { file_id: "art_v3" });
+      return jsonResponse(204, null);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    resetResultPinsForTests();
+  });
+
+  it("drops a pin at once when its file goes to the recycle bin, and brings it back on restore", async () => {
+    lists = [[filePin()], [], [filePin()]];
+    const { result } = renderHook(() => useResultPins("ws_1"));
+    await waitFor(() => expect(result.current.pins).toHaveLength(1));
+
+    await deleteFile("art_v3");
+    await waitFor(() => expect(result.current.pins).toHaveLength(0));
+
+    await restoreFile("art_v3");
+    await waitFor(() => expect(result.current.pins).toHaveLength(1));
+    expect(listRequests()).toBe(3);
+  });
+
+  it("repeats a load that was running when a pinned result changed", async () => {
+    let answerFirst: (response: Response) => void = () => undefined;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answerFirst = resolve)));
+    lists = [[]];
+    const { result } = renderHook(() => useResultPins("ws_1"));
+    await waitFor(() => expect(listRequests()).toBe(1));
+
+    window.dispatchEvent(new Event(RESULT_TARGETS_CHANGED_EVENT));
+    answerFirst(jsonResponse(200, { items: [filePin()] }));
+
+    await waitFor(() => expect(listRequests()).toBe(2));
+    await waitFor(() => expect(result.current.pins).toHaveLength(0));
+  });
+
+  it("reloads when a Turn ends, since it may have written a newer version", async () => {
+    lists = [[filePin()], [filePin({ artifact_id: "art_v4", version_no: 4 })]];
+    const { result } = renderHook(() => useResultPins("ws_1"));
+    await waitFor(() => expect(result.current.pins[0]?.version_no).toBe(3));
+
+    window.dispatchEvent(new Event("bowhead.canvas.changed"));
+
+    await waitFor(() => expect(result.current.pins[0]?.version_no).toBe(4));
+  });
+
+  it("reloads on returning to the tab only when the list is not fresh", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    lists = [[filePin()], []];
+    const { result } = renderHook(() => useResultPins("ws_1"));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    now += RESULT_PINS_RETURN_REFRESH_MS - 1;
+    window.dispatchEvent(new Event("focus"));
+    expect(listRequests()).toBe(1);
+
+    now += 1;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(result.current.pins).toHaveLength(0));
+    expect(listRequests()).toBe(2);
+  });
+
+  it.each([
+    ["moving a file to the recycle bin", () => deleteFile("art_v3")],
+    ["restoring a file", () => restoreFile("art_v3")],
+    ["purging files", () => purgeFiles(["art_v3"])],
+    ["deleting a conversation", () => deleteSession("s_1")],
+    ["restoring a deleted conversation", () => undeleteSession("s_1")],
+    ["clearing a report", () => clearCanvas("cv_1")],
+    ["deleting a report", () => deleteCanvas("cv_1")],
+  ])("announces %s only when the server accepted it", async (_label, change) => {
+    const changed = vi.fn();
+    window.addEventListener(RESULT_TARGETS_CHANGED_EVENT, changed);
+    try {
+      fetchMock.mockResolvedValueOnce(jsonResponse(500, { detail: "boom" }));
+      await expect(change()).rejects.toBeTruthy();
+      expect(changed).not.toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { file_id: "art_v3", purged: 1, kb_blocked: 0 }));
+      await change();
+      expect(changed).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(RESULT_TARGETS_CHANGED_EVENT, changed);
+    }
   });
 });

@@ -293,19 +293,36 @@ def _mcp_preview_headers(auth_type: str, auth: dict[str, Any] | None) -> dict[st
     return _build_auth_headers(auth_type, auth or {}) if auth_type and auth_type != "none" else {}
 
 
-async def _mcp_enumerate_creds(request: Request, src: TeamToolSource) -> tuple[dict[str, str], Any]:
-    """Resolve (headers, auth) for enumerating a STORED MCP source (validate / refresh / callback):
-    an ``oauth`` source is driven by the self-refreshing OAuthClientProvider (no static headers; fails
-    closed if never authorized); a static / no-auth source uses the registry's decrypted headers."""
+async def _mcp_enumerate_creds(request: Request, src: TeamToolSource, *, rejected_token: str | None = None) -> tuple[dict[str, str], Any]:
+    """Resolve (headers, auth) for enumerating a STORED MCP source (validate / refresh / callback).
+
+    An ``oauth`` source gets its bearer from the shared single-flight broker (the same one Turns use),
+    so an administrator's refresh never races a running Turn's renewal; it raises
+    ``OAuthGrantRejected`` when the sign-in is missing or has ended and ``OAuthRefreshUnavailable``
+    when the renewal could not complete. ``rejected_token`` is a token the server just refused.
+    A static / no-auth source uses the registry's decrypted headers."""
     if src.auth_type == "oauth":
-        from bowhead_core.mcp_oauth import FernetTokenStorage, build_mcp_oauth_provider
+        from bowhead_core.mcp_oauth import team_oauth_headers
 
         store = getattr(request.app.state, "user_store", None)
-        provider = build_mcp_oauth_provider(src.base_url, FernetTokenStorage(store, src.team_id, src.id))
-        return {}, provider
+        return await team_oauth_headers(store, src.team_id, src.id, src.base_url, rejected_token=rejected_token), None
     reg = getattr(request.app.state, "tool_auth_registry", None)
     headers = await reg.get_headers(src.team_id, src.id) if reg is not None else {}
     return headers, None
+
+
+async def _enumerate_stored_mcp_tools(request: Request, src: TeamToolSource) -> tuple[list[dict[str, Any]], dict[str, str], Any]:
+    """tools/list for a stored source; an OAuth token the server refuses is renewed once and retried."""
+    from bowhead_core.openapi_tool_source import enumerate_remote_mcp_tools, refused_credential
+
+    headers, auth = await _mcp_enumerate_creds(request, src)
+    try:
+        return await enumerate_remote_mcp_tools(src.base_url, headers, timeout=8.0, auth=auth), headers, auth
+    except Exception as exc:
+        if src.auth_type != "oauth" or not refused_credential(exc):
+            raise
+    headers, auth = await _mcp_enumerate_creds(request, src, rejected_token=headers.get("Authorization", "").removeprefix("Bearer "))
+    return await enumerate_remote_mcp_tools(src.base_url, headers, timeout=8.0, auth=auth), headers, auth
 
 
 class PreviewBody(BaseModel):
@@ -387,9 +404,24 @@ def _public(
         "created_at": src.created_at,
         "updated_at": src.updated_at,
     }
+    if src.auth_type == "oauth":
+        value["oauth_sign_in_ended"] = _oauth_sign_in_ended(src)
     if usage_summary is not None:
         value["usage_summary"] = usage_summary
     return value
+
+
+def _oauth_sign_in_ended(src: TeamToolSource) -> bool:
+    """True when the provider refused to renew this source's sign-in (shown on its card)."""
+    from bowhead_core.llm_config_crypto import decrypt_llm_config
+    from bowhead_core.mcp_oauth import oauth_sign_in_ended
+
+    if not src.auth_ref:
+        return False
+    try:
+        return oauth_sign_in_ended(decrypt_llm_config(src.auth_ref))
+    except Exception:  # noqa: BLE001 - an unreadable credential is reported elsewhere; the card stays as it was
+        return False
 
 
 def _operation_stable_ref(src: TeamToolSource, operation_id: str) -> str | None:
@@ -1914,14 +1946,16 @@ async def validate_source(
     # WP2: a remote MCP source is validated by CONNECTING (SSRF-guarded, stored decrypted auth) and
     # listing tools — reachable = handshake + tools/list succeeded. No OpenAPI in-process dry-run.
     if src.kind == "mcp":
+        from bowhead_core.oauth_token_broker import OAuthGrantRejected
         from bowhead_core.openapi_tool_source import (
             enumerate_remote_mcp_prompts,
-            enumerate_remote_mcp_tools,
         )
 
-        headers, auth = await _mcp_enumerate_creds(request, src)  # oauth → provider; else decrypted headers
         try:
-            tools = await enumerate_remote_mcp_tools(src.base_url, headers, timeout=8.0, auth=auth)
+            tools, headers, auth = await _enumerate_stored_mcp_tools(request, src)
+        except OAuthGrantRejected:
+            # The sign-in has ended or never completed: the server is not the problem, the grant is.
+            return {"operation_id": "", "reachable": True, "result": {"ok": False, "error_kind": "upstream_auth", "error": "oauth_sign_in_ended"}}
         except Exception as e:
             return {"operation_id": "", "reachable": False, "result": {"ok": False, "error_kind": "connection", "error": scrub(type(e).__name__)}}
         result: dict[str, Any] = {
@@ -2091,19 +2125,17 @@ async def _enumerate_refresh_candidate(
     request: Request,
     src: TeamToolSource,
 ) -> dict[str, Any]:
+    from bowhead_core.oauth_token_broker import OAuthGrantRejected, OAuthRefreshUnavailable
     from bowhead_core.openapi_tool_source import (
         enumerate_remote_mcp_prompts,
-        enumerate_remote_mcp_tools,
     )
 
-    headers, auth = await _mcp_enumerate_creds(request, src)
     try:
-        tools = await enumerate_remote_mcp_tools(
-            src.base_url,
-            headers,
-            timeout=8.0,
-            auth=auth,
-        )
+        tools, headers, auth = await _enumerate_stored_mcp_tools(request, src)
+    except OAuthGrantRejected as exc:
+        raise HTTPException(409, "oauth_sign_in_ended: the service no longer accepts this source's sign-in; re-authorize it, then refresh") from exc
+    except OAuthRefreshUnavailable as exc:
+        raise HTTPException(502, "oauth_sign_in_renewal_unavailable: the service's sign-in server did not answer; try again later") from exc
     except Exception as exc:
         raise HTTPException(
             502,
@@ -2684,7 +2716,7 @@ async def oauth_callback(
 
     storage = FernetTokenStorage(store, team_id, source_id)
     try:
-        await exchange_mcp_oauth_code(
+        token = await exchange_mcp_oauth_code(
             storage,
             code=code,
             code_verifier=str(rec["code_verifier"]),
@@ -2695,6 +2727,10 @@ async def oauth_callback(
         )
     except Exception:
         return _back("error", source_id)
+    from bowhead_core.mcp_oauth import prime_team_oauth
+
+    # Runs use the new grant at once; a token cached from the previous grant is dropped.
+    prime_team_oauth(store, team_id, source_id, token)
     # Best-effort metadata refresh after the token is durable. Tool and Prompt
     # discovery are isolated: an optional prompts/list failure must not discard a
     # successful tools/list result or turn an authorized source into an empty shell.
@@ -2707,10 +2743,11 @@ async def oauth_callback(
         src = await store.get_team_tool_source(team_id, source_id)
         if src is not None:
             expected_revision = src.updated_at
-            _headers, provider = await _mcp_enumerate_creds(request, src)  # oauth → fresh-token provider
+            headers, provider = await _mcp_enumerate_creds(request, src)  # oauth → the token just primed
             with contextlib.suppress(Exception):
                 tools = await enumerate_remote_mcp_tools(
                     src.base_url,
+                    headers,
                     timeout=8.0,
                     auth=provider,
                 )
@@ -2742,6 +2779,7 @@ async def oauth_callback(
                     prompts = _validate_prompt_cache(
                         await enumerate_remote_mcp_prompts(
                             src.base_url,
+                            headers,
                             timeout=8.0,
                             auth=provider,
                         )

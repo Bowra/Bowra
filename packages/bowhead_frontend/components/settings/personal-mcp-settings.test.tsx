@@ -528,3 +528,117 @@ it("labels empty tool change lists as no changes, not as the no-auth option", as
   expect(screen.getByText("changed: noToolChanges")).toBeTruthy();
   expect(screen.queryByText(/: none$/)).toBeNull();
 });
+
+describe("signing in to a service with the member's own account", () => {
+  function signInCatalog(
+    connections: unknown[],
+    { oauth = true, onPost }: { oauth?: boolean; onPost?: (path: string, body: unknown) => unknown } = {},
+  ) {
+    mocks.api.mockImplementation(async (path: string, method?: string, body?: unknown) => {
+      if (path === "/capabilities") return { enabled: true, oauth_connectable: oauth };
+      if (method === "POST" && onPost) return onPost(path, body);
+      return { connections };
+    });
+  }
+  const oauthConnection = (status: string) => ({
+    id: `pcm_${status}`,
+    name: `Notes ${status}`,
+    endpoint: "https://notes.example/mcp",
+    auth_type: "oauth",
+    provider_host: "idp.example",
+    status,
+    version: 3,
+    tools: [],
+  });
+
+  it("switches the dialog to sign-in when the service asks for it, then sends the browser to the service", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, search: "", href: "http://app.example/connections/" });
+    const posted: Array<[string, unknown]> = [];
+    signInCatalog([], {
+      onPost: (path, body) => {
+        posted.push([path, body]);
+        if (path === "") throw { code: "personal_mcp_needs_oauth", message: "This service asks you to sign in at idp.example." };
+        return { authorize_url: "https://idp.example/authorize?state=s" };
+      },
+    });
+    render(<PersonalMcpSettings />);
+    fireEvent.click(await screen.findByRole("button", { name: "addConnection" }));
+    fireEvent.change(screen.getByLabelText("name"), { target: { value: "Notes" } });
+    fireEvent.change(screen.getByLabelText("endpoint"), { target: { value: "https://notes.example/mcp" } });
+    fireEvent.click(screen.getByRole("button", { name: "connect" }));
+
+    const hint = await screen.findByText("This service asks you to sign in at idp.example.");
+    expect(hint.getAttribute("role")).toBe("status");
+    expect((screen.getByLabelText("auth") as HTMLSelectElement).value).toBe("oauth");
+    expect(screen.queryByLabelText("credential")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "continueSignIn" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://idp.example/authorize?state=s"));
+    expect(posted[1]).toEqual(["/oauth/authorize", { name: "Notes", endpoint: "https://notes.example/mcp" }]);
+    vi.unstubAllGlobals();
+  });
+
+  it("shows each signed-in state with its own next step", async () => {
+    signInCatalog([oauthConnection("ready"), oauthConnection("authorizing"), oauthConnection("needs_reauth")]);
+    render(<PersonalMcpSettings />);
+    expect(await screen.findByText('signedInAt {"host":"idp.example"}')).toBeTruthy();
+    const card = (status: string) => screen.getByText(`Notes ${status}`).closest("fieldset") as HTMLElement;
+    const buttons = (status: string) => Array.from(card(status).querySelectorAll("button")).map((button) => button.textContent);
+    expect(buttons("authorizing")).toEqual(["continueSignInAction", "delete"]);
+    // enabling cannot stand in for signing in again
+    expect(buttons("needs_reauth")).toEqual(["signInAgain", "disable", "editConnectionAction", "delete"]);
+    expect(buttons("ready")).toEqual(["saveTools", "refreshTools", "signInAgain", "disable", "editConnectionAction", "delete"]);
+    expect(card("needs_reauth").textContent).toContain("signInEnded");
+  });
+
+  it("signs in again from the card with the connection's version", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, search: "", href: "http://app.example/connections/" });
+    const posted: Array<[string, unknown]> = [];
+    signInCatalog([oauthConnection("needs_reauth")], {
+      onPost: (path, body) => {
+        posted.push([path, body]);
+        return { authorize_url: "https://idp.example/authorize?again" };
+      },
+    });
+    render(<PersonalMcpSettings />);
+    fireEvent.click(await screen.findByRole("button", { name: "signInAgain" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://idp.example/authorize?again"));
+    expect(posted).toEqual([["/oauth/authorize", { connection_id: "pcm_needs_reauth", version: 3 }]]);
+    vi.unstubAllGlobals();
+  });
+
+  it("reports the return from the service and clears its parameters", async () => {
+    window.history.replaceState({}, "", "/connections/?mcp_oauth=connected&mcp_oauth_reason=signed_in_again&connection=pcm_x&keep=1");
+    signInCatalog([]);
+    render(<PersonalMcpSettings />);
+    const status = await screen.findByText('oauthNotice.signedInAgain {"host":"","name":""}');
+    expect(status.getAttribute("role")).toBe("status");
+    expect(window.location.search).toBe("?keep=1");
+  });
+
+  it("names the service in a refused return as an alert", async () => {
+    window.history.replaceState({}, "", "/connections/?mcp_oauth=failed&mcp_oauth_reason=authorization_denied&connection=pcm_authorizing");
+    signInCatalog([oauthConnection("authorizing")]);
+    render(<PersonalMcpSettings />);
+    const alert = await screen.findByText('oauthNotice.authorizationDenied {"host":"idp.example","name":"Notes authorizing"}');
+    expect(alert.getAttribute("role")).toBe("alert");
+  });
+
+  it("says the sign-in did not complete when the returned connection is gone", async () => {
+    window.history.replaceState({}, "", "/connections/?mcp_oauth=failed&mcp_oauth_reason=oauth_exchange_failed&connection=pcm_gone");
+    signInCatalog([]);
+    render(<PersonalMcpSettings />);
+    expect((await screen.findByText('oauthNotice.failed {"host":"","name":""}')).getAttribute("role")).toBe("alert");
+  });
+
+  it("hides sign-in while the deployment has it turned off", async () => {
+    signInCatalog([oauthConnection("needs_reauth")], { oauth: false });
+    render(<PersonalMcpSettings />);
+    expect(await screen.findByText("signInOff")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "signInAgain" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "addConnection" }));
+    const options = Array.from((screen.getByLabelText("auth") as HTMLSelectElement).options).map((option) => option.value);
+    expect(options).toEqual(["none", "bearer", "api_key"]);
+  });
+});

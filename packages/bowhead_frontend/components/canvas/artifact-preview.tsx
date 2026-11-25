@@ -13,6 +13,11 @@ import {
 import { appPath } from "@/lib/base-path";
 import { codeLanguageForFile } from "@/lib/code-highlight";
 import { formatByteSize } from "@/lib/format";
+import { fileExtensionLabel } from "@/lib/file-type-icon";
+import { itemsOnOneLine, noOverflow, writeFitTokens, type FitStep } from "@/lib/toolbar-fit";
+import { useToolbarFit } from "@/lib/use-toolbar-fit";
+import { presentationSlideSelection } from "@/lib/presentation-selection";
+import type { AttachmentRef } from "@/lib/types";
 import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors";
 import type { ResultsViewerMode } from "@/lib/results-workspace-route";
 import type {
@@ -70,7 +75,8 @@ export interface PresentationEditHost {
   /** A save or a move to another version: show `artifactId` next (the viewer reloads its list first), then run `then`. */
   onOpenVersion: (artifactId: string, then?: () => void) => void;
   /** Add a reference to one deck element to the Composer (design §6.9). */
-  onReferenceElement?: (reference: import("@/lib/types").AttachmentRef) => void;
+  /** `quiet` when the control that asked confirms on its own (「已引用」), so no toast covers the header. */
+  onReferenceElement?: (reference: import("@/lib/types").AttachmentRef, options?: { quiet?: boolean }) => void;
 }
 
 export function ArtifactPreview({
@@ -144,12 +150,18 @@ export function ArtifactPreview({
   const [handoff] = useState(() => readPresentationHandoff(fileId));
   const [expanded, setExpanded] = useState(Boolean(handoff?.expanded));
   const [editing, setEditing] = useState(Boolean(handoff?.edit));
+  // Where editing started, so leaving it returns there (design §13.1).
+  const editOriginRef = useRef<"panel" | "full">(handoff?.origin ?? (handoff?.expanded ? "full" : "panel"));
+  const [editStartPage, setEditStartPage] = useState<number | undefined>(handoff?.edit ? undefined : handoff?.page);
   const editorRef = useRef<PresentationEditorHandle>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [imageView, setImageView] = useState<ImageViewState>(DEFAULT_IMAGE_VIEW_STATE);
   const [textView, setTextView] = useState<TextViewState>(DEFAULT_TEXT_VIEW_STATE);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const documentPreviewCacheRef = useRef<DocumentPreviewCache>(handoff?.pdfData ? { pdfData: handoff.pdfData } : {});
+  const documentPreviewCacheRef = useRef<DocumentPreviewCache>({
+    ...(handoff?.pdfData ? { pdfData: handoff.pdfData } : {}),
+    ...(handoff?.page ? { focusPage: handoff.page } : {}),
+  });
   const mountedFileRef = useRef(fileId);
   const videoPlaybackRef = useRef<VideoPlaybackState>({
     currentTime: 0,
@@ -203,8 +215,10 @@ export function ArtifactPreview({
     setExpanded(false);
   }, [fileId]);
 
+  // Every file shows its type label ("PPTX", "XLSX"), not its MIME type, which crowds the header's actions
+  // (critique 2026-11-25; narrow desktop layout design §5). Details keeps the MIME type.
   const meta = [
-    mime,
+    fileExtensionLabel(filename) || (profile === "pptx" ? "PPTX" : null),
     sizeLabel,
     safeHtmlActive
       ? t(htmlMode.mode === "interactive" ? "html_interactive" : "capability_safe_html")
@@ -290,6 +304,8 @@ export function ArtifactPreview({
   const editingPresentation = pptxPreview && Boolean(editHost) && editing && expanded;
   const startEditing = (trigger?: HTMLElement) => {
     if (!expanded && trigger) returnFocusRef.current = trigger;
+    editOriginRef.current = expanded ? "full" : "panel";
+    setEditStartPage(documentPreviewCacheRef.current.visiblePage);
     setExpanded(true);
     setEditing(true);
   };
@@ -298,21 +314,45 @@ export function ArtifactPreview({
       setEditing(false);
       return;
     }
+    // Leaving returns to where editing started: the Results panel or the full view, on the same page.
+    const toPanel = exit.close || editOriginRef.current === "panel";
     if (exit.artifactId === fileId) {
+      if (exit.page) documentPreviewCacheRef.current.focusPage = exit.page;
       setEditing(false);
-      if (exit.close) setExpanded(false);
+      if (toPanel) setExpanded(false);
       exit.then?.();
       return;
     }
     // The next file opens in a fresh viewer (Results keys viewers by file): hand it the render and the view.
     // Staying in edit mode until then keeps this file's full view from showing in between.
-    stashPresentationHandoff(exit.artifactId, { pdfData: exit.pdfData, expanded: !exit.close, edit: exit.edit });
+    stashPresentationHandoff(exit.artifactId, {
+      pdfData: exit.pdfData,
+      expanded: exit.edit ? true : !toPanel,
+      edit: exit.edit,
+      origin: editOriginRef.current,
+      ...(exit.page ? { page: exit.page } : {}),
+    });
     if (exit.close) {
       setEditing(false);
       setExpanded(false);
     }
     editHost?.onOpenVersion(exit.artifactId, exit.then);
   };
+  // 「引用这一页」 under each page of a deck the person can reference in chat (design §13.2).
+  const referencePage = pptxPreview && editHost?.onReferenceElement && capabilities?.has("reference_in_chat") && !editingPresentation
+    ? (page: number) => {
+        const selection = presentationSlideSelection(fileId, page);
+        if (!selection || !editHost.onReferenceElement) return;
+        const reference: AttachmentRef = {
+          fileId, filename, mime: mime ?? "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          size: sizeBytes ?? 0, referenceKind: "result", presentationSelection: selection,
+        };
+        // In the full view the page's button leaves with it, so the toast confirms there.
+        const quiet = !expanded;
+        if (expanded) setExpanded(false);
+        editHost.onReferenceElement(reference, { quiet });
+      }
+    : undefined;
   useEffect(() => {
     if (!editingPresentation) return;
     markPresentationEditing(fileId, true);
@@ -324,6 +364,7 @@ export function ArtifactPreview({
     compactActions,
     onEditPresentation: canEditPresentation ? startEditing : undefined,
     onReference: onReference && leaveFullViewThen(onReference),
+    referenceLabel: pptxPreview ? t("reference_whole_file") : undefined,
     onViewerModeChange: compactToolbar && onViewerModeChange ? leaveFullViewThen(onViewerModeChange) : onViewerModeChange,
     onOpenHistory: compactToolbar && onOpenHistory ? leaveFullViewThen(onOpenHistory) : onOpenHistory,
   };
@@ -342,6 +383,7 @@ export function ArtifactPreview({
             filename={filename}
             downloadHref={href}
             initialPdfData={documentPreviewCacheRef.current.pdfData}
+            initialPage={editStartPage}
             agentRunning={editHost.agentRunning}
             onReference={onReference && capabilities?.has("reference_in_chat") ? onReference : undefined}
             onReferenceElement={editHost.onReferenceElement && capabilities?.has("reference_in_chat")
@@ -362,7 +404,7 @@ export function ArtifactPreview({
           onClose={inPlaceFullView && expanded ? undefined : onClose}
           showTitle={showHeaderTitle}
         />
-        {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} expanded={inPlaceFullView && expanded} /> : null}
+        {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} expanded={inPlaceFullView && expanded} /> : null}
         </>}
       </InPlaceFullView>
       {expanded && !inPlaceFullView ? (
@@ -382,7 +424,7 @@ export function ArtifactPreview({
               modalClose
             />
             <div className="artifact-viewer-modal-body">
-              <ArtifactPreviewBody {...bodyProps} expanded />
+              <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} expanded />
             </div>
           </div>
           <button
@@ -396,6 +438,36 @@ export function ArtifactPreview({
       ) : null}
     </>
   );
+}
+
+/** Narrow desktop layout (design §5): action labels become icons in this order before the title gets too narrow. */
+const FILE_HEADER_FIT_STEPS: readonly FitStep[] = ["more-icon", "full-icon", "reference-icon", "edit-icon"];
+const FILE_HEADER_MIN_TITLE_PX = 120;
+
+function fileHeaderInColumn(head: HTMLElement): boolean {
+  return head.ownerDocument.defaultView?.getComputedStyle(head).flexDirection === "column";
+}
+
+function fileHeaderFits(head: HTMLElement): boolean {
+  // In a column (the `stacked` token, or the ≤640 px layout) the title has its own row; the actions still keep one.
+  const column = head.matches('[data-fit~="stacked"]') || fileHeaderInColumn(head);
+  const title = head.querySelector(".artifact-viewer-title");
+  const titleWide = column || !title || title.getBoundingClientRect().width >= FILE_HEADER_MIN_TITLE_PX;
+  return titleWide
+    && itemsOnOneLine(head.querySelector(".artifact-viewer-actions"))
+    && itemsOnOneLine(head.querySelector(".artifact-object-actions"))
+    && noOverflow(head);
+}
+
+/**
+ * Stack title over actions only when even icon-only actions leave the title too narrow; then labels return where they
+ * fit. The ≤640 px layout is already a column: there the labels give way in the same order until the actions fit.
+ */
+function fileHeaderStacked(head: HTMLElement): FitStep[] {
+  writeFitTokens(head, []);
+  if (fileHeaderInColumn(head)) return [];
+  writeFitTokens(head, FILE_HEADER_FIT_STEPS);
+  return fileHeaderFits(head) ? [] : ["stacked"];
 }
 
 function ArtifactPreviewHeader({
@@ -422,6 +494,7 @@ function ArtifactPreviewHeader({
   compactTitle,
   compactActions,
   onEditPresentation,
+  referenceLabel,
 }: {
   artifactId: string;
   filename: string;
@@ -429,6 +502,8 @@ function ArtifactPreviewHeader({
   href: string;
   onExpand?: (trigger: HTMLButtonElement) => void;
   onReference?: () => void;
+  /** The reference action's label where 「在对话中引用」 would be ambiguous (a deck's whole file). */
+  referenceLabel?: string;
   onDownload?: () => void;
   capabilities?: ReadonlySet<ResultCapability>;
   resultRole?: ArtifactResultRole;
@@ -449,13 +524,20 @@ function ArtifactPreviewHeader({
 }) {
   const t = useTranslations("artifact_viewer");
   const expandLabel = t(fullViewActive ? "close" : "open_full");
+  const headRef = useRef<HTMLDivElement | null>(null);
+  useToolbarFit(headRef, {
+    steps: FILE_HEADER_FIT_STEPS,
+    first: fileHeaderStacked,
+    fits: fileHeaderFits,
+    enabled: !compactActions,
+  });
   const tools = onExpand || onClose ? (
     <div className="artifact-viewer-tools">
       {onExpand ? (
-        <button type="button" aria-label={expandLabel} title={compactActions ? expandLabel : undefined}
+        <button type="button" aria-label={expandLabel} title={expandLabel} data-fit-key="full"
           onClick={(event) => onExpand(event.currentTarget)}>
           {fullViewActive ? <X size={13} aria-hidden="true" /> : <Maximize size={13} aria-hidden="true" />}
-          {compactActions ? null : expandLabel}
+          {compactActions ? null : <span className="result-action-label">{expandLabel}</span>}
         </button>
       ) : null}
       {onClose ? (
@@ -468,7 +550,7 @@ function ArtifactPreviewHeader({
     </div>
   ) : null;
   return (
-    <div className={compactActions ? "artifact-viewer-head result-file-toolbar" : "artifact-viewer-head"}>
+    <div ref={headRef} className={compactActions ? "artifact-viewer-head result-file-toolbar" : "artifact-viewer-head"}>
       {compactTitle ?? (
         <div className="artifact-viewer-title">
           {showTitle ? <strong title={filename}>{filename}</strong> : null}
@@ -490,6 +572,7 @@ function ArtifactPreviewHeader({
               feedbackRecorded={feedbackRecorded}
               compact={compactActions}
               onReference={onReference}
+              referenceLabel={referenceLabel}
               onDownload={onDownload}
               onModeChange={onViewerModeChange}
               onOpenHistory={onOpenHistory}
@@ -540,6 +623,7 @@ function ArtifactPreviewBody({
   onTextViewChange,
   onOpenFailed,
   documentPreviewCacheRef,
+  onReferencePage,
 }: {
   profile: ArtifactViewerProfile;
   /** Syntax grammar derived from the file name/MIME for text previews. */
@@ -583,6 +667,7 @@ function ArtifactPreviewBody({
   onTextViewChange: React.Dispatch<React.SetStateAction<TextViewState>>;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
   documentPreviewCacheRef: React.MutableRefObject<DocumentPreviewCache>;
+  onReferencePage?: (page: number) => void;
 }) {
   const t = useTranslations("artifact_viewer");
   if (loading && !error) return <div className="artifact-viewer-note loading">{t("loading")}</div>;
@@ -637,6 +722,7 @@ function ArtifactPreviewBody({
           onError={onOpenFailed}
           cacheRef={documentPreviewCacheRef}
           thumbnails={profile === "pptx" && !expanded}
+          onReferencePage={onReferencePage}
         />
       </div>
     );

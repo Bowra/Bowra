@@ -77,6 +77,10 @@ import { optionalSkillsNeedPrivateAudience } from "@/lib/agent-runtime-extension
 import { agentReleaseBlockedText, agentReleaseErrorKey, agentReleaseReasonKey } from "./agent-release-reason";
 import { AgentTaxonomyPanel } from "./agent-taxonomy-panel";
 import { AGENT_PENDING_ANCHOR, AgentVersionWorkbenchPanel } from "./agent-version-workbench";
+import { AgentReleaseBar } from "./agent-release-bar";
+import { releaseBarState } from "./release-bar-state";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
+import { toast } from "@/lib/use-toast";
 import { type PickerPlugin, ResourcePluginPicker, ResourceSummary, ResourceToolPicker, pluginMatches, pluginToolOwners, pluginsFromCatalog, visiblePlugins } from "@/components/ui/resource-picker";
 import { randomUuid } from "@/lib/random-id";
 import { releaseNoteText } from "@/lib/agent-release-notes";
@@ -378,6 +382,10 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   agentId: string; returnHref?: string; hosted?: HostedAgentEditor;
 }) {
   const hostedMode = hosted !== undefined;
+  // FEATURE_AGENT_RELEASE_BAR: one release bar above the tabs replaces the release cards and summaries; the
+  // Canvas-hosted editor shows it as a band at its top, and keeps its own save bar.
+  const releaseBarOn = useAgentReleaseBarCapability();
+  const [releaseBarSlot, setReleaseBarSlot] = useState<HTMLDivElement | null>(null);
   const mounted = useRef(true);
   const loadRequest = useRef(0);
   const navigationIntent = useRef(0);
@@ -1215,10 +1223,10 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   const archived = detail.aggregate.lifecycle_state === "archived";
   const selectedAudienceUsers = new Set(draft.userIds);
   const selectedAudienceGroups = new Set(draft.groupIds);
-  const releaseLabel = t("version_task_validation");
+  const releaseLabel = t(releaseBarOn ? "release_bar_tab_versions" : "version_task_validation");
   const taskItems: Array<{ id: AgentManagerTask; label: string; count?: number; marker?: boolean }> = [
     { id: "config", label: t("version_task_config"), count: pendingCount },
-    ...(evalAvailability === "enabled" ? [{ id: "evaluate" as const, label: t("version_task_eval") }] : []),
+    ...(evalAvailability === "enabled" ? [{ id: "evaluate" as const, label: t(releaseBarOn ? "release_bar_tab_cases" : "version_task_eval") }] : []),
     { id: "release", label: releaseLabel, marker: activeTask !== "release" && releaseResultUnseen(releaseResult, releaseSeen) },
   ];
   const goToTask = (task: AgentManagerTask, section: AgentConfigSection | null = null, anchor: string | null = null) => {
@@ -1301,6 +1309,36 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         : t("version_ask_coach_prefill", { name }));
     }
     : null;
+  const saveBlocked = !hasCapability || missingPrimaryCapability || customAudienceInvalid || optionalAudienceInvalid || displayNameInvalid || outputSchemaInvalid
+    || Boolean(missingTools.length || missingSkills.length || missingToolConnections.length || audienceBlockedSkills.length);
+  const discardDraftEdits = () => {
+    void (async () => {
+      if (!await confirm(canvasCloseGuardOptions(tObject, draft.displayName))) return;
+      if (detail && catalog) setDraft(editorDraft(detail, catalog, teamPlugins));
+    })();
+  };
+  const copyAgentLink = () => {
+    const url = new URL(appPath(`/agents/detail/?${new URLSearchParams({ id: agentId })}`), window.location.origin).toString();
+    void navigator.clipboard?.writeText(url).then(
+      () => toast({ kind: "success", text: t("release_bar_link_copied") }),
+      () => toast({ kind: "error", text: url }),
+    );
+  };
+  const releaseBarHost = releaseBarOn && !archived ? {
+    slot: releaseBarSlot,
+    shared: draft.audienceMode !== "private",
+    liveAudience: detail.live.audience.effective_mode,
+    dirty,
+    saveBlocked,
+    saving: busy === "save",
+    onSave: () => void save(),
+    onDiscard: discardDraftEdits,
+    onCopyLink: copyAgentLink,
+    variant: hostedMode ? "canvas" as const : "page" as const,
+  } : null;
+  const archivedBar = releaseBarOn && archived ? releaseBarState({
+    workbench: null, kind: null, test: null, hasOwnerCases: true, blockedByRegression: false, dirty: false, archived: true, shared: false,
+  }) : null;
   const workbenchPanel = (
     <AgentVersionWorkbenchPanel
         // The workbench probes its availability once on mount (an archived Agent answers 404), so
@@ -1331,6 +1369,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         suitesRefreshKey={suitesRefreshKey}
         onAddCases={activeTask === "evaluate" && !archived ? () => setAddCaseRequest((value) => value + 1) : undefined}
         onTestState={activeTask === "evaluate" ? setEvaluateTestState : undefined}
+        releaseBar={releaseBarHost}
     />
   );
 
@@ -1350,12 +1389,12 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
               <Badge tone={archived ? "warning" : detail.aggregate.status === "enabled" ? "positive" : "neutral"}>
                 {t(archived ? "release_state_archived" : detail.aggregate.status === "enabled" ? "release_state_live" : "release_state_disabled")}
               </Badge>
-              {detail.working_copy ? <Badge tone="neutral">{t(draft.audienceMode === "private" ? "release_state_draft_private" : "release_state_draft")}</Badge> : null}
-              {detail.pending_candidate ? <Badge tone="warning">{t("release_state_pending")}</Badge> : null}
+              {detail.working_copy && !releaseBarOn ? <Badge tone="neutral">{t(draft.audienceMode === "private" ? "release_state_draft_private" : "release_state_draft")}</Badge> : null}
+              {detail.pending_candidate && !releaseBarOn ? <Badge tone="warning">{t("release_state_pending")}</Badge> : null}
             </div>
           </div>
           <div ref={resourceActionsRef} className="am-release-resource-actions">
-            {detail.actions.restore ? <Button variant="primary" disabled={busy !== null} onClick={() => void restore()}>{t("release_restore_agent")}</Button> : null}
+            {detail.actions.restore && !releaseBarOn ? <Button variant="primary" disabled={busy !== null} onClick={() => void restore()}>{t("release_restore_agent")}</Button> : null}
             <RowActionsMenu
               label={t("release_agent_more", { name: draft.displayName })}
               busy={busy === "status" || busy === "archive"}
@@ -1376,7 +1415,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         skillUpdates={detail.live.skill_updates}
         onReevaluate={evalAvailability === "enabled" && !archived ? () => goToTask("evaluate") : undefined}
       />
-      {askPublish && detail.working_copy && detail.actions.publish && !detail.pending_candidate && !dirty ? (
+      {askPublish && !releaseBarOn && detail.working_copy && detail.actions.publish && !detail.pending_candidate && !dirty ? (
         <section className="am-release-impact" role="group" aria-labelledby="am-ask-publish-title" data-testid="feedback-ask-publish" aria-busy={busy !== null}>
           <div>
             <strong id="am-ask-publish-title">{busy === "safety" || busy === "publish" ? fp("ask_publish_progress") : fp("ask_publish_title")}</strong>
@@ -1398,13 +1437,22 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
           }}>{t("cancel")}</button><button className="am-danger-confirm" disabled={busy !== null} onClick={() => void archive()}>{t("release_confirm_archive")}</button></div>
         </section>
       ) : null}
-      {detail.pending_candidate ? (
+      {detail.pending_candidate && !releaseBarOn ? (
         <section className="am-release-pending">
           <div><strong>{t("release_pending_title")}</strong><p>{t("release_pending_body", { version: detail.live.release_sequence })}</p></div>
           <a href={appPath(`/agents/manage/?release_candidate=${encodeURIComponent(detail.pending_candidate.candidate_id)}&agent_id=${encodeURIComponent(agentId)}`)}>{t("release_open_candidate")}</a>
         </section>
       ) : null}
 
+      {archivedBar ? (
+        <AgentReleaseBar
+          state={archivedBar}
+          status={t("release_bar_status_archived")}
+          meta={t("release_bar_meta_archived", { live: `v${detail.live.release_sequence}` })}
+          actions={detail.actions.restore && !hosted?.readOnly ? { restore: { label: t("release_bar_action_restore"), onSelect: () => void restore(), loading: busy === "restore", disabled: busy !== null } } : {}}
+          variant={hostedMode ? "canvas" : "page"}
+        />
+      ) : releaseBarOn ? <div ref={setReleaseBarSlot} className="am-rb-slot" /> : null}
       <Tabs value={activeTask} onValueChange={(task) => goToTask(task)} idBase="agent-manager">
       {!hostedMode ? <div className="am-task-bar">
         <TabList appearance="underline" className="am-release-task-nav" aria-label={t("version_task_navigation")}>
@@ -1684,7 +1732,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
             />
           ) : null}
           {/* Archived Agents are read-only: no "Next draft / Save configuration" card (the heading carries the note). */}
-          {!hostedMode && !archived ? <aside className="am-release-sidebar">
+          {!hostedMode && !archived && !releaseBarOn ? <aside className="am-release-sidebar">
             <section className="am-release-publish-card">
               <span>{t("version_config_save_eyebrow")}</span><h2>{t("version_config_save_title")}</h2>
               <dl className="am-config-summary"><div><dt>{t("version_config_summary_prompt")}</dt><dd>{t(draft.systemPrompt.trim() ? "version_config_summary_ready" : "version_config_summary_empty")}</dd></div>{selectedPrimaryCapability || missingPrimaryCapability ? <div><dt>{t("version_config_summary_outcome")}</dt><dd>{selectedPrimaryCapability ? localizedCapabilityText(selectedPrimaryCapability, locale).name : t("release_advanced_needs_attention")}</dd></div> : null}<div><dt>{t("version_config_summary_uses")}</dt><dd>{resourceCountLine}</dd></div><div><dt>{t("version_config_summary_audience")}</dt><dd>{t(`release_audience_${draft.audienceMode}` as never)}</dd></div></dl>

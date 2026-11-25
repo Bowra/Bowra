@@ -892,7 +892,7 @@ def main() -> int:
     # caller-supplied template_path to the OS temp root (where canvas_export materializes
     # uploaded templates via tempfile.mkdtemp) or this workdir; open the RESOLVED path
     # (closes the resolve→open gap); on reject/missing → bundled baseline (trusted, ships
-    # with the skill). Mirrors render_deck.py SEC-2.
+    # with the skill).
     _caller_tpl = data.get("template_path")
     if _caller_tpl:
         _rp = Path(_caller_tpl).resolve()

@@ -305,6 +305,53 @@ test("delete runs at once with an in-app undo toast, never a browser confirm", a
   expect(nativeDialog, "no native browser confirm").toBe(false);
 });
 
+test("deleting a pinned file takes it out of the sidebar's pinned group at once, and Undo brings it back", async ({ page }) => {
+  await mockFilesPage(page);
+  let trashed = false;
+  await page.route(
+    (url) => url.pathname === "/api/v1/result-pins",
+    (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: trashed ? [] : [{
+          kind: "file",
+          pin_id: "art_upload",
+          artifact_id: "art_upload",
+          title: ASSET_UPLOAD.filename,
+          mime: ASSET_UPLOAD.mime,
+          version_no: 1,
+          session_id: null,
+          opens: "files",
+          changed_at: "2026-07-18T10:20:00Z",
+          pinned_at: "2026-07-18T10:21:00Z",
+        }],
+      }),
+    }),
+  );
+  // Registered after mockFilesPage, so these answer first: the file's own trash state drives the pin list.
+  await page.route("**/api/v1/files/art_upload", async (route: Route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    trashed = true;
+    await route.fulfill({ status: 204, body: "" });
+  });
+  await page.route("**/api/v1/files/art_upload/restore", async (route: Route) => {
+    trashed = false;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ASSET_UPLOAD) });
+  });
+  await page.goto("/files/");
+
+  const pinnedRow = page.locator("[data-result-pin='file:art_upload']");
+  await expect(pinnedRow).toBeVisible();
+
+  const menu = await openRowMenu(page, page.locator('[data-file-id="art_upload"]'));
+  await menu.getByRole("menuitem", { name: "删除", exact: true }).click();
+  await expect(pinnedRow).toHaveCount(0);
+
+  await page.getByRole("button", { name: "撤销" }).click();
+  await expect(pinnedRow).toBeVisible();
+});
+
 test("row actions have readable names and the drawer can be closed", async ({ page }) => {
   await mockFilesPage(page);
   await page.goto("/files/");

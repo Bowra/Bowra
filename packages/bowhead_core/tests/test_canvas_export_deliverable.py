@@ -136,17 +136,6 @@ async def test_docx_output_outside_workdir_is_rejected(store: ArtifactStore, wor
 # ── No overlap with consultant deck collection (avoids double registration/interference) ───
 
 
-async def test_render_deck_script_not_collected_here(store: ArtifactStore, workdir: Path) -> None:
-    """`render_deck.py` 是 consultant deck 那条路的**权威**收集对象。
-
-    本 helper 必须不碰它，否则同一个 .pptx 会被两处各登记一次（用户看到两个重复下载）。
-    """
-    out = _write(workdir, "output.pptx")
-    delivs = await _collect(store, [_inv("render_deck.py", [out])])
-    assert delivs == []
-    assert await store.list_deliverables_for_turn("t_1") == []
-
-
 # ── Security: SEC-4 must reject registration without an owner ───────────
 
 

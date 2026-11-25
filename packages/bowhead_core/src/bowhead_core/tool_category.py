@@ -75,10 +75,11 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "routine_notify": "write",
     "google_doc_write": "write",
     "google_slides_write": "write",
-    # Native PPTX rendering produces a deliverable file, like google_slides_write; no numbers to summarize.
+    # Removed on 2026-11-24; kept for the results of earlier Turns. It delivered a PPTX file; no numbers to summarize.
     "render_deck": "write",
-    # Delivers retained files to the conversation through native receipts, like render_deck; no numbers to summarize.
+    # Delivers retained files to the conversation through native receipts; no numbers to summarize.
     "present_artifacts": "write",
+    "show_break_even": "write",
     "google_sheet_write": "write",
     # Canvas (write tools)
     "add_chart": "chart",

@@ -148,9 +148,8 @@ examples:
     description: 单 metric lookup (LOW complexity)
 
 # agent-capability-routing 2a: **declare** deliverable capability (replacing the name-based check
-# `deck_inputs=(name in {"compute","consultant"})` in agent_runner_adapter).
-# Declare only what **actually works today**: this agent's deck hook (render_deck.py -> output.pptx
-# registered as an artifact at finalization) was already enabled; move that fact from the name set into a declaration without behavior changes.
+# `deck_inputs=(name in {"compute","consultant"})` in agent_runner_adapter). This agent writes PPTX files in the
+# Python sandbox.
 produces:
   - pptx
 

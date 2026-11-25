@@ -407,7 +407,7 @@ def native_authoring_tools() -> tuple[AuthoringTool, ...]:
                 risk=risk,
                 # System parts (tool_aliases.yaml `kind: part`) are never shown or selected on their own. They
                 # stay in the allowlist, so dependency compilation and fingerprints are unchanged; only pickers
-                # stop listing them (render_deck, tool_switch_context and find_results slipped in via roles).
+                # stop listing them (tool_switch_context and find_results slipped in via roles).
                 discoverable=tool_ref not in COMPILER_DERIVED_SKILL_TOOLS and TOOL_KINDS.get(tool_ref) != "part",
                 selectable=risk != "unknown",
                 locked_reason="risk_metadata_unknown" if risk == "unknown" else None,

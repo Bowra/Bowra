@@ -19,6 +19,7 @@ system: null
 tools:
   default_enabled: false
   allow:
+    - show_break_even
     - present_artifacts
     - read_report
     - bi_schema

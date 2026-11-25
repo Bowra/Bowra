@@ -674,6 +674,45 @@ describe("ToolsManager MCP tool-list refresh", () => {
   });
 });
 
+describe("ToolsManager ended OAuth sign-in", () => {
+  const ENDED: TeamToolSourcePublic = {
+    ...SOURCE,
+    id: "ots_ended",
+    name: "Ended OAuth",
+    kind: "mcp",
+    base_url: "https://mcp.example.com/mcp",
+    auth_type: "oauth",
+    selected_op_ids: ["search", "fetch"],
+    tools_count: 3,
+    op_count: 2,
+    oauth_sign_in_ended: true,
+  };
+
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/team/settings/tools/");
+    vi.mocked(listBuiltinTools).mockResolvedValue([]);
+    vi.mocked(listSources).mockResolvedValue([{ ...ENDED }]);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("asks for authorization again but keeps the tool counts and the switch", async () => {
+    renderIntl(<ToolsManager />);
+    const card = (await screen.findByText("Ended OAuth")).closest(".ai-tools-card") as HTMLElement;
+    expect(within(card).getByText("待授权")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "授权" })).toBeTruthy();
+    expect(within(card).getByText("已导入 2 / 共 3 个操作")).toBeTruthy();
+    expect(within(card).queryByText("尚未授权 · 工具清单待同步")).toBeNull();
+    expect(within(card).getByText("已启用")).toBeTruthy();
+    expect(within(card).getByRole("switch", { name: "启停工具源 Ended OAuth" })).not.toBeDisabled();
+    const items = menuItemNames(await openRowMenu("Ended OAuth 的更多操作"));
+    expect(items).not.toContain("重新授权");
+    expect(items).not.toContain("刷新工具列表");
+  });
+});
+
 describe("ToolsManager Choose Tools", () => {
   const MCP: TeamToolSourcePublic = {
     ...SOURCE,

@@ -43,6 +43,7 @@ import {
 import { buildOptionValueByLabel, relabelQuestions } from "@/lib/clarification-option-labels";
 import { clarificationDraftIdentity, clearClarificationDraft } from "@/lib/clarification-draft";
 import type { ComposerPersistenceScope } from "@/lib/composer-persistence-scope";
+import { ChatAnswerCard } from "./BreakEvenCard";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -1868,6 +1869,8 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
             ) : null}
           </div>
 
+          {turnComplete && <ChatAnswerCard key={elapsedAnchorKey} payload={runner.finalPayload} generation={runner.executionGeneration} />}
+
           {runner.restoringResults && !runner.running && runner.answer ? (
             <div className="bh-working-indicator" role="status" data-testid="turn-results-loading">
               <span className="bh-working-dot" aria-hidden />
@@ -3265,6 +3268,8 @@ function ArchivedTurnView({
           {legacyAnswerFallback}
         </>
       )}
+
+      {archivedComplete && <ChatAnswerCard key={elapsedAnchorKeyOf(archived.turnId, archived.executionGeneration)} payload={archived.finalPayload} generation={archived.executionGeneration} />}
 
       {archived.errorReason ? (
         // Chat turn feedback D5: an older turn cannot be replayed from here, so a Retry

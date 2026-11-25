@@ -12,9 +12,13 @@ export interface PersonalMcpConnection {
   id: string;
   name: string;
   endpoint: string;
-  auth_type: "none" | "bearer" | "api_key";
+  /** "oauth": the member signed in at the service with their own account (FEATURE_PERSONAL_MCP_OAUTH). */
+  auth_type: "none" | "bearer" | "api_key" | "oauth";
+  /** ready | authorizing (sign-in not finished) | needs_reauth | unreachable | disabled */
   status: string;
   version: number;
+  /** Signed-in connections only: where the member signs in. */
+  provider_host?: string;
   tools: PersonalMcpTool[];
 }
 export interface PersonalMcpAgent {

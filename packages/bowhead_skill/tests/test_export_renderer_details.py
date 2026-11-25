@@ -1,7 +1,7 @@
-"""导出渲染细节：数字格式化 + deck 标签语言（dev 1.0.77 dogfood P2-c / P2-f）。
+"""Export rendering details: number formatting (dev 1.0.77 dogfood P2-c).
 
-catalog 里的 `render_from_canvas.py` / `render_deck.py` 是**独立脚本**（跑在沙箱里，
-不作为包 import），所以这里按路径加载后直接测那几个纯函数。
+The catalog's `render_from_canvas.py` scripts are standalone scripts run in the sandbox, not an
+importable package, so these tests load them by path and test their pure functions.
 """
 
 from __future__ import annotations
@@ -30,11 +30,6 @@ def _load(rel: str, name: str) -> Any:
 @pytest.fixture(scope="module")
 def docx_mod() -> Any:
     return _load("canvas-docx/scripts/render_from_canvas.py", "_r_docx")
-
-
-@pytest.fixture(scope="module")
-def deck_mod() -> Any:
-    return _load("pptx/scripts/render_deck.py", "_r_deck")
 
 
 # ── P2-c: unformatted numbers ────────────────────────────────────────────────────────
@@ -83,51 +78,6 @@ def test_pdf_matches_docx(docx_mod: Any) -> None:
     pdf = _load("canvas-pdf/scripts/render_from_canvas.py", "_r_pdf")
     for v in (21778172.57949218, 18.070109577367795, 2026, 0.0034, "华东区"):
         assert pdf._cell_text(v) == docx_mod._cell_text(v), v
-
-
-# ── P2-f: mixed Chinese/English deck text ─────────────────────────────────────────────
-
-
-def _sec(kind: str, **payload: Any) -> dict[str, Any]:
-    return {"kind": kind, "payload": payload}
-
-
-def test_english_deck_gets_english_labels(deck_mod: Any) -> None:
-    """dogfood 实测形态：正文全英文，标签却写死中文「核心指标」「行动建议」。"""
-    sections = [
-        _sec("h1", text="Supermarket Retail — August 2026"),
-        _sec("insight_card", title="Revenue Tracking at 26.37M/Day", thesis="August opened with strong momentum across all regions."),
-    ]
-    assert deck_mod._label_lang(sections) == "en"
-    assert deck_mod._LABELS["en"]["kpi"] == "Key Metrics"
-
-
-def test_chinese_deck_keeps_chinese_labels(deck_mod: Any) -> None:
-    sections = [
-        _sec("h1", text="2026 年 8 月经营汇报"),
-        _sec("insight_card", title="营收日均 2637 万", thesis="八月开局稳健，各区域均实现增长。"),
-    ]
-    assert deck_mod._label_lang(sections) == "zh"
-
-
-def test_chinese_body_with_english_metric_names_stays_chinese(deck_mod: Any) -> None:
-    """★ 等权比较会判错：中文表达同样内容用字远少于英文，正文夹几个英文指标名
-    就会被算成英文档。"""
-    sections = [
-        _sec("h1", text="八月经营汇报"),
-        _sec(
-            "insight_card",
-            title="营收与利润",
-            thesis="本月 revenue 与 gross profit margin 双双改善，daily active users 同步上行。",
-        ),
-    ]
-    assert deck_mod._label_lang(sections) == "zh"
-
-
-def test_no_judgable_text_keeps_legacy_chinese(deck_mod: Any) -> None:
-    """一个字都判不出来时保持改动前的行为（标签本来就写死中文），不能崩也不该改样。"""
-    assert deck_mod._label_lang([]) == "zh"
-    assert deck_mod._label_lang([_sec("chart", spec={"rows": [1, 2]})]) == "zh"
 
 
 # ── Render a real docx: a correct helper does not prove every call site uses it ─────────

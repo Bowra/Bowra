@@ -305,6 +305,21 @@ async def test_auth_me_reports_the_shopify_plugin_switch(app_ctx, monkeypatch, p
 
 
 @pytest.mark.parametrize("flag", [None, "0", "1"])
+async def test_auth_me_reports_the_agent_release_bar_from_its_switch(app_ctx, monkeypatch, flag) -> None:
+    if flag is None:
+        monkeypatch.delenv("FEATURE_AGENT_RELEASE_BAR", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_AGENT_RELEASE_BAR", flag)
+    app, store = app_ctx
+    await _seed_team_and_user(store)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 200, response.text
+    assert response.json()["capabilities"]["agent_release_bar"] is (flag == "1")
+
+
+@pytest.mark.parametrize("flag", [None, "0", "1"])
 async def test_auth_me_reports_team_tool_confirmations_from_its_switch(app_ctx, monkeypatch, flag) -> None:
     if flag is None:
         monkeypatch.delenv("FEATURE_TEAM_TOOL_CONFIRMATION", raising=False)

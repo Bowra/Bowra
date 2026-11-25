@@ -36,6 +36,7 @@ from mcp.types import PaginatedRequestParams
 
 from bowhead_core._db import is_authority_busy, open_pooled_read_ctx, open_shared_ctx, repeat_when_authority_busy
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
+from bowhead_core.oauth_token_broker import OAuthGrantRejected, OAuthRefreshUnavailable
 from bowhead_core.openapi_tool_source import connect_remote_mcp
 from bowhead_core.scrub import scrub
 from bowhead_core.sqlite_domains import domain_database_path
@@ -59,6 +60,12 @@ HUNG_SCHEMA_TTL_SECONDS = 600
 HUNG_SCHEMA_MAX_ENTRIES = 256
 
 log = structlog.get_logger(__name__)
+
+
+def personal_mcp_oauth_enabled() -> bool:
+    """Members may sign in to MCP services with their own account (rollout register, default off)."""
+    return os.environ.get("FEATURE_PERSONAL_MCP_OAUTH", "0") == "1"
+
 
 # anyio's worker-process pool is per event loop, so the validation slot is too.
 _validation_slot: RunVar[anyio.Lock] = RunVar("personal_mcp_validation_slot")
@@ -371,10 +378,14 @@ class PersonalMcpStore:
 
     async def connections(self, owner: str) -> list[dict[str, Any]]:
         rows = await self.rows(
-            "SELECT id,name,endpoint,auth_type,status,version FROM personal_mcp_connection WHERE owner_user_id=? AND status<>'deleted' ORDER BY created_at",
+            "SELECT id,name,endpoint,auth_type,auth_cipher,status,version FROM personal_mcp_connection WHERE owner_user_id=? AND status<>'deleted' ORDER BY created_at",
             (owner,),
         )
         for row in rows:
+            cipher = row.pop("auth_cipher")
+            if row["auth_type"] == "oauth":
+                # Only where the member signs in is shown; the grant itself never leaves the store.
+                row["provider_host"] = self._oauth_provider_host(owner, row["id"], cipher) or urlsplit(row["endpoint"]).hostname
             row["tools"] = await self.rows(
                 "SELECT id,remote_name,description,risk,selected,schema_digest FROM personal_mcp_tool WHERE connection_id=?", (row["id"],)
             )
@@ -382,51 +393,83 @@ class PersonalMcpStore:
                 tool["remote_name"] = _safe(tool["remote_name"])
         return rows
 
+    @repeat_when_authority_busy()
     async def save_connection(
         self,
         owner: str,
         name: str,
         endpoint: str,
         auth_type: str,
-        credentials: dict[str, str],
+        credentials: dict[str, str] | None,
         tools: list[dict[str, Any]],
         *,
         connection_id: str | None = None,
         expected_version: int | None = None,
+        keep_unchanged: bool = False,
     ) -> str:
+        """Store a connection and its discovered tools.
+
+        ``credentials=None`` keeps the stored credential (a signed-in connection's grant). An explicit
+        refresh deselects every tool; ``keep_unchanged`` (signing in again, decision Q1) keeps the
+        selection and Agent bindings of tools whose schema did not change. Each attempt rechecks the
+        version in its own transaction, so a write that lost the core lease repeats safely.
+        """
         identity = connection_id or f"pcm_{uuid4().hex[:20]}"
-        cipher = self.seal(owner, identity, "credentials", credentials)
+        cipher = None if credentials is None else self.seal(owner, identity, "credentials", credentials)
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 if connection_id:
-                    updated = await db.execute(
-                        "UPDATE personal_mcp_connection SET name=?,endpoint=?,auth_type=?,auth_cipher=?,status='ready',version=version+1,updated_at=? WHERE id=? AND owner_user_id=? AND version=? AND status<>'deleted'",
-                        (name, endpoint, auth_type, cipher, _now(), identity, owner, expected_version),
-                    )
+                    if cipher is None:
+                        updated = await db.execute(
+                            "UPDATE personal_mcp_connection SET name=?,endpoint=?,status='ready',version=version+1,updated_at=? WHERE id=? AND owner_user_id=? AND auth_type=? AND version=? AND status<>'deleted'",
+                            (name, endpoint, _now(), identity, owner, auth_type, expected_version),
+                        )
+                    else:
+                        updated = await db.execute(
+                            "UPDATE personal_mcp_connection SET name=?,endpoint=?,auth_type=?,auth_cipher=?,status='ready',version=version+1,updated_at=? WHERE id=? AND owner_user_id=? AND version=? AND status<>'deleted'",
+                            (name, endpoint, auth_type, cipher, _now(), identity, owner, expected_version),
+                        )
                     if updated.rowcount != 1:
                         raise PersonalMcpError("personal_mcp_version_conflict")
-                    # Explicit refresh revokes all selections, including tools
-                    # with an unchanged schema. The user reconfirms the list.
-                    await db.execute("UPDATE personal_mcp_tool SET selected=0 WHERE connection_id=?", (identity,))
-                    await db.execute(
-                        """UPDATE personal_mcp_binding SET
-                      tool_ids_json=(SELECT json_group_array(value) FROM json_each(personal_mcp_binding.tool_ids_json)
-                        WHERE value NOT IN (SELECT id FROM personal_mcp_tool WHERE connection_id=?)), version=version+1
-                      WHERE EXISTS(SELECT 1 FROM json_each(personal_mcp_binding.tool_ids_json)
-                        WHERE value IN (SELECT id FROM personal_mcp_tool WHERE connection_id=?))""",
-                        (identity, identity),
-                    )
+                    if keep_unchanged:
+                        incoming = {tool["remote_name"]: tool["schema_digest"] for tool in tools}
+                        async with db.execute(
+                            "SELECT id,remote_name,schema_digest FROM personal_mcp_tool WHERE connection_id=? AND selected=1", (identity,)
+                        ) as selected_cursor:
+                            lost = [row[0] for row in await selected_cursor.fetchall() if incoming.get(row[1]) != row[2]]
+                    else:
+                        # Explicit refresh revokes all selections, including tools
+                        # with an unchanged schema. The user reconfirms the list.
+                        async with db.execute("SELECT id FROM personal_mcp_tool WHERE connection_id=?", (identity,)) as all_cursor:
+                            lost = [row[0] for row in await all_cursor.fetchall()]
+                    if lost:
+                        await db.execute(
+                            f"UPDATE personal_mcp_tool SET selected=0 WHERE id IN ({','.join('?' * len(lost))})",  # noqa: S608 - placeholders only
+                            tuple(lost),
+                        )
+                        await db.execute(
+                            """UPDATE personal_mcp_binding SET
+                          tool_ids_json=(SELECT json_group_array(value) FROM json_each(personal_mcp_binding.tool_ids_json)
+                            WHERE value NOT IN (SELECT value FROM json_each(?))), version=version+1
+                          WHERE EXISTS(SELECT 1 FROM json_each(personal_mcp_binding.tool_ids_json)
+                            WHERE value IN (SELECT value FROM json_each(?)))""",
+                            (canonical(lost), canonical(lost)),
+                        )
                 else:
+                    if cipher is None:
+                        raise PersonalMcpError("personal_mcp_invalid_credentials")
                     await db.execute(
                         "INSERT INTO personal_mcp_connection VALUES (?,?,?,?,?,?,'ready',1,?,?)",
                         (identity, owner, name, endpoint, auth_type, cipher, _now(), _now()),
                     )
                 for tool in tools:
+                    # A tool keeps its selection only when it survived above (unchanged schema, Q1).
                     await db.execute(
                         """INSERT INTO personal_mcp_tool VALUES (?,?,?,?,?,?,?,0)
                       ON CONFLICT(connection_id,remote_name) DO UPDATE SET description=excluded.description,
-                      schema_json=excluded.schema_json,schema_digest=excluded.schema_digest,risk=excluded.risk,selected=0""",
+                      schema_json=excluded.schema_json,schema_digest=excluded.schema_digest,risk=excluded.risk,
+                      selected=CASE WHEN personal_mcp_tool.schema_digest=excluded.schema_digest THEN personal_mcp_tool.selected ELSE 0 END""",
                         (
                             f"pmt_{uuid4().hex[:20]}",
                             identity,
@@ -445,7 +488,7 @@ class PersonalMcpStore:
                 for tool_id, remote_name in existing:
                     if remote_name not in present:
                         await db.execute(
-                            "UPDATE personal_mcp_tool SET risk='unknown',description='[unavailable]',schema_json='{}',schema_digest='' WHERE id=?",
+                            "UPDATE personal_mcp_tool SET risk='unknown',description='[unavailable]',schema_json='{}',schema_digest='',selected=0 WHERE id=?",
                             (tool_id,),
                         )
                 await db.execute(
@@ -458,6 +501,96 @@ class PersonalMcpStore:
                 await db.rollback()
                 raise
         return identity
+
+    # ── Signed-in connections (OAuth). The sealed auth holds the grant; its ciphertext is the version. ──
+
+    def _oauth_provider_host(self, owner: str, identity: str, cipher: str) -> str | None:
+        try:
+            meta = self.unseal(owner, identity, "credentials", cipher).get("oauth_meta") or {}
+        except PersonalMcpError:
+            return None
+        return urlsplit(str(meta.get("token_endpoint") or "")).hostname
+
+    async def oauth_grant_versioned(self, owner: str, identity: str) -> tuple[str, dict[str, Any]] | None:
+        rows = await self.rows(
+            "SELECT auth_cipher FROM personal_mcp_connection WHERE id=? AND owner_user_id=? AND auth_type='oauth' AND status<>'deleted'",
+            (identity, owner),
+        )
+        if not rows or not rows[0]["auth_cipher"]:
+            return None
+        cipher = str(rows[0]["auth_cipher"])
+        return cipher, self.unseal(owner, identity, "credentials", cipher)
+
+    @repeat_when_authority_busy()
+    async def create_oauth_connection(self, owner: str, name: str, endpoint: str) -> str:
+        """A connection waiting for its first sign-in (status ``authorizing``, no tools)."""
+        identity = f"pcm_{uuid4().hex[:20]}"
+        cipher = self.seal(owner, identity, "credentials", {})
+        async with open_shared_ctx(self.db_path) as db:
+            try:
+                await db.execute(
+                    "INSERT INTO personal_mcp_connection VALUES (?,?,?,?,'oauth',?,'authorizing',1,?,?)",
+                    (identity, owner, name, endpoint, cipher, _now(), _now()),
+                )
+            except sqlite3.IntegrityError as error:
+                # A database below revision 0233 cannot store signed-in connections.
+                if "auth_type" in str(error) or "CHECK constraint" in str(error):
+                    raise PersonalMcpError("personal_mcp_oauth_unavailable") from None
+                raise
+            await db.commit()
+        return identity
+
+    @repeat_when_authority_busy()
+    async def store_oauth_auth(self, owner: str, identity: str, auth: dict[str, Any]) -> None:
+        """Write the grant during sign-in (client registration, code exchange); no version change."""
+        cipher = self.seal(owner, identity, "credentials", auth)
+        async with open_shared_ctx(self.db_path) as db:
+            async with db.execute(
+                "UPDATE personal_mcp_connection SET auth_cipher=? WHERE id=? AND owner_user_id=? AND auth_type='oauth' AND status<>'deleted'",
+                (cipher, identity, owner),
+            ) as cursor:
+                changed = cursor.rowcount == 1
+            await db.commit()
+        if not changed:
+            raise PersonalMcpError("personal_mcp_not_found")
+
+    @repeat_when_authority_busy(spent=None, kind="turn")
+    async def replace_oauth_grant(self, owner: str, identity: str, auth: dict[str, Any], *, expected_cipher: str) -> bool:
+        """Write a renewed grant over ``expected_cipher`` only. A renewal is not a configuration change:
+        the version stays, so running Turns keep their manifest."""
+        cipher = self.seal(owner, identity, "credentials", auth)
+        async with open_shared_ctx(self.db_path) as db:
+            async with db.execute(
+                "UPDATE personal_mcp_connection SET auth_cipher=? WHERE id=? AND owner_user_id=? AND auth_type='oauth' AND auth_cipher=? AND status<>'deleted'",
+                (cipher, identity, owner, expected_cipher),
+            ) as cursor:
+                changed = cursor.rowcount == 1
+            await db.commit()
+        return changed
+
+    @repeat_when_authority_busy(spent=None, kind="turn")
+    async def end_oauth_grant(self, owner: str, identity: str, auth: dict[str, Any], *, expected_cipher: str) -> None:
+        """The service will not renew the sign-in: keep the ended mark and ask the owner to sign in again.
+
+        Fenced by the grant version, so a renewal that failed with an old grant never ends a sign-in the
+        owner just completed. Pending calls on the connection are denied, as after any credential failure."""
+        cipher = self.seal(owner, identity, "credentials", auth)
+        async with open_shared_ctx(self.db_path) as db:
+            async with db.execute(
+                """UPDATE personal_mcp_connection SET auth_cipher=?,
+                  status=CASE WHEN status IN ('ready','unreachable') THEN 'needs_reauth' ELSE status END,
+                  version=version+1,updated_at=?
+                  WHERE id=? AND owner_user_id=? AND auth_type='oauth' AND auth_cipher=? AND status<>'deleted'""",
+                (cipher, _now(), identity, owner, expected_cipher),
+            ) as cursor:
+                changed = cursor.rowcount == 1
+            if changed:
+                await db.execute(
+                    "UPDATE personal_mcp_invocation SET status='denied',args_cipher=NULL WHERE connection_id=? AND status IN ('pending','approved')",
+                    (identity,),
+                )
+                await db.execute("DELETE FROM personal_mcp_session_tool_allowance WHERE connection_id=?", (identity,))
+            await db.commit()
 
     async def configure(self, owner: str, identity: str, version: int, status: str, selected: list[str]) -> None:
         async with open_shared_ctx(self.db_path) as db:
@@ -591,7 +724,17 @@ class PersonalMcpStore:
                     ) as cursor:
                         tool = await cursor.fetchone()
                     if tool is None:
-                        raise PersonalMcpError("personal_mcp_binding_unavailable")
+                        async with db.execute(
+                            """SELECT 1 FROM personal_mcp_tool t JOIN personal_mcp_connection c ON c.id=t.connection_id
+                          WHERE t.id=? AND t.selected=1 AND c.owner_user_id=? AND c.status='needs_reauth'""",
+                            (tool_id, owner),
+                        ) as stale_cursor:
+                            needs_sign_in = await stale_cursor.fetchone()
+                        if needs_sign_in is None:
+                            raise PersonalMcpError("personal_mcp_binding_unavailable")
+                        # The owner must sign in again (or renew the credential): the binding is intact, so
+                        # the run keeps its other tools; build_personal_specs offers this one as not runnable.
+                        continue
                     tools.append(dict(tool))
                 manifest = {
                     "turn_id": binding.turn_id,
@@ -608,6 +751,18 @@ class PersonalMcpStore:
             except BaseException:
                 await db.rollback()
                 raise
+
+    async def tools_needing_sign_in(self, owner: str, binding: Any) -> list[dict[str, Any]]:
+        """Bound tools whose connection needs the owner to sign in again or renew its credential."""
+        return await self.rows(
+            """SELECT t.id,t.remote_name,t.description,t.schema_json,t.connection_id,c.name AS connection_name,c.auth_type
+          FROM personal_mcp_binding b JOIN json_each(b.tool_ids_json) j
+          JOIN personal_mcp_tool t ON t.id=j.value JOIN personal_mcp_connection c ON c.id=t.connection_id
+          WHERE b.agent_id=? AND b.revision_id=? AND b.owner_user_id=? AND c.owner_user_id=?
+            AND c.status='needs_reauth' AND t.selected=1 AND t.schema_digest<>''
+          ORDER BY t.id""",
+            (binding.agent_id, binding.revision_ref, owner, owner),
+        )
 
     async def revalidate(self, owner: str, manifest: dict[str, Any], tool: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
         if not await personal_mcp_licensed(ctx):
@@ -829,6 +984,153 @@ class PersonalMcpStore:
         return result
 
 
+class _PersonalConnectionGrant:
+    """A signed-in personal connection's grant for the shared OAuth broker (``mcp_oauth.OAuthGrantRecord``)."""
+
+    def __init__(self, store: PersonalMcpStore, owner: str, identity: str) -> None:
+        self._store = store
+        self._owner = owner
+        self._identity = identity
+        self.cache_scope = f"{store.db_path}:{_grant_key(owner, identity)}"
+
+    async def read_versioned(self) -> tuple[str, dict[str, Any]] | None:
+        return await self._store.oauth_grant_versioned(self._owner, self._identity)
+
+    async def replace(self, auth: dict[str, Any], *, expected_version: str) -> bool:
+        return await self._store.replace_oauth_grant(self._owner, self._identity, auth, expected_cipher=expected_version)
+
+    async def end(self, auth: dict[str, Any], *, expected_version: str) -> None:
+        await self._store.end_oauth_grant(self._owner, self._identity, auth, expected_cipher=expected_version)
+
+
+class PersonalOAuthAuthStore:
+    """``mcp_oauth.FernetTokenStorage``'s store over personal connections: team_id → owner, source_id → connection."""
+
+    def __init__(self, store: PersonalMcpStore) -> None:
+        self._store = store
+        self.db_path = store.db_path
+
+    async def get_team_tool_auth_decrypted(self, owner: str, identity: str) -> dict[str, Any]:
+        row = await self._store.oauth_grant_versioned(owner, identity)
+        return row[1] if row else {}
+
+    async def update_team_tool_source_auth(self, owner: str, identity: str, *, auth_type: str, auth: dict[str, Any]) -> None:
+        await self._store.store_oauth_auth(owner, identity, auth)
+
+
+def _grant_key(owner: str, identity: str) -> str:
+    return f"personal-mcp:{owner}:{identity}"
+
+
+async def personal_oauth_headers(
+    store: PersonalMcpStore, owner: str, identity: str, endpoint: str, *, rejected_token: str | None = None
+) -> dict[str, str]:
+    """Bearer header of a signed-in connection from the shared single-flight broker.
+
+    Raises ``OAuthGrantRejected`` when the sign-in is missing or ended (the connection is marked
+    ``needs_reauth``) and ``OAuthRefreshUnavailable`` when a renewal could not complete."""
+    if not personal_mcp_oauth_enabled():
+        raise PersonalMcpError("personal_mcp_oauth_disabled")
+    from bowhead_core.mcp_oauth import oauth_broker, oauth_grant_headers
+
+    return await oauth_grant_headers(
+        oauth_broker(store), _grant_key(owner, identity), _PersonalConnectionGrant(store, owner, identity), endpoint, rejected_token=rejected_token
+    )
+
+
+def prime_personal_oauth(store: PersonalMcpStore, owner: str, identity: str, access_token: str, expires_in: int | None) -> None:
+    """Use the access token of a connection that was just signed in instead of renewing at once."""
+    from bowhead_core.mcp_oauth import oauth_broker
+
+    oauth_broker(store).prime(_grant_key(owner, identity), access_token, expires_in)
+
+
+def _sign_in_result(connection_name: str, failure: OAuthGrantRejected | OAuthRefreshUnavailable | None) -> dict[str, Any]:
+    """Model-facing result of a call that was not sent because of the connection's sign-in."""
+    name = _safe(connection_name)
+    if failure is None:
+        return {
+            "ok": False,
+            "error_kind": "personal_mcp_oauth_disabled",
+            "error": f"Not run: sign-in connections such as {name} are turned off on this deployment. Do not retry.",
+        }
+    if isinstance(failure, OAuthGrantRejected):
+        return {
+            "ok": False,
+            "error_kind": "personal_mcp_sign_in_ended",
+            "error": (
+                f"Not run: the user's sign-in to {name} has ended; the service no longer accepts it. Tell the user to sign in "
+                f"again in My Connections, then retry. Do not retry before that."
+            ),
+        }
+    result: dict[str, Any] = {
+        "ok": False,
+        "error_kind": "personal_mcp_sign_in_renewal_unavailable",
+        "error": (
+            f"Not run: renewing the sign-in to {name} did not complete because the service "
+            + ("is limiting requests" if failure.reason == "rate_limited" else "did not respond")
+            + ". The sign-in itself is still valid. Try again later."
+        ),
+    }
+    if failure.retry_after_seconds is not None:
+        result["retry_after_seconds"] = failure.retry_after_seconds
+    return result
+
+
+def _needs_sign_in_result(connection_name: str, auth_type: str) -> dict[str, Any]:
+    """Result of a bound tool whose connection needs the owner to act before anything can run."""
+    if auth_type == "oauth":
+        return _sign_in_result(connection_name, OAuthGrantRejected("needs_reauth"))
+    return {
+        "ok": False,
+        "error_kind": "personal_mcp_credential_rejected",
+        "error": (
+            f"Not run: {_safe(connection_name)} rejected the stored credential. Tell the user to update the credential "
+            f"in My Connections, then retry. Do not retry before that."
+        ),
+    }
+
+
+def _needs_sign_in_spec(tool: dict[str, Any]) -> ToolSpec:
+    """A bound tool kept visible while its connection needs the owner; calling it sends nothing.
+
+    Without it the Agent would not know the tool exists and could only say the service is unreachable
+    (PRD P1, decided 2026-11-25: keep the tool, answer on call)."""
+    label = f"{tool['connection_name']} · {_safe(tool['remote_name'])}"
+    result = _needs_sign_in_result(tool["connection_name"], tool["auth_type"])
+
+    async def handler(args: dict[str, Any], call_ctx: ToolExecutionContext) -> dict[str, Any]:
+        return dict(result)
+
+    return ToolSpec(
+        schema=ToolSchema(
+            name=f"personalmcp.{tool['connection_id']}.{tool['id']}",
+            description=(
+                f"{label}: {tool['description']}\nUnavailable in this run: the owner must sign in to {tool['connection_name']} again "
+                "(or update its credential) in My Connections. Calling it sends nothing and returns that fact."
+            ),
+            input_schema=json.loads(tool["schema_json"]),
+        ),
+        handler=handler,
+        source="external",
+        personal_mcp_label=label,
+        allowed_for_roles=frozenset({"analyst"}),
+    )
+
+
+def _sign_in_failure(exc: BaseException) -> OAuthGrantRejected | OAuthRefreshUnavailable | None:
+    seen: list[BaseException] = [exc]
+    while seen:
+        item = seen.pop()
+        if isinstance(item, (OAuthGrantRejected, OAuthRefreshUnavailable)):
+            return item
+        if isinstance(item, BaseExceptionGroup):
+            seen.extend(item.exceptions)
+        elif item.__cause__ is not None:
+            seen.append(item.__cause__)
+    return None
+
+
 async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any, ctx: ToolExecutionContext) -> list[ToolSpec]:
     if not await personal_mcp_licensed(ctx) or binding is None or binding.agent_source_kind != "team":
         return []
@@ -846,6 +1148,7 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
         async def handler(args: dict[str, Any], call_ctx: ToolExecutionContext) -> dict[str, Any]:
             identity: str | None = None
             dispatched = False
+            oauth_headers: dict[str, str] | None = None
             # A confirmation card announced on the step must end with exactly one outcome.
             card_open = False
             started = time.perf_counter()
@@ -916,11 +1219,19 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="approved_session" if for_session else "approved")
                 connection = await store.revalidate(owner, manifest, tool, call_ctx)
                 await store.expire(owner)
+                if connection["auth_type"] == "oauth":
+                    # Renew before the call is marked dispatched: a sign-in failure means nothing was sent.
+                    oauth_headers = await personal_oauth_headers(store, owner, connection["id"], connection["endpoint"])
                 if not await store.transition(owner, identity, "approved", "dispatching"):
                     raise PersonalMcpError("personal_mcp_confirmation_unavailable")
                 dispatched = True
-                credentials = store.unseal(owner, connection["id"], "credentials", connection["auth_cipher"])
-                headers = auth_headers(connection["auth_type"], credentials)
+                if oauth_headers is not None:
+                    headers = oauth_headers
+                    redact = [headers["Authorization"].removeprefix("Bearer ")]
+                else:
+                    credentials = store.unseal(owner, connection["id"], "credentials", connection["auth_cipher"])
+                    headers = auth_headers(connection["auth_type"], credentials)
+                    redact = [secret for secret in credentials.values() if secret and secret != credentials.get("header")]
                 with anyio.fail_after(30):
                     async with connect_remote_mcp(connection["endpoint"], headers, call_timeout=30, response_bytes_limit=MAX_RESULT_BYTES) as session:
                         result = await session.call_tool(tool["remote_name"], args)
@@ -933,14 +1244,18 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     raise PersonalMcpError("personal_mcp_result_limit")
                 # Never reflect supplied credentials even if the remote echoes them.
                 safe_blob = canonical(_safe(data))
-                for secret in credentials.values():
-                    if secret and secret != credentials.get("header"):
-                        safe_blob = safe_blob.replace(json.dumps(secret, ensure_ascii=False)[1:-1], "[redacted]")
+                for secret in redact:
+                    safe_blob = safe_blob.replace(json.dumps(secret, ensure_ascii=False)[1:-1], "[redacted]")
                 await store.transition(owner, identity, "dispatching", "ok", duration=int((time.perf_counter() - started) * 1000))
                 return {"ok": True, "data": json.loads(safe_blob)}
             except BaseException as exc:
                 from bowhead_core.team_tool_registry_view import is_upstream_auth_error
 
+                if dispatched and oauth_headers is not None and isinstance(exc, Exception) and is_upstream_auth_error(exc):
+                    # The service refused the access token: never offer it again.
+                    from bowhead_core.mcp_oauth import oauth_broker
+
+                    oauth_broker(store).invalidate(_grant_key(owner, tool["connection_id"]), oauth_headers["Authorization"].removeprefix("Bearer "))
                 if dispatched and isinstance(exc, Exception) and not isinstance(exc, PersonalMcpError):
                     with anyio.CancelScope(shield=True):
                         try:
@@ -962,6 +1277,9 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     raise
                 if card_open and identity:
                     await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="unavailable")
+                sign_in = None if dispatched else _sign_in_failure(exc)
+                if sign_in is not None or str(exc) == "personal_mcp_oauth_disabled":
+                    return _sign_in_result(tool["connection_name"], sign_in)
                 code = str(exc) if isinstance(exc, PersonalMcpError) else "personal_mcp_call_failed"
                 return {
                     "ok": False,
@@ -980,6 +1298,8 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
 
         return handler
 
+    for tool in await store.tools_needing_sign_in(owner, binding):
+        specs.append(_needs_sign_in_spec(tool))
     for tool in tools:
         specs.append(
             ToolSpec(

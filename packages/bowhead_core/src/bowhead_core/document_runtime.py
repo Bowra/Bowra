@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
+
+_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+# Decks the product produced, never a customer's template.
+_PRODUCED_SOURCES = frozenset({"python_sandbox", "sandbox_output", "canvas_export", "canvas_export_clone", "consultant_deck"})
+_PRODUCED_KINDS = frozenset({"deliverable", "deck_preview"})
 
 
 @lru_cache(maxsize=1)
@@ -56,3 +64,28 @@ def community_deck_guidance(*, template_present: bool) -> str:
         "Omit deliverables and file paths: "
         "the backend registers only successful current-turn outputs as downloadable Artifacts.\n"
     )
+
+
+def _is_uploaded_presentation(art: Any) -> bool:
+    """A PowerPoint the user uploaded, not a deck the product generated."""
+    filename = (getattr(art, "filename", "") or "").lower()
+    if not (filename.endswith(".pptx") or getattr(art, "mime", "") == _PPTX_MIME):
+        return False
+    return getattr(art, "kind", "") not in _PRODUCED_KINDS and getattr(art, "source", "") not in _PRODUCED_SOURCES
+
+
+async def community_consultant_guidance(*, artifact_store: Any, session_id: str, user_id: str | None) -> str | None:
+    """The Bowra deck contract for a presentation-consultant assignment; None outside the Community profile.
+
+    Reads only the session's file list. It creates no files and stages no templates.
+    """
+    if read_document_profile() != "bowra-v1":
+        return None
+    if not artifact_store or not session_id or not user_id:
+        return "Presentation inputs cannot be authorized. Ask for the missing session context; do not generate a file."
+    try:
+        arts = await artifact_store.list_for_session(session_id=session_id, user_id=user_id)
+    except Exception:
+        logger.warning("community_deck.input_lookup_failed", exc_info=True)
+        return "Presentation inputs could not be checked. Report the failure; do not generate a file."
+    return community_deck_guidance(template_present=any(_is_uploaded_presentation(art) for art in arts))

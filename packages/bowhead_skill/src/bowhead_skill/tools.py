@@ -273,7 +273,9 @@ async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises
     at this moment (the run may already have saved one). Outputs the model mapped itself, other names,
     and targets it already used are left alone; ``_validated_revises`` checks the result like any other.
     """
-    targets = [str(item) for item in getattr(ctx, "revision_target_files", ()) or () if isinstance(item, str) and item]
+    # An upload is never versioned; its revised copy is handled by `_upload_copies`.
+    uploads = set(_revision_upload_copies(ctx))
+    targets = [str(item) for item in getattr(ctx, "revision_target_files", ()) or () if isinstance(item, str) and item and item not in uploads]
     store = getattr(ctx, "artifact_store", None)
     if not targets or store is None or not hasattr(store, "latest_live_version_id"):
         return {}
@@ -294,6 +296,40 @@ async def _same_name_revisions(ctx: Any, deliverable_outputs: list[str], revises
             if deliverable_saved_name(name) in names and name not in revises and name not in found:
                 found[name] = latest.id
                 used.add(latest.id)
+                break
+    return found
+
+
+def _revision_upload_copies(ctx: Any) -> dict[str, tuple[str, str]]:
+    """This dispatch's uploads to revise: {upload id: (upload file name, revised copy name)}; set by core."""
+    raw = getattr(ctx, "revision_upload_copies", None)
+    copies: dict[str, tuple[str, str]] = {}
+    for upload_id, pair in raw.items() if isinstance(raw, dict) else ():
+        if isinstance(upload_id, str) and upload_id and isinstance(pair, (tuple, list)) and len(pair) == 2:
+            upload_name, copy_name = str(pair[0] or ""), str(pair[1] or "")
+            if upload_name and copy_name:
+                copies[upload_id] = (upload_name, copy_name)
+    return copies
+
+
+def _upload_copies(ctx: Any, deliverable_outputs: list[str], revises: dict[str, str], helper_versions: dict[str, str]) -> dict[str, dict[str, str]]:
+    """A revised copy of an upload is a new file named like the deck editor's copy that records the upload.
+
+    pptx dogfood 2026-11-25: uploads are never versioned, so a helper that kept the upload's name saved a
+    second file with the same name and no link to the upload, and the deck editor, opened on the upload,
+    did not find it. In a dispatch revising this person's upload, a deliverable named like the upload (or
+    like its copy) is that copy: it is saved as ``<copy name>`` with ``derived_from`` the upload. A later
+    save of the same entry in this Turn is the copy's next version (``_same_helper_revisions``) and keeps
+    the copy name. An entry the model mapped to another file with ``revises`` is left alone.
+    Returns ``{entry: {"filename": copy name, "upload": upload id}}`` for the runner.
+    """
+    found: dict[str, dict[str, str]] = {}
+    for upload_id, (upload_name, copy_name) in _revision_upload_copies(ctx).items():
+        for entry in deliverable_outputs:
+            if entry in found or (entry in revises and entry not in helper_versions):
+                continue
+            if deliverable_saved_name(entry) in {upload_name, copy_name}:
+                found[entry] = {"filename": copy_name, "upload": upload_id}
                 break
     return found
 
@@ -601,8 +637,23 @@ def _output_artifacts_from_result_json(result_json: Any) -> list[dict[str, Any]]
             item["path"] = output["path"]
         if isinstance(output.get("files"), int):
             item["files"] = output["files"]
+        # A revised copy of an upload: the name the user sees, and the upload it was made from.
+        if isinstance(output.get("saved_as"), str) and output["saved_as"]:
+            item["saved_as"] = output["saved_as"]
+        if isinstance(output.get("derived_from"), str) and output["derived_from"]:
+            item["derived_from"] = output["derived_from"]
         projected.append(item)
     return projected
+
+
+_UPLOAD_COPY_NOTE = (
+    "Each output with saved_as was saved under that name as a new file made from the upload in derived_from (or as the next "
+    "version of that file when it has no derived_from); the upload is unchanged. The user sees the file as saved_as."
+)
+
+
+def _upload_copy_note(saved: list[dict[str, Any]]) -> dict[str, str]:
+    return {"_upload_copy_note": _UPLOAD_COPY_NOTE} if any(item.get("saved_as") for item in saved) else {}
 
 
 def entry_script_name(script: str, entry_names: Sequence[str]) -> str:
@@ -941,6 +992,7 @@ def build_skill_tools(
         input_data.pop("_work_outputs", None)
         input_data.pop("_revises", None)
         input_data.pop("_revises_implicit", None)
+        input_data.pop("_derived_copies", None)
         _output_purpose = "analysis"
         _output_purpose_declared = False
         _deliverable_outputs: list[str] = []
@@ -948,6 +1000,7 @@ def build_skill_tools(
         _revises: dict[str, str] = {}
         _same_name_versions: dict[str, str] = {}
         _helper_versions: dict[str, str] = {}
+        _derived_copies: dict[str, dict[str, str]] = {}
         _inputs_newer: list[dict[str, Any]] = []
         if _direct_python_sandbox:
             # Regression check N5: an explicit purpose='analysis' keeps the call's documents out of the result files.
@@ -1034,6 +1087,7 @@ def build_skill_tools(
                         continue
                     _helper_versions.update(_helper_checked["revises"])
                 _revises = {**_revises, **_helper_versions}
+                _derived_copies = _upload_copies(ctx, _deliverable_outputs, _revises, _helper_versions)
         # follow-up② model-driven command (argv array assembled by the model from commands documented in the skill's SKILL.md).
         _command = args.get("command")
         _orig_skill_name: str | None = None  # D7 attribution: rewrite changes name→python_sandbox.
@@ -1252,6 +1306,8 @@ def build_skill_tools(
                 if _helper_versions:
                     # The model did not ask for these versions: a refused one is saved as a new file (D3).
                     input_data["_revises_implicit"] = sorted(_helper_versions)
+                if _derived_copies:
+                    input_data["_derived_copies"] = _derived_copies
             # Fill filenames **after** resolving refs to actual IDs (simple-int IDs cannot be looked up).
             await _fill_input_filenames(input_data, ctx)
             _inputs_newer = await _input_newer_versions(input_data, ctx)
@@ -1486,6 +1542,7 @@ def build_skill_tools(
             "output_artifacts": _output_artifacts_from_result_json(result.result_json),
             **({"inputs_with_newer_version": _inputs_newer} if _inputs_newer else {}),
             **_same_name_version_facts(_same_name_versions, _saved_outputs, _helper_versions, _saved_as_new_file),
+            **_upload_copy_note(_saved_outputs),
             "workdir": None if _is_sandbox else (str(result.workdir) if result.workdir else None),
             "duration_ms": result.duration_ms,
             **(

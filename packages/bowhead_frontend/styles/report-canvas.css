@@ -1841,6 +1841,18 @@
 .v2-chart-figure[data-chart-output="screen"] .v2-chart-canvas-wrap.is-tall:not(.is-page-height) {
   overflow-y: auto;
 }
+/* Narrow desktop layout (design §7): in a narrow card (a chat column at its minimum is 294 px) the title gives
+   way, down to 120 px, before the actions do, so ⋯ (and a kind switch, where it fits) stays beside it instead of
+   taking a row of its own. Exports keep their frozen frame. A chat table card has no reading container; its
+   header gets the same basis, which only changes anything below about 300 px. */
+@container chart-reading (max-width: 600px) {
+  .v2-chart-figure[data-chart-output="screen"] > .v2-chart-header > .v2-chart-title {
+    flex-basis: 120px;
+  }
+}
+.chat-inline-chart > .v2-chart-table > .v2-chart-header > .v2-chart-title {
+  flex-basis: 120px;
+}
 @container chart-reading (max-width: 600px) {
   .v2-chart-canvas-wrap { padding-inline: 0; }
   .v2-chart-canvas-wrap.is-page-height { max-height: none; overflow-y: hidden; }

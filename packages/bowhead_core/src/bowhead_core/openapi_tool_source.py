@@ -795,10 +795,11 @@ class RemoteMcpToolClient:
     requires session continuity across calls would need the held-session shape back, redesigned so a
     single task owns it end to end.
 
-    ``auth`` (WP2b) is an optional ``httpx2.Auth`` — the OAuth 2.1 provider for an ``auth_type="oauth"``
-    source; when set it drives the bearer (and self-refreshes) in place of static ``headers``, and a
-    never-authorized source fails closed at connect (the SDK raises with no interactive handler → the
-    handler maps it to a native error).
+    ``header_source`` supplies the headers of an ``auth_type="oauth"`` source before each connection
+    (``mcp_oauth.team_oauth_header_source``: a single-flight refresh shared by every caller). When the
+    server refuses that token during ``initialize`` — before the tool call is sent — it is asked once
+    more with the refused token and the call is retried once. A refusal of ``tools/call`` itself is
+    reported, not retried. A never-authorized source fails closed in the header source.
     """
 
     def __init__(
@@ -808,29 +809,56 @@ class RemoteMcpToolClient:
         *,
         timeout: float = REMOTE_MCP_CONNECT_TIMEOUT_SEC,
         call_timeout: float = REMOTE_MCP_CALL_TIMEOUT_SEC,
-        auth: Any = None,
+        header_source: Callable[[str | None], Awaitable[dict[str, str]]] | None = None,
     ) -> None:
         self._base_url = base_url
         self._headers = headers
         self._timeout = timeout
         self._call_timeout = call_timeout
-        self._auth = auth
+        self._header_source = header_source
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        async def _once() -> Any:
+        initialized = False
+
+        async def _once(headers: dict[str, str]) -> Any:
+            nonlocal initialized
+            initialized = False
             async with connect_remote_mcp(
                 self._base_url,
-                self._headers,
+                headers,
                 timeout=self._timeout,
                 call_timeout=self._call_timeout,
-                auth=self._auth,
             ) as session:
+                initialized = True
                 return await session.call_tool(name, arguments)
 
         # Explicit outer bound (F1-a): the httpx2 read timeout is the transport backstop, but a server
         # that dribbles bytes forever would never trip it. ``connect`` + ``call`` is the worst case a
         # single dispatch may cost the turn; past that the handler surfaces a native timeout envelope.
-        return await asyncio.wait_for(_once(), self._timeout + self._call_timeout)
+        # A header source refreshes outside this bound, under its own token-endpoint timeout.
+        bound = self._timeout + self._call_timeout
+        if self._header_source is None:
+            return await asyncio.wait_for(_once(self._headers), bound)
+        headers = await self._header_source(None)
+        try:
+            return await asyncio.wait_for(_once(headers), bound)
+        except Exception as exc:
+            if initialized or not refused_credential(exc):
+                raise
+        refused = headers.get("Authorization", "").removeprefix("Bearer ")
+        return await asyncio.wait_for(_once(await self._header_source(refused)), bound)
+
+
+def refused_credential(exc: BaseException, _depth: int = 0) -> bool:
+    """True when ``exc`` is, or wraps, an HTTP 401 from the MCP server."""
+    if _depth > 6:
+        return False
+    if isinstance(exc, httpx2.HTTPStatusError):
+        return exc.response.status_code == 401
+    if isinstance(exc, BaseExceptionGroup):
+        return any(refused_credential(sub, _depth + 1) for sub in exc.exceptions)
+    cause = exc.__cause__ or exc.__context__
+    return cause is not None and cause is not exc and refused_credential(cause, _depth + 1)
 
 
 def _mcp_tool_to_cache(tool: Any) -> dict[str, Any]:

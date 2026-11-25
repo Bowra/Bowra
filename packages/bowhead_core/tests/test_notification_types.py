@@ -97,6 +97,8 @@ def test_every_outbox_projection_is_registered_with_an_allowed_priority():
             )
             projection = agent_release_outbox._notification_projection(delivery)  # type: ignore[arg-type]
             notification_types.validate(type_, projection["priority"])
+            if type_ == "agent.release.rejected":
+                assert projection["action_url"] == "/agents/manage/?agent_id=sa_1&section=release"
     for priority in ("p1", "p2"):
         notification_types.validate("agent.eval.regression_failed", priority)
 

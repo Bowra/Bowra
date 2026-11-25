@@ -1,7 +1,7 @@
 /**
  * After a save the Results view opens the new version in a fresh viewer. The editor already holds
  * that version's rendered PDF, so the viewer takes it from here instead of rendering the deck again
- * (a render costs 7–12 s, design §10.1), and reopens in the full view the person was using.
+ * (a render costs 7–12 s, design §10.1), and reopens where editing started, on the same page.
  */
 
 export interface PresentationHandoff {
@@ -9,6 +9,10 @@ export interface PresentationHandoff {
   expanded: boolean;
   /** Open straight into edit mode (moving from an upload to the file already made from it). */
   edit?: boolean;
+  /** Where editing started, carried to the next viewer so leaving returns there (design §13.1). */
+  origin?: "panel" | "full";
+  /** The page to show. */
+  page?: number;
 }
 
 const TTL_MS = 60_000;

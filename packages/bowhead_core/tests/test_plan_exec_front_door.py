@@ -186,7 +186,8 @@ async def test_scenario_c_real_content_claims_canvas_and_wires_pointer(tmp_path,
     rt = _runtime(store, runner, canvas_store=_FakeCanvasStore())
     res = await _run_plan_execution_turn(_sctx(plan.id), rt)
     assert res.status == TurnStatus.COMPLETED
-    assert "报告已生成在 canvas" in res.final_answer
+    # Without a router the reply cannot be written: the completion is stated, then the report pointer.
+    assert res.final_answer == "The plan finished all 2 steps.\n\nThe full report is on the canvas."
     dones = rt.parent_bus.find_all("done")
     assert dones[0].payload["response_kind"] == "canvas"
     # Pointer wired (M2 reconcile input); actual content in store (fake supplies D6 evidence) →
@@ -221,16 +222,13 @@ async def test_scenario_c2_reconcile_retracts_phantom_when_no_sections(tmp_path,
     rt = _runtime(store, runner, canvas_store=_FakeCanvasStore(kinds=("meta",)))
     await _run_plan_execution_turn(_sctx(plan.id), rt)
     fas = rt.parent_bus.find_all("final_answer")
-    # After chrome-i18n P1-2, clause splitting recognizes ASCII punctuation: plan text "计划执行完成:N 步成功,
-    # 报告已生成在 canvas。" now splits on ASCII comma; innocent first clause survives as correction
-    # under strip-preserve semantics (same as Chinese-comma text), phantom second clause still withdrawn;
-    # only wholly phantom sentence uses "本次未生成画布报告" fallback.
+    # The reply survives the correction under strip-preserve semantics; only the report pointer is withdrawn.
     assert fas, "应有 final_answer 事件"
     _last = str(fas[-1].payload)
-    assert "计划执行完成" in _last, "纠正 final_answer 应保留真发现"
-    assert "报告已生成" not in _last, "幻影指针应被撤回（原始 emit 在流里是预期，纠正在其后）"
+    assert "The plan finished all 2 steps." in _last, "纠正 final_answer 应保留回复"
+    assert "full report is on the canvas" not in _last, "幻影指针应被撤回（原始 emit 在流里是预期，纠正在其后）"
     # Persist sync (contract 2): _pi final_answer holds corrected text.
-    assert "报告已生成" not in str(rt.parent_bus._pi_turn_state.get("final_answer", ""))
+    assert "full report is on the canvas" not in str(rt.parent_bus._pi_turn_state.get("final_answer", ""))
 
 
 @pytest.mark.asyncio
@@ -261,7 +259,7 @@ async def test_scenario_e_writerless_plan_composes_honestly(tmp_path, monkeypatc
     rt = _runtime(store, runner, canvas_store=_FakeCanvasStore())
     res = await _run_plan_execution_turn(_sctx(plan.id), rt)
     assert res.status == TurnStatus.COMPLETED
-    assert "报告已生成在 canvas" in res.final_answer
+    assert res.final_answer.endswith("The full report is on the canvas.")
     p = got["payload"]
     assert p is not None
     # ① No misleading copy (scan entire payload).
@@ -396,7 +394,7 @@ async def test_scenario_i_writerless_empty_report_demotes_to_blocked(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_scenario_g_psi_composed_report_counts_as_content(tmp_path, monkeypatch) -> None:
-    """★116 dogfood 1.0.93 P1（t_d4be37936054/t_4c9c5997643a 两次复现）：卡片缺省
+    """★116 dogfood 1.0.93 P1（an observed task/an observed task 两次复现）：卡片缺省
     代笔后 ψ-E 在步执行期就把报告落库，末轮 composer 被 _psi_compose_done 跳过 →
     kinds 恒空 → 文案谎报「报告内容未能生成」+ completed plan 被降级 BLOCKED。
     修：内容真值以库为准（与终态同源）。"""
@@ -422,7 +420,7 @@ async def test_scenario_g_psi_composed_report_counts_as_content(tmp_path, monkey
     res = await _run_plan_execution_turn(_sctx(plan.id), rt)
     assert res.status == TurnStatus.COMPLETED
     assert "报告内容未能生成" not in res.final_answer, "库里有报告还谎报未生成"
-    assert "报告已生成" in res.final_answer
+    assert res.final_answer.endswith("The full report is on the canvas.")
     dones = rt.parent_bus.find_all("done")
     assert dones[0].payload["response_kind"] == "canvas"
     fresh = await store.get_plan(plan.id, user_id="u", workspace_id="w")
@@ -435,7 +433,7 @@ async def test_scenario_g_psi_composed_report_counts_as_content(tmp_path, monkey
 @pytest.mark.parametrize("with_canvas", [True, False])
 @pytest.mark.parametrize("planning_v2", ["1", "0"])
 async def test_scenario_h_answer_plan_surfaces_leg_answer_not_echo(tmp_path, monkeypatch, with_canvas, planning_v2) -> None:
-    """★116 dogfood 1.0.93 P1（t_cde94266cbf4）：ANSWER plan 的短答 payload 被
+    """★116 dogfood 1.0.93 P1（an observed task）：ANSWER plan 的短答 payload 被
     DF-04 挡在聚合外 → 文案链落到 user_text 兜底 → 终稿=用户原话回显。
     修：回显时以 done leg 的 exec_summary 为真源。"""
     monkeypatch.setenv("BOWHEAD_WRITE_REPORT", "0")
@@ -532,6 +530,7 @@ async def _run_titled_plan(tmp_path, monkeypatch, *, router: Any) -> dict[str, A
         }
     )
     rt = _runtime(store, runner, canvas_store=_FakeCanvasStore(), router=router)
+    rt.parent_ctx.language_context = SimpleNamespace(output_language="en-US")
     res = await _run_plan_execution_turn(_sctx(plan.id), rt)
     got["res"] = res
     return got
@@ -541,7 +540,7 @@ async def _run_titled_plan(tmp_path, monkeypatch, *, router: Any) -> dict[str, A
 async def test_document_title_comes_from_lead_not_from_a_chapter(tmp_path, monkeypatch) -> None:
     """★封面标题＝Lead 生成的**整份文档**标题，不再是某一章的标题。
 
-    116 真机 t_c9853b490565 的形态：封面 h1 与末章 h1 逐字相同。确定性兜底链的
+    116 真机 an observed task 的形态：封面 h1 与末章 h1 逐字相同。确定性兜底链的
     天花板就在这儿——任何确定性选择都只能是某一章的标题。
     删掉 `_run_plan_execution_turn` 里那次 `generate_document_title` 调用，本条必红。
     """
@@ -552,27 +551,25 @@ async def test_document_title_comes_from_lead_not_from_a_chapter(tmp_path, monke
     assert p["title"] == "区域商超连锁收购尽调报告", p["title"]
     # No chapter title.
     assert p["title"] not in ("行业扫描", "财务分析")
-    # Compose uses narrative role (writing convergence T3: not most expensive lead model).
-    assert router.calls == ["narrative"], router.calls
-    # Writing convergence T4: bill new LLM call; two legs each 100/50 (total 200/100),
-    # plus title 120/12 ⇒320/112. Difference proves title call actually billed.
-    assert got["res"].tokens_input == 320, got["res"].tokens_input
-    assert got["res"].tokens_output == 112, got["res"].tokens_output
+    # Title, then the chat reply, both on the narrative role (writing convergence T3: not the most expensive lead model).
+    assert router.calls == ["narrative", "narrative"], router.calls
+    # Writing convergence T4: bill new LLM calls; two legs each 100/50 (total 200/100),
+    # plus title and reply 120/12 each ⇒440/124. The difference proves both calls are billed.
+    assert got["res"].tokens_input == 440, got["res"].tokens_input
+    assert got["res"].tokens_output == 124, got["res"].tokens_output
 
 
 @pytest.mark.asyncio
 async def test_document_title_falls_back_to_chapter_title_when_flag_off(tmp_path, monkeypatch) -> None:
-    """正对照：回滚绳 `BOWHEAD_PLAN_DOC_TITLE=0` 一拉，就退回既有确定性兜底链，
-
-    且**一次 LLM 都不调**（别在关着的路上偷偷烧钱）。
-    """
+    """正对照：回滚绳 `BOWHEAD_PLAN_DOC_TITLE=0` 一拉，就退回既有确定性兜底链，不再请求标题。"""
     monkeypatch.setenv("BOWHEAD_PLAN_DOC_TITLE", "0")
     router = _TitleRouter("《不该被用到的标题》")
     got = await _run_titled_plan(tmp_path, monkeypatch, router=router)
     p = got["payload"]
     assert p is not None
     assert p["title"] != "不该被用到的标题"
-    assert router.calls == [], "flag 关着时不许调 LLM"
+    # No title call with the switch off; the one remaining call is the chat reply.
+    assert router.calls == ["narrative"], router.calls
     # Deterministic fallback = closing-chapter title.
     assert p["title"] == "财务分析", p["title"]
 
@@ -593,6 +590,43 @@ async def test_document_title_survives_a_dead_router(tmp_path, monkeypatch) -> N
     assert p is not None
     assert p["title"] == "财务分析", p["title"]
     assert got["res"].status == TurnStatus.COMPLETED
+
+
+class _ReplyRouter:
+    """Answers the title call with a title and the reply call with a reply; records the reply request."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.reply_requests: list[Any] = []
+
+    async def invoke(self, agent_type: str, req: Any) -> Any:
+        usage = SimpleNamespace(input_tokens=300, output_tokens=40, cached_tokens=0)
+        if req.trace_id.startswith("plan_chat_reply:"):
+            self.reply_requests.append(req)
+            return SimpleNamespace(content=self.reply, usage=usage)
+        return SimpleNamespace(content="Q1 Review", usage=usage)
+
+
+@pytest.mark.asyncio
+async def test_plan_report_reply_is_written_by_the_model_in_the_answer_language(tmp_path, monkeypatch) -> None:
+    """The chat answer of a Plan Turn with a report is a model reply plus the canonical pointer.
+
+    116 (to 1.7.71): every such Turn ended with the fixed Chinese line "计划执行完成:N 步成功,报告已生成在 canvas。",
+    whatever the answer language. A pointer the model writes itself is replaced by the single canonical one.
+    """
+    router = _ReplyRouter("The review finds a 12% margin. The full report is on the canvas.")
+    got = await _run_titled_plan(tmp_path, monkeypatch, router=router)
+    res = got["res"]
+    (request,) = router.reply_requests
+    assert request.max_output_tokens == 400
+    assert "in English" in request.system and request.messages[-1].content.endswith(
+        "Write the reply in English, even if the facts above are in another language."
+    )
+    facts = request.messages[-1].content
+    assert "Summary: 发现 X 趋势" in facts and "Summary: 利润率 12%" in facts and "Files saved in this Turn: none" in facts
+    assert res.final_answer == "The review finds a 12% margin.\n\nThe full report is on the canvas."
+    # Two legs 100/50 each, then title and reply 300/40 each.
+    assert (res.tokens_input, res.tokens_output) == (800, 180)
 
 
 @pytest.mark.asyncio
@@ -684,7 +718,7 @@ async def test_old_plan_with_a_retired_writer_step_completes_without_gap_or_dupl
     )
     res = await _run_plan_execution_turn(_sctx(plan.id), _runtime(store, runner, canvas_store=_FakeCanvasStore()))
     assert res.status == TurnStatus.COMPLETED
-    assert "报告已生成在 canvas" in res.final_answer
+    assert res.final_answer.endswith("The full report is on the canvas.")
     after = {s.agent_name: s for s in await store.list_steps(plan.id)}
     assert str(after["canvas-writer"].status) == str(StepStatus.DONE if writer_done_earlier else StepStatus.SKIPPED)
     flat = _json.dumps(got["payload"], ensure_ascii=False)

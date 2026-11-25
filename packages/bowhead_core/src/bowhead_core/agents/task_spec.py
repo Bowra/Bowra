@@ -201,29 +201,6 @@ class PlanStepModelError(PlanStepError):
         super().__init__(_PLAN_STEP_MODEL_FAILURE_MESSAGES.get(reason_code, reason_code))
 
 
-# Stored step reason for clients without localized copy; the plan card localizes by kind.
-_PLAN_STEP_DELIVERY_FAILURE_MESSAGES = {
-    "deck_delivery_missing": (
-        "This step must deliver a new PowerPoint file, and none was produced. Revise the step to give it to another "
-        "helper, or resume the plan to run it again if a presentation is wanted."
-    ),
-}
-PLAN_STEP_DELIVERY_FAILURE_CODES = frozenset(_PLAN_STEP_DELIVERY_FAILURE_MESSAGES)
-
-
-class PlanStepDeliveryError(PlanStepError):
-    """The step's Agent owes a file and returned none.
-
-    ``error_kind`` is the delivery check's code (``deck_delivery_missing``: a Consultant step without an
-    uploaded deck must render a new one). Running the step again with the same assignment fails the same
-    way unless the Agent renders the file, so the plan card leads with revising the step.
-    """
-
-    def __init__(self, code: str) -> None:
-        self.error_kind = code
-        super().__init__(_PLAN_STEP_DELIVERY_FAILURE_MESSAGES.get(code, code))
-
-
 @dataclass
 class TaskResult:
     """单 task 的执行结果.

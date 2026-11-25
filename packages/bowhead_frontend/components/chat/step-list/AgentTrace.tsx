@@ -132,6 +132,7 @@ const COLLABORATION_AND_DECK_ERROR_KEYS: Record<string, `collab_errors.${string}
   collaboration_recipient_unavailable: "collab_errors.unavailable",
   collaboration_execution_unavailable: "collab_errors.unavailable",
   collaboration_owner_unavailable: "collab_errors.unavailable",
+  // render_deck was removed on 2026-11-24; these codes stay for steps stored before then.
   deck_render_not_admitted: "deck_errors.not_admitted",
   deck_storage_unavailable: "deck_errors.storage_unavailable",
   invalid_deck_arguments: "deck_errors.invalid",

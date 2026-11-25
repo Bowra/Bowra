@@ -2,6 +2,8 @@
 
 Teamverantwortliche und Teamadministratoren können externe MCP-Dienste als Team-Tools bereitstellen. Mitglieder verwenden dann die freigegebenen Tools entsprechend ihrer Berechtigungen. Für diese Funktion muss die Bereitstellung MCP-Tools unterstützen.
 
+Soll jedes Mitglied beim Dienst sein eigenes Konto statt eines geteilten verwenden, können sich Mitglieder unter **Meine Verbindungen** anmelden; siehe [Persönlichen MCP-Dienst verbinden](personal-mcp.de-DE.md).
+
 ## MCP-Verbindung auf Teamebene einrichten
 
 1. Öffnen Sie **Team-Einstellungen → Tools**.
@@ -31,6 +33,12 @@ Wenn ein MCP-Dienst Tools hinzufügt oder entfernt, wählen Sie in den Aktionen 
 Erst wenn Sie **Tool-Liste aktualisieren** auswählen, werden Änderungen übernommen; mit **Abbrechen** bleibt alles unverändert. Ändert sich die Tool-Liste oder ihre Verwendung während Ihrer Prüfung, liest Bowra sie erneut ein und zeigt Ihnen die neuen Änderungen zur Prüfung. Wurde nichts hinzugefügt, entfernt oder geändert, meldet die Vorschau, dass die Tool-Liste auf dem neuesten Stand ist.
 
 Ein MCP-Dienst, der eine Autorisierung erfordert, muss autorisiert sein, bevor Sie seine Tool-Liste aktualisieren können.
+
+## Wenn eine Autorisierung endet
+
+Ein autorisierter Dienst funktioniert ohne Ihr Zutun weiter: Bowhead erneuert den Zugriff bei Bedarf, und zwar einmal für das ganze Team, auch wenn mehrere Unterhaltungen den Dienst gleichzeitig nutzen. Akzeptiert der Dienst die Autorisierung nicht mehr (zum Beispiel weil sie nach langer Nichtnutzung abgelaufen ist, jemand den Zugriff von Bowhead im Dienst entfernt hat oder der Dienst seinen Anmeldeserver gewechselt hat), zeigt die Karte der Quelle **Autorisierung erforderlich** und die Schaltfläche **Autorisieren**. Aufrufe aus Unterhaltungen werden dann nicht gesendet, und der Agent bittet die Person, sich an einen Teamadministrator zu wenden.
+
+Wählen Sie **Autorisieren** und melden Sie sich erneut beim Dienst an; die importierten Tools bleiben unverändert. Solange die Autorisierung aussteht, können Sie die Quelle weiterhin deaktivieren. Sobald die Quelle wieder autorisiert ist, können Sie die Tool-Liste erneut aktualisieren.
 
 ## Zu importierende Tools auswählen
 

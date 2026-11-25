@@ -52,12 +52,17 @@ export interface InventoryElement {
   reason: string | null;
   paragraphs?: InventoryParagraph[];
   rows?: InventoryCell[][];
+  /** A table's column widths and row heights, as shares of its box (they sum to 1). */
+  col_widths?: number[];
+  row_heights?: number[];
   chart?: InventoryChart;
 }
 
 export interface InventorySlide {
   slide_id: number;
   index: number;
+  /** The text of the slide's title placeholder, when it has one. */
+  title?: string | null;
   inherited_text: boolean;
   elements: InventoryElement[];
 }
@@ -226,6 +231,11 @@ function sessionPath(sessionId: string, tail: string): string {
   return `/api/v1/sessions/${encodeURIComponent(sessionId)}/results/${tail}`;
 }
 
+/** A table's column widths or row heights as shares of its box. */
+function isShares(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "number" && Number.isFinite(item) && item >= 0 && item <= 1);
+}
+
 function isBox(value: unknown): value is ElementBox {
   return Array.isArray(value) && value.length === 4 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
@@ -254,10 +264,18 @@ function parseInventory(value: unknown): PresentationInventory {
         reason: typeof element.reason === "string" ? element.reason : null,
         ...(Array.isArray(element.paragraphs) ? { paragraphs: element.paragraphs as InventoryParagraph[] } : {}),
         ...(Array.isArray(element.rows) ? { rows: element.rows as InventoryCell[][] } : {}),
+        ...(isShares(element.col_widths) ? { col_widths: element.col_widths } : {}),
+        ...(isShares(element.row_heights) ? { row_heights: element.row_heights } : {}),
         ...(isRecord(element.chart) ? { chart: element.chart as unknown as InventoryChart } : {}),
       }];
     });
-    return { slide_id: slide.slide_id, index: slide.index, inherited_text: slide.inherited_text === true, elements };
+    return {
+      slide_id: slide.slide_id,
+      index: slide.index,
+      ...(typeof slide.title === "string" ? { title: slide.title } : {}),
+      inherited_text: slide.inherited_text === true,
+      elements,
+    };
   });
   return {
     artifact_id: value.artifact_id,

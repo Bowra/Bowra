@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict
-from typing import Any, Literal
+from typing import Any
 
 from bowhead_core.config_copilot import (
     ConfigDraftInputRejected,
@@ -199,7 +199,9 @@ async def _owned_form_draft(request: Request, user: Any, draft_id: str) -> Confi
         raise _error(404, "config_draft_not_found")
     if draft.kind != KIND_FORM_DRAFT:
         raise _error(409, "draft_kind_mismatch")
-    if draft.form_id == "team_subagent" and get_form("team_subagent") is None:
+    # Chat edits of existing Agents (form `team_subagent`) were removed on 2026-11-24; Coach owns Agent changes.
+    # Drafts a deployment saved while that form was enabled stay hidden instead of opening an unknown editor.
+    if draft.form_id == "team_subagent":
         raise _error(404, "config_draft_not_found")
     return draft
 
@@ -236,10 +238,6 @@ class ConsumeDraftBody(BaseModel):
         model_config = ConfigDict(extra="forbid")
 
         job_id: str | None = Field(None, min_length=1, max_length=64)
-        kind: Literal["team_subagent"] | None = None
-        stage: Literal["working_copy"] | None = None
-        ref_id: str | None = Field(None, min_length=1, max_length=64)
-        label: str | None = Field(None, max_length=120)
         name: str | None = Field(None, max_length=120)
         human_schedule: str | None = Field(None, max_length=200)
         next_run_at: str | None = Field(None, max_length=64)
@@ -267,10 +265,7 @@ async def consume_form_draft(
     """保存成功后的回执标记。result 是展示性指针（保存已过原写 API 全部校验，
     伪造只污染自己的草稿行——tech-design-batch1b §2.2 拍板）。"""
     draft = await _owned_form_draft(request, user, draft_id)
-    if draft.form_id == "team_subagent":
-        if body.result.kind != "team_subagent" or body.result.ref_id != (draft.payload or {}).get("target", {}).get("id"):
-            raise _error(422, "draft_result_target_mismatch")
-    elif draft.form_id == "scheduled_job" and not body.result.job_id:
+    if draft.form_id == "scheduled_job" and not body.result.job_id:
         raise _error(422, "draft_result_job_missing")
     if draft.status == FORM_STATUS_CONSUMED:
         return _form_draft_dto(draft, replayed=True)

@@ -549,3 +549,134 @@ def test_mcp_return_restores_saved_prefix_and_consumes_denied_state(
     assert response.status_code == 303
     assert response.headers["location"].startswith(f"{prefix}/settings/tools?oauth={'error' if denied else 'success'}")
     assert _run(store.take_mcp_oauth_pending("prefix-state")) is None
+
+
+# ── shared broker: ended sign-in, re-authorization, admin actions ─────────────
+
+
+def _ended_oauth_source(store: UserStore) -> TeamToolSource:
+    """An authorized OAuth source whose provider has since refused to renew the sign-in."""
+    from bowhead_core.mcp_oauth import FernetTokenStorage
+    from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+
+    src = _mcp_source()
+    _run(store.create_team_tool_source(src))
+
+    async def seed() -> None:
+        storage = FernetTokenStorage(store, "team_a", src.id)
+        await storage.set_client_info(OAuthClientInformationFull(client_id="cid_test", token_endpoint_auth_method="none"))
+        await storage.set_grant(
+            OAuthToken(access_token="old", token_type="Bearer", refresh_token="old-refresh"), {"token_endpoint": f"{_IDP}/token", "resource": _PUB}
+        )
+        d = await storage._load()
+        d["oauth_grant_state"] = {"ended": True, "reason": "invalid_grant"}
+        await storage._save()
+
+    _run(seed())
+    return src
+
+
+def test_ended_sign_in_is_shown_and_blocks_admin_tool_actions(tmp_path: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+
+    def no_network(request: httpx2.Request) -> httpx2.Response:  # pragma: no cover - must not run
+        raise AssertionError(f"unexpected request {request.url}")
+
+    _patch_idp(monkeypatch, no_network)
+    store = UserStore(str(tmp_path / "u.db"))
+    _run(store.initialize())
+    src = _ended_oauth_source(store)
+    client = _client(store, User(id="u", team_id="team_a", email="a@x.com"))
+
+    # the serializer every source list and card uses
+    assert ots._public(_run(store.get_team_tool_source("team_a", src.id)))["oauth_sign_in_ended"] is True  # type: ignore[arg-type]
+
+    validated = client.post(f"/api/v1/team-tool-sources/{src.id}/validate").json()
+    assert validated["reachable"] is True and validated["result"]["error_kind"] == "upstream_auth"
+
+    preview = client.post(f"/api/v1/team-tool-sources/{src.id}/refresh-preview")
+    assert preview.status_code == 409 and "oauth_sign_in_ended" in preview.text
+
+
+def test_reauthorization_clears_the_ended_sign_in_and_primes_runs(tmp_path: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    from bowhead_core.llm_config_crypto import decrypt_llm_config
+    from bowhead_core.mcp_oauth import team_oauth_headers
+
+    store = UserStore(str(tmp_path / "u.db"))
+    _run(store.initialize())
+    src = _ended_oauth_source(store)
+    token_posts: list[str] = []
+    idp = _full_idp()
+
+    def counting(request: httpx2.Request) -> httpx2.Response:
+        if urlparse(str(request.url)).path == "/token":
+            token_posts.append(parse_qs(request.content.decode())["grant_type"][0])
+        return idp(request)
+
+    _patch_idp(monkeypatch, counting)
+    listed_with: list[Any] = []
+
+    async def _tools(_url: str, headers: Any = None, **_kwargs: Any) -> list[dict[str, Any]]:
+        listed_with.append(headers)
+        return [{"name": "search", "description": "d", "input_schema": {"type": "object"}, "destructive": False}]
+
+    monkeypatch.setattr("bowhead_core.openapi_tool_source.enumerate_remote_mcp_tools", _tools)
+    _run(
+        store.create_mcp_oauth_pending(
+            state="again",
+            team_id="team_a",
+            source_id=src.id,
+            code_verifier="v" * 43,
+            redirect_uri="https://app/cb",
+            token_endpoint=f"{_IDP}/token",
+            client_id="cid_test",
+            resource=_PUB,
+            created_by="u_admin",
+        )
+    )
+    r = _cb_client(store).get(_CB, params={"code": "authcode", "state": "again"}, follow_redirects=False)
+    assert r.status_code == 303 and "oauth=success" in r.headers["location"]
+
+    stored = decrypt_llm_config(_run(store.get_team_tool_source("team_a", src.id)).auth_ref)  # type: ignore[union-attr]
+    assert "oauth_grant_state" not in stored
+    assert stored["oauth_meta"] == {"token_endpoint": f"{_IDP}/token", "resource": _PUB}
+    assert ots._public(_run(store.get_team_tool_source("team_a", src.id)))["oauth_sign_in_ended"] is False  # type: ignore[arg-type]
+    # runs use the new grant at once: no refresh right after authorizing
+    assert _run(team_oauth_headers(store, "team_a", src.id, _PUB)) == {"Authorization": "Bearer at_final"}
+    assert token_posts == ["authorization_code"]
+    # the tool list right after authorizing is read with the new token
+    assert listed_with == [{"Authorization": "Bearer at_final"}]
+
+
+def test_rotated_refresh_token_is_stored_after_a_lost_core_lease(tmp_path: Any, monkeypatch: Any) -> None:
+    """auth_ref is fenced: a rotated refresh token must still reach the database when Turns hold the lease."""
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    from bowhead_core.llm_config_crypto import decrypt_llm_config
+    from bowhead_core.mcp_oauth import team_oauth_headers
+    from test_request_write_lease_repeats import _lose_lease
+
+    store = UserStore(str(tmp_path / "u.db"))
+    _run(store.initialize())
+    src = _ended_oauth_source(store)
+
+    async def clear_end_mark() -> None:
+        from bowhead_core.mcp_oauth import FernetTokenStorage
+
+        storage = FernetTokenStorage(store, "team_a", src.id)
+        d = await storage._load()
+        d.pop("oauth_grant_state")
+        await storage._save()
+
+    _run(clear_end_mark())
+
+    def idp(request: httpx2.Request) -> httpx2.Response:
+        assert urlparse(str(request.url)).path == "/token"
+        return httpx2.Response(200, json={"access_token": "renewed", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rotated"})
+
+    _patch_idp(monkeypatch, idp)
+    attempts = _lose_lease(monkeypatch, "team_tool_source", 2)
+    assert _run(team_oauth_headers(store, "team_a", src.id, _PUB)) == {"Authorization": "Bearer renewed"}
+    assert len(attempts) >= 3
+    stored = decrypt_llm_config(_run(store.get_team_tool_source("team_a", src.id)).auth_ref)  # type: ignore[union-attr]
+    assert stored["oauth_tokens"]["refresh_token"] == "rotated"

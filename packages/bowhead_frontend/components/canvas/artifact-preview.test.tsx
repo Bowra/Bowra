@@ -27,13 +27,17 @@ vi.mock("./presentation-edit/presentation-editor", async () => {
     PresentationEditor: forwardRef(function EditorStub(props: {
       artifactId: string;
       initialPdfData?: ArrayBuffer;
-      onExit: (exit: { artifactId: string; pdfData?: ArrayBuffer; close: boolean } | null) => void;
+      initialPage?: number;
+      onExit: (exit: { artifactId: string; pdfData?: ArrayBuffer; close: boolean; page?: number } | null) => void;
     }, _ref) {
       return (
-        <div data-testid="presentation-editor-stub">
+        <div data-testid="presentation-editor-stub" data-initial-page={props.initialPage ?? ""}>
           {props.artifactId}
-          <button type="button" onClick={() => props.onExit({ artifactId: "art_deck_v2", pdfData: new ArrayBuffer(3), close: false })}>
+          <button type="button" onClick={() => props.onExit({ artifactId: "art_deck_v2", pdfData: new ArrayBuffer(3), close: false, page: 2 })}>
             saved
+          </button>
+          <button type="button" onClick={() => props.onExit({ artifactId: props.artifactId, close: false, page: 2 })}>
+            leave
           </button>
         </div>
       );
@@ -104,6 +108,26 @@ describe("ArtifactPreview", () => {
     expect(enMessages.artifact_viewer.safe_html_unsupported).toBe(
       "This HTML has no safely readable static content, or its file type is unsupported.",
     );
+  });
+
+  it("labels the header with the file type, keeping the MIME type out of it (narrow desktop layout §5)", () => {
+    render(
+      <ArtifactPreview
+        fileId="art_xlsx_meta"
+        filename="model.xlsx"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        profile="xlsx"
+        sizeLabel="5.1 KB"
+        preview={{ family: "spreadsheet", mode: "text", text: "--- sheet: Summary ---\nRevenue\t42" }}
+      />,
+    );
+    const meta = document.querySelector(".artifact-viewer-title > span");
+    expect(meta?.textContent).toMatch(/^XLSX · 5\.1 KB · /);
+    expect(meta?.textContent).not.toContain("application/");
+    // The full-view action keeps its name and tooltip when a narrow header shows only its icon.
+    const fullView = screen.getByRole("button", { name: "Full view" });
+    expect(fullView).toHaveAttribute("title", "Full view");
+    expect(fullView.querySelector(".result-action-label")?.textContent).toBe("Full view");
   });
 
   it("renders text preview with a stable download href and full-view modal", () => {
@@ -571,10 +595,69 @@ describe("ArtifactPreview", () => {
     rerender(<ArtifactPreview {...deck} capabilities={new Set(["download"])} presentationEdit={undefined} />);
     expect(screen.getByTestId("presentation-editor-stub")).toBe(editor);
 
+    // Editing started in the Results panel, so the saved version opens there, on the same page (design §13.1).
     fireEvent.click(within(editor).getByRole("button", { name: "saved" }));
     expect(onOpenVersion).toHaveBeenCalledWith("art_deck_v2", undefined);
-    expect(readPresentationHandoff("art_deck_v2")).toMatchObject({ expanded: true });
+    expect(readPresentationHandoff("art_deck_v2")).toMatchObject({ expanded: false, origin: "panel", page: 2 });
     expect(readPresentationHandoff("art_deck_v2")?.pdfData?.byteLength).toBe(3);
+  });
+
+  it("returns from deck editing to the panel or the full view it started from", async () => {
+    pdfGetDocument.mockImplementation(() => ({ promise: new Promise(() => undefined), destroy: vi.fn().mockResolvedValue(undefined) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 })));
+    const deck = {
+      fileId: "art_deck",
+      filename: "deck.pptx",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      profile: "pptx" as const,
+      preview: null,
+      resultRole: "deliverable" as const,
+      downloadHref: "/api/v1/files/art_deck",
+      capabilities: new Set(["download", "edit_presentation"] as const),
+      presentationEdit: { sessionId: "s_1", onOpenVersion: vi.fn() },
+    };
+    render(<ArtifactPreview {...deck} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "edit_presentation" }));
+    fireEvent.click(within(await screen.findByTestId("presentation-editor-stub")).getByRole("button", { name: "leave" }));
+    await waitFor(() => expect(screen.queryByTestId("presentation-editor-stub")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "deck.pptx" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Full view" }));
+    fireEvent.click(await within(screen.getByRole("dialog", { name: "deck.pptx" })).findByRole("button", { name: "edit_presentation" }));
+    fireEvent.click(within(await screen.findByTestId("presentation-editor-stub")).getByRole("button", { name: "leave" }));
+    await waitFor(() => expect(screen.queryByTestId("presentation-editor-stub")).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "deck.pptx" })).toBeInTheDocument();
+  });
+
+  it("offers 引用这一页 under each page of a deck and references that slide", async () => {
+    const page = {
+      getViewport: () => ({ width: 960, height: 540 }),
+      render: () => ({ promise: Promise.resolve() }),
+    };
+    pdfGetDocument.mockImplementation(() => ({
+      promise: Promise.resolve({ numPages: 2, getPage: () => Promise.resolve(page) }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 })));
+    const onReferenceElement = vi.fn();
+    render(
+      <ArtifactPreview
+        fileId="art_deck" filename="deck.pptx" mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        profile="pptx" preview={null} resultRole="deliverable" downloadHref="/api/v1/files/art_deck" sizeBytes={2048}
+        capabilities={new Set(["download", "reference_in_chat"])}
+        presentationEdit={{ sessionId: "s_1", onOpenVersion: vi.fn(), onReferenceElement }}
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(2));
+    fireEvent.click(screen.getAllByRole("button", { name: "reference_page_label" })[1]);
+    expect(onReferenceElement).toHaveBeenCalledWith({
+      fileId: "art_deck", filename: "deck.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 2048, referenceKind: "result", presentationSelection: { version: 1, artifactId: "art_deck", slideIndex: 2 },
+    }, { quiet: true });
+    // The button confirms instead of a toast over the header; its name starts with what it shows.
+    await waitFor(() => expect(screen.getByRole("button", { name: "referenced_page_label" })).toHaveTextContent("referenced_page"));
+    expect(screen.getByRole("img", { name: "deck.pptx · 2" })).toBeInTheDocument();
   });
 
   it("reports an unavailable PDF response without misclassifying it as corrupt", async () => {

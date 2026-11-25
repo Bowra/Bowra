@@ -12,7 +12,9 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import { ApiError, apiJson, apiVoid } from "@/lib/api-client";
 import { requestCanvasDataFocus, requestCanvasResultOpen } from "@/lib/canvas-workspace-focus";
+import { RESULT_TARGETS_CHANGED_EVENT } from "@/lib/result-pin-events";
 import { reportHrefForSession } from "@/lib/report-share";
+import { CANVAS_CHANGED_EVENT } from "@/lib/report-status-store";
 import { reportDisplayTitle } from "@/lib/report-title";
 import { getActiveSpaceId, spaceHeader } from "@/lib/space-storage";
 
@@ -42,6 +44,9 @@ export const RESULT_PINS_CHANGED_EVENT = "bowhead:result-pins-changed";
 const WORKSPACE_CHANGED_EVENT = "bowhead:workspace-changed";
 
 export const RESULT_PIN_LIMIT = 100;
+
+/** Returning to the tab reloads a list older than this; one just read is not asked for again. */
+export const RESULT_PINS_RETURN_REFRESH_MS = 15_000;
 
 export type ResultPinFailure = "gone" | "limit" | "unavailable" | "other";
 
@@ -149,7 +154,11 @@ interface ResultPinsSnapshot {
 const EMPTY: ResultPinsSnapshot = { workspaceId: "", status: "idle", pins: [], error: null, loadedOnce: false };
 
 let snapshot: ResultPinsSnapshot = EMPTY;
-let inflight: { workspaceId: string; controller: AbortController } | null = null;
+/** The running load. `stale` records a change announced while it ran, whose answer may predate that change. */
+let inflight: { workspaceId: string; controller: AbortController; stale: boolean } | null = null;
+/** When the last load answered (`Date.now()`), 0 before any. */
+let loadedAt = 0;
+let refreshEventsAttached = false;
 const listeners = new Set<() => void>();
 /** Version IDs a pin was made from in this tab, so surfaces showing an older version still see it as pinned. */
 const aliases = new Map<string, string>();
@@ -174,7 +183,8 @@ export function loadResultPins(workspaceId?: string | null): void {
   if (inflight?.workspaceId === id) return;
   inflight?.controller.abort();
   const controller = new AbortController();
-  inflight = { workspaceId: id, controller };
+  const load = { workspaceId: id, controller, stale: false };
+  inflight = load;
   const sameSpace = snapshot.workspaceId === id;
   publish({
     workspaceId: id,
@@ -185,16 +195,50 @@ export function loadResultPins(workspaceId?: string | null): void {
   });
   fetchResultPins(id, controller.signal)
     .then((pins) => {
-      if (inflight?.controller !== controller) return;
+      if (inflight !== load) return;
       inflight = null;
+      loadedAt = Date.now();
       publish({ workspaceId: id, status: "ready", pins: sortPins(pins), error: null, loadedOnce: true });
+      if (load.stale) loadResultPins(id);
     })
     .catch((error: unknown) => {
-      if (inflight?.controller !== controller) return;
+      if (inflight !== load) return;
       inflight = null;
       if (controller.signal.aborted) return;
       publish({ ...snapshot, workspaceId: id, status: "error", error });
     });
+}
+
+/**
+ * Reload the list on screen after a change elsewhere. A load already running for it may have been answered before the
+ * change, so it is repeated once it answers.
+ */
+function refreshResultPins(): void {
+  if (snapshot.status === "idle") return;
+  if (inflight?.workspaceId === snapshot.workspaceId) {
+    inflight.stale = true;
+    return;
+  }
+  loadResultPins(snapshot.workspaceId);
+}
+
+/** Another tab or device may have changed a pinned result while this tab was in the background. */
+function refreshOnReturn(): void {
+  if (Date.now() - loadedAt >= RESULT_PINS_RETURN_REFRESH_MS) refreshResultPins();
+}
+
+/**
+ * What reloads the list, once per tab: a pin or unpin on any surface, a pinned file, report or conversation that was
+ * trashed, restored, cleared or deleted (`RESULT_TARGETS_CHANGED_EVENT`), a finished Turn (it may have written a newer
+ * version or changed a report), and returning to the tab.
+ */
+const REFRESH_EVENTS = [RESULT_PINS_CHANGED_EVENT, RESULT_TARGETS_CHANGED_EVENT, CANVAS_CHANGED_EVENT] as const;
+
+function attachRefreshEvents(): void {
+  if (refreshEventsAttached || typeof window === "undefined") return;
+  refreshEventsAttached = true;
+  for (const name of REFRESH_EVENTS) window.addEventListener(name, refreshResultPins);
+  window.addEventListener("focus", refreshOnReturn);
 }
 
 function notifyResultPinsChanged(): void {
@@ -258,8 +302,8 @@ export interface ResultPinsView {
 }
 
 /**
- * The person's pins for a Space (the active Space when omitted). Loads on first use and on Space change, and reloads
- * when any surface pins or unpins. `enabled: false` reads nothing and never requests.
+ * The person's pins for a Space (the active Space when omitted). Loads on first use and on Space change, and reloads on
+ * the changes `REFRESH_EVENTS` names and on returning to the tab. `enabled: false` reads nothing and never requests.
  */
 export function useResultPins(
   workspaceId?: string | null,
@@ -276,14 +320,12 @@ export function useResultPins(
 
   useEffect(() => {
     if (!enabled) return;
-    const reload = () => loadResultPins(resolvedWorkspaceId(requested));
+    attachRefreshEvents();
     const reloadForSpace = () => {
       if (requested === null) loadResultPins(getActiveSpaceId());
     };
-    window.addEventListener(RESULT_PINS_CHANGED_EVENT, reload);
     window.addEventListener(WORKSPACE_CHANGED_EVENT, reloadForSpace);
     return () => {
-      window.removeEventListener(RESULT_PINS_CHANGED_EVENT, reload);
       window.removeEventListener(WORKSPACE_CHANGED_EVENT, reloadForSpace);
     };
   }, [enabled, requested]);
@@ -297,6 +339,12 @@ export function useResultPins(
 export function resetResultPinsForTests(): void {
   inflight?.controller.abort();
   inflight = null;
+  loadedAt = 0;
+  if (refreshEventsAttached) {
+    for (const name of REFRESH_EVENTS) window.removeEventListener(name, refreshResultPins);
+    window.removeEventListener("focus", refreshOnReturn);
+    refreshEventsAttached = false;
+  }
   aliases.clear();
   snapshot = EMPTY;
 }

@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
-from bowhead_core.deck_render_inputs import prepare_deck_render_inputs
 from bowhead_core.events import TurnEventBus
 from bowhead_core.subagent import SubagentProfile, SubagentRunner, _collect_canvas_export_deliverables
 from bowhead_core.subagent_return_tool import register_subagent_return_tool
@@ -178,26 +177,28 @@ async def test_template_limitation_precedes_materialization_and_artifact_writes(
     monkeypatch.setattr(document_runtime, "read_document_profile", lambda: "bowra-v1")
     uploaded = SimpleNamespace(id="art_template", filename="company.pptx", kind="upload", source="upload")
     store = SimpleNamespace(list_for_session=AsyncMock(return_value=[uploaded]), put_bytes=AsyncMock(), materialize_to_temp=AsyncMock())
-    canvas = SimpleNamespace(get_canvas_by_session=AsyncMock())
-    block = await prepare_deck_render_inputs(
-        canvas_store=canvas, artifact_store=store, session_id="s_documents", user_id="u_documents", mode="consultant"
-    )
+    block = await document_runtime.community_consultant_guidance(artifact_store=store, session_id="s_documents", user_id="u_documents")
     assert "needs_user_input" in block
     assert "do not generate any file" in block
     store.put_bytes.assert_not_awaited()
     store.materialize_to_temp.assert_not_awaited()
-    canvas.get_canvas_by_session.assert_not_awaited()
 
 
 async def test_fresh_deck_guidance_uses_real_contract_without_canvas(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(document_runtime, "read_document_profile", lambda: "bowra-v1")
-    store = SimpleNamespace(list_for_session=AsyncMock(return_value=[]), put_bytes=AsyncMock())
-    block = await prepare_deck_render_inputs(
-        canvas_store=None, artifact_store=store, session_id="s_documents", user_id="u_documents", mode="consultant"
-    )
+    generated = SimpleNamespace(id="art_deck", filename="deck.pptx", kind="deliverable", source="python_sandbox")
+    store = SimpleNamespace(list_for_session=AsyncMock(return_value=[generated]), put_bytes=AsyncMock())
+    block = await document_runtime.community_consultant_guidance(artifact_store=store, session_id="s_documents", user_id="u_documents")
     assert 'name="bowra-pptx",script="run.py"' in block
     assert '"operation":"create"' in block
     store.put_bytes.assert_not_awaited()
+
+
+async def test_consultant_guidance_is_community_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(document_runtime, "read_document_profile", lambda: "legacy")
+    store = SimpleNamespace(list_for_session=AsyncMock(return_value=[]))
+    assert await document_runtime.community_consultant_guidance(artifact_store=store, session_id="s_documents", user_id="u_documents") is None
+    store.list_for_session.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

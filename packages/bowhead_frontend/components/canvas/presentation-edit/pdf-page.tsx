@@ -13,7 +13,9 @@ export interface PdfPageLike {
     promise: Promise<void>;
     cancel: () => void;
   };
-  getTextContent: () => Promise<{ items: PdfTextLike[] }>;
+  getTextContent: () => Promise<{ items: Array<PdfTextLike & { fontName?: string }> }>;
+  /** Fonts resolved while drawing; with `fontExtraProperties` a font carries its PDF name. */
+  commonObjs?: { get: (id: string) => unknown };
 }
 
 export interface PdfDocumentLike {
@@ -32,7 +34,8 @@ export function usePdfDocument(data: ArrayBuffer | null): { pdf: PdfDocumentLike
       try {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-        task = pdfjs.getDocument({ data: data.slice(0) });
+        // Font names let edits on the slide take the deck's family and weight (design §13.3).
+        task = pdfjs.getDocument({ data: data.slice(0), fontExtraProperties: true });
         const pdf = await task.promise as unknown as PdfDocumentLike;
         if (!cancelled) setState({ data, pdf, failed: false });
       } catch {
@@ -49,10 +52,21 @@ export function usePdfDocument(data: ArrayBuffer | null): { pdf: PdfDocumentLike
 
 /** One page drawn at `width` CSS pixels; the canvas is sharp on high-density screens. */
 export function PdfPageCanvas({
-  pdf, pageNumber, width, label, className,
-}: { pdf: PdfDocumentLike | null; pageNumber: number; width: number; /** Without a label the page is decorative. */ label?: string; className?: string }) {
+  pdf, pageNumber, width, label, className, onDrawn,
+}: {
+  pdf: PdfDocumentLike | null;
+  pageNumber: number;
+  width: number;
+  /** Without a label the page is decorative. */
+  label?: string;
+  className?: string;
+  /** Called after each draw, with the canvas holding it. */
+  onDrawn?: (canvas: HTMLCanvasElement) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawn, setDrawn] = useState(false);
+  const onDrawnRef = useRef(onDrawn);
+  onDrawnRef.current = onDrawn;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!pdf || !canvas || width <= 0) return;
@@ -72,7 +86,10 @@ export function PdfPageCanvas({
         if (!context) return;
         task = page.render({ canvas, canvasContext: context, viewport });
         await task.promise;
-        if (!cancelled) setDrawn(true);
+        if (!cancelled) {
+          setDrawn(true);
+          onDrawnRef.current?.(canvas);
+        }
       } catch { /* A cancelled or failed draw leaves the previous frame; the editor reports load failures. */ }
     })();
     return () => {
@@ -102,7 +119,12 @@ export async function openPdfDocument(data: ArrayBuffer): Promise<{ pdf: PdfDocu
 }
 
 /** A page drawn only once it nears the viewport, for the phone's long list of slides. */
-export function LazyPdfPageCanvas(props: Parameters<typeof PdfPageCanvas>[0]) {
+/**
+ * Draws a page once it comes near view. `aspectRatio` (width / height) gives the placeholder its
+ * height before drawing; without it, a holder in an auto-height box is 0 px tall and every page
+ * counts as near.
+ */
+export function LazyPdfPageCanvas({ aspectRatio, ...props }: Parameters<typeof PdfPageCanvas>[0] & { aspectRatio?: number }) {
   const holderRef = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(() => typeof IntersectionObserver !== "function");
   useEffect(() => {
@@ -117,5 +139,9 @@ export function LazyPdfPageCanvas(props: Parameters<typeof PdfPageCanvas>[0]) {
     observer.observe(holder);
     return () => observer.disconnect();
   }, [near]);
-  return <div ref={holderRef} style={{ width: "100%", height: "100%" }}>{near ? <PdfPageCanvas {...props} /> : null}</div>;
+  return (
+    <div ref={holderRef} style={{ width: "100%", height: "100%", ...(near || !aspectRatio ? {} : { aspectRatio: String(aspectRatio) }) }}>
+      {near ? <PdfPageCanvas {...props} /> : null}
+    </div>
+  );
 }

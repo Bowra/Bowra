@@ -17,9 +17,6 @@ _ALLOWED_DIRECT_COMPARISONS = Counter(
         ("agents/lead_orchestrator.py", "profile == 'consultant'"): 1,
         ("agents/lead_orchestrator.py", "profile == 'marketing-analyst'"): 1,
         ("agents/lead_orchestrator.py", "profile == 'canvas-writer'"): 1,
-        ("deck_render_inputs.py", "mode == 'consultant'"): 1,
-        ("deck_render_inputs.py", "mode != 'consultant'"): 2,
-        ("deck_render_inputs.py", "i.arguments.get('profile') == 'consultant'"): 1,
         ("subagent.py", "profile in ('compute', 'consultant')"): 1,
         ("subagent.py", "getattr(profile, 'name', '') == 'marketing-analyst'"): 1,
         ("subagent.py", "profile_name in ('lead', 'analyst', 'compute')"): 1,
@@ -29,11 +26,6 @@ _ALLOWED_DIRECT_COMPARISONS = Counter(
         # 4f813582e and 6c135b78f: lookup template hierarchy and localized lookup rules.
         ("agents/agent_runner_adapter.py", "manifest.name == 'compute'"): 2,
         ("subagent.py", "profile.name == 'compute'"): 1,
-        # a3ac20de9 and 8554bb4f6: native new-deck delivery verification and receipts
-        # (the second deck_render_inputs.py `mode != 'consultant'` above is from a3ac20de9).
-        ("deck_render_tool.py", "get_current_peer_name() != 'consultant'"): 1,
-        ("subagent.py", "profile.name == 'consultant'"): 3,
-        ("subagent.py", "result.profile == 'consultant'"): 1,
         # 01afbedc9: default internal lookup read requirement for an explicit Datarc lookup.
         ("subagent.py", "profile == 'compute'"): 1,
         ("subagent_capability_resolver.py", "tool.risk in {'read', 'compute', 'artifact_write'}"): 1,

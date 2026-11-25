@@ -23,6 +23,7 @@ import zipfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any
 
 from lxml import etree
@@ -55,7 +56,8 @@ def is_presentation(mime: str | None, filename: str | None) -> bool:
 
 
 def feature_enabled() -> bool:
-    return os.environ.get(FEATURE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
+    """On unless the deployment sets ``FEATURE_PPTX_INLINE_EDIT=0`` (default on since 2026-11-25, the maintainer's decision)."""
+    return os.environ.get(FEATURE_ENV, "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class EditRefused(Exception):
@@ -474,6 +476,27 @@ def _cell_info(cell: Any) -> dict[str, Any]:
     return {"text": text, "editable": True, "reason": None, "mixed_style": _mixed_style(paragraphs[0]._p) if paragraphs else False}
 
 
+def _fractions(lengths: Sequence[Any]) -> list[float]:
+    """Each length as a share of their sum: table columns of the table's width, rows of its height."""
+    values = [max(0, int(length or 0)) for length in lengths]
+    total = sum(values)
+    if not total:
+        return [round(1 / len(values), 5) for _ in values] if values else []
+    return [round(value / total, 5) for value in values]
+
+
+def _slide_title(slide: Any) -> str | None:
+    """The text of the slide's title or centered-title placeholder, when it has one."""
+    try:
+        shape = slide.shapes.title
+    except (AttributeError, KeyError, ValueError):
+        return None
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return None
+    text = " ".join(shape.text_frame.text.split())
+    return text[:200] or None
+
+
 def build_inventory(data: bytes) -> dict[str, Any]:
     prs = _open(data)
     width, height = float(prs.slide_width or 1), float(prs.slide_height or 1)
@@ -499,11 +522,16 @@ def build_inventory(data: bytes) -> dict[str, Any]:
                     for p in element.shape.text_frame.paragraphs
                 ]
             elif element.kind == "table" and element.editable:
-                item["rows"] = [[_cell_info(cell) for cell in row.cells] for row in element.shape.table.rows]
+                table = element.shape.table
+                item["rows"] = [[_cell_info(cell) for cell in row.cells] for row in table.rows]
+                item["col_widths"] = _fractions([column.width for column in table.columns])
+                item["row_heights"] = _fractions([row.height for row in table.rows])
             elif element.kind == "chart" and element.editable:
                 item["chart"] = element.extra["chart"]
             items.append(item)
-        slides.append({"slide_id": slide.slide_id, "index": index, "inherited_text": _inherited_text(slide), "elements": items})
+        slides.append(
+            {"slide_id": slide.slide_id, "index": index, "title": _slide_title(slide), "inherited_text": _inherited_text(slide), "elements": items}
+        )
     return {"slide_width": int(width), "slide_height": int(height), "field_token": FIELD_TOKEN, "slides": slides}
 
 
@@ -704,3 +732,11 @@ def edited_filename(filename: str, language: str = "zh-CN") -> str:
     marker, fallback = _EDITED_MARKERS.get(language, _EDITED_MARKERS["en-US"])
     stem = _SUFFIX.sub("", filename or "").strip() or fallback
     return f"{stem}{marker}.pptx"
+
+
+def edited_copy_filename(filename: str, language: str = "zh-CN") -> str:
+    """The same marker for a revised copy of any uploaded file, keeping its extension (``报表（已修改）.xlsx``)."""
+    marker = _EDITED_MARKERS.get(language, _EDITED_MARKERS["en-US"])[0]
+    path = PurePosixPath(filename or "")
+    stem = path.stem.strip() if path.suffix else (filename or "").strip()
+    return f"{stem or 'file'}{marker}{path.suffix}"

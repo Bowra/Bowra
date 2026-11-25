@@ -149,3 +149,52 @@ test("the recipient opens a shared HTML result from the notification center", as
   await recipient.reload();
   await expect(recipient.getByRole("alert").filter({ hasText: messages.file_share.unavailable })).toBeVisible();
 });
+
+test("the recipient pins a shared file from its shared page", async ({ page }) => {
+  await mockAuthedApp(page);
+  await page.setViewportSize({ width: 1440, height: 860 });
+  const html = "<!doctype html><h1>Shared</h1>";
+  const changedAt = "2026-11-25T00:00:00Z";
+  const pinRequests: unknown[] = [];
+  let pins: unknown[] = [];
+  await page.route("**/api/v1/results/capabilities", (route) => route.fulfill({ json: {
+    dto_version: 1, workspace: true, complete_list: false, scale_nav: false, max_page_size: 50, interactive_html: true,
+  } }));
+  await page.route("**/api/v1/files/shared/art_shared_root/view", (route) => route.fulfill({
+    json: { filename: "board.html", mime: "text/html", size: 30, version_id: "art_shared_v5", version: 5 },
+  }));
+  await page.route("**/api/v1/files/shared/art_shared_root/content?version_id=art_shared_v5", (route) => route.fulfill({
+    contentType: "text/html", body: html,
+  }));
+  await page.route((url) => url.pathname === "/api/v1/result-pins", (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { items: pins } });
+    pinRequests.push(route.request().postDataJSON());
+    const pin = {
+      kind: "file", pin_id: "art_shared_root", artifact_id: "art_shared_v5", title: "board.html", mime: "text/html",
+      version_no: 5, session_id: null, opens: "shared_view", changed_at: changedAt, pinned_at: changedAt,
+    };
+    pins = [pin];
+    return route.fulfill({ json: pin });
+  });
+
+  await page.goto("/files/view/?file=art_shared_root");
+  await expect(page.getByRole("link", { name: messages.artifact_viewer.download, exact: true }))
+    .toHaveAttribute("href", /version_id=art_shared_v5$/);
+  // A file shared with the person is listed nowhere else, so its shared page pins it (result pins acceptance F4),
+  // by the version shown: the link's lineage root may name a pruned first version.
+  const more = page.getByRole("button", { name: messages.artifact_viewer.more_actions, exact: true });
+  await more.click();
+  await page.getByRole("menuitem", { name: messages.result_pins.pin, exact: true }).click();
+  await expect.poll(() => pinRequests).toEqual([{ kind: "file", id: "art_shared_v5" }]);
+  await expect(page.getByText(messages.result_pins.pinned_toast)).toBeVisible();
+  await more.click();
+  await expect(page.getByRole("menuitem", { name: messages.result_pins.unpin, exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto("/");
+  const row = page.locator("[data-result-pin='file:art_shared_root']");
+  await expect(row).toContainText("board.html");
+  await expect(row).toContainText("第 5 版");
+  await row.getByText("board.html").click();
+  await expect(page).toHaveURL(/\/files\/view\/?\?file=art_shared_root$/);
+});

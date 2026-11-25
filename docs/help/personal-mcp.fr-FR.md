@@ -10,6 +10,27 @@ Un service MCP distant permet à votre Agent privé d’utiliser des outils exte
 
 Les identifiants enregistrés ne sont pas relisibles. Laissez les champs vides pour les conserver lors d’une modification ; fournissez de nouveaux identifiants si vous changez la méthode. Bowra prend en charge MCP distant en HTTP(S), pas les commandes locales. Le cloud exige HTTPS public ; les déploiements internes acceptent les adresses internes. Utilisez des services de confiance et des identifiants aux droits minimaux.
 
+## Vous authentifier sur un service avec votre propre compte
+
+Certains services MCP ne fournissent pas de jeton et demandent de vous authentifier avec votre propre compte, par exemple Notion, Linear, Sentry ou n8n. Si votre déploiement le propose, choisissez **Se connecter au service** sous **Authentification**. Si vous laissez **Aucune authentification** et que le service demande une authentification, la boîte de dialogue bascule sur cette option et indique où vous vous authentifierez.
+
+1. Saisissez un nom et l’adresse MCP distante, puis choisissez **Continuer vers la connexion**.
+2. Authentifiez-vous sur le service et approuvez l’accès demandé. Certains services permettent de restreindre ce que Bowhead peut faire (par exemple en lecture seule) ; les outils disponibles ensuite suivent ce choix.
+3. De retour dans **Mes connexions**, sélectionnez les outils nécessaires et enregistrez. La connexion indique où vous vous êtes authentifié.
+
+Bowhead conserve votre authentification pour cette seule connexion et la renouvelle si nécessaire ; elle survit aux redémarrages et n’est montrée à personne. Si le service met fin à l’authentification (par exemple après une longue inactivité, ou parce que l’accès de Bowhead y a été retiré), la connexion indique que votre authentification a pris fin : choisissez **S’authentifier de nouveau**. Vos sélections d’outils et associations d’Agents sont conservées ; les outils dont la définition a changé doivent être sélectionnés de nouveau. D’ici là, vos Agents continuent avec leurs autres outils, et un appel aux outils de cette connexion n’est pas envoyé : l’Agent vous demande de vous authentifier de nouveau.
+
+Une authentification annulée ou inachevée affiche **Authentification non terminée** avec **Reprendre l’authentification**. Pour une connexion authentifiée, seul le nom peut être modifié ; pour une autre adresse, ajoutez une nouvelle connexion. À la suppression, Bowhead oublie votre authentification ; pour retirer aussi l’accès de Bowhead au service, supprimez-le des applications connectées du service.
+
+Certains services n’acceptent que les applications enregistrées par leur administrateur (par exemple GitHub, Google et Microsoft). Bowhead ne peut pas encore s’y authentifier ; utilisez un jeton personnel ou une clé d’API si le service en propose.
+
+| Situation                                                                       | Où se connecter                           | Compte vu par le service                                      |
+| ------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| L’équipe partage un compte de service géré par un administrateur                | Paramètres de l’équipe → Sources d’outils | L’authentification de l’administrateur, partagée par l’équipe |
+| Chaque personne doit agir en son nom et le service propose une authentification | Mes connexions → Se connecter au service  | Le vôtre                                                      |
+| Le service vous fournit un jeton personnel ou une clé d’API                     | Mes connexions → Bearer Token / API Key   | Le vôtre                                                      |
+| Slack                                                                           | Mes connexions → Connecter votre Slack    | Le vôtre, via l’application Slack de l’équipe                 |
+
 ## Connecter votre Slack
 
 Lorsque Slack est activé par l’administrateur et que le déploiement le permet, **Connecter mon Slack** apparaît dans **Mes connexions**. Autorisez avec votre propre compte Slack. La connexion et le jeton vous appartiennent uniquement ; propriétaires et administrateurs ne peuvent ni les consulter ni les utiliser.
@@ -39,4 +60,4 @@ Un service externe peut produire des changements irréversibles. Posséder une c
 
 ## Réparer, désactiver ou supprimer
 
-**Modifier la connexion / Actualiser les outils** répare l’authentification ou redécouvre les outils. L’actualisation efface les sélections et nécessite de confirmer de nouveau les associations concernées. Désactiver ou supprimer bloque les appels futurs ; un appel commencé peut se terminer. La suppression efface les identifiants et conserve seulement des traces minimales. Avant confirmation, la page liste les Agents privés encore associés. Si le résultat externe est inconnu, vérifiez-le dans le service avant d’approuver de nouveau la même action.
+**Modifier la connexion / Actualiser les outils** répare l’authentification ou redécouvre les outils. Lorsque le service refuse les identifiants d’une connexion, celle-ci indique que l’authentification a expiré ; vos Agents continuent avec leurs autres outils, et un appel aux outils de cette connexion n’est pas envoyé : l’Agent vous demande d’abord de mettre à jour les identifiants. L’actualisation efface les sélections et nécessite de confirmer de nouveau les associations concernées. Désactiver ou supprimer bloque les appels futurs ; un appel commencé peut se terminer. La suppression efface les identifiants et conserve seulement des traces minimales. Avant confirmation, la page liste les Agents privés encore associés. Si le résultat externe est inconnu, vérifiez-le dans le service avant d’approuver de nouveau la même action.

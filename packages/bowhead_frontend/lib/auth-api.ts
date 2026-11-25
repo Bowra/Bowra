@@ -75,6 +75,8 @@ export interface MeUser {
     shopify_plugin?: boolean;
     /** FEATURE_AGENT_EVAL_ALIGNMENT: the Coach alignment loop, point and suite review, held-out controls. */
     agent_eval_alignment?: boolean;
+    /** FEATURE_AGENT_RELEASE_BAR: the Agent workbench shows the release bar. */
+    agent_release_bar?: boolean;
     /** The notification center is on (`BOWHEAD_NOTIFICATION_CENTER`): shows the Notifications help. */
     notification_reach?: boolean;
     /** The notification center is on: scheduled runs may flag results; the task form offers "only when flagged". */

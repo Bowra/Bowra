@@ -3,18 +3,24 @@
 import json
 import logging
 import os
+import secrets
 from typing import Any, Literal
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx2
 from bowhead_core.llm_config_crypto import decrypt_llm_config
+from bowhead_core.oauth_token_broker import OAuthGrantRejected, OAuthRefreshUnavailable
 from bowhead_core.personal_mcp import (
     PersonalMcpError,
     PersonalMcpStore,
+    PersonalOAuthAuthStore,
     _safe,
     auth_headers,
     discover,
     normalize_endpoint,
+    personal_mcp_oauth_enabled,
+    personal_oauth_headers,
+    prime_personal_oauth,
 )
 from bowhead_core.tool_registry import ToolExecutionContext
 from bowhead_core.user_store import User, UserStore
@@ -55,15 +61,28 @@ async def _slack_connection(request: Request, user: User) -> Any:
     return connection
 
 
+# Sign-in errors carry a catalog code (config/i18n/errors) so the page shows actionable copy.
+_CODED_STATUS = {
+    "personal_mcp_sign_in_ended": 409,
+    "personal_mcp_sign_in_renewal_unavailable": 503,
+    "personal_mcp_oauth_endpoint_locked": 409,
+    "personal_mcp_oauth_sign_in_required": 400,
+    "personal_mcp_oauth_unavailable": 409,
+}
+
+
 def _error(exc: PersonalMcpError) -> HTTPException:
     code = str(exc)
+    if code in _CODED_STATUS:
+        return HTTPException(_CODED_STATUS[code], detail={"code": code})
     return HTTPException(404 if code == "personal_mcp_not_found" else 409 if code == "personal_mcp_version_conflict" else 400, code)
 
 
 class ConnectionInput(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     endpoint: str = Field(min_length=1, max_length=2048)
-    auth_type: Literal["none", "bearer", "api_key"] = "none"
+    # "oauth" only renames or refreshes a signed-in connection; signing in uses /oauth/authorize.
+    auth_type: Literal["none", "bearer", "api_key", "oauth"] = "none"
     value: SecretStr | None = None
     header: str = Field(default="X-API-Key", max_length=64)
     version: int | None = None
@@ -88,7 +107,7 @@ async def capabilities(request: Request, user: User = Depends(_current_user)) ->
     if enabled and _slack_personal_enabled():
         connection = await SlackStore(request.app.state.slack_store.db_path).by_team(user.team_id)
         slack = bool(connection and connection.status == "enabled" and connection.client_id and connection.client_secret_ref)
-    return {"enabled": enabled, "slack_connectable": slack}
+    return {"enabled": enabled, "slack_connectable": slack, "oauth_connectable": enabled and personal_mcp_oauth_enabled()}
 
 
 @router.post("/slack/connect", dependencies=[Depends(_enabled)])
@@ -171,6 +190,186 @@ async def slack_oauth_callback(request: Request, code: str = "", state: str = ""
     return _slack_callback_redirect("connected")
 
 
+_OAUTH_CALLBACK_PATH = "/api/v1/personal-mcp/oauth/callback"
+
+
+class OAuthAuthorizeInput(BaseModel):
+    """A new connection (name + endpoint) or an existing signed-in connection (id + version)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    endpoint: str | None = Field(default=None, min_length=1, max_length=2048)
+    connection_id: str | None = Field(default=None, max_length=64)
+    version: int | None = Field(default=None, ge=1)
+
+
+@router.post("/oauth/authorize", dependencies=[Depends(_enabled)])
+async def authorize_oauth(
+    body: OAuthAuthorizeInput,
+    request: Request,
+    user: User = Depends(_current_user),
+    registry: PersonalMcpStore = Depends(_registry),
+    users: UserStore = Depends(_store),
+) -> dict[str, str]:
+    """Start signing in to an MCP service with the member's own account.
+
+    Registers Bowhead with the service when needed, pins the full callback address in a single-use
+    pending row (team public-entry rules) and returns the service's authorization URL. Nothing is
+    sent to the service before the member opens that URL."""
+    if not personal_mcp_oauth_enabled():
+        raise HTTPException(404, detail={"code": "personal_mcp_oauth_unavailable"})
+    from bowhead_core.mcp_oauth import FernetTokenStorage, McpOAuthRegistrationRefused, begin_mcp_oauth
+    from mcp.client.auth.oauth2 import PKCEParameters
+
+    from bowhead_gateway.public_url import public_app_url_for_base, team_public_access_context
+
+    try:
+        public_context = await team_public_access_context(request, team_id=user.team_id)
+    except PublicEntryRequiredError:
+        raise HTTPException(409, detail={"code": "personal_mcp_public_entry_required"}) from None
+    redirect_uri = public_app_url_for_base(public_context.base_url, _OAUTH_CALLBACK_PATH)
+    created = False
+    try:
+        if body.connection_id:
+            connection = await registry.connection(user.id, body.connection_id)
+            if connection["auth_type"] != "oauth" or connection["status"] == "deleted":
+                raise PersonalMcpError("personal_mcp_not_found")
+            if body.version is not None and body.version != connection["version"]:
+                raise PersonalMcpError("personal_mcp_version_conflict")
+            identity, endpoint = str(connection["id"]), str(connection["endpoint"])
+        else:
+            if not body.name or not body.endpoint:
+                raise HTTPException(422, "name and endpoint are required for a new connection")
+            endpoint = normalize_endpoint(body.endpoint)
+            identity = await registry.create_oauth_connection(user.id, _safe(body.name), endpoint)
+            created = True
+    except PersonalMcpError as exc:
+        raise _error(exc) from None
+    host = urlsplit(endpoint).hostname or ""
+    pkce = PKCEParameters.generate()
+    state = secrets.token_urlsafe(32)
+    try:
+        begun = await begin_mcp_oauth(
+            endpoint,
+            FernetTokenStorage(PersonalOAuthAuthStore(registry), user.id, identity),
+            redirect_uri,
+            state=state,
+            code_challenge=pkce.code_challenge,
+        )
+        await users.create_mcp_oauth_pending(
+            state=state,
+            team_id=user.team_id,
+            source_id=identity,
+            code_verifier=pkce.code_verifier,
+            redirect_uri=redirect_uri,
+            token_endpoint=begun.token_endpoint,
+            client_id=begun.client_id,
+            resource=begun.resource,
+            created_by=user.id,
+            public_entry_id=public_context.entry_id,
+        )
+    except McpOAuthRegistrationRefused as exc:
+        await _discard_unstarted(registry, user.id, identity, created)
+        if exc.code == "invalid_redirect_uri":
+            raise HTTPException(422, detail={"code": "personal_mcp_callback_refused", "provider_host": host, "callback": redirect_uri}) from None
+        raise HTTPException(422, detail={"code": "personal_mcp_admin_app_required", "provider_host": host}) from None
+    except Exception as exc:
+        await _discard_unstarted(registry, user.id, identity, created)
+        logger.warning("personal_mcp.oauth_begin_failed error=%s", type(exc).__name__)
+        raise HTTPException(502, detail={"code": "personal_mcp_sign_in_start_failed", "provider_host": host}) from None
+    return {"authorize_url": begun.authorization_url, "connection_id": identity}
+
+
+async def _discard_unstarted(registry: PersonalMcpStore, owner: str, identity: str, created: bool) -> None:
+    """A connection created for a sign-in that never reached the service is removed again."""
+    if not created:
+        return
+    try:
+        await registry.configure(owner, identity, 1, "deleted", [])
+    except Exception as exc:  # noqa: BLE001 - the original failure is what the member needs to see
+        logger.warning("personal_mcp.oauth_discard_failed error=%s", type(exc).__name__)
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(request: Request, code: str = "", state: str = "", error: str = "") -> RedirectResponse:
+    """Return from the service's sign-in page: a top-level navigation authenticated only by the
+    single-use state, which binds the owner, Team and connection. Always redirects to My Connections."""
+    users: UserStore = request.app.state.user_store
+    try:
+        pending = await users.take_mcp_oauth_pending(state, personal=True) if state else None
+    except Exception:  # noqa: BLE001 - a database error fails closed to the notice, never 500
+        pending = None
+    if pending is None:
+        return _oauth_redirect("failed", "session_expired")
+    restore_oauth_public_access_context(str(pending["redirect_uri"]), callback_path=_OAUTH_CALLBACK_PATH)
+    owner, identity, team_id = str(pending.get("created_by") or ""), str(pending["source_id"]), str(pending["team_id"])
+    license_check = feature_license_checker(request.app, "mcp")
+    if not personal_mcp_oauth_enabled() or not owner or not await license_check(team_id):
+        return _oauth_redirect("failed", "unavailable", identity)
+    if error or not code:
+        return _oauth_redirect("failed", "authorization_denied", identity)
+    registry = PersonalMcpStore(users.db_path, license_check=license_check)
+    try:
+        connection = await registry.connection(owner, identity)
+    except PersonalMcpError:
+        return _oauth_redirect("failed", "connection_unavailable", identity)
+    if connection["auth_type"] != "oauth" or connection["status"] == "deleted":
+        return _oauth_redirect("failed", "connection_unavailable", identity)
+    from bowhead_core.mcp_oauth import FernetTokenStorage, exchange_mcp_oauth_code
+
+    try:
+        token = await exchange_mcp_oauth_code(
+            FernetTokenStorage(PersonalOAuthAuthStore(registry), owner, identity),
+            code=code,
+            code_verifier=str(pending["code_verifier"]),
+            redirect_uri=str(pending["redirect_uri"]),
+            token_endpoint=str(pending["token_endpoint"]),
+            client_id=str(pending["client_id"]),
+            resource=pending.get("resource"),
+        )
+    except Exception as exc:  # noqa: BLE001 - provider text never reaches the page
+        logger.warning("personal_mcp.oauth_exchange_failed error=%s", type(exc).__name__)
+        return _oauth_redirect("failed", "oauth_exchange_failed", identity)
+    prime_personal_oauth(registry, owner, identity, token.access_token, token.expires_in)
+    again = connection["status"] != "authorizing"
+    try:
+        tools = await discover(str(connection["endpoint"]), {"Authorization": f"Bearer {token.access_token}"})
+    except PersonalMcpError:
+        tools = None
+    try:
+        latest = await registry.connection(owner, identity)
+        if tools is None:
+            # Signed in, but the tool list could not be read: keep the tools and selections the
+            # connection already has, and let the member refresh the list later.
+            kept = [row["id"] for row in await registry.rows("SELECT id FROM personal_mcp_tool WHERE connection_id=? AND selected=1", (identity,))]
+            await registry.configure(owner, identity, int(latest["version"]), "ready", kept)
+            return _oauth_redirect("failed", "tool_discovery_failed", identity)
+        # Signing in again keeps the selection and Agent bindings of unchanged tools (decision Q1).
+        await registry.save_connection(
+            owner,
+            str(latest["name"]),
+            str(latest["endpoint"]),
+            "oauth",
+            None,
+            tools,
+            connection_id=identity,
+            expected_version=int(latest["version"]),
+            keep_unchanged=again,
+        )
+    except Exception as exc:  # noqa: BLE001 - the sign-in is stored; the page explains how to continue
+        logger.warning("personal_mcp.oauth_complete_failed error=%s", type(exc).__name__)
+        return _oauth_redirect("failed", "connection_unavailable", identity)
+    return _oauth_redirect("connected", "signed_in_again" if again else "signed_in", identity)
+
+
+def _oauth_redirect(result: Literal["connected", "failed"], reason: str, connection_id: str = "") -> RedirectResponse:
+    query = {"mcp_oauth": result, "mcp_oauth_reason": reason}
+    if connection_id:
+        query["connection"] = connection_id
+    from bowhead_gateway.public_url import oauth_return_path
+
+    return RedirectResponse(oauth_return_path(f"/connections/?{urlencode(query)}", callback_path=_OAUTH_CALLBACK_PATH), status_code=303)
+
+
 def _slack_callback_redirect(result: Literal["connected", "failed"], reason: str = "") -> RedirectResponse:
     query = {"slack": result}
     if reason:
@@ -190,13 +389,14 @@ async def connections(response: Response, user: User = Depends(_current_user), r
 
 async def _save(body: ConnectionInput, user: User, registry: PersonalMcpStore, identity: str | None = None) -> dict[str, Any]:
     try:
-        credentials: dict[str, str] = {}
+        credentials: dict[str, str] | None = {}
         previous: dict[str, str] = {}
+        old: dict[str, Any] | None = None
         if identity:
             old = await registry.connection(user.id, identity)
             if body.version != old["version"] or old["status"] == "deleted":
                 raise PersonalMcpError("personal_mcp_version_conflict")
-            if body.value is None and body.auth_type == old["auth_type"]:
+            if body.value is None and body.auth_type == old["auth_type"] and old["auth_type"] != "oauth":
                 credentials = registry.unseal(user.id, identity, "credentials", old["auth_cipher"])
             previous = {
                 tool["remote_name"]: tool["schema_digest"]
@@ -204,13 +404,32 @@ async def _save(body: ConnectionInput, user: User, registry: PersonalMcpStore, i
                     "SELECT remote_name,schema_digest FROM personal_mcp_tool WHERE connection_id=? AND schema_digest<>''", (identity,)
                 )
             }
-        if body.value is not None:
-            credentials = {"value": body.value.get_secret_value(), "header": body.header}
-        if body.auth_type == "none":
-            credentials = {}
         endpoint = normalize_endpoint(body.endpoint)
-        headers = auth_headers(body.auth_type, credentials)
-        tools = await discover(endpoint, headers)
+        if body.auth_type == "oauth":
+            # A signed-in connection is renamed or rediscovered here; its sign-in stays as it is.
+            if old is None or old["auth_type"] != "oauth":
+                raise PersonalMcpError("personal_mcp_oauth_sign_in_required")
+            if endpoint != old["endpoint"]:
+                raise PersonalMcpError("personal_mcp_oauth_endpoint_locked")
+            try:
+                headers = await personal_oauth_headers(registry, user.id, old["id"], endpoint)
+            except OAuthGrantRejected:
+                raise PersonalMcpError("personal_mcp_sign_in_ended") from None
+            except OAuthRefreshUnavailable:
+                raise PersonalMcpError("personal_mcp_sign_in_renewal_unavailable") from None
+            credentials = None
+        else:
+            if body.value is not None:
+                credentials = {"value": body.value.get_secret_value(), "header": body.header}
+            if body.auth_type == "none":
+                credentials = {}
+            headers = auth_headers(body.auth_type, credentials or {})
+        try:
+            tools = await discover(endpoint, headers)
+        except PersonalMcpError as exc:
+            if str(exc) == "personal_mcp_discovery_failed" and body.auth_type == "none" and personal_mcp_oauth_enabled():
+                await _offer_sign_in(endpoint)
+            raise
         connection_id = await registry.save_connection(
             user.id, _safe(body.name), endpoint, body.auth_type, credentials, tools, connection_id=identity, expected_version=body.version
         )
@@ -223,6 +442,22 @@ async def _save(body: ConnectionInput, user: User, registry: PersonalMcpStore, i
         return {"connection_id": connection_id, "connections": await registry.connections(user.id), "changes": changes}
     except PersonalMcpError as exc:
         raise _error(exc) from None
+
+
+async def _offer_sign_in(endpoint: str) -> None:
+    """Without a credential, an unreachable tool list may mean the service wants a sign-in.
+
+    Only probed when no credential was supplied: a refused token or API key keeps its own error
+    (116 finding for team sources: a wrong token was reported as "needs OAuth")."""
+    from bowhead_core.mcp_oauth import probe_mcp_oauth_details
+
+    probe = await probe_mcp_oauth_details(endpoint)
+    if not probe.needs_oauth:
+        return
+    host = probe.provider_host or ""
+    if probe.registration_supported is False:
+        raise HTTPException(422, detail={"code": "personal_mcp_admin_app_required", "provider_host": host})
+    raise HTTPException(409, detail={"code": "personal_mcp_needs_oauth", "provider_host": host})
 
 
 @router.post("", dependencies=[Depends(_enabled)])

@@ -11,6 +11,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState, type ForwardedRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 import {
   BadgeCheck,
@@ -90,11 +91,40 @@ import { CoachCIPanel } from "./coach-ci-panel";
 import { AgentThisChangeCard, testStateLabelKey } from "./agent-this-change-card";
 import { AttemptPointVerdicts, PointCalibrationNotices, UnmetPointsList, quotedToolNames } from "./agent-eval-point-verdicts";
 import { Markdown } from "@/lib/md";
-import { pendingProposals } from "@/lib/agent-draft-changes";
+import { pendingProposals, summarizeDraftChanges } from "@/lib/agent-draft-changes";
 import type { CiMerge } from "@/lib/agent-ci-merges";
 import { ciRunTimeline, type CiTimelineStep } from "@/lib/agent-ci-timeline";
+import { AgentReleaseBar, type ReleaseBarActionView } from "./agent-release-bar";
+import { releaseBarState, type ReleaseBarAction } from "./release-bar-state";
 
 const ACTIVE_EXECUTION = new Set(["queued", "running", "finalizing"]);
+
+/** What the page gives the release bar besides the workbench facts (FEATURE_AGENT_RELEASE_BAR). */
+export interface ReleaseBarHost {
+  /** Where the bar renders: above the tabs, so it stays the same on every tab. */
+  slot: HTMLElement | null;
+  /** The draft's audience is not private (with no draft, the live audience). */
+  shared: boolean;
+  liveAudience: "private" | "custom" | "teamwide";
+  /** Unsaved Configure edits; the bar's first job is then to save them. */
+  dirty: boolean;
+  /** Configure can't be saved yet (a required setting is missing); the bar says so instead of offering Save. */
+  saveBlocked: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onDiscard: () => void;
+  onCopyLink: () => void;
+  /** "canvas": a band at the top of the Canvas-hosted editor, whose own save bar keeps saving and discarding. */
+  variant?: "page" | "canvas";
+}
+
+/** The reviewer's reasons (agent-release-review.tsx), named with the reviewer's own labels. */
+const REJECTION_REASON_KEYS: Record<string, string> = {
+  needs_changes: "release_reject_needs_changes",
+  risk_not_justified: "release_reject_risk",
+  audience_too_broad: "release_reject_audience",
+  insufficient_evidence: "release_reject_evidence",
+};
 /** Risk reasons that stand for unmet expected points; the acknowledgement lists those points (R28). */
 const POINT_REASONS = new Set(["point_regression", "point_unmet"]);
 
@@ -473,6 +503,7 @@ export function AgentVersionValidation({
   suitesRefreshKey = 0,
   onAddCases,
   onTestState,
+  releaseBar = null,
 }: {
   agentId: string;
   agentName: string;
@@ -499,13 +530,19 @@ export function AgentVersionValidation({
   /**
    * "release": the Release tab (rail, test card with its details, case changes, Coach requests).
    * "evaluate": the same test card above the evaluation suites; details stay on Release.
+   * "bar": only the release bar and its dialogs (Configure, while FEATURE_AGENT_RELEASE_BAR is on).
    */
-  surface?: "release" | "evaluate";
+  surface?: "release" | "evaluate" | "bar";
   /** Bumped when the Owner saves the suite on this page; the card rereads the cases (the "no cases" state ends). */
   suitesRefreshKey?: number;
   /** Evaluate: start a case in the editor below (the "no cases" card's primary action). */
   onAddCases?: () => void;
   onTestState?: (state: TestChangeState) => void;
+  /**
+   * FEATURE_AGENT_RELEASE_BAR: render the release bar into `slot` (above the tabs) with this card's actions and
+   * dialogs; the card then leaves out the buttons the bar offers, so the page has one primary action.
+   */
+  releaseBar?: ReleaseBarHost | null;
 }) {
   const t = useTranslations("agents_marketplace");
   const format = useCiFormat();
@@ -832,17 +869,20 @@ export function AgentVersionValidation({
   const coachAwaiting = coachPending > 0;
   // Spec 7: on a phone the view's single primary action docks to the bottom edge. While Coach awaits
   // consent its "Allow and start" is that primary, so the test card does not dock.
-  const dock = coachAwaiting || evaluate ? undefined : "primary";
+  const barOn = releaseBar !== null;
+  const dock = barOn || coachAwaiting || evaluate ? undefined : "primary";
+  /** With the bar on it holds the page's primary action, so the card's own buttons step down to secondary. */
+  const pv = (variant: "primary" | "secondary" | "ghost"): "primary" | "secondary" | "ghost" => (barOn && variant === "primary" ? "secondary" : variant);
   const viewChanges = () => {
     setChangesOpen(true);
     requestAnimationFrame(() => changesRef.current?.focus());
   };
   const canAct = !readOnly;
-  const testButton = (label: "version_test_action" | "version_test_again" | "version_test_again_after_fix", variant: "primary" | "secondary" = "primary") => canAct ? (
+  const testButton = (label: "version_test_action" | "version_test_again" | "version_test_again_after_fix", variant: "primary" | "secondary" = "primary") => canAct && !barOn ? (
     <Button variant={variant} disabled={busy !== null || workspaceLoading || !workspaceId} loading={busy === "test"} onClick={() => void test()}>{t(label)}</Button>
   ) : null;
   /** Private Agents: "Release as vN" in every result state; "Release as vN anyway" after a real regression. */
-  const releaseButton = (variant: "primary" | "secondary" | "ghost" = "secondary") => canReleasePrivately ? (
+  const releaseButton = (variant: "primary" | "secondary" | "ghost" = "secondary") => canReleasePrivately && !barOn ? (
     <Button variant={variant} disabled={busy !== null || workspaceLoading || !workspaceId} loading={busy === "activate"} onClick={() => setReleasing(true)}>
       {t(privateWarning ? "version_release_anyway_action" : "version_release_action", { candidate: sequenceLabel(releaseSeq) })}
     </Button>
@@ -853,6 +893,111 @@ export function AgentVersionValidation({
       {canAct && !workspaceLoading && !workspaceId ? <p className="am-ci-note">{t("version_workspace_required")}</p> : null}
     </>
   );
+
+  // Release bar (FEATURE_AGENT_RELEASE_BAR): this card's state and actions, shown once above the tabs.
+  const barState = releaseBar ? releaseBarState({
+    workbench,
+    kind,
+    test: state,
+    hasOwnerCases,
+    blockedByRegression: regressed,
+    dirty: releaseBar.dirty,
+    archived: false,
+    shared: releaseBar.shared,
+  }) : null;
+  const onResultsTab = surface === "release";
+  const showResults = () => {
+    if (onResultsTab) viewChanges();
+    else onOpenRelease?.();
+  };
+  const barNext = sequenceLabel(privateRelease ? releaseSeq : candidateSeq);
+  const barValues = { live: sequenceLabel(live), next: barNext };
+  const barStatus = (() => {
+    if (!barState || !releaseBar) return "";
+    if (barState.id === "testing") {
+      return progress
+        ? t("release_bar_status_testing", { completed: progress.cases.completed, total: progress.cases.total })
+        : t("release_bar_status_testing_preparing");
+    }
+    if (barState.id === "declined") {
+      const reasonKey = REJECTION_REASON_KEYS[workbench.latest_decision?.reason_code ?? ""] ?? "release_reject_needs_changes";
+      return t("release_bar_status_declined", { reason: t(reasonKey as never) });
+    }
+    if (barState.id === "released_shared") {
+      return t("release_bar_status_released_shared", { ...barValues, audience: t(`release_audience_${releaseBar.liveAudience}` as never) });
+    }
+    return t(`release_bar_status_${barState.id}` as never, barValues as never);
+  })();
+  const barMeta = (() => {
+    if (!barState || !releaseBar || barState.id === "no_change") return null;
+    if (barState.id === "unsaved") {
+      return t(releaseBar.saveBlocked ? "release_bar_meta_unsaved_blocked" : releaseBar.shared ? "release_bar_meta_unsaved_shared" : "release_bar_meta_unsaved", barValues);
+    }
+    if (barState.id === "testing") return t(releaseBar.shared ? "release_bar_meta_testing_shared" : "release_bar_meta_testing");
+    return t(`release_bar_meta_${barState.id}` as never, barValues as never);
+  })();
+  const testDisabled = busy !== null || workspaceLoading || !workspaceId || readOnly;
+  const addCasesTarget = onAddCases ?? onOpenEvaluate;
+  const decision = workbench.latest_decision;
+  const ownsSave = releaseBar?.variant !== "canvas";
+  const barActions: Partial<Record<ReleaseBarAction, ReleaseBarActionView>> = releaseBar ? {
+    ...(ownsSave ? {
+      save: { label: t("release_bar_action_save"), onSelect: releaseBar.onSave, loading: releaseBar.saving, disabled: releaseBar.saveBlocked || releaseBar.saving },
+      discard: { label: t("release_bar_action_discard"), onSelect: releaseBar.onDiscard, disabled: releaseBar.saving },
+    } : {}),
+    release: {
+      label: t("release_bar_action_release", { next: barNext }),
+      onSelect: () => setReleasing(true),
+      loading: busy === "activate",
+      disabled: busy !== null || readOnly || (privateRelease ? !canReleasePrivately : !workbench.primary_action.enabled),
+    },
+    submit: { label: t("release_bar_action_submit"), onSelect: () => setReleasing(true), loading: busy === "submit", disabled: busy !== null || readOnly || !workbench.primary_action.enabled },
+    test: { label: t("release_bar_action_test"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
+    retest: { label: t("release_bar_action_retest"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
+    test_safety_only: { label: t("release_bar_action_test_safety_only"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
+    ...(addCasesTarget ? { add_cases: { label: t("release_bar_action_add_cases"), onSelect: addCasesTarget } } : {}),
+    ...(onOpenConfig ? {
+      edit_config: { label: t("release_bar_action_edit_config"), onSelect: onOpenConfig },
+      rebase: { label: t("release_bar_action_rebase"), onSelect: onOpenConfig },
+    } : {}),
+    accept_risks: {
+      label: t("release_bar_action_accept_risks"),
+      onSelect: () => {
+        if (!onResultsTab) {
+          onOpenRelease?.();
+          return;
+        }
+        const title = document.getElementById(cardTitleId);
+        title?.closest("section")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        title?.focus({ preventScroll: true });
+      },
+    },
+    view_results: { label: t("release_bar_action_view_results"), onSelect: showResults },
+    view_regressions: { label: t("release_bar_action_view_regressions"), onSelect: showResults },
+    view_reason: { label: t("release_bar_action_view_reason"), onSelect: showResults },
+    ...(onAskCoach && canAct ? { ask_coach_fix: { label: t("release_bar_action_ask_coach_fix"), onSelect: () => onAskCoach(reasons.map((code) => t(gateReasonKey(code) as never))) } } : {}),
+    ...(execution?.can_cancel && canAct ? { stop_test: { label: t("release_bar_action_stop_test"), onSelect: () => void cancelComparison(), loading: busy === "cancel", disabled: busy !== null } } : {}),
+    ...(candidate && candidate.state !== "approved" && canAct ? { withdraw: { label: t("release_bar_action_withdraw"), onSelect: () => void withdraw(), loading: busy === "withdraw", disabled: busy !== null } } : {}),
+    ...(decision ? {
+      view_decision: {
+        label: t("release_bar_action_view_decision"),
+        onSelect: () => window.location.assign(appPath(`/agents/manage/?release_candidate=${encodeURIComponent(decision.candidate_id)}&agent_id=${encodeURIComponent(agentId)}`)),
+      },
+    } : {}),
+    copy_link: { label: t("release_bar_action_copy_link"), onSelect: releaseBar.onCopyLink },
+    copy_diagnostics: { label: t("release_bar_action_copy_diagnostics"), onSelect: () => void copyDiagnosticRecord(diagnostics(), t("version_copy_diagnostics_prompt")) },
+  } : {};
+  const bar = barState && releaseBar?.slot ? createPortal(
+    <AgentReleaseBar
+      state={barState}
+      status={barStatus}
+      meta={barMeta}
+      results={barState.resultsLink ? { label: t("release_bar_results"), onSelect: showResults } : null}
+      actions={barActions}
+      variant={releaseBar?.variant ?? "page"}
+    />,
+    releaseBar.slot,
+  ) : null;
 
   const card = (() => {
     const head = (props: Parameters<typeof CiCardHead>[0]) => <CiCardHead titleId={cardTitleId} {...props} />;
@@ -870,7 +1015,7 @@ export function AgentVersionValidation({
         return <>
           {head({ icon: <ListChecks size={16} />, title: t("version_test_no_cases_title"), body: t("version_test_no_cases_body") })}
           <div className="am-ci-acts" data-dock={dock}>
-            {addCases && canAct ? <Button variant="primary" onClick={addCases}>{t("version_test_add_cases")}</Button> : null}
+            {addCases && canAct ? <Button variant={pv("primary")} onClick={addCases}>{t("version_test_add_cases")}</Button> : null}
             {testButton("version_test_action", addCases && canAct ? "secondary" : "primary")}
             {releaseButton(addCases && canAct ? "ghost" : "secondary")}
           </div>
@@ -912,7 +1057,7 @@ export function AgentVersionValidation({
           ) : elapsed !== null && execution ? (
             <p className="am-ci-meta"><span>{t("version_progress_elapsed", { value: format.elapsed(elapsed) })}</span></p>
           ) : null}
-          {execution?.can_cancel && canAct ? (
+          {execution?.can_cancel && canAct && !barOn ? (
             <div className="am-ci-acts">
               <Button variant="ghost" disabled={busy !== null} loading={busy === "cancel"} onClick={() => void cancelComparison()}>{t("version_test_stop")}</Button>
             </div>
@@ -976,7 +1121,7 @@ export function AgentVersionValidation({
           <div className="am-ci-acts" data-dock={dock}>
             {retryHelps ? testButton("version_test_again") : null}
             {/* Testing again can't run a Tool evaluation can't run: the fix is the case's point (on Evaluate, right below). */}
-            {!retryHelps && toolCannotRun && onOpenEvaluate && !evaluate ? <Button variant="primary" onClick={onOpenEvaluate}>{t("version_test_open_points")}</Button> : null}
+            {!retryHelps && toolCannotRun && onOpenEvaluate && !evaluate ? <Button variant={pv("primary")} onClick={onOpenEvaluate}>{t("version_test_open_points")}</Button> : null}
             {!retryHelps && !toolCannotRun && !usedToolCannotRun ? <>
               {modelsFix ? <ModelsSettingsLink /> : null}
               {dataSourceFix ? <DataSourceSettingsLink /> : null}
@@ -992,7 +1137,7 @@ export function AgentVersionValidation({
         return <>
           {head({ icon: <TriangleAlert size={16} />, tone: "warning", title: t("version_test_risks_title", { count: reasons.length }), body: t(privateRelease ? "version_test_risks_body_private" : "version_test_risks_body") })}
           {evaluate ? (
-            onOpenRelease ? <div className="am-ci-acts"><Button variant="primary" onClick={onOpenRelease}>{t("version_test_risks_open_release")}</Button></div> : null
+            onOpenRelease ? <div className="am-ci-acts"><Button variant={pv("primary")} onClick={onOpenRelease}>{t("version_test_risks_open_release")}</Button></div> : null
           ) : <>
             <ReasonList codes={reasons} tone="warn" changes={changes} live={live} onOpenCase={setAnswersFor} />
             {candidate && changesExecutionId && reasons.some((code) => POINT_REASONS.has(code)) ? (
@@ -1016,7 +1161,7 @@ export function AgentVersionValidation({
             )) : null}
             {canAct && !privateRelease ? (
               <div className="am-ci-acts" data-dock={dock}>
-                <Button variant="primary" disabled={busy !== null || !workbench.primary_action.enabled || !reasons.length || !reasons.every((code) => notes[code]?.trim())} loading={busy === "override"} onClick={recordRisks}>{t("version_accept_risks")}</Button>
+                <Button variant={pv("primary")} disabled={busy !== null || !workbench.primary_action.enabled || !reasons.length || !reasons.every((code) => notes[code]?.trim())} loading={busy === "override"} onClick={recordRisks}>{t("version_accept_risks")}</Button>
               </div>
             ) : null}
           </>}
@@ -1039,7 +1184,7 @@ export function AgentVersionValidation({
           })}
           {!evaluate ? <ReasonList codes={reasons} tone="neg" changes={changes} live={live} onOpenCase={setAnswersFor} onViewChanges={changes ? viewChanges : undefined} agentId={agentId} candidateRevisionId={workbench.candidate_identity?.revision_id} /> : null}
           <div className="am-ci-acts" data-dock={dock}>
-            {onAskCoach && canAct ? (
+            {onAskCoach && canAct && !barOn ? (
               <Button variant="primary" onClick={() => onAskCoach(reasons.map((code) => t(gateReasonKey(code) as never)))}>{t("version_ask_coach_fix")}</Button>
             ) : null}
             {evaluate && onOpenRelease ? <Button variant="secondary" onClick={onOpenRelease}>{t(regressed ? "version_test_view_details" : "version_test_view_failures")}</Button> : null}
@@ -1063,7 +1208,7 @@ export function AgentVersionValidation({
           {submitAction ? <p className="am-ci-note">{t("version_card_ready_submit_note", { live: sequenceLabel(live) })}</p> : null}
           {privateRelease ? (
             canReleasePrivately ? <div className="am-ci-acts" data-dock={dock}>{releaseButton("primary")}</div> : null
-          ) : canAct ? (
+          ) : canAct && !barOn ? (
             <div className="am-ci-acts" data-dock={dock}>
               <Button variant="primary" disabled={busy !== null || !workbench.primary_action.enabled} loading={busy === "activate" || busy === "submit"} onClick={() => setReleasing(true)}>
                 {submitAction ? t("version_submit_review", { candidate: sequenceLabel(candidateSeq) }) : t("version_release_action", { candidate: sequenceLabel(candidateSeq) })}
@@ -1075,7 +1220,7 @@ export function AgentVersionValidation({
       case "review":
         return <>
           {head({ icon: <Clock size={16} />, tone: "warning", title: t("version_test_in_review_title"), body: t("version_card_review_body", { live: sequenceLabel(live) }) })}
-          {candidate && candidate.state !== "approved" && canAct ? (
+          {candidate && candidate.state !== "approved" && canAct && !barOn ? (
             <div className="am-ci-acts" data-dock={dock}>
               <Button variant="secondary" className="settings-button--destructive-text" disabled={busy !== null} loading={busy === "withdraw"} onClick={() => void withdraw()}>{t("version_withdraw_candidate")}</Button>
             </div>
@@ -1086,13 +1231,14 @@ export function AgentVersionValidation({
           {head({ icon: <TriangleAlert size={16} />, tone: "warning", title: t("version_card_rebase_title", { live: sequenceLabel(live) }), body: t("version_card_rebase_body", { live: sequenceLabel(live) }) })}
           {onOpenConfig ? (
             <div className="am-ci-acts" data-dock={dock}>
-              <Button variant="primary" onClick={onOpenConfig}>{t("version_fix_in_draft")}</Button>
+              <Button variant={pv("primary")} onClick={onOpenConfig}>{t("version_fix_in_draft")}</Button>
             </div>
           ) : null}
         </>;
     }
   })();
 
+  const releaseChanges = barOn ? summarizeDraftChanges(workbench.draft_changes ?? []) : [];
   const testLine = privateRelease ? releaseTestLine(privateRelease.test_state, privateRelease.reason_codes, changes, (key, values) => t(key as never, values as never)) : null;
   const releaseDialog = releasing ? (
     <Dialog
@@ -1113,6 +1259,24 @@ export function AgentVersionValidation({
       <p className="am-ci-note">{privateRelease
         ? t(privateRelease.test_state === "passed" ? "version_test_release_body_private" : "version_release_body_private", { candidate: sequenceLabel(releaseSeq), live: sequenceLabel(live) })
         : submitAction ? t("version_card_ready_submit_note", { live: sequenceLabel(live) }) : t(candidate?.audience_mode === "private" ? "version_test_release_body_private" : candidate?.audience_mode === "custom" ? "version_test_release_body_custom" : "version_test_release_body", { candidate: sequenceLabel(candidateSeq), live: sequenceLabel(live) })}</p>
+      {/* Release bar on: name what this release carries before the Owner confirms (design §13.3, ADP comparison #6). */}
+      {barOn && releaseChanges.length ? (
+        <div className="am-ci-fld am-rb-dialog-changes">
+          <span className="am-rb-dialog-changes-title">{t("release_bar_dialog_changes")}</span>
+          <ul>
+            {releaseChanges.map((item) => (
+              <li key={item.section}>
+                {t("version_change_section_count", { section: t(`version_config_section_${item.section}` as never), count: item.count })}
+                {item.sources.map((source) => (
+                  <span key={source.tag} className="am-change-source" data-source={source.tag}>
+                    {t("version_change_source_count", { source: t(`version_change_source_${source.tag}` as never), count: source.count })}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {(
         <div className="am-ci-fld">
           <label htmlFor={`${cardTitleId}-note`}>{t("version_release_note_label")}</label>
@@ -1177,9 +1341,20 @@ export function AgentVersionValidation({
     />
   ) : null;
 
+  if (surface === "bar") {
+    return (
+      <>
+        {dialog}
+        {releaseDialog}
+        {bar}
+      </>
+    );
+  }
+
   if (evaluate) {
     return (
       <>
+        {bar}
         {dialog}
         {releaseDialog}
         <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
@@ -1211,11 +1386,12 @@ export function AgentVersionValidation({
 
   return (
     <div className="am-ci-split" data-coach={coachVisible ? "true" : undefined}>
+      {bar}
       {dialog}
       {releaseDialog}
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <div className="am-ci-col">
-        {showChangeSummary && workbench.draft_changes ? (
+        {showChangeSummary && !barOn && workbench.draft_changes ? (
           <AgentThisChangeCard
             changes={workbench.draft_changes}
             state={state}

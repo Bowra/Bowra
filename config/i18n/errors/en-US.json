@@ -744,5 +744,15 @@
   "tool_execution_timeout": "This operation timed out and its result is not confirmed. Check the recorded outcome before repeating an operation that changes data.",
   "tool_execution_unknown": "The operation has no confirmed outcome. Verify whether it took effect before attempting it again.",
   "tool_execution_failed": "The tool could not complete this step. Review its recorded result and copy the diagnostics for your administrator if the cause is unavailable.",
-  "tool_delivery_review_required": "Delivery could not yet be verified. The agent must account for the failed steps and identify any unmet requirements before finishing."
+  "tool_delivery_review_required": "Delivery could not yet be verified. The agent must account for the failed steps and identify any unmet requirements before finishing.",
+  "personal_mcp_needs_oauth": "This service asks you to sign in at {provider_host}.",
+  "personal_mcp_admin_app_required": "{provider_host} only accepts apps registered by its administrator, so Bowhead cannot sign in to it yet. Use a personal token or API key if the service offers one.",
+  "personal_mcp_callback_refused": "{provider_host} did not accept Bowhead's return address {callback}. If that address is not HTTPS, ask a team owner to register an HTTPS public entry, then try again.",
+  "personal_mcp_public_entry_required": "Bowhead could not determine the address the service should return you to. Ask a team owner to register a public entry, then try again.",
+  "personal_mcp_sign_in_start_failed": "Bowhead could not start signing in to {provider_host}. Check the address and try again; if it keeps failing, check the service's status.",
+  "personal_mcp_sign_in_ended": "Your sign-in to this service has ended. Sign in again to use this connection.",
+  "personal_mcp_sign_in_renewal_unavailable": "The service did not respond while Bowhead renewed your sign-in. Your sign-in is still valid; try again later.",
+  "personal_mcp_oauth_endpoint_locked": "A signed-in connection keeps its address. To use another address, add a new connection.",
+  "personal_mcp_oauth_sign_in_required": "This connection is created by signing in to the service. Choose Continue to Sign In.",
+  "personal_mcp_oauth_unavailable": "Sign-in connections are not available on this deployment."
 }

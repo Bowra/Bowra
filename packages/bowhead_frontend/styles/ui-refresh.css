@@ -3214,10 +3214,13 @@
   color: var(--c-accent-text);
   background: var(--c-accent-tint);
 }
-:root:root .composer-v2[data-layout-mode="compact"] :is(.composer-v2__model-trigger, .composer-v2__planning),
-:root:root .composer-v2[data-layout-mode="ultra"] :is(.composer-v2__model-trigger, .composer-v2__planning) {
-  min-width: 44px;
-  min-height: 44px;
+/* Narrow composers keep 44 px targets on touch only; a mouse keeps 32 px (narrow desktop layout design §6). */
+@media (hover: none), (pointer: coarse) {
+  :root:root .composer-v2[data-layout-mode="compact"] :is(.composer-v2__model-trigger, .composer-v2__planning),
+  :root:root .composer-v2[data-layout-mode="ultra"] :is(.composer-v2__model-trigger, .composer-v2__planning) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 :root:root .composer-v2 .v2-send-btn {
   width: 40px;

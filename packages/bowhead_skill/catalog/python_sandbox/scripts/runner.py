@@ -760,6 +760,7 @@ def _upload_artifact(
     derived_from: str | None = None,
     token: str | None = None,
     version_of: str | None = None,
+    saved_name: str | None = None,
 ) -> dict | None:
     """把 workdir 里产出的文件 POST /api/v1/files/upload → 拿 artifact_id.
 
@@ -785,12 +786,15 @@ def _upload_artifact(
     (deck → kind=deliverable, created_by_turn=本 turn). 全 optional，老路径不变.
     """
     mime = _guess_upload_mime(path.name)
+    # A revised copy of an upload is stored under its copy name (tools.py `_upload_copies`); the
+    # record keeps the sandbox name in `name` so declared entries still match it.
+    stored_name = saved_name or path.name
     try:
         # Construct multipart/form-data manually (no dependencies).
         boundary = "----bowheadsandboxboundary"
         body_parts = [
             f"--{boundary}\r\n".encode(),
-            (f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\nContent-Type: {mime}\r\n\r\n').encode(),
+            (f'Content-Disposition: form-data; name="file"; filename="{stored_name}"\r\nContent-Type: {mime}\r\n\r\n').encode(),
             path.read_bytes(),
             f"\r\n--{boundary}--\r\n".encode(),
         ]
@@ -840,12 +844,17 @@ def _upload_artifact(
             if code:
                 return {"name": path.name, "refused": code}
             raise
-        return {
+        record = {
             "name": path.name,
             "artifact_id": data.get("file_id"),
             "mime": data.get("mime") or mime,
             "size": int(data.get("size") or path.stat().st_size),
         }
+        if stored_name != path.name:
+            record["saved_as"] = stored_name
+        if derived_from:
+            record["derived_from"] = derived_from
+        return record
     except Exception as e:
         # Some MIME types are outside the Gateway allowlist (e.g. .npy / .parquet); do not crash, fall back to the filename.
         sys.stderr.write(f"[runner] upload failed for {path.name}: {e}\n")
@@ -1538,6 +1547,7 @@ _SKILL_CONTROL_KEYS = frozenset(
         "_work_outputs",
         "_revises",
         "_revises_implicit",
+        "_derived_copies",
         "_artifact_fetch_token",
         "_sandbox_executor_url",
         "_sandbox_executor_token",
@@ -2187,6 +2197,20 @@ def main() -> int:
         str(name) for name in (_raw_implicit if isinstance(_raw_implicit, list) else ()) if isinstance(name, str) and name in _revises
     )
     _saved_as_new_file: list[str] = []
+    # Revised copies of uploads: {declared entry: {"filename": copy name, "upload": upload id}} (server key only).
+    _raw_copies = payload.get("_derived_copies")
+    _derived_copies = {
+        str(entry): {"filename": str(copy["filename"]), "upload": str(copy["upload"])}
+        for entry, copy in (_raw_copies.items() if isinstance(_raw_copies, dict) else ())
+        if isinstance(entry, str)
+        and entry in _deliverable_outputs
+        and isinstance(copy, dict)
+        and isinstance(copy.get("filename"), str)
+        and copy["filename"]
+        and "/" not in copy["filename"]
+        and isinstance(copy.get("upload"), str)
+        and copy["upload"]
+    }
     # cca P3 F-B: artifact-fetch token (set by tools.py from the gateway ctx minter). Read
     # HOST-SIDE only; threaded into _materialize_inputs → _fetch_artifact as a Bearer header
     # so the gateway download owner-check runs as the real caller. NEVER written into the
@@ -2377,6 +2401,8 @@ def main() -> int:
             work_outputs=_work_outputs,
             analysis_declared=_analysis_declared,
         )
+        _version_of = _revises.get(p.name) if _out_kind == "deliverable" else None
+        _copy = _derived_copies.get(p.name) if _out_kind == "deliverable" else None
         rec = _upload_artifact(
             p,
             gateway,
@@ -2384,7 +2410,9 @@ def main() -> int:
             kind=_out_kind,
             created_by_turn=_created_by_turn,
             token=_artifact_fetch_token,  # cca P3 F-B: own outputs as the real caller
-            version_of=_revises.get(p.name) if _out_kind == "deliverable" else None,
+            version_of=_version_of,
+            derived_from=_copy["upload"] if _copy and not _version_of else None,
+            saved_name=_copy["filename"] if _copy else None,
         )
         if rec and rec.get("version_error") and p.name in _revises_implicit:
             rec = _upload_artifact(
@@ -2394,6 +2422,8 @@ def main() -> int:
                 kind=_out_kind,
                 created_by_turn=_created_by_turn,
                 token=_artifact_fetch_token,
+                derived_from=_copy["upload"] if _copy else None,
+                saved_name=_copy["filename"] if _copy else None,
             )
             _saved_as_new_file.append(p.name)
         if rec and rec.get("version_error"):
@@ -2435,6 +2465,7 @@ def main() -> int:
                 except _DeclaredOutputError as exc:
                     _nested_reported[entry] = f"declared deliverable {entry} {exc}"
                     continue
+                _copy = _derived_copies.get(entry)
                 rec = _upload_artifact(
                     source,
                     gateway,
@@ -2443,6 +2474,8 @@ def main() -> int:
                     created_by_turn=_created_by_turn,
                     token=_artifact_fetch_token,
                     version_of=_revises.get(entry),
+                    derived_from=_copy["upload"] if _copy and not _revises.get(entry) else None,
+                    saved_name=_copy["filename"] if _copy else None,
                 )
                 if rec and rec.get("version_error") and entry in _revises_implicit:
                     rec = _upload_artifact(
@@ -2452,6 +2485,8 @@ def main() -> int:
                         kind="deliverable",
                         created_by_turn=_created_by_turn,
                         token=_artifact_fetch_token,
+                        derived_from=_copy["upload"] if _copy else None,
+                        saved_name=_copy["filename"] if _copy else None,
                     )
                     _saved_as_new_file.append(entry)
                 if rec and rec.get("version_error"):
