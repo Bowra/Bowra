@@ -63,8 +63,12 @@ log = structlog.get_logger(__name__)
 
 
 def personal_mcp_oauth_enabled() -> bool:
-    """Members may sign in to MCP services with their own account (rollout register, default off)."""
-    return os.environ.get("FEATURE_PERSONAL_MCP_OAUTH", "0") == "1"
+    """Members may sign in to MCP services with their own account.
+
+    On unless the deployment sets ``FEATURE_PERSONAL_MCP_OAUTH=0`` (default on since 2026-11-25, the
+    maintainer's decision; see the rollout register).
+    """
+    return os.environ.get("FEATURE_PERSONAL_MCP_OAUTH", "1") != "0"
 
 
 # anyio's worker-process pool is per event loop, so the validation slot is too.
@@ -1118,6 +1122,12 @@ def _needs_sign_in_spec(tool: dict[str, Any]) -> ToolSpec:
     )
 
 
+async def _call_remote(endpoint: str, headers: dict[str, str], remote_name: str, args: dict[str, Any]) -> Any:
+    with anyio.fail_after(30):
+        async with connect_remote_mcp(endpoint, headers, call_timeout=30, response_bytes_limit=MAX_RESULT_BYTES) as session:
+            return await session.call_tool(remote_name, args)
+
+
 def _sign_in_failure(exc: BaseException) -> OAuthGrantRejected | OAuthRefreshUnavailable | None:
     seen: list[BaseException] = [exc]
     while seen:
@@ -1148,10 +1158,15 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
         async def handler(args: dict[str, Any], call_ctx: ToolExecutionContext) -> dict[str, Any]:
             identity: str | None = None
             dispatched = False
+            # The service answered HTTP 401/403: it refused the request, so nothing ran there.
+            refused = False
+            auth_type = ""
             oauth_headers: dict[str, str] | None = None
             # A confirmation card announced on the step must end with exactly one outcome.
             card_open = False
             started = time.perf_counter()
+            from bowhead_core.team_tool_registry_view import is_upstream_auth_error
+
             try:
                 if getattr(call_ctx, "personal_mcp_execution_id", None) != binding.execution_id:
                     raise PersonalMcpError("personal_mcp_scope_denied")
@@ -1218,6 +1233,7 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     for_session = await store.session_allows(owner, call_ctx.session_id, tool)
                     await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="approved_session" if for_session else "approved")
                 connection = await store.revalidate(owner, manifest, tool, call_ctx)
+                auth_type = str(connection["auth_type"])
                 await store.expire(owner)
                 if connection["auth_type"] == "oauth":
                     # Renew before the call is marked dispatched: a sign-in failure means nothing was sent.
@@ -1232,9 +1248,23 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     credentials = store.unseal(owner, connection["id"], "credentials", connection["auth_cipher"])
                     headers = auth_headers(connection["auth_type"], credentials)
                     redact = [secret for secret in credentials.values() if secret and secret != credentials.get("header")]
-                with anyio.fail_after(30):
-                    async with connect_remote_mcp(connection["endpoint"], headers, call_timeout=30, response_bytes_limit=MAX_RESULT_BYTES) as session:
-                        result = await session.call_tool(tool["remote_name"], args)
+                try:
+                    result = await _call_remote(connection["endpoint"], headers, tool["remote_name"], args)
+                except Exception as first:
+                    if not is_upstream_auth_error(first):
+                        raise
+                    refused = True
+                    if oauth_headers is None:
+                        raise
+                    # A remembered access token can be refused before it expires (for example when the
+                    # service revoked Bowhead's access). Renew once with that token marked as used: an
+                    # ended sign-in or an unanswered renewal is reported as "not run".
+                    refused_token = oauth_headers["Authorization"].removeprefix("Bearer ")
+                    oauth_headers = await personal_oauth_headers(store, owner, connection["id"], connection["endpoint"], rejected_token=refused_token)
+                    headers = oauth_headers
+                    redact = [headers["Authorization"].removeprefix("Bearer ")]
+                    refused = False
+                    result = await _call_remote(connection["endpoint"], headers, tool["remote_name"], args)
                 if result.is_error:
                     raise PersonalMcpError("personal_mcp_remote_error")
                 data = result.structured_content
@@ -1249,14 +1279,17 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                 await store.transition(owner, identity, "dispatching", "ok", duration=int((time.perf_counter() - started) * 1000))
                 return {"ok": True, "data": json.loads(safe_blob)}
             except BaseException as exc:
-                from bowhead_core.team_tool_registry_view import is_upstream_auth_error
-
+                if dispatched and isinstance(exc, Exception) and is_upstream_auth_error(exc):
+                    refused = True
+                sign_in = _sign_in_failure(exc)
                 if dispatched and oauth_headers is not None and isinstance(exc, Exception) and is_upstream_auth_error(exc):
                     # The service refused the access token: never offer it again.
                     from bowhead_core.mcp_oauth import oauth_broker
 
                     oauth_broker(store).invalidate(_grant_key(owner, tool["connection_id"]), oauth_headers["Authorization"].removeprefix("Bearer "))
-                if dispatched and isinstance(exc, Exception) and not isinstance(exc, PersonalMcpError):
+                if dispatched and sign_in is None and isinstance(exc, Exception) and not isinstance(exc, PersonalMcpError):
+                    # A renewal that ended the sign-in already marked the connection; one that went
+                    # unanswered keeps it. Only a refused or failed dispatch is recorded here.
                     with anyio.CancelScope(shield=True):
                         try:
                             await store.connection_failure(
@@ -1270,16 +1303,19 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                             if not is_authority_busy(busy):
                                 raise
                             log.warning("personal_mcp.connection_failure_unrecorded", connection_id=tool["connection_id"])
+                not_run = refused or sign_in is not None
                 if identity:
                     with anyio.CancelScope(shield=True):
-                        await self_finish(identity, dispatched, started)
+                        await self_finish(identity, dispatched and not not_run, started)
                 if not isinstance(exc, Exception):
                     raise
                 if card_open and identity:
                     await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="unavailable")
-                sign_in = None if dispatched else _sign_in_failure(exc)
                 if sign_in is not None or str(exc) == "personal_mcp_oauth_disabled":
                     return _sign_in_result(tool["connection_name"], sign_in)
+                if refused:
+                    # Same answer as a later call to the connection the refusal marked for repair.
+                    return _needs_sign_in_result(tool["connection_name"], auth_type)
                 code = str(exc) if isinstance(exc, PersonalMcpError) else "personal_mcp_call_failed"
                 return {
                     "ok": False,
@@ -1295,6 +1331,7 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
             else:
                 await store.transition(owner, identity, "pending", "denied")
                 await store.transition(owner, identity, "approved", "denied")
+                await store.transition(owner, identity, "dispatching", "denied")
 
         return handler
 

@@ -149,7 +149,9 @@ def register_document_tool(registry, *, service):
                 "error_kind": "validation",
                 "retryable": False,
                 "hint": (
-                    "Quote a longer unique exact passage from the earlier user's task in this same Chat, or ask the user to restate the complete request. Do not use assistant prose, another Chat or a later message. This attempt admitted no new job."
+                    "This chat is the Agent Owner's trial of an unreleased draft, where template documents are not available. Tell the user plainly that drafting from a template works in a normal chat with the released Agent; do not retry here. No job was admitted."
+                    if exc.code == "agent_trial_document_tools_unavailable"
+                    else "Quote a longer unique exact passage from the earlier user's task in this same Chat, or ask the user to restate the complete request. Do not use assistant prose, another Chat or a later message. This attempt admitted no new job."
                     if exc.code in {"document_task_source_unavailable", "document_task_source_ambiguous"}
                     else "Earlier-task references are not enabled. Ask the administrator to enable the qualified capability, or provide the full task in the current request. No job was admitted."
                     if exc.code == "document_task_source_disabled"

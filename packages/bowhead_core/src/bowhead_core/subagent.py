@@ -35,7 +35,13 @@ from uuid import uuid4
 
 from bowhead_router.errors import provider_failure_kind
 from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
-from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME, RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME, WITHDRAWN_ANSWER_FACT
+from bowhead_router.runtime_notes import (
+    FINAL_REPLY_REVIEW_NOTE_NAME,
+    OUTPUT_RECOVERY_STATE_NAME,
+    RUNTIME_CORRECTION_NOTE_NAME,
+    VISUAL_VIEW_NOTE_NAME,
+    WITHDRAWN_ANSWER_FACT,
+)
 from bowhead_router.types import TokenUsage
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.sandbox_call_shape import FLAT_SANDBOX_TOOL, SANDBOX_SCRIPT, SANDBOX_SKILL_NAME, SKILL_INVOKE_TOOL, sandbox_entry_for
@@ -288,6 +294,10 @@ _ADMISSION_BLOCK_GUIDANCE: dict[str, str] = {
     "agent_assignment_inactive": "this user has not hired this Agent, or has turned it off",
     "agent_access_denied": "this user is not in this Agent's audience",
     "agent_safety_blocked": "this Agent's published definition did not pass its safety check",
+    "agent_trial_helper_unavailable": (
+        "this chat is the Owner's trial of this Agent's unreleased draft, and another run of the same Agent "
+        "would use its released version instead, so it is not available in a trial"
+    ),
 }
 
 
@@ -7500,6 +7510,26 @@ class SubagentRunner:
             # Temporary coordination messages enter the base transcript only
             # after every original native call has its actual Tool result.
             messages.extend(coordination_messages)
+            if (
+                delivery_review_carrier is not None
+                and any(
+                    inv.tool_name == "subagent_spawn" and classify_tool_outcome(invocation_result(inv), inv.error).state == "success"
+                    for inv in invocations[_inv_baseline_iter:]
+                )
+                and _lead_scope_review_required()
+            ):
+                # docs/sprints/answer-written-twice-2026-11-25: Lead learned that its reply waits for the delivery
+                # review only when its written answer was withdrawn, and wrote the answer again. Stated after the
+                # helper's result with the evidence IDs, Lead reviews when it is ready to answer and answers once.
+                from bowhead_core.tool_delivery_review import final_reply_review_note
+
+                messages.append(
+                    Message(
+                        role="user",
+                        name=FINAL_REPLY_REVIEW_NOTE_NAME,
+                        content=final_reply_review_note(invocations, review_tool=delivery_review_carrier.name),
+                    )
+                )
             output_recovery.observe([inv for inv in invocations[_inv_baseline_iter:] if not _is_inv_failure(inv)])
             output_recovery.sync(messages)
 
@@ -10711,8 +10741,14 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
         first = queries[0]
         head = first if isinstance(first, str) else _preview(first, max_len=80)
         rest = len(queries) - 1
-        suffix = f" +{rest} more" if rest > 0 else ""
-        return _truncate_preview(f"{head}{suffix}")
+        if rest <= 0:
+            return _truncate_preview(head)
+        # Fixed format the interface rewrites in its language ("… 等 N 项"); cut the head, never the count.
+        suffix = f" +{rest} more"
+        head_max = _INPUT_PREVIEW_MAX_LEN - len(suffix)
+        if len(head) > head_max:
+            head = head[: head_max - 1] + "…"
+        return f"{head}{suffix}"
 
     # Single query / question / text / q (kb_search, bi_query single, web_search single)
     for k in ("query", "question", "text", "q"):
@@ -10791,6 +10827,13 @@ def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
         if isinstance(title, str) and title.strip():
             return _truncate_preview(title)
 
+    # write_report: { kind, content (Markdown), section_id? }. Name the section by its heading; the
+    # generic loop below would return the kind code ("narrative"), which the interface then names by kind.
+    if tool_name == "write_report":
+        heading = _first_markdown_heading(args.get("content"))
+        if heading:
+            return _truncate_preview(heading)
+
     # add_chart: flat { title, data_artifact_id, ... }.
     # chat-solidify follow-up (#6): without this the generic first-string-field
     # loop below can return the data_artifact_id ("art_…") when it precedes
@@ -10843,6 +10886,24 @@ def _truncate_preview(s: str) -> str:
     if len(s) <= _INPUT_PREVIEW_MAX_LEN:
         return s
     return s[: _INPUT_PREVIEW_MAX_LEN - 1] + "…"
+
+
+def _first_markdown_heading(content: Any) -> str:
+    """The first Markdown heading of written report content, cleaned as chapter titles are; "" when none."""
+    if not isinstance(content, str):
+        return ""
+    from bowhead_core.report_chapters import chapter_title
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if _MARKDOWN_HEADING_RE.match(stripped):
+            title = chapter_title(stripped)
+            if title:
+                return title
+    return ""
+
+
+_MARKDOWN_HEADING_RE = re.compile(r"#{1,6}\s")
 
 
 # `input_preview` is a **plain-text** field (step cards and report banners render text directly, with no Markdown

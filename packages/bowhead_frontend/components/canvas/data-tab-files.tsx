@@ -867,6 +867,9 @@ function humanArtifactSource(
   if (item.kind === "user_upload" || item.source === "upload") {
     return t("source_upload");
   }
+  if (item.source === "presentation_edit") {
+    return t("source_edited");
+  }
   if (item.kind === "canvas_export" || item.source === "canvas_export") {
     return t("source_export");
   }

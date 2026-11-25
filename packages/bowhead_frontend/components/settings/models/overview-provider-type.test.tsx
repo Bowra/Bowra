@@ -96,3 +96,23 @@ describe("Azure 接口显示名", () => {
     }
   });
 });
+
+describe("connection list verification labels", () => {
+  it("shows one vocabulary and when a pass was verified", () => {
+    const observedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    renderOverview("zh-CN", [{
+      ...PROVIDERS[0],
+      models: [{
+        id: "deepseek-flash",
+        capabilities: [
+          { capability: "chat", state: "verified", observedAt },
+          { capability: "tool", state: "stale", observedAt: null },
+          { capability: "vision", state: "unknown", observedAt: null },
+        ],
+      }],
+    }]);
+    const labels = [...document.querySelectorAll(".overview-model-capabilities .overview-state")].map((node) => node.textContent);
+    expect(labels).toEqual(["对话 · 已验证 · 3 天前", "工具调用 · 需重新验证", "视觉理解 · 未验证"]);
+    expect(document.querySelector(".overview-model-capabilities .fact-verified")?.getAttribute("title")).toBeTruthy();
+  });
+});

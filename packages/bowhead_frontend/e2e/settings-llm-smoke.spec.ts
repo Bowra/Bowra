@@ -251,11 +251,11 @@ test("模型 V4 overview preserves evidence semantics across desktop, mobile, an
   // Since 96a5eb706, resting state has no “当前配置还不能安全应用” verdict panel: actual issues show only a quiet hint
   // linking to detailed evidence below (fixture: 1 awaiting confirmation, 1 older evidence).
   const attention = page.locator(".overview-quiet.is-attention");
-  await expect(attention).toContainText(/1 项还没验证、1 项模型分工建议重新验证|1 item not verified yet, 1 model assignment should be rechecked/);
+  await expect(attention).toContainText(/1 项还没验证、1 项模型分工需重新验证|1 item not verified yet, 1 model assignment needs verifying again/);
   await expect(attention.getByRole("link", { name: /前往验证|Review/ })).toHaveAttribute("href", "#mset-overview-evidence");
   await expect(page.getByText(/验证状态|Verification status/, { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/最近尝试|Latest attempt/, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/^验证通过$|^Passed$/).first()).toBeVisible();
+  await expect(page.getByText(/^已验证$|^Verified$/).first()).toBeVisible();
   await expect(page.getByText(/本次请求出错|Latest request errored/)).toBeVisible();
   await expect(page.locator("[data-testid='model-settings-editor']")).toBeHidden();
   // f7789bf1b: page root fills the uniform settings-shell content width (the 880px form width), never narrows independently.
@@ -491,7 +491,7 @@ test("模型 page: changing the main model stays draft-only until one explicit a
   await page.getByRole("button", { name: /检查并应用|Review and apply/ }).click();
   await expect(page.getByRole("heading", { name: /应用模型配置|Apply model configuration/ })).toBeVisible();
   await page.screenshot({ path: "test-results/models-review-drawer.png", fullPage: true });
-  await page.getByRole("button", { name: /一次应用|Apply once/ }).click();
+  await page.getByRole("button", { name: /^(应用|Apply)$/ }).click();
 
   await expect.poll(() => sawPut).toBe(true);
   const cfg = (putBody as unknown as {
@@ -527,7 +527,7 @@ test("模型 page: a failed server review stays visible and cannot be applied", 
 
   const review = page.getByRole("dialog", { name: /应用模型配置|Apply model configuration/ });
   await expect(review.locator(".review-issues")).toBeVisible();
-  await expect(review.getByRole("button", { name: /一次应用|Apply once/ })).toBeDisabled();
+  await expect(review.getByRole("button", { name: /^(应用|Apply)$/ })).toBeDisabled();
 });
 
 test("模型 page: a stale review becomes read-only and preserves the draft", async ({ page }) => {
@@ -552,11 +552,11 @@ test("模型 page: a stale review becomes read-only and preserves the draft", as
   await page.locator(".mset .default-sel select").first().selectOption("我们的 OpenAI 代理::gpt-4o-proxy");
   await page.getByRole("button", { name: /检查并应用|Review and apply/ }).click();
   const review = page.getByRole("dialog", { name: /应用模型配置|Apply model configuration/ });
-  await review.getByRole("button", { name: /一次应用|Apply once/ }).click();
+  await review.getByRole("button", { name: /^(应用|Apply)$/ }).click();
 
   await expect(review.getByText(/这份检查结果已经失效|review is no longer current/)).toBeVisible();
   await expect(review.getByRole("button", { name: /载入最新配置并重新检查|Load latest and review again/ })).toBeVisible();
-  await expect(review.getByRole("button", { name: /一次应用|Apply once/ })).toHaveCount(0);
+  await expect(review.getByRole("button", { name: /^(应用|Apply)$/ })).toHaveCount(0);
   await expect(draftBar(page)).toBeHidden();
 });
 
@@ -771,7 +771,7 @@ test("模型 V2: discovery stays unknown until declaration and verification conf
     /请选择模型能力：|Choose model capabilities:/,
   )).toBeVisible();
   await editor.getByRole("button", { name: /^对话$|^Chat$/ }).click();
-  await editor.getByRole("button", { name: /^工具$|^Tools$/ }).click();
+  await editor.getByRole("button", { name: /^工具调用$|^Tool calling$/ }).click();
   await page.getByRole("button", {
     name: /制定验证计划|Plan verification/,
   }).click();

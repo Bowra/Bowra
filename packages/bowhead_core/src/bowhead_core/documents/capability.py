@@ -13,6 +13,10 @@ async def admit_capability(db, *, path, runtime, scope, turn_id, inputs, now):
     binding = runtime.binding
     if binding is None or binding.team_id != scope.team_id or binding.turn_id != turn_id:
         raise DocumentRequestError("document_capability_unavailable")
+    from bowhead_core.documents.agent_caller import refuse_owner_trial_turn_in_tx
+
+    # Also the Lead's own submission: no template-document job starts in an Owner draft trial.
+    await refuse_owner_trial_turn_in_tx(db, turn_id=turn_id)
     catalog = default_catalog()
     if catalog is None:
         raise DocumentRequestError("document_capability_unavailable")

@@ -34,6 +34,7 @@ from bowhead_core.team_llm_readiness import (
     RequiredAssignment,
     compute_team_llm_readiness,
     external_readiness_rows,
+    touched_provider_ids,
 )
 from bowhead_core.team_llm_readiness_store import (
     ROLLOUT_GENERATION,
@@ -451,6 +452,11 @@ async def apply_team_llm_v2(
                 grandfather_scopes=grandfather_scopes,
                 baseline_will_invalidate=(baseline_will_invalidate),
                 external_rows=external_readiness_rows(config_to_save),
+                touched_provider_ids=touched_provider_ids(
+                    current_config_for_readiness,
+                    config_to_save,
+                    draft_provider_ids,
+                ),
             )
             if decision.draft_semantic_hash != draft_semantic_hash:
                 # feedback-triage-2026-08-24: customer reported '点应用报 409，重新检查又回到应用

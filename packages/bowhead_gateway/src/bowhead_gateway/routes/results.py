@@ -334,9 +334,6 @@ __all__ = ["owner_router", "router"]
 
 async def _presentation_edit_session(request: Request, session_id: str, user: User) -> Any:
     """The owner fences of the Results routes, with write access to the Space (pptx-inline-edit design §6)."""
-    from bowhead_gateway.presentation_edit_service import require_feature
-
-    require_feature()
     session_store = getattr(request.app.state, "session_store", None)
     if session_store is None or getattr(request.app.state, "artifact_store", None) is None:
         raise coded_results_error(status.HTTP_503_SERVICE_UNAVAILABLE, "results_read_model_unavailable")

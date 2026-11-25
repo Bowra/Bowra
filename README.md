@@ -37,7 +37,7 @@ ChromaDB has unresolved upstream dependency advisories. See the [current assessm
 
 ## Current source snapshot
 
-**Bowra 1.7.75** adds supported PowerPoint editing in Results, linked edited copies of uploads, shared-file pins, and more reliable report revisions and Team MCP sign-ins. [Release notes](docs/help/release-notes/releases/v1.7.75.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
+**Bowra 1.7.76** adds interactive break-even scenarios, multi-slide chat references, clearer model verification and saving, and personal MCP sign-in improvements. [Release notes](docs/help/release-notes/releases/v1.7.76.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
 
 SQLite upgrades coordinate twelve database files. Stop every writer and preserve instance keys, databases and objects before upgrading. Automatic migration backups cover registered SQLite files and layout metadata; keep complete recovery snapshots separately. Restoring a snapshot from before account deletion can restore that account. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

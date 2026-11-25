@@ -383,6 +383,33 @@ describe("DataTabFiles runtime path prefix", () => {
     expect(screen.getByText("art_controlled")).toBeInTheDocument();
   });
 
+  it("names a version saved in the deck editor as the person's edit, not its internal source", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).endsWith("/details")
+      ? detailsResponse("art_hand") : new Response(
+        JSON.stringify({
+          items: [{
+            id: "art_hand",
+            filename: "deck.pptx",
+            mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            size: 42,
+            source: "presentation_edit",
+            created_at: "2026-11-25T00:00:00Z",
+            preview_available: true,
+            kind: "deliverable",
+            origin: "other",
+          }],
+        }),
+        { status: 200 },
+      )));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DataTabFiles sessionId="s_hand" focusArtifactId="art_hand" viewerOnly viewerMode="details" />);
+
+    expect(await screen.findByText("art_hand")).toBeInTheDocument();
+    expect(screen.getByText("source_edited")).toBeInTheDocument();
+    expect(screen.queryByText("presentation_edit")).not.toBeInTheDocument();
+  });
+
   it("never renders the previous artifact body after focus moves to another ID", async () => {
     let resolveSecondPreview!: (response: Response) => void;
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {

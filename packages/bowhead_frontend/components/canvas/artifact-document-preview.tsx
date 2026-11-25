@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import type { PDFDocumentLoadingTask } from "pdfjs-dist";
 
 import { appFetch } from "@/lib/base-path";
+import type { SlideToggleOutcome } from "@/lib/presentation-selection";
 import {
   classifyResultsError,
   classifyResultsResponse,
@@ -92,6 +93,7 @@ export function ArtifactDocumentPreview({
   cacheRef,
   thumbnails = false,
   onReferencePage,
+  referencedPages,
 }: {
   profile: DocumentProfile;
   href: string;
@@ -100,8 +102,10 @@ export function ArtifactDocumentPreview({
   onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
   cacheRef: MutableRefObject<DocumentPreviewCache>;
   thumbnails?: boolean;
-  /** A deck's pages each offer 「引用这一页」 (design §13.2). */
-  onReferencePage?: (page: number) => void;
+  /** A deck's pages each offer 「引用这一页」, a toggle (design §13.2, §13.6). */
+  onReferencePage?: (page: number) => SlideToggleOutcome;
+  /** The pages of this file in the Composer: their buttons read 「已引用」. */
+  referencedPages?: ReadonlyArray<number>;
 }) {
   if (profile !== "docx") {
     return (
@@ -114,6 +118,7 @@ export function ArtifactDocumentPreview({
         presentation={profile === "pptx"}
         thumbnails={thumbnails}
         onReferencePage={profile === "pptx" ? onReferencePage : undefined}
+        referencedPages={referencedPages}
       />
     );
   }
@@ -136,6 +141,7 @@ function PdfArtifactPreview({
   presentation,
   thumbnails,
   onReferencePage,
+  referencedPages,
 }: {
   href: string;
   title: string;
@@ -144,7 +150,8 @@ function PdfArtifactPreview({
   cacheRef: MutableRefObject<DocumentPreviewCache>;
   presentation: boolean;
   thumbnails: boolean;
-  onReferencePage?: (page: number) => void;
+  onReferencePage?: (page: number) => SlideToggleOutcome;
+  referencedPages?: ReadonlyArray<number>;
 }) {
   const t = useTranslations("artifact_viewer");
   const pagesRef = useRef<HTMLDivElement>(null);
@@ -157,10 +164,17 @@ function PdfArtifactPreview({
         labelFor: (page) => t("reference_page_label", { page }),
         doneLabelFor: (page) => t("referenced_page_label", { page }),
         doneLabel: t("referenced_page"),
+        removedLabelFor: (page) => t("page_reference_removed", { page }),
+        isReferenced: (page) => Boolean(referencedPages?.includes(page)),
         onSelect: onReferencePage,
         announce: (text) => { if (pageStatusRef.current) pageStatusRef.current.textContent = text; },
       }
     : null;
+  // The Composer decides which pages are referenced: a chip removed there turns its pages' buttons back.
+  const referencedKey = referencedPages?.join(",") ?? "";
+  useEffect(() => {
+    pagesRef.current?.querySelectorAll(".artifact-pdf-page-action").forEach((button) => button.dispatchEvent(new CustomEvent("page-action-sync")));
+  }, [referencedKey]);
   const pdfRef = useRef<PdfDocumentLike | null>(null);
   const cancelledRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -353,9 +367,11 @@ type PageAction = {
   /** Names start with the visible text (WCAG 2.5.3): 「引用这一页 · 第 N 页」, then 「已引用 · 第 N 页」. */
   labelFor: (page: number) => string;
   doneLabelFor: (page: number) => string;
-  /** Shown on the button for a moment after it is used, instead of a toast over the header. */
+  /** Shown on the button while the page is in the Composer (a pressed toggle), instead of a toast. */
   doneLabel: string;
-  onSelect: (page: number) => void;
+  removedLabelFor: (page: number) => string;
+  isReferenced: (page: number) => boolean;
+  onSelect: (page: number) => SlideToggleOutcome;
   announce: (text: string) => void;
 };
 
@@ -407,30 +423,27 @@ async function renderPdfPages(
       button.className = "artifact-pdf-page-action";
       const show = (done: boolean) => {
         const current = pageAction() ?? action;
+        button.setAttribute("aria-pressed", String(done));
         button.setAttribute("aria-label", done ? current.doneLabelFor(pageNumber) : current.labelFor(pageNumber));
         button.innerHTML = done ? PAGE_DONE_ICON : PAGE_ACTION_ICON;
         button.append(document.createTextNode(done ? current.doneLabel : current.label));
         if (done) button.dataset.referenced = "true";
         else delete button.dataset.referenced;
       };
-      show(false);
-      let timer: number | undefined;
+      show(action.isReferenced(pageNumber));
+      // A toggle: the page joins the file's page set in the Composer, or leaves it (design §13.6).
       button.addEventListener("click", () => {
         const current = pageAction();
         if (!current) return;
-        current.onSelect(pageNumber);
-        // One reference per file: the page used last is the one confirmed.
-        container.querySelectorAll<HTMLButtonElement>(".artifact-pdf-page-action[data-referenced]").forEach((other) => {
-          if (other !== button) other.dispatchEvent(new CustomEvent("page-action-reset"));
-        });
-        show(true);
-        current.announce(current.doneLabelFor(pageNumber));
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => show(false), 2500);
+        const outcome = current.onSelect(pageNumber);
+        // At the limit the host says why; the page stays as it was.
+        if (outcome === "limit") return;
+        show(outcome === "added");
+        current.announce(outcome === "added" ? current.doneLabelFor(pageNumber) : current.removedLabelFor(pageNumber));
       });
-      button.addEventListener("page-action-reset", () => {
-        window.clearTimeout(timer);
-        show(false);
+      button.addEventListener("page-action-sync", () => {
+        const current = pageAction();
+        if (current) show(current.isReferenced(pageNumber));
       });
       caption.prepend(document.createElement("span"));
       caption.append(button);

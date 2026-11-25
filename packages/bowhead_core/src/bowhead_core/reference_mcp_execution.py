@@ -77,6 +77,9 @@ class ReferenceMcpPrimaryComposition(ReferencePrimaryComposition):
 
 
 def _composition(primary: ReferencePrimaryInput, prepared: PreparedReferenceMcpSelection) -> ReferenceMcpPrimaryComposition:
+    if primary.binding.trial_candidate_id is not None:
+        # MCP composition is bound to a released Agent; an Owner draft trial has none (§4.5).
+        raise ValueError("agent_trial_mcp_references_unavailable")
     document = primary.source.input_document
     if document is None or primary.automatic_receiver is not None or prepared.receiver.source_kind != "team":
         raise ValueError("reference_mcp_composition_unavailable")

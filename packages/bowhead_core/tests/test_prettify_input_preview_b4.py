@@ -424,3 +424,26 @@ def test_tool_creator_input_preview_never_echoes_spec_url() -> None:
 )
 def test_step_label_drops_internal_object_ids(tool_name, args, expected) -> None:
     assert _prettify_input_preview(tool_name, args) == expected
+
+
+# ─── Chat running state R1.3 / TD1 ──────────────────────────────────────────
+
+
+def test_query_list_keeps_its_count_when_the_first_query_is_long() -> None:
+    """The interface rewrites the fixed " +N more" form in its language; a cut must never drop the count."""
+    out = _prettify_input_preview("bi_query", {"queries": ["各门店" * 60, "x", "y", "z"]})
+    assert out.endswith("… +3 more")
+    assert len(out) <= 120
+
+
+def test_report_write_is_named_by_its_section_heading() -> None:
+    out = _prettify_input_preview(
+        "write_report",
+        {"kind": "narrative", "content": "前言一句。\n\n## 各门店营业额对比 [figure:sec_1]\n\n正文……"},
+    )
+    assert out == "各门店营业额对比"
+
+
+def test_report_write_without_a_heading_keeps_the_kind_for_the_interface_to_name() -> None:
+    out = _prettify_input_preview("write_report", {"kind": "narrative", "content": "续写一段，没有标题。#不是标题"})
+    assert out == "narrative"

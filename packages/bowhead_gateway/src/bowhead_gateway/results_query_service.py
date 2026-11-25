@@ -477,10 +477,10 @@ def _position_artifacts(
 
 def _presentation_editable(artifact: object) -> bool:
     """A deck the owner may edit in place (pptx-inline-edit design §6.1); the edit routes re-check it."""
-    from bowhead_core.presentation_edit import feature_enabled, is_presentation
+    from bowhead_core.presentation_edit import is_presentation
     from bowhead_core.results_read_model import artifact_kind
 
-    if not feature_enabled() or not is_presentation(getattr(artifact, "mime", None), getattr(artifact, "filename", None)):
+    if not is_presentation(getattr(artifact, "mime", None), getattr(artifact, "filename", None)):
         return False
     producer = getattr(artifact, "producer_kind", None) or ""
     return artifact_kind(artifact) in {"deliverable", "user_upload"} and producer not in {"template_document_v1", "template_document_internal_v1"}

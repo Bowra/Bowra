@@ -29,6 +29,16 @@ WITHDRAWN_REPLY_FACT = (
     "content of the removed reply reaches the user only if your next reply contains it again."
 )
 _MAX_REVIEW_CALLS = 2000
+# docs/sprints/answer-written-twice-2026-11-25/spike.md: a run with a successful helper needs the review before its
+# reply, but Lead learned it only when its written answer was withdrawn, so it wrote the answer twice (243 of 244
+# helper Turns on 116 since 2026-11-20). Stated in a note right after the helper's result with the evidence IDs,
+# deepseek-flash reviewed first in 15 of 16 replays with valid citations and continued planned work in 8 of 8 mid-plan
+# steps; the same text inside the result's JSON reached only 10 to 11 of 16.
+FINAL_REPLY_REVIEW_FACT = (
+    "Your final reply to the user after this delegation is delivered only after {tool} is accepted; a final reply written "
+    "before the review is withdrawn from the user's view and has to be written again. This applies only when you are ready "
+    "to answer, not while work remains."
+)
 _REQUIRED_GAP_GUIDANCE = (
     "A missing required result remains unfulfilled even when its absence is correctly disclosed. "
     "Keep the original requested outcome as the requirement; never replace it with explaining why it is missing. "
@@ -208,6 +218,18 @@ def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
     if visual := visual_disclosures(calls):
         context["visual_disclosures"] = list(visual.values())
     return context
+
+
+def final_reply_review_note(invocations: Sequence[Any], *, review_tool: str) -> str:
+    """The runtime note after a helper's result when the run will require the review before its final reply.
+
+    It states the fact and gives ``review_context``, the evidence IDs the review cites (the same context a
+    bounce gives). It is a turn-local note (``runtime_notes.FINAL_REPLY_REVIEW_NOTE_NAME``), never a Tool
+    result, so a question's pause still saves the Tool results byte for byte.
+    """
+    import json
+
+    return FINAL_REPLY_REVIEW_FACT.format(tool=review_tool) + " review_context: " + json.dumps(_review_call_context(invocations), ensure_ascii=False)
 
 
 def _review_work_guidance(*, closeout_only: bool, ask_tool: str | None) -> str:

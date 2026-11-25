@@ -11,7 +11,7 @@ import json
 import math
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SerializerFunctionWrapHandler, field_validator, model_serializer, model_validator
 
 MAX_DOCUMENT_BYTES = 256 * 1024
 MAX_DOCUMENT_NODES = 512
@@ -94,14 +94,31 @@ class AgentResourceRef(_WireModel):
     version: Identity
     assignment_id: Identity | None = None
     release_id: Identity | None = None
+    # The Owner's trial of a saved draft: the release candidate whose frozen revision ``version``
+    # names. It takes the place of the live assignment and release, never both.
+    trial_candidate_id: Identity | None = None
 
     @model_validator(mode="after")
     def exact_source_fields(self) -> Self:
-        if self.source_kind == "team" and (self.assignment_id is None or self.release_id is None):
+        if self.source_kind == "team" and self.trial_candidate_id is not None:
+            if self.assignment_id is not None or self.release_id is not None:
+                raise ValueError("reference_agent_trial_fields_conflict")
+        elif self.source_kind == "team" and (self.assignment_id is None or self.release_id is None):
             raise ValueError("reference_agent_assignment_required")
-        if self.source_kind == "system" and (self.assignment_id is not None or self.release_id is not None):
+        if self.source_kind == "system" and (self.assignment_id is not None or self.release_id is not None or self.trial_candidate_id is not None):
             raise ValueError("reference_system_agent_has_team_fields")
         return self
+
+    @model_serializer(mode="wrap")
+    def omit_absent_trial(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """Serialize references without a trial exactly as before the field existed.
+
+        Stored plans, sources and policy digests hash these dumps, some without ``exclude_none``.
+        """
+        data = handler(self)
+        if self.trial_candidate_id is None and isinstance(data, dict):
+            data.pop("trial_candidate_id", None)
+        return data
 
 
 class SkillResourceRef(_WireModel):

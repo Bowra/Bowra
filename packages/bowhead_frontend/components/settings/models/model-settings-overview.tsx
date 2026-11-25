@@ -17,6 +17,7 @@ import {
 } from "@/components/icons";
 import type { LlmReadiness, LlmReadinessRow } from "@/lib/llm-config-api";
 import { formatDateTime } from "@/lib/locale";
+import { useListDate } from "@/components/ui/list-time";
 import {
   attentionBreakdown,
   attentionCount,
@@ -40,7 +41,7 @@ export interface ModelSettingsOverviewProvider {
   type: string;
   endpoint: string;
   modelCount: number;
-  models?: Array<{ id: string; capabilities: Array<{ capability: string; state: string }> }>;
+  models?: Array<{ id: string; capabilities: Array<{ capability: string; state: string; observedAt?: string | null }> }>;
   fingerprint?: string | null;
   authType?: "bearer" | "api_key" | "secret_header" | "none";
 }
@@ -322,6 +323,7 @@ export function ModelSettingsOverview({
   const tTier = useTranslations("settings.models.tier");
   const tConnect = useTranslations("settings.models.connect");
   const tProviderType = useTranslations("settings.llm.provider_types");
+  const listDate = useListDate();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const items = evidenceItems(readiness);
@@ -424,9 +426,13 @@ export function ModelSettingsOverview({
                   <code translate="no">{safeOverviewEndpoint(provider.endpoint)}</code>
                   {provider.models?.map((model) => <div className="overview-model-capabilities" key={model.id}>
                     <span>{model.id}</span>
-                    {model.capabilities.map(({ capability, state }) => <span className={`overview-state fact-${state}`} key={capability}>
-                      {t(`capability_${capability}`)} · {t(`fact_${FACT_STATES.has(state) ? state : "unknown"}`)}
-                    </span>)}
+                    {model.capabilities.map(({ capability, state, observedAt }) => {
+                      // A pass keeps its date: it stays valid until the connection changes (2026-11-25).
+                      const verifiedAt = (state === "verified" || state === "aged") ? listDate(observedAt) : null;
+                      return <span className={`overview-state fact-${state}`} key={capability} title={verifiedAt?.title}>
+                        {t(`capability_${capability}`)} · {t(`fact_${FACT_STATES.has(state) ? state : "unknown"}`)}{verifiedAt ? ` · ${verifiedAt.label}` : null}
+                      </span>;
+                    })}
                   </div>)}
                 </div>
                 <div className="overview-provider-secret">

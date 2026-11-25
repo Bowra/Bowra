@@ -302,7 +302,11 @@ def _now() -> str:
     return datetime.now(tz=UTC).isoformat(timespec="seconds")
 
 
-_SESSION_ORIGINS = frozenset({"normal", "workflow_dryrun", "agent_eval"})
+# `agent_trial`: an Agent Owner's chat with the saved draft (trial-tech-design §3); every reader of
+# `origin='normal'` leaves it out.
+_SESSION_ORIGINS = frozenset({"normal", "workflow_dryrun", "agent_eval", "agent_trial"})
+# Origins a chat submission may start or continue; the others belong to internal producers.
+_CHAT_SUBMISSION_ORIGINS = frozenset({"normal", "agent_trial"})
 # Failure codes forwarded unchanged to the frontend in the recovery projection (all others become lead_internal_error).
 _CREDIT_FAILURE_REASON_CODES = frozenset({"team_pool_exhausted", "user_credit_exhausted"})
 
@@ -6041,12 +6045,17 @@ class SessionStore:
         document_revision_target: DocumentRevisionTarget | None = None,
         context_maintenance: ContextMaintenanceAction | None = None,
         selected_skills: tuple[SkillResourceRef, ...] | None = None,
+        session_origin: str = "normal",
     ) -> ChatSubmissionReceipt:
         """Atomically persist a Turn/receipt and optional prepared Agent/Skill references.
 
         reference_start is server-only. The HTTP reference reader and legacy
         execution barriers stay closed until the reference worker is ready.
+        ``session_origin`` creates the Session with that origin, or requires an
+        existing Session to have it (``agent_trial`` for an Owner draft trial).
         """
+        if session_origin not in _CHAT_SUBMISSION_ORIGINS:
+            raise ValueError("chat_session_origin_invalid")
         is_reference = submission_contract_version == "chat-references.v1" or model_control_batch == "references"
         if document_revision_target is not None and (
             submission_kind != "start"
@@ -6200,6 +6209,7 @@ class SessionStore:
                     workspace_id=workspace_id,
                     user_id=user_id,
                     now=now,
+                    origin=session_origin,
                 )
                 await _read_exact_legacy_turn_or_fence_in_tx(
                     db,

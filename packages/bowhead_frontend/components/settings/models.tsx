@@ -55,7 +55,9 @@ import {
 import { ReadinessReview } from "@/components/settings/models/readiness-review";
 import { evidenceItemKey } from "@/lib/readiness-items";
 import { autoJudgeModel } from "@/lib/judge-auto";
-import { VerificationPanel } from "@/components/settings/models/verification-panel";
+import { VerificationFailureLine, VerificationPanel } from "@/components/settings/models/verification-panel";
+import { VerificationStatus } from "@/components/settings/models/verification-status";
+import { toast } from "@/lib/use-toast";
 import {
   VerificationSelector,
   type VerificationCandidate,
@@ -71,6 +73,7 @@ import {
   discoverV2Models,
   fetchActiveVerificationBatches,
   fetchContextWindowCatalog,
+  fetchDraftEvidence,
   fetchOutboundAdaptations,
   fetchVerificationBatch,
   precheckV2Provider,
@@ -78,6 +81,7 @@ import {
   suggestedContextWindow,
   type ContextWindowCatalog,
   type DiscoveryResult,
+  type DraftEvidenceItem,
   type ModelCapability,
   type V2ProviderDraft,
   type VerificationBatch,
@@ -635,7 +639,7 @@ function mergeVerificationBatch(
 }
 
 export type CapabilityTestState =
-  "off" | "testing" | "unverified" | "verified" | "degraded" | "failed";
+  "off" | "testing" | "unverified" | "verified" | "degraded" | "failed" | "stale";
 
 export function uniqueCapabilitySteps(steps: VerifyProviderStep[] | undefined): VerifyProviderStep[] {
   const byCapability = new Map<string, VerifyProviderStep>();
@@ -1671,6 +1675,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [verificationPlan, setVerificationPlan] = useState<VerificationPlan | null>(null);
   const [verificationBatch, setVerificationBatch] = useState<VerificationBatch | null>(null);
+  /** The connection editor's cost plan opens as a dialog only when asked for; a plan prepared on its own (Bowra
+   *  import) waits in the save bar so Save and Cancel stay reachable. */
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [verificationDrafts, setVerificationDrafts] = useState<V2ProviderDraft[] | null>(null);
   const [verificationSelectionOpen, setVerificationSelectionOpen] = useState(false);
   const [verificationBusy, setVerificationBusy] = useState(false);
@@ -1685,6 +1692,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const [rebuildOk, setRebuildOk] = useState(false);
   const [retryIndexRequested, setRetryIndexRequested] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** The last connection save hit a version conflict; the bar offers to load the latest config and keep the draft. */
+  const [connectionSaveConflict, setConnectionSaveConflict] = useState(false);
   const [reviewStale, setReviewStale] = useState<"conflict" | "readiness" | null>(null);
   const [validation, setValidation] = useState<LlmConfigValidationResp | null>(null);
   const [applyReindexConfirmed, setApplyReindexConfirmed] = useState(false);
@@ -2286,6 +2295,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       setMigrationAccepted(false);
       setProviderTests({});
       if (scoped && connectionEditor) {
+        toast({ kind: "success", text: t("sections.saved_toast", { name: connect?.origKey || connect?.name.trim() || "" }) });
         connectionBaselineRef.current = null;
         connectionInitializedRef.current = true;
         setConnect(null);
@@ -2326,6 +2336,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           if (section === "assignments") setAssignmentsSaved(true);
           setPageMode(scoped ? "edit" : "overview");
           if (scoped && connectionEditor) {
+            toast({ kind: "success", text: t("sections.saved_toast", { name: connect?.origKey || connect?.name.trim() || "" }) });
             connectionBaselineRef.current = null;
             setConnect(null);
             setNavigateAfterConnectionSave(true);
@@ -2369,6 +2380,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     v2Enabled,
     userFacingError,
     refreshOverviewReadiness,
+    connect,
+    connectionEditor,
+    t,
   ]);
 
   const recheckStaleReview = useCallback(async () => {
@@ -2599,17 +2613,18 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         modelCount: normModels(spec).length + mediaCount + searchCount,
         models: normModels(spec).map((model) => ({
           id: model.id,
-          capabilities: model.caps.filter((capability) => VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)).map((capability) => ({
-            capability,
-            state: data?.verification?.entries.find((entry) => entry.provider_id === draftProviderIds[runtimeKey] && entry.model_id === model.id && entry.capability === capability)?.fact_state || "unknown",
-          })),
+          capabilities: model.caps.filter((capability) => VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)).map((capability) => {
+            const entry = data?.verification?.entries.find((item) => item.provider_id === draftProviderIds[runtimeKey] && item.model_id === model.id && item.capability === capability);
+            return { capability, state: entry?.fact_state || "unknown", observedAt: entry?.observed_at ?? null };
+          }),
         })),
         fingerprint: fingerprints[runtimeKey] || spec.fingerprint || null,
         authType: spec.auth?.type,
       };
     })
   ), [baseConfig, fingerprints, data?.verification?.entries, draftProviderIds]);
-  const verificationCandidates = useMemo<VerificationCandidate[]>(() => {
+  /** Every declared verifiable capability of each saved connection. */
+  const allVerificationCandidates = useMemo<VerificationCandidate[]>(() => {
     const readinessRows = overviewValidation?.readiness?.rows || [];
     const candidates = Object.entries(baseConfig.providers).flatMap(([runtimeKey, spec]) => {
       const providerId = draftProviderIds[runtimeKey];
@@ -2642,12 +2657,17 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           };
         }));
     });
-    return candidates.filter((candidate) => !sectionsEnabled || candidate.referenced).sort((left, right) =>
+    return candidates.sort((left, right) =>
       Number(right.recommended) - Number(left.recommended)
       || left.providerName.localeCompare(right.providerName)
       || left.modelId.localeCompare(right.modelId)
       || left.capability.localeCompare(right.capability));
-  }, [baseConfig.providers, data?.verification?.entries, sectionsEnabled, draftProviderIds, overviewValidation?.readiness?.rows]);
+  }, [baseConfig.providers, data?.verification?.entries, draftProviderIds, overviewValidation?.readiness?.rows]);
+  /** "Verify current assignments" covers the capabilities the assignments use. */
+  const verificationCandidates = useMemo(
+    () => allVerificationCandidates.filter((candidate) => !sectionsEnabled || candidate.referenced),
+    [allVerificationCandidates, sectionsEnabled],
+  );
 
   const capLabel = useCallback((c: string) => t(`caps.${c}`), [t]);
 
@@ -3475,6 +3495,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   }, [confirmCancelVerification, recoveredBatch, recoveredBatchRunning, userFacingError]);
 
   const dismissVerification = useCallback(() => {
+    setPlanDialogOpen(false);
     setVerificationPlan(null);
     setVerificationBatch(null);
     setVerificationDrafts(null);
@@ -3660,6 +3681,84 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         />
       )
     : null;
+
+  const [draftEvidence, setDraftEvidence] = useState<DraftEvidenceItem[] | null>(null);
+  const draftEvidenceKey = v2Enabled && connect ? stableJson(v2ProviderDraftFromConnect(connect)) : null;
+  useEffect(() => {
+    if (!draftEvidenceKey || !connect) return;
+    const draft = v2ProviderDraftFromConnect(connect);
+    if (!draft.models.length) return;
+    let cancelled = false;
+    // Ask after typing settles; a late answer for an older draft is dropped by `cancelled`.
+    const timer = window.setTimeout(() => {
+      void fetchDraftEvidence(draft)
+        .then((result) => {
+          if (!cancelled && !result.draft_invalid) setDraftEvidence(result.items);
+        })
+        // The states already shown stay; verification and saving report their own errors.
+        .catch(() => undefined);
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // `connect` is read through the key; refetch also when saved evidence changes after a verification.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftEvidenceKey, data?.verification?.as_of]);
+  useEffect(() => {
+    if (!connect) setDraftEvidence(null);
+  }, [connect]);
+
+  const capabilityStates = useMemo(() => {
+    if (!v2Enabled || !connect) return undefined;
+    const states: Record<string, CapabilityTestState> = {};
+    const fromFact = (fact: string): CapabilityTestState =>
+      fact === "verified" || fact === "aged" ? "verified"
+        : fact === "failed" ? "failed"
+          : fact === "stale" ? "stale"
+            : "unverified";
+    if (draftEvidence) {
+      for (const item of draftEvidence) states[`${item.model_id}:${item.capability}`] = fromFact(item.fact_state);
+    } else if (connect.providerId) {
+      for (const entry of data?.verification?.entries || []) {
+        if (entry.provider_id === connect.providerId) states[`${entry.model_id}:${entry.capability}`] = fromFact(entry.fact_state);
+      }
+    }
+    for (const item of verificationBatch?.items || []) {
+      const key = `${item.model_id}:${item.capability}`;
+      if (item.state === "queued" || item.state === "verifying") states[key] = "testing";
+      else if (item.state === "verified") states[key] = "verified";
+      else if (item.state === "failed" || item.state === "errored") states[key] = "failed";
+    }
+    return states;
+  }, [v2Enabled, connect, draftEvidence, data?.verification?.entries, verificationBatch?.items]);
+
+  const verificationRowFailures = useMemo(() => {
+    const rows: Record<string, React.ReactNode[]> = {};
+    for (const item of verificationBatch?.items || []) {
+      if (item.state !== "failed" && item.state !== "errored") continue;
+      (rows[item.model_id] ||= []).push(<VerificationFailureLine key={item.item_id || item.capability} item={item} />);
+    }
+    return Object.fromEntries(Object.entries(rows).map(([model, lines]) => [model, <>{lines}</>]));
+  }, [verificationBatch?.items]);
+
+  const reloadLatestKeepingDraft = useCallback(async () => {
+    setBusy(true);
+    try {
+      const latest = await fetchAdminLlmConfig();
+      const normalized = normConfig(latest.config);
+      setData(latest);
+      setBaseConfig(normalized);
+      setConfig(normalized);
+      setDraftProviderIds((current) => ({ ...(latest.provider_identities || {}), ...current }));
+      setConnectionSaveConflict(false);
+      setError(null);
+    } catch (cause) {
+      setError(userFacingError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [userFacingError]);
 
   const saveConnect = useCallback(() => {
     if (!connect) return;
@@ -3870,6 +3969,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     void (async () => {
       setBusy(true);
       setError(null);
+      setConnectionSaveConflict(false);
       try {
         let providerId = connect.providerId;
         if (v2Enabled && !providerId) {
@@ -3882,6 +3982,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         if (scoped) {
           const outgoing = configForWrite(nextCfg);
           const finishConnectionSave = (saved: AdminLlmConfigResp) => {
+            toast({ kind: "success", text: t("sections.saved_toast", { name: key }) });
             const normalized = normConfig(saved.config);
             setData(saved);
             setBaseConfig(normalized);
@@ -3899,6 +4000,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           };
           if (stableJson(outgoing) === stableJson(configForWrite(baseConfig))) {
             connectionBaselineRef.current = null;
+            toast({ kind: "info", text: t("sections.unchanged_toast", { name: key }) });
             setConnect(null);
             setNavigateAfterConnectionSave(true);
             return;
@@ -3909,7 +4011,6 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             || checked.issues.length > 0
             || (v2Enabled && (!readiness?.may_apply
               || readiness.blocking.length > 0
-              || readiness.warnings.length > 0
               || readiness.required_acceptances.length > 0
               || Boolean(readiness.migration_acceptance)))
             || reindexRequested;
@@ -3951,6 +4052,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         const ok = await persist(nextCfg);
         if (ok) { setConnect(null); setVerificationPlan(null); setVerificationBatch(null); setVerificationDrafts(null); }
       } catch (cause) {
+        if (scoped && modelSettingsErrorKey(cause) === "err_config_version_conflict") {
+          // The draft lives in `connect`, apart from the saved config: reloading the latter keeps it.
+          setConnectionSaveConflict(true);
+          setError(t("sections.save_conflict"));
+          return;
+        }
         setError(userFacingError(cause));
       } finally {
         setBusy(false);
@@ -4119,6 +4226,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const migrationAcceptanceComplete = Boolean(
     !readiness?.migration_acceptance || migrationAccepted,
   );
+  /** Saving a connection shows only the decisions this save needs, not the Team-wide review (design §3.2). */
+  const connectionConfirmation = Boolean(connectionEditor && connect && v2Enabled);
+  const reviewAcceptancesPending = Boolean(v2Enabled && readiness && (!riskAcceptancesComplete || !migrationAcceptanceComplete));
 
   const assignmentRows = assignmentSummaryRows(config, assignmentMaintenance);
   const previousAssignmentRows = assignmentSummaryRows(baseConfig, assignmentMaintenance);
@@ -4159,7 +4269,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       onAddProvider={() => router.push("/team/settings/models/connections/new/")}
       onConnectBowra={data?.features?.bowra_connect ? () => void connectBowra() : undefined}
       onVerifyProvider={(runtimeKey) => {
-        void planSelectedVerification(verificationCandidates.filter((candidate) => candidate.providerId === draftProviderIds[runtimeKey]));
+        // A connection's Verify checks everything it declares, as the editor's does (audit F11).
+        void planSelectedVerification(allVerificationCandidates.filter((candidate) => candidate.providerId === draftProviderIds[runtimeKey]));
       }}
       onEditProvider={(key) => router.push(`/team/settings/models/connections/edit/?id=${encodeURIComponent(draftProviderIds[key] || "")}`)}
       onRetryReadiness={() => void refreshOverviewReadiness(baseConfig, data?.version ?? 0, v2Enabled)}
@@ -4214,8 +4325,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       {data?.assignment_review_required ? <p role="status">{t("sections.assignment_review_required")} <button type="button" className="btn sec sm" onClick={() => router.push("/team/settings/models/assignments/")}>{t("overview.edit_assignments")}</button></p> : null}
       {assignmentMaintenance && !config.tiers.primary?.provider && !connect ? <p role="status">{t("sections.no_primary")}</p> : null}
       {bowraImported ? <p role="status">{t("bowra.imported")}</p> : null}
-      {scoped && connectionEditor && pageMode === "overview" ? <p role="status">{t("sections.saved")}</p> : null}
-      {error ? (
+      {error && !connect ? (
         <div className="test-result err" role="alert"><span className="ti"><AlertTriangle size={15} /></span><div>{error}</div></div>
       ) : null}
 
@@ -4492,6 +4602,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               adaptations={outboundAdaptations}
               caps={connectCaps}
               busy={busy || verificationBusy || verificationBatchRunning}
+              saving={busy}
+              saveError={error && !reviewOpen ? <>
+                {error}
+                {connectionSaveConflict ? <button type="button" className="btn sec sm" disabled={busy}
+                  onClick={() => void reloadLatestKeepingDraft()}>{t("sections.reload_keep_draft")}</button> : null}
+              </> : undefined}
               dirty={connectionDirty || isDirty}
               saveEnabled={saveEnabled} saveBlocked={saveBlocked} testEnabled={testEnabled}
               deploymentMode={data?.features?.deployment_mode}
@@ -4499,7 +4615,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               previewKey={JSON.stringify({ connect, version: data?.version })}
               onParameterPreview={(modelId, capability) => previewModelParameters(v2ProviderDraftFromConnect(connect), modelId, capability, data?.version || 0)}
               onPatch={patchConnect} onToggleCap={toggleDraftCap}
-              onTouch={touchProviderField} onTest={runTest} onAutoFill={autoFillModels} discoveringModels={discoveringModels}
+              onTouch={touchProviderField} onTest={() => { setPlanDialogOpen(true); void runTest(); }} onAutoFill={autoFillModels} discoveringModels={discoveringModels}
               onSave={saveConnect}
               onCancel={() => {
                 if (bowraImported) { void exitEditMode(); return; }
@@ -4510,11 +4626,33 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 setError(null);
               }}
               capLabel={capLabel}
-              verification={sectionsEnabled && verificationPlan ? <VerificationPanel
-                plan={verificationPlan} batch={verificationBatch} busy={verificationBusy}
+              // The cost plan opens in view; once confirmed, progress and the count sit in the save bar and
+              // each failure under its model row (design §3.3).
+              verification={sectionsEnabled && verificationPlan && !verificationBatch && planDialogOpen ? <DialogShell
+                presentation="center"
+                onClose={dismissVerification}
+                busy={verificationBusy}
+                mount="inline"
+                label={t("v2.verification_confirm_title")}
+                backdropClassName="mset-scrim"
+                panelClassName="mset-modal verification-plan-modal"
+              ><VerificationPanel
+                plan={verificationPlan} batch={null} busy={verificationBusy}
                 onConfirm={() => void confirmVerification()} onCancel={() => void cancelCurrentVerification()}
-                onDismiss={dismissVerification} onRetry={() => void retryUnfinishedVerification()}
-              /> : undefined}
+                onDismiss={dismissVerification}
+              /></DialogShell> : undefined}
+              capabilityStates={capabilityStates}
+              verifyStatus={!sectionsEnabled ? undefined : verificationBatch ? <VerificationStatus
+                batch={verificationBatch}
+                busy={verificationBusy}
+                onCancel={() => void cancelCurrentVerification()}
+                onRetry={() => { setPlanDialogOpen(true); void retryUnfinishedVerification(); }}
+                onDismiss={dismissVerification}
+              /> : verificationPlan && !planDialogOpen ? <span className="verification-status" role="status">
+                {t("v2.status_prepared", { count: verificationPlan.item_count, requests: verificationPlan.provider_request_count })}
+                <Button type="button" size="sm" onClick={() => setPlanDialogOpen(true)}>{t("v2.status_review_plan")}</Button>
+              </span> : undefined}
+              rowFailures={verificationRowFailures}
               aiFill={providerAiFill}
               v2={v2Enabled}
               azureEnabled={Boolean(data?.features?.azure_openai)}
@@ -4542,7 +4680,6 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         ) : null}
       </section> : null}
 
-      {scoped && connectionEditor && isDirty ? <p>{t("sections.connection_staged")}</p> : null}
       {(!scoped || section === "assignments") ? <>
       {/* ② Model allocation (tiers: primary + advanced [lightweight/judge]) */}
       <section className="block">
@@ -5041,9 +5178,11 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         >
           <div className="review-head">
             <div>
-              <span className="review-kicker">{t("v4.review_kicker")}</span>
-              <h2 id="mset-review-title">{t("v4.review_title")}</h2>
-              <p>{t("v4.review_sub")}</p>
+              {connectionConfirmation ? null : <span className="review-kicker">{t("v4.review_kicker")}</span>}
+              <h2 id="mset-review-title">{connectionConfirmation
+                ? t("sections.confirm_save_title", { name: connect?.origKey || connect?.name.trim() || "" })
+                : t("v4.review_title")}</h2>
+              <p>{t(connectionConfirmation ? "sections.confirm_save_body" : "v4.review_sub")}</p>
             </div>
             <button type="button" className="iconbtn" aria-label={t("v4.close")} onClick={() => setReviewOpen(false)}><XSm size={17} /></button>
           </div>
@@ -5059,12 +5198,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 </div>
               </div>
             ) : null}
-            <section className="review-section">
+            {connectionConfirmation ? null : <section className="review-section">
               <h3>{t("v4.changed")}</h3>
               <div className="change-chips">
                 {changedSections.map((section) => <span key={section}>{t(`v4.section_${section}`)}</span>)}
               </div>
-            </section>
+            </section>}
             {section === "assignments" && assignmentEdits.length ? <section className="review-section">
               <h3>{t("overview.assignment_changes")}</h3>
               {assignmentEdits.map((row) => {
@@ -5076,7 +5215,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 </div>;
               })}
             </section> : null}
-            <section className="review-section" aria-live="polite">
+            {connectionConfirmation && !error && !(busy && !validation) && reviewIssues.length === 0 && reviewWarnings.length === 0 ? null : <section className="review-section" aria-live="polite">
               <h3>{t("v4.validation")}</h3>
               {busy && !validation ? (
                 <div className="review-neutral"><Spinner size={14} /> {t("v4.validating")}</div>
@@ -5090,7 +5229,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                     <div key={`${issue.path}:${issue.message}`}><AlertTriangle size={14} /><span>{issue.message}</span></div>
                   ))}
                 </div>
-              ) : (
+              ) : reviewAcceptancesPending ? null : (
                 <div className="review-ok"><Check size={14} /> {t("v4.validation_ok")}</div>
               )}
               {reviewWarnings.length > 0 ? (
@@ -5100,10 +5239,11 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                   ))}
                 </div>
               ) : null}
-            </section>
+            </section>}
             {validation?.assignment_changes?.length ? <AssignmentChanges changes={validation.assignment_changes} /> : null}
             {v2Enabled && readiness ? (
               <ReadinessReview
+                decisionsOnly={connectionConfirmation}
                 readiness={readiness}
                 acceptedTokens={acceptedRiskTokens}
                 migrationAccepted={migrationAccepted}
@@ -5119,7 +5259,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 disabled={Boolean(reviewStale)}
               />
             ) : null}
-            {(!scoped || connectionEditor) ? <section className="review-section">
+            {(!scoped || (connectionEditor && !v2Enabled)) ? <section className="review-section">
               <h3>{v2Enabled ? t("v2.evidence_title") : t("v4.connection_evidence")}</h3>
               <div className="evidence-list">
                 {providerEntries.filter(([key]) => !scoped || connectionEditor && key === (connect?.origKey || connect?.name.trim())).map(([key, spec]) => {
@@ -5216,7 +5356,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                   }
                   onClick={() => void applyDraft()}
                 >
-                  {busy ? <Spinner size={13} /> : <Check size={13} />} {t("v4.apply")}
+                  {busy ? <Spinner size={13} /> : <Check size={13} />} {connectionConfirmation ? t("common.save") : t("v4.apply")}
                 </button>
               </>
             )}
@@ -5375,7 +5515,19 @@ export function ConnectPanel(props: {
   draft: ConnectDraft;
   modelsOptional?: boolean;
   caps: readonly string[];
+  /** Disables the form: saving, or a verification plan or batch in progress. */
   busy: boolean;
+  /** Only the save request itself; Save must not read "saving" while a verification runs. Defaults to `busy`. */
+  saving?: boolean;
+  /** A save failure shown beside Save, where the administrator acted, instead of at the page top. */
+  saveError?: React.ReactNode;
+  /** v2: each declared capability's state for this draft, keyed `model:capability`, from the server's draft evidence
+   *  and the running batch. Absent keys read as unverified. */
+  capabilityStates?: Record<string, CapabilityTestState>;
+  /** v2: a running or finished verification's one-line status for the save bar. */
+  verifyStatus?: React.ReactNode;
+  /** v2: why a capability failed, under its model row; keyed by trimmed model ID. */
+  rowFailures?: Record<string, React.ReactNode>;
   dirty?: boolean;
   saveEnabled: boolean;
   /** Outbound URL policy (`local` / `saas`). When unknown, URL hints omit format guidance — wrong guesses mislead users. */
@@ -5419,6 +5571,11 @@ export function ConnectPanel(props: {
     caps,
     adaptations,
     busy,
+    saving = busy,
+    saveError,
+    capabilityStates,
+    verifyStatus,
+    rowFailures,
     dirty = false,
     saveEnabled,
     deploymentMode,
@@ -6006,17 +6163,22 @@ export function ConnectPanel(props: {
                       the hint (design S1/S3). */}
                   <div className="medit-caps">
                     <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.capabilities" label={t("v2.capability_required_title")} />{caps.map((c) => {
-                      const state = modelCapabilityTestState(m.id, m.caps, c, draft.testing, testResult?.steps);
+                      const state: CapabilityTestState = v2 && capabilityStates
+                        ? m.caps.includes(c) ? capabilityStates[`${m.id.trim()}:${c}`] ?? "unverified" : "off"
+                        : modelCapabilityTestState(m.id, m.caps, c, draft.testing, testResult?.steps);
                       const status = state === "verified" ? t("connect.verified")
                         : state === "degraded" ? t("connect.degraded")
                         : state === "failed" ? t("connect.verification_failed")
                           : state === "testing" ? t("connect.verifying")
-                            : state === "unverified" ? t("connect.unverified")
-                              : "";
+                            : state === "stale" ? t("connect.needs_reverify")
+                              : state === "unverified" ? t("connect.unverified")
+                                : "";
                       return <button type="button" key={c} className={`captoggle ${state}`} onClick={() => { touch("models"); onToggleCap(idx, c); }}><span className="tk" />{capLabel(c)}{status ? ` · ${status}` : ""}</button>;
                     })}
                   </div>
                   <button type="button" className="medit-x" title={t("common.remove")} aria-label={`${t("common.remove")} ${m.id || idx + 1}`} onClick={() => removeRow(idx)}><XSm size={14} /></button>
+                  {/* Placed after the row's three grid cells so it spans its own full-width line. */}
+                  {rowFailures?.[m.id.trim()] ? <div className="verification-row-failures">{rowFailures[m.id.trim()]}</div> : null}
                   <details className="model-advanced" open={Boolean(m.parameterError || !creditRatesValid(m.creditRates) || !outboundParamsValid(m.outboundParams) || !runtimeParametersValid(m.runtimeParameters) || !contextPolicyValid(m.contextPolicy) || !modelRequestBodyOverridesValid(m.requestBodyOverrides || "{}", m.caps))}>
                     <summary>{t("sections.advanced_model")}</summary>
                   {draft.protocol === "openai_compatible" && m.caps.some((c) => ["chat", "tool", "vision"].includes(c)) ? (
@@ -6235,13 +6397,15 @@ export function ConnectPanel(props: {
           {pureImage ? <div className="unver-note legacy-mset-unver-neutral"><Info size={12} /> <span><b>{t("connect.pure_image_title")}</b>{t("connect.pure_image_note")}</span></div> : null}
           {pureSearch ? <div className="unver-note legacy-mset-unver-neutral"><Info size={12} /> <span><b>{t("connect.pure_search_title")}</b>{t("connect.pure_search_note")}</span></div> : null}
         </div>
-        {testResult ? (
+        {/* v2 results live on the capability chips and in the verification panel; this v1 summary would
+            repeat them, and during a run it claimed capability checks were not performed. */}
+        {!v2 && testResult ? (
           <div className={`test-result ${testResult.code === "capability_degraded" ? "warn" : testResult.ok ? "ok" : "err"}`} role="status">
             <span className="ti">{testResult.ok && testResult.code !== "capability_degraded" ? <Check size={15} /> : <AlertTriangle size={15} />}</span>
             <div>{summary()}</div>
           </div>
         ) : null}
-        {capabilitySteps.map((step) => (
+        {!v2 && capabilitySteps.map((step) => (
           <div key={`${step.model}:${step.capability}`} className={`test-result ${step.status === "degraded" ? "warn" : step.ok ? "ok" : "err"}`} role="status">
             <span className="ti">{step.ok && step.status !== "degraded" ? <Check size={15} /> : <AlertTriangle size={15} />}</span>
             <div>{step.model} · {capLabel(step.capability || "")} · {step.status === "degraded" ? t("verify.stream_degraded") : step.ok ? t("connect.verified") : t(`verify.${step.code}`)}</div>
@@ -6250,8 +6414,10 @@ export function ConnectPanel(props: {
       </fieldset>
       {verification}
       <SaveBar
-        dirty={dirty} guard={false} saving={busy}
-        message={<>        {saveBlocked ? (
+        dirty={dirty} guard={false} saving={saving}
+        message={<>        {saveError ? (
+          <span className="save-error" role="alert">{saveError}</span>
+        ) : verifyStatus ? verifyStatus : saveBlocked ? (
           <span className="save-blocked" id="connect-save-blocked" role="status">
             {saveBlocked === "name_missing"
               // The field is "来源标识" in v2, "名称" in v1 — reasons must use the same name as the field,
@@ -6262,7 +6428,7 @@ export function ConnectPanel(props: {
               : t(`connect.blocked_${saveBlocked}`)}
           </span>
         ) : null}
-{!saveBlocked ? t("sections.connection_actions") : null}</>}
+{!saveError && !verifyStatus && !saveBlocked ? t("sections.connection_actions") : null}</>}
         saveDisabled={!saveEnabled}
         saveLabel={t("common.save")} discardLabel={t("common.cancel")}
         onSave={onSave} onDiscard={onCancel}

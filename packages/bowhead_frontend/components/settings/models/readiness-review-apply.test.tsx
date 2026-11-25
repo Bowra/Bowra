@@ -95,9 +95,9 @@ describe("把「不验证也能应用」说出来", () => {
     renderReview({ ...BASE, required_acceptances: [ACCEPTANCE] });
 
     const note = document.querySelector(".readiness-optional")?.textContent ?? "";
-    expect(note).toContain("确认风险后保存");
-    expect(note).toContain("模型分工");      // Identify where to verify
-    expect(note).toContain("重新检查并确认保存");      // Explain the cost: invalidates the review
+    expect(note).toContain("确认后仍可保存");  // Saving does not need verification
+    expect(note).toContain("先返回");          // Where to verify: back in the editor or assignments page
+    expect(note).toContain("验证这些能力后再保存"); // Verifying first means saving again
   });
 
   it("负对照：没有待确认项时不出这句话（别对着空气解释）", () => {
@@ -112,5 +112,35 @@ describe("把「不验证也能应用」说出来", () => {
     expect(screen.queryByRole("button", { name: /验证|重试/ })).toBeNull();
     // Positive control: prove this surface actually rendered, only without a verification button.
     expect(screen.getByText("模型可用性")).toBeTruthy();
+  });
+});
+
+describe("the Team review reads in plain names and puts decisions first", () => {
+  const row = (roleKey: string, model: string, capability: string, status: string) => ({
+    role_key: roleKey, provider_id: "p", provider_display_name: "aliyun_qwen", model_id: model, capability,
+    routing_critical: true, declared: true, fact_state: status === "ready" ? "verified" : "failed", status,
+  });
+
+  it("names roles and capabilities, and folds rows that need nothing", () => {
+    renderReview({
+      ...BASE,
+      rows: [
+        row("tier.primary", "qwen-max", "chat", "ready"),
+        row("tier.primary_fallback", "qwen-plus", "tool", "warning"),
+        row("kb.row_extractor", "qwen-flash", "chat", "risk_accepted"),
+      ],
+      required_acceptances: [{ ...ACCEPTANCE, role_key: "tier.primary_fallback", capability: "tool", risk_code: "capability_failed" }],
+    });
+
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/tier\.|kb\.|· tool|· chat/);
+    expect(text).toContain("gpt-51 的工具调用能力用于主模型备用");
+    const visibleRows = [...document.querySelectorAll(".readiness-review > .readiness-rows .readiness-row")];
+    expect(visibleRows.map((node) => node.querySelector("b")?.textContent)).toEqual(["qwen-plus"]);
+    expect(document.querySelector(".readiness-settled summary")?.textContent).toBe("其余 2 项无需处理");
+    // The acknowledgment comes before the table it would otherwise sit under.
+    const acceptance = document.querySelector(".readiness-acceptance") as Element;
+    const table = document.querySelector(".readiness-review > .readiness-rows") as Element;
+    expect(acceptance.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

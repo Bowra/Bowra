@@ -189,8 +189,12 @@ describe("PresentationEditor", () => {
     expect(within(popover).queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.blur(cell);
     expect(within(popover).getByRole("alert")).toHaveTextContent("not_a_number");
-    expect(screen.getByText("invalid_pending")).toBeInTheDocument();
+    // The save waits, and the footer names the value, with a way to it (design §13.7).
+    expect(screen.getByText('invalid_chart_value:{"page":1,"name":"Chart 3","category":"1 月"}')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "save_version" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "go_edit" })).toBeInTheDocument();
+    // The chart is marked as a change, numbered, and says why.
+    expect(screen.getByRole("button", { name: /kind_chartlabel_separatorChart 3 · unsaved_numbered:\{"number":1\} · chart_invalid_label/ })).toHaveAttribute("data-pending", "true");
   });
 
   it("keeps focus in the editor when PageDown turns the page, so the next PageUp still works", async () => {
@@ -204,9 +208,51 @@ describe("PresentationEditor", () => {
     await waitFor(() => expect(hit).toHaveFocus());
     fireEvent.keyDown(hit, { key: "PageDown" });
     // The hit left with page 1; focus moves to the page (or its rail thumbnail) instead of the body.
-    await waitFor(() => expect(screen.getByRole("group", { name: 'page_of:{"page":2,"count":2}' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("group", { name: 'stage_label:{"page":2,"count":2}' })).toHaveFocus());
     fireEvent.keyDown(document.activeElement as Element, { key: "PageUp" });
-    await waitFor(() => expect(screen.getByRole("group", { name: 'page_of:{"page":1,"count":2}' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("group", { name: 'stage_label:{"page":1,"count":2}' })).toHaveFocus());
+  });
+
+  it("toggles 引用这一页 for the shown slide and stays in the editor", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    const onToggleSlide = vi.fn().mockReturnValue("added");
+    const onExit = vi.fn();
+    const view = render(
+      <PresentationEditor sessionId="s_e" artifactId="art_v3" filename="季度复盘.pptx" downloadHref="/api/v1/files/art_v3" onExit={onExit}
+        onToggleSlide={onToggleSlide} referencedSlides={{}} />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: 'reference_page_label:{"page":1}' }));
+    expect(onToggleSlide).toHaveBeenCalledWith(expect.objectContaining({ fileId: "art_v3", referenceKind: "result" }), 1);
+    expect(onExit).not.toHaveBeenCalled();
+    // The Composer holds the page: the button reads 「已引用」, pressed.
+    view.rerender(
+      <PresentationEditor sessionId="s_e" artifactId="art_v3" filename="季度复盘.pptx" downloadHref="/api/v1/files/art_v3" onExit={onExit}
+        onToggleSlide={onToggleSlide} referencedSlides={{ art_v3: [1] }} />,
+    );
+    const pressed = screen.getByRole("button", { name: 'referenced_page_label:{"page":1}' });
+    expect(pressed).toHaveAttribute("aria-pressed", "true");
+    expect(pressed).toHaveTextContent("referenced_page");
+  });
+
+  it("focuses the page on entry, undoes the last change with ⌘Z and brings it back with ⇧⌘Z", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    renderEditor();
+    // Entering edit mode puts focus on the page, so the keys work at once.
+    await waitFor(() => expect(screen.getByRole("group", { name: 'stage_label:{"page":1,"count":1}' })).toHaveFocus());
+
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    fireEvent.click(hit);
+    fireEvent.keyDown(hit, { key: "Enter" });
+    const field = await screen.findByRole("textbox");
+    fireEvent.change(field, { target: { value: "年度复盘" } });
+    expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument();
+    const editor = screen.getByTestId("presentation-editor");
+    fireEvent.keyDown(editor, { key: "z", metaKey: true });
+    await waitFor(() => expect(screen.queryByText('pending_count:{"count":1}')).not.toBeInTheDocument());
+    expect(screen.getByText('undo_announce:{"page":1,"name":"季度复盘"}')).toBeInTheDocument();
+    fireEvent.keyDown(editor, { key: "z", metaKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument());
+    expect(screen.getByText('redo_announce:{"page":1,"name":"季度复盘"}')).toBeInTheDocument();
   });
 
   it("explains a picture and offers the ways out", async () => {

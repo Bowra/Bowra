@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from bowhead_router.runtime_notes import (
+    FINAL_REPLY_REVIEW_NOTE_NAME,
     OUTPUT_RECOVERY_STATE_NAME,
     REJECTED_TOOL_SYNTAX_HISTORY_NAME,
     RUNTIME_CORRECTION_NOTE_NAME,
@@ -50,6 +51,8 @@ MESSAGE_KIND_POLICY: dict[str, HistoryPolicy] = {
     "bowhead_connection_probe": "turn_local",
     # Rendered views of saved files for the next request only (visual self-check).
     VISUAL_VIEW_NOTE_NAME: "turn_local",
+    # The final reply waits for the delivery review; its evidence IDs are this Turn's.
+    FINAL_REPLY_REVIEW_NOTE_NAME: "turn_local",
     "context_summary": "conversation",
     # A user-selected Skill stays with the request it belongs to.
     "skill_content": "conversation",

@@ -39,8 +39,7 @@ def test_bounded_optional_amounts(value, accepted):
 
 
 @pytest.mark.asyncio
-async def test_native_card_recovery_and_scope(monkeypatch):
-    monkeypatch.setenv("FEATURE_CHAT_ANSWER_CARDS", "1")
+async def test_native_card_recovery_and_scope():
     ctx = SimpleNamespace(turn_id="t_math", execution_generation=1, answer_card_entry=True, artifact_presentation_entry=True, language_context=None)
     receipt = await cards.show_break_even(
         {"unit_price": 100, "unit_variable_cost": " ", "fixed_costs": False, "currency": "XYZ", "extra": "ignored"}, ctx
@@ -62,6 +61,15 @@ async def test_native_card_recovery_and_scope(monkeypatch):
     assert cards.completed_card([invocation(receipt), invocation(receipt)], ctx) is None
     ctx.execution_generation = 2
     assert cards.completed_card([invocation(receipt)], ctx) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("card_entry", "presentation_entry"), [(False, True), (True, False)])
+async def test_calculator_requires_an_eligible_chat_turn(card_entry, presentation_entry):
+    ctx = SimpleNamespace(answer_card_entry=card_entry, artifact_presentation_entry=presentation_entry)
+    result = await cards.show_break_even({}, ctx)
+    assert result["ok"] is False
+    assert "answer_card" not in result
 
 
 @pytest.mark.parametrize(

@@ -75,8 +75,6 @@ async def stores(tmp_path):
 @pytest.fixture
 def client(stores, monkeypatch):
     store, sessions = stores
-    # Unset: the switch defaults to on.
-    monkeypatch.delenv("FEATURE_PPTX_INLINE_EDIT", raising=False)
     app = FastAPI()
     app.include_router(results_routes.owner_router, prefix="/api/v1")
     app.state.artifact_store = store
@@ -118,16 +116,6 @@ async def _agent_deck(store: ArtifactStore, turn: str = "t1", target: str | None
 def _title_edit(inventory: dict, before: str, after: str) -> dict:
     element = inventory["slides"][0]["elements"][0]
     return {"kind": "text", "key": element["key"], "paragraph": 0, "expect": before, "text": after}
-
-
-async def test_the_switch_hides_both_routes(stores, client, monkeypatch):
-    store, _ = stores
-    http, _, _ = client
-    deck = await _agent_deck(store)
-    monkeypatch.setenv("FEATURE_PPTX_INLINE_EDIT", "0")
-    response = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": deck.id})
-    assert response.status_code == 404 and response.json()["detail"]["error"]["code"] == "presentation_edit_unavailable"
-    assert http.post("/api/v1/sessions/s_e/results/presentation-edits", json={"artifact_id": deck.id, "edits": [{}]}).status_code == 404
 
 
 async def test_a_saved_edit_is_the_next_version_and_stays_revisable_and_listed(stores, client):
@@ -295,7 +283,7 @@ async def test_the_owner_fences_hide_other_sessions_and_denied_spaces(stores, cl
     assert http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": deck.id}).status_code == 404
 
 
-def test_results_offer_editing_only_for_owned_decks_unless_switched_off(monkeypatch):
+def test_results_offer_editing_only_for_owned_decks():
     from bowhead_gateway.results_query_service import _presentation_editable
 
     fields = {"mime": PPTX, "filename": "deck.pptx"}
@@ -303,11 +291,8 @@ def test_results_offer_editing_only_for_owned_decks_unless_switched_off(monkeypa
     upload = SimpleNamespace(kind="user_upload", producer_kind="upload", source="upload", **fields)
     template = SimpleNamespace(kind="deliverable", producer_kind="template_document_v1", source="x", **fields)
     pdf = SimpleNamespace(kind="deliverable", producer_kind="python_sandbox", source="python_sandbox", mime="application/pdf", filename="deck.pdf")
-    monkeypatch.delenv("FEATURE_PPTX_INLINE_EDIT", raising=False)
     assert _presentation_editable(deck) and _presentation_editable(upload)
     assert not _presentation_editable(template) and not _presentation_editable(pdf)
-    monkeypatch.setenv("FEATURE_PPTX_INLINE_EDIT", "0")
-    assert not _presentation_editable(deck)
 
 
 async def test_a_running_turn_holds_pruning_of_a_file_only_people_saved(stores, client):

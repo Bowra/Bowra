@@ -94,7 +94,9 @@ When Lead asks you a clarification question, answer the existing question card. 
 
 ## Try a break-even scenario
 
-When the calculator is available, ask for an editable break-even calculation and give the selling price per unit, variable cost per unit and total fixed costs in one currency. For example, 100, 60 and 12,000 give a break-even volume of 300 units. Change the price to 90 to see the result rise to 400. You can fill in missing amounts directly in the card. Edits are local to your view. Reopening the conversation restores the original assumptions.
+In ordinary chat, ask for an editable break-even calculation and give the selling price per unit, variable cost per unit and total fixed costs in one currency. For example, 100, 60 and 12,000 give a break-even volume of 300 units. Change the price to 90 to see the result rise to 400. You can fill in missing amounts directly in the card. Edits are local to your view. Reopening the conversation restores the original assumptions.
+
+Drag a slider to explore a change or type an exact amount. Compare the new quantity with the original and choose **Reset values** to start again.
 
 ## Actions under an answer
 
@@ -235,7 +237,7 @@ Keep in mind:
 - Saving changes only the characters you edit; other text, styles and slides stay as they were.
 - If some text or a table cannot be located on the preview (an empty text box, for example), you edit it in the panel on the right instead.
 - Pictures, SmartArt, embedded objects, text in the master and layouts (such as a footer on every slide), speaker notes, and moving or resizing cannot be changed here. For these, download the file and use PowerPoint, or select **Reference this item in chat** and ask the AI: the reference says which slide and which item you mean, so you only describe the change. Text, tables and charts can be referenced the same way.
-- To ask about a whole slide, select **Reference this slide** under it (while editing, next to “What you can edit on slide N”; on a phone, next to **Edit slide N**). “Slide N” appears in the message box, and the AI receives the slide’s title and what is on it. The reference points at the version you were looking at.
+- To ask about a whole slide, select **Reference this slide** under it (while editing, next to “What you can edit on slide N”; on a phone, next to **Edit slide N**). “Slide N” appears in the message box, and the AI receives the slide’s title and what is on it. You can pick several slides in a row (up to 10); they share one item, such as “Slides 2, 5”, the button reads **Referenced**, and selecting it again removes that slide. In the full view and while editing you stay where you are, so you can keep picking; on a phone you stay on Results, and **Go to chat** in the notice takes you to the message box. The reference points at the version you were looking at.
 - Numbers in a table are not formulas: changing one cell does not recalculate others. When you change a chart value, the same number written elsewhere on the slide does not follow it; the editor points this out.
 - Generated content such as slide numbers and dates can have text around it changed but cannot be removed.
 - The first save of an uploaded file creates a new “(edited)” file and leaves the upload unchanged; later saves add versions to the new file.

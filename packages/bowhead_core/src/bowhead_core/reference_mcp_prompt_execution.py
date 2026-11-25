@@ -183,6 +183,9 @@ def _composition(
     primary: ReferencePrimaryInput,
     prepared: PreparedReferenceMcpPromptSelection,
 ) -> ReferenceMcpPromptPrimaryComposition:
+    if primary.binding.trial_candidate_id is not None:
+        # MCP Prompt composition is bound to a released Agent; an Owner draft trial has none (§4.5).
+        raise ValueError("agent_trial_mcp_references_unavailable")
     document = primary.source.input_document
     if document is None or primary.automatic_receiver is not None or prepared.receiver.source_kind != "team":
         raise ValueError("reference_mcp_prompt_composition_unavailable")

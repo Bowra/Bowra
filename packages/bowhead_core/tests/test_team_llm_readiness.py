@@ -123,9 +123,10 @@ def test_readiness_blocks_undeclared_and_only_accepts_nonrouting_risk(
     assert any(row.status == "risk_accepted" for row in accepted.rows)
 
 
-def test_aged_only_survives_unchanged_scope_and_grandfather_is_exact(
+def test_aged_fact_counts_as_a_pass_and_grandfather_is_exact(
     monkeypatch,
 ) -> None:
+    """Evidence no longer ages (2026-11-25); an `aged` fact from an older projection still counts as a pass."""
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", ROOT_KEY)
     assignments = build_required_assignments(
         _config(),
@@ -143,7 +144,8 @@ def test_aged_only_survives_unchanged_scope_and_grandfather_is_exact(
         assignments=assignments,
         facts=aged,
     )
-    assert changed.blocking
+    assert not changed.blocking and not changed.warnings
+    assert all(row.status == "ready" for row in changed.rows)
 
     unchanged = compute_team_llm_readiness(
         expected_version=7,
@@ -153,7 +155,7 @@ def test_aged_only_survives_unchanged_scope_and_grandfather_is_exact(
     )
     assert not unchanged.blocking
     assert unchanged.may_apply is True
-    assert all(row.status == "warning" for row in unchanged.rows)
+    assert all(row.status == "ready" for row in unchanged.rows)
 
     unknown = compute_team_llm_readiness(
         expected_version=7,

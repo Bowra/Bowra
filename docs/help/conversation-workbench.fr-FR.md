@@ -19,7 +19,9 @@ Cet article décrit les zones de la page de conversation qui affichent la progre
 
 ## Simuler le seuil de rentabilité
 
-Lorsque le calculateur est disponible, demandez une simulation modifiable dans la conversation. Indiquez le prix unitaire, le coût variable unitaire et les coûts fixes dans la même devise. Avec 100, 60 et 12 000, le seuil est de 300 unités. Si vous ramenez le prix à 90, il passe à 400 unités. Vous pouvez saisir les montants manquants dans la carte. Vos modifications restent locales. À la réouverture, la conversation affiche les hypothèses initiales.
+Dans une conversation ordinaire, demandez une simulation modifiable. Indiquez le prix unitaire, le coût variable unitaire et les coûts fixes dans la même devise. Avec 100, 60 et 12 000, le seuil est de 300 unités. Si vous ramenez le prix à 90, il passe à 400 unités. Vous pouvez saisir les montants manquants dans la carte. Vos modifications restent locales. À la réouverture, la conversation affiche les hypothèses initiales.
+
+Déplacez un curseur ou saisissez un montant précis. Le résultat indique l’écart avec la quantité initiale. Choisissez **Rétablir** pour retrouver les valeurs de départ.
 
 ## Actions sous une réponse
 
@@ -81,7 +83,7 @@ Sur téléphone, les diapositives s’affichent les unes sous les autres. Touche
 - L’enregistrement ne change que les caractères modifiés ; le reste du texte, les styles et les diapositives restent inchangés.
 - Si un texte ou un tableau ne peut pas être repéré dans l’aperçu (une zone de texte vide, par exemple), vous le modifiez dans le panneau de droite.
 - Les images, SmartArt, objets incorporés, le texte du masque et des dispositions (comme un pied de page présent sur chaque diapositive), les commentaires du présentateur, ainsi que déplacer ou redimensionner, ne se modifient pas ici. Téléchargez le fichier et utilisez PowerPoint, ou choisissez **Citer cet élément dans la conversation** et demandez à l’IA : la citation indique la diapositive et l’élément, vous n’avez qu’à décrire la modification. Le texte, les tableaux et les graphiques peuvent être cités de la même façon.
-- Pour poser une question sur toute une diapositive, choisissez **Citer cette diapositive** sous celle-ci (pendant la modification, à côté de « Modifiable sur la diapositive N » ; sur téléphone, à côté de **Modifier la diapositive N**). « Diapositive N » apparaît dans la zone de message, et l’IA reçoit le titre de la diapositive et son contenu. La citation porte sur la version que vous regardiez.
+- Pour poser une question sur toute une diapositive, choisissez **Citer cette diapositive** sous celle-ci (pendant la modification, à côté de « Modifiable sur la diapositive N » ; sur téléphone, à côté de **Modifier la diapositive N**). « Diapositive N » apparaît dans la zone de message, et l’IA reçoit le titre de la diapositive et son contenu. Vous pouvez en choisir plusieurs à la suite (jusqu’à 10) ; elles forment un seul élément, par exemple « Diapositives 2, 5 », le bouton indique **Cité**, et le choisir à nouveau retire la diapositive. En plein écran et pendant la modification, vous restez où vous êtes ; sur téléphone, vous restez dans les résultats, et **Aller à la conversation** dans l’avis mène à la zone de message. La citation porte sur la version que vous regardiez.
 - Les nombres d’un tableau ne sont pas des formules. Si vous changez une valeur de graphique, le même nombre écrit ailleurs sur la diapositive ne suit pas ; l’éditeur vous le signale.
 - Pour un contenu généré, comme les numéros de diapositive et les dates, vous pouvez modifier le texte autour, mais pas le supprimer.
 - Le premier enregistrement d’un fichier importé crée un nouveau fichier « (modifié) » et laisse le fichier importé inchangé ; les enregistrements suivants ajoutent des versions au nouveau fichier.

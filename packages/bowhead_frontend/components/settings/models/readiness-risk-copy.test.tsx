@@ -62,13 +62,14 @@ describe("认领文案按风险种类取", () => {
     expect(screen.getByText(/接受验证失败的能力风险/)).toBeTruthy();
     // The negative assertion matters most: claiming verification is impossible makes users sign a false statement
     expect(screen.queryByText(/无法自动验证/)).toBeNull();
-    expect(screen.getByText(/最近一次验证判定为失败/)).toBeTruthy();
+    expect(screen.getByText(/最近一次验证失败/)).toBeTruthy();
   });
 
-  it("证据过期：说「证据已过期」", () => {
+  it("配置已改：说连接已修改、尚未重新验证（不是按时间过期）", () => {
     renderRisk("capability_stale");
 
-    expect(screen.getByText(/接受证据已过期的能力风险/)).toBeTruthy();
+    expect(screen.getByText(/接受连接已修改、尚未重新验证的能力风险/)).toBeTruthy();
+    expect(screen.queryByText(/过期/)).toBeNull();
     expect(screen.queryByText(/无法自动验证/)).toBeNull();
   });
 

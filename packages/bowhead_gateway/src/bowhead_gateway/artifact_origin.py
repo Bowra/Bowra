@@ -42,6 +42,9 @@ SOURCE_TO_ORIGIN: dict[str, str] = {
     "web_deep_research": "web",
     "consultant_deck": "deck",
     "kb_bundle_upload": "upload",
+    # A version the person saved in the deck editor. None of the origins describes a hand edit; the owner chose
+    # (2026-11-25) to register it as other rather than add one, which is what origin_for already returned.
+    "presentation_edit": "other",
 }
 
 VALID_ORIGINS: frozenset[str] = frozenset({"query", "compute", "upload", "export", "web", "deck", "other"})

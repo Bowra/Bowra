@@ -281,6 +281,8 @@ async def _discover_and_register(
     client_metadata: OAuthClientMetadata,
     www_auth: str | None,
     www_auth_scope: str | None,
+    *,
+    reuse_client: bool = True,
 ) -> tuple[OAuthMetadata | None, ProtectedResourceMetadata | None, OAuthClientInformationFull]:
     """Straight-line version of the SDK's async_auth_flow discovery+registration (steps 1-4):
     protected-resource metadata (RFC 9728) → auth-server metadata (RFC 8414, with fallbacks) →
@@ -311,7 +313,7 @@ async def _discover_and_register(
     # we then request in the authorize URL → later tool calls fail insufficient_scope.
     client_metadata.scope = get_client_metadata_scopes(www_auth_scope, prm, asm)
 
-    client_info = await storage.get_client_info()
+    client_info = await storage.get_client_info() if reuse_client else None
     if client_info is not None and not await _client_info_reusable(storage, client_info, client_metadata):
         client_info = None
     if client_info is None:
@@ -353,9 +355,12 @@ async def begin_mcp_oauth(
     state: str,
     code_challenge: str,
     timeout: float = 10.0,
+    reuse_client: bool = True,
 ) -> OAuthBeginResult:
     """Discover + register (persisting client_info via ``storage``) and build the authorization
-    URL for the admin's browser. ``state`` (CSRF, server-issued) and ``code_challenge`` (S256 of
+    URL for the admin's browser. ``reuse_client=False`` registers a new client even when one is
+    stored: a provider may delete the registration when access is revoked there (n8n does), and an
+    authorization URL with a deleted client strands the browser on the provider's error page. ``state`` (CSRF, server-issued) and ``code_challenge`` (S256 of
     the caller-held verifier) are the caller's — this NEVER generates or stores the verifier, so it
     cannot leak into the browser leg. Returns the token_endpoint / client_id / resource / scope the
     callback must reuse verbatim (RFC 8707 resource binding, exact redirect_uri)."""
@@ -372,7 +377,9 @@ async def begin_mcp_oauth(
                 www_auth_scope = extract_scope_from_www_auth(probe)
         except Exception:
             www_auth = None
-        asm, prm, client_info = await _discover_and_register(server_url, client, storage, client_metadata, www_auth, www_auth_scope)
+        asm, prm, client_info = await _discover_and_register(
+            server_url, client, storage, client_metadata, www_auth, www_auth_scope, reuse_client=reuse_client
+        )
 
     scope = client_metadata.scope  # set by _discover_and_register (used for both DCR + the authorize URL)
     base = _base_url(server_url)

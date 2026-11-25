@@ -630,34 +630,50 @@ describe("ArtifactPreview", () => {
     expect(screen.getByRole("dialog", { name: "deck.pptx" })).toBeInTheDocument();
   });
 
-  it("offers 引用这一页 under each page of a deck and references that slide", async () => {
+  it("offers 引用这一页 under each page of a deck as a toggle that follows the Composer", async () => {
     const page = {
       getViewport: () => ({ width: 960, height: 540 }),
       render: () => ({ promise: Promise.resolve() }),
     };
     pdfGetDocument.mockImplementation(() => ({
-      promise: Promise.resolve({ numPages: 2, getPage: () => Promise.resolve(page) }),
+      promise: Promise.resolve({ numPages: 3, getPage: () => Promise.resolve(page) }),
       destroy: vi.fn().mockResolvedValue(undefined),
     }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 })));
-    const onReferenceElement = vi.fn();
-    render(
-      <ArtifactPreview
-        fileId="art_deck" filename="deck.pptx" mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        profile="pptx" preview={null} resultRole="deliverable" downloadHref="/api/v1/files/art_deck" sizeBytes={2048}
-        capabilities={new Set(["download", "reference_in_chat"])}
-        presentationEdit={{ sessionId: "s_1", onOpenVersion: vi.fn(), onReferenceElement }}
-      />,
-    );
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(2));
-    fireEvent.click(screen.getAllByRole("button", { name: "reference_page_label" })[1]);
-    expect(onReferenceElement).toHaveBeenCalledWith({
+    const onToggleSlide = vi.fn().mockReturnValue("added");
+    const host = (referencedSlides: Record<string, number[]>) => ({ sessionId: "s_1", onOpenVersion: vi.fn(), onToggleSlide, referencedSlides });
+    const props = {
       fileId: "art_deck", filename: "deck.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      size: 2048, referenceKind: "result", presentationSelection: { version: 1, artifactId: "art_deck", slideIndex: 2 },
-    }, { quiet: true });
-    // The button confirms instead of a toast over the header; its name starts with what it shows.
-    await waitFor(() => expect(screen.getByRole("button", { name: "referenced_page_label" })).toHaveTextContent("referenced_page"));
+      profile: "pptx" as const, preview: null, resultRole: "deliverable" as const, downloadHref: "/api/v1/files/art_deck", sizeBytes: 2048,
+      capabilities: new Set(["download", "reference_in_chat"]) as never,
+    };
+    const view = render(<ArtifactPreview {...props} presentationEdit={host({})} />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(3));
+    fireEvent.click(screen.getAllByRole("button", { name: "reference_page_label" })[1]);
+    expect(onToggleSlide).toHaveBeenCalledWith({
+      fileId: "art_deck", filename: "deck.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 2048, referenceKind: "result",
+    }, 2, { stay: false });
+    // The button confirms on itself, pressed, and its name starts with what it shows.
+    const pressed = screen.getByRole("button", { name: "referenced_page_label" });
+    expect(pressed).toHaveTextContent("referenced_page");
+    expect(pressed).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("img", { name: "deck.pptx · 2" })).toBeInTheDocument();
+
+    // The Composer decides: pages 1 and 3 in it read 「已引用」; a chip removed there turns them back.
+    view.rerender(<ArtifactPreview {...props} presentationEdit={host({ art_deck: [1, 3] })} />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "referenced_page_label" })).toHaveLength(2));
+    expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(1);
+    view.rerender(<ArtifactPreview {...props} presentationEdit={host({})} />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(3));
+
+    // Pressing a referenced page removes it.
+    view.rerender(<ArtifactPreview {...props} presentationEdit={host({ art_deck: [3] })} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "referenced_page_label" })).toBeInTheDocument());
+    onToggleSlide.mockReturnValueOnce("removed");
+    fireEvent.click(screen.getByRole("button", { name: "referenced_page_label" }));
+    expect(onToggleSlide).toHaveBeenLastCalledWith(expect.objectContaining({ fileId: "art_deck" }), 3, { stay: false });
+    expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(3);
   });
 
   it("reports an unavailable PDF response without misclassifying it as corrupt", async () => {

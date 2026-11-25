@@ -102,6 +102,7 @@ import {
   Square as LucideSquare,
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
+import { referencedSlides, toggleSlide } from "@/lib/presentation-selection";
 import { ComposerNotices, orderComposerNotices, type ComposerNoticeItem } from "./composer-notices";
 import { useComposerFileDrop, type ComposerDropVerdict } from "./use-composer-file-drop";
 import { CharIcon } from "@/components/char-icon";
@@ -200,6 +201,13 @@ interface Props {
   /** Acknowledge the exact refs merged into the current draft so event-style
    * producers can clear their queue without reattaching old results later. */
   onPrefillAttachmentsConsumed?: (attachments: AttachmentRef[]) => void;
+  /**
+   * 「引用这一页」: add `page` to the page set of `file`'s chip, or remove it (the last page removes the
+   * chip). An element reference of the file gives way to the page. Applied once per `nonce`.
+   */
+  slideToggleRequest?: { file: AttachmentRef; page: number; nonce: number } | null;
+  /** The pages of each deck file the draft references, by file ID; drives the pages' 「已引用」. */
+  onReferencedSlidesChange?: (slides: Record<string, number[]>) => void;
   /** Phase 1.4 Steer mode — when present + running=true, submitting text
    *  routes through onSteer instead of starting a new turn. Backend buffers
    *  the message into the active turn's steer queue. Composer stays input-
@@ -630,6 +638,7 @@ function V2ComposerScope({
   referenceInputEnabled = false,
   onInputInteraction,
   onSend, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, disabled, placeholder, sessionTexts, running, onCancel, prefillText, prefillInputDocument, onPrefillConsumed, onPrefillInputDocumentConsumed, statusMessage, prefillAttachments, onPrefillAttachmentsConsumed, onSteer,
+  slideToggleRequest = null, onReferencedSlidesChange,
   lastUserText, lastUserAttachments = [], onReplay, readOnly, recoveryLocked = false, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", autoFocus, hidden, surface = "workbench", stopRequested = false, awaitingAnswer = false, draftControlRef,
   fileDropTargetRef, sendBlockedReason = null, draftTransferLocked, transferNotice = null, submitRequest,
 }: Props & { draftTransferLocked: boolean; transferNotice?: ComposerNoticeItem | null }) {
@@ -1539,6 +1548,33 @@ function V2ComposerScope({
     // Explicit reference actions replace scope without adding duplicate chips.
     onPrefillAttachmentsConsumed?.(uniquePrefills);
   }, [draftConflict, draftReadBlocked, onPrefillAttachmentsConsumed, ordinaryDraftHydrating, prefillAttachments, recoveryLocked]);
+
+  // 「引用这一页」 toggles a page in the file's page set (design §13.6), on the chip the draft holds.
+  const appliedSlideToggleRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!slideToggleRequest || appliedSlideToggleRef.current === slideToggleRequest.nonce) return;
+    if (recoveryLocked || ordinaryDraftHydrating || draftReadBlocked || draftConflict) return;
+    appliedSlideToggleRef.current = slideToggleRequest.nonce;
+    const { file, page } = slideToggleRequest;
+    setItems((prev) => {
+      const index = prev.findIndex((item) => item.fileId === file.fileId && !item.bundleArtifactIds?.length);
+      const { selection, outcome } = toggleSlide(index >= 0 ? prev[index].presentationSelection : undefined, file.fileId, page);
+      if (outcome === "limit") return prev;
+      if (!selection) return prev.filter((_, position) => position !== index);
+      const updated = attachmentRefToItem({ ...file, presentationSelection: selection });
+      if (index < 0) return [...prev, updated];
+      const next = [...prev];
+      next[index] = { ...updated, localId: prev[index].localId };
+      return next;
+    });
+  }, [draftConflict, draftReadBlocked, ordinaryDraftHydrating, recoveryLocked, slideToggleRequest]);
+  const referencedSlidesKey = JSON.stringify(items.flatMap((item) => {
+    const pages = item.fileId && item.presentationSelection ? referencedSlides(item.presentationSelection) : [];
+    return pages.length ? [[item.fileId, pages]] : [];
+  }));
+  useEffect(() => {
+    onReferencedSlidesChange?.(Object.fromEntries(JSON.parse(referencedSlidesKey) as Array<[string, number[]]>));
+  }, [onReferencedSlidesChange, referencedSlidesKey]);
 
   const retryOrdinaryDraftRead = () => {
     // Preserve anything the user entered while the storage read was blocked.

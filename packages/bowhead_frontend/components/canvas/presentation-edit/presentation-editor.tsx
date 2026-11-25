@@ -52,7 +52,7 @@ import {
   type PresentationSaveResult,
   type ReapplyRow,
 } from "@/lib/presentation-edit";
-import { canonicalizePresentationSelection, presentationSlideSelection } from "@/lib/presentation-selection";
+import { canonicalizePresentationSelection, type SlideToggleOutcome } from "@/lib/presentation-selection";
 import { locateTable, locateText, type TableLayout, type TextLayout } from "@/lib/presentation-layout";
 import type { AttachmentRef } from "@/lib/types";
 import { toast } from "@/lib/use-toast";
@@ -181,9 +181,14 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
   onReference?: () => void;
   /** Reference one element with its slide in chat (design §6.9); the editor leaves the full view first. */
   onReferenceElement?: (reference: AttachmentRef) => void;
+  /** 「引用这一页」: add a page of the file to the Composer, or remove it; the editor stays open (design §13.6). */
+  onToggleSlide?: (file: AttachmentRef, page: number) => SlideToggleOutcome;
+  /** The pages of each deck file the Composer references, by file ID. */
+  referencedSlides?: Readonly<Record<string, ReadonlyArray<number>>>;
   onExit: (exit: PresentationEditorExit | null) => void;
 }>(function PresentationEditor({
-  sessionId, artifactId, filename, downloadHref, initialPdfData, initialPage, agentRunning = false, onReference, onReferenceElement, onExit,
+  sessionId, artifactId, filename, downloadHref, initialPdfData, initialPage, agentRunning = false, onReference, onReferenceElement, onToggleSlide,
+  referencedSlides, onExit,
 }, ref) {
   const t = useTranslations("presentation_edit");
   const tObject = useTranslations("canvas_object");
@@ -215,6 +220,23 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingEdit[]>([]);
   const [chartDrafts, setChartDrafts] = useState<ChartDrafts>({});
+  /** Change IDs, the last changed last: ⌘Z undoes the most recent one (design §13.7). */
+  const touchedRef = useRef<string[]>([]);
+  const [redoStack, setRedoStack] = useState<Array<{ edit: PendingEdit; index: number }>>([]);
+  /** An element whose outline flashes after an undo or redo brought it into view. */
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  /** One polite announcement for undo, redo and entering edit mode. */
+  const [announcement, setAnnouncement] = useState("");
+  // Entering edit mode puts focus on the page, so the keyboard model works at once; the page's name says
+  // 「编辑模式 · 第 N / M 页」 (design §13.7). The control that opened the editor has gone with the preview.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      (phoneBodyRef.current ?? stageRef.current)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<PresentationEditError | null>(null);
   const [refusals, setRefusals] = useState<Record<string, string>>({});
@@ -332,7 +354,8 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
 
   const selected = slide?.elements.find((element) => element.key === selectedKey) ?? null;
 
-  const pageLayout = usePageLayout(pdf, !phone && !saved ? drawn : null);
+  // After a save the new text stays painted on the old render until the new render has drawn (design §13.7).
+  const pageLayout = usePageLayout(pdf, !phone && (!saved || renderState === "loading") ? drawn : null);
   const located = useMemo(() => {
     const texts = new Map<string, TextLayout>();
     const tables = new Map<string, TableLayout>();
@@ -452,15 +475,23 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     return next;
   });
 
+  /** A new change: it becomes the one ⌘Z undoes next, and redo starts over. */
+  const touch = (id: string) => {
+    touchedRef.current = [...touchedRef.current.filter((item) => item !== id), id];
+    setRedoStack((stack) => (stack.length ? [] : stack));
+  };
+
   const updateText = (element: InventoryElement, slideId: number, paragraph: number, text: string) => {
     const expect = element.paragraphs?.[paragraph]?.text ?? "";
     setPending((current) => upsertPendingEdit(current, { kind: "text", key: element.key, slideId, paragraph, expect, text }));
+    touch(pendingEditId({ kind: "text", key: element.key, paragraph }));
     clearRefusal(pendingEditId({ kind: "text", key: element.key, paragraph }));
   };
 
   const updateCell = (element: InventoryElement, slideId: number, row: number, col: number, text: string) => {
     const expect = element.rows?.[row]?.[col]?.text ?? "";
     setPending((current) => upsertPendingEdit(current, { kind: "cell", key: element.key, slideId, row, col, expect, text }));
+    touch(pendingEditId({ kind: "cell", key: element.key, row, col }));
     clearRefusal(pendingEditId({ kind: "cell", key: element.key, row, col }));
   };
 
@@ -472,6 +503,7 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
       grid[series][category] = text;
       return { ...current, [element.key]: grid };
     });
+    touch(pendingEditId({ kind: "chart", key: element.key }));
     const parsed = parseChartValue(text, chart.series[series]?.format, locale);
     if (parsed === undefined) return;
     setPending((current) => {
@@ -495,10 +527,45 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     }
   }, []);
 
-  const undoLast = useCallback(() => {
-    const last = pending[pending.length - 1];
-    if (last) undo(pendingEditId(last));
-  }, [pending, undo]);
+  /** After an undo or redo: show the element (turning the page when it is on another), flash it, and say what happened. */
+  const revealChange = (key: string, kind: "undo_announce" | "redo_announce") => {
+    const found = findElement(inventory, key);
+    if (!found) return;
+    if (found.slide.index !== page) {
+      setPage(found.slide.index);
+      setSelectedKey(null);
+      setInPlace(null);
+    }
+    setFlashKey(key);
+    window.setTimeout(() => setFlashKey((current) => (current === key ? null : current)), 1200);
+    setAnnouncement(t(kind, { page: found.slide.index, name: elementLabel(found.element, t, fieldToken) }));
+  };
+
+  const undoLast = () => {
+    const ids = new Set(pending.map(pendingEditId));
+    const id = [...touchedRef.current].reverse().find((item) => ids.has(item)) ?? (pending.length ? pendingEditId(pending[pending.length - 1]) : undefined);
+    if (!id) return;
+    const index = pending.findIndex((edit) => pendingEditId(edit) === id);
+    const edit = pending[index];
+    undo(id);
+    touchedRef.current = touchedRef.current.filter((item) => item !== id);
+    setRedoStack((stack) => [...stack, { edit, index }]);
+    revealChange(edit.key, "undo_announce");
+  };
+
+  const redoLast = () => {
+    const item = redoStack[redoStack.length - 1];
+    if (!item) return;
+    const id = pendingEditId(item.edit);
+    setRedoStack((stack) => stack.slice(0, -1));
+    setPending((current) => {
+      const next = current.filter((edit) => pendingEditId(edit) !== id);
+      next.splice(Math.min(item.index, next.length), 0, item.edit);
+      return next;
+    });
+    touchedRef.current = [...touchedRef.current.filter((entry) => entry !== id), id];
+    revealChange(item.edit.key, "redo_announce");
+  };
 
   const chartInvalid = useMemo(() => {
     const result: Record<string, boolean[][]> = {};
@@ -511,6 +578,23 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     return result;
   }, [chartDrafts, inventory, locale]);
   const hasInvalidChart = Object.values(chartInvalid).some((grid) => grid.some((row) => row.some(Boolean)));
+  /** Charts holding a value that is not a number: a change too, marked and numbered (design §13.7). */
+  const invalidChartKeys = useMemo(
+    () => Object.entries(chartInvalid).filter(([, grid]) => grid.some((row) => row.some(Boolean))).map(([key]) => key),
+    [chartInvalid],
+  );
+  /** The first value that is not a number: where the footer sends 「去修改」. */
+  const firstInvalidValue = useMemo(() => {
+    for (const key of invalidChartKeys) {
+      const found = findElement(inventory, key);
+      const grid = chartInvalid[key];
+      for (let s = 0; s < grid.length; s += 1) {
+        const c = grid[s].findIndex(Boolean);
+        if (c >= 0 && found?.element.chart) return { key, s, c, page: found.slide.index, element: found.element, category: found.element.chart.categories[c] ?? "" };
+      }
+    }
+    return null;
+  }, [chartInvalid, invalidChartKeys, inventory]);
   const hasBrokenField = pending.some((edit) => edit.kind !== "chart" && countFieldTokens(edit.text, fieldToken) !== countFieldTokens(edit.expect, fieldToken));
   const invalid = hasInvalidChart || hasBrokenField;
   // Typed input counts as unsaved even while it is not a valid edit yet.
@@ -683,16 +767,14 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     return () => { void requestExit(true, undefined, () => onReferenceElement(reference)); };
   };
 
+  // 「引用这一页」 adds the page to the file's page set in the Composer, or removes it; editing goes on.
   const referencePage = (slideOf: InventorySlide | undefined) => {
     const file = base?.inventory.file;
-    if (!onReferenceElement || !base || !file || !slideOf) return undefined;
-    const selection = presentationSlideSelection(base.artifactId, slideOf.index, slideOf.slide_id);
-    if (!selection) return undefined;
-    const reference: AttachmentRef = {
-      fileId: base.artifactId, filename: file.filename, mime: file.mime, size: file.size, referenceKind: "result", presentationSelection: selection,
-    };
-    return () => { void requestExit(true, undefined, () => onReferenceElement(reference)); };
+    if (!onToggleSlide || !base || !file || !slideOf) return undefined;
+    const reference: AttachmentRef = { fileId: base.artifactId, filename: file.filename, mime: file.mime, size: file.size, referenceKind: "result" };
+    return () => { onToggleSlide(reference, slideOf.index); };
   };
+  const pageReferenced = (slideOf: InventorySlide | undefined) => Boolean(slideOf && base && referencedSlides?.[base.artifactId]?.includes(slideOf.index));
 
   const describeEdit = useCallback((edit: PendingEdit, source: PresentationInventory | undefined): { location: string; text: string } => {
     const found = findElement(source, edit.key);
@@ -832,6 +914,12 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
       undoLast();
       return;
     }
+    // Redo: ⇧⌘Z (Ctrl+Shift+Z), and Ctrl+Y on other systems.
+    if (mod && !event.altKey && ((event.shiftKey && event.key.toLowerCase() === "z") || (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "y")) && !typing && !saved) {
+      event.preventDefault();
+      redoLast();
+      return;
+    }
     if ((event.key === "PageUp" || event.key === "PageDown") && !typing && !phone) {
       event.preventDefault();
       const next = Math.min(slideCount, Math.max(1, page + (event.key === "PageDown" ? 1 : -1)));
@@ -850,14 +938,31 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     }
   };
 
+  /** 「去修改」 on an invalid chart value: open that chart's data with focus in the value. */
+  const openInvalidValue = () => {
+    if (!firstInvalidValue) return;
+    const { key, s: series, c: category, page: target } = firstInvalidValue;
+    setPage(target);
+    setSelectedKey(key);
+    if (phone) {
+      focusAfterSelectRef.current = true;
+      return;
+    }
+    setInPlace({ kind: "chart", key });
+    window.setTimeout(() => {
+      rootRef.current?.querySelector<HTMLInputElement>(`[role="dialog"] input[data-row="${category}"][data-col="${series}"]`)?.focus();
+    }, 50);
+  };
+
   const editingMode = !saved;
   /** Each changed element's number: the outline on the slide and the change list share it. */
   const numbers = useMemo(() => {
     const map = new Map<string, number>();
     for (const edit of pending) if (!map.has(edit.key)) map.set(edit.key, map.size + 1);
+    for (const key of invalidChartKeys) if (!map.has(key)) map.set(key, map.size + 1);
     return map;
-  }, [pending]);
-  const pendingPages = new Set(pending.map((edit) => findElement(inventory, edit.key)?.slide.index ?? 0));
+  }, [invalidChartKeys, pending]);
+  const pendingPages = new Set([...pending.map((edit) => edit.key), ...invalidChartKeys].map((key) => findElement(inventory, key)?.slide.index ?? 0));
   const savedKeys = saved ? [...new Set(saved.changes.map((edit) => edit.key))] : [];
   const newFile = base?.inventory.edit_mode === "new_file";
 
@@ -897,7 +1002,7 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     }
     const body = error.code === "presentation_unreadable" ? t("error_unreadable")
       : error.code === "too_large" ? t("error_too_large")
-        : error.code === "results_scope_unavailable" || error.code === "presentation_not_editable" || error.code === "presentation_edit_unavailable" ? t("inventory_not_editable")
+        : error.code === "results_scope_unavailable" || error.code === "presentation_not_editable" ? t("inventory_not_editable")
           : t("inventory_failed_body");
     return (
       <>
@@ -1040,7 +1145,7 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
       }
     }
     return <ElementList slide={slide} pending={pending} numbers={numbers} fieldToken={fieldToken} onSelect={select}
-      onReferencePage={referencePage(slide)} keyboardHint={t("keyboard_hint", { undo: undoKey })} />;
+      onReferencePage={referencePage(slide)} pageReferenced={pageReferenced(slide)} keyboardHint={t("keyboard_hint", { undo: undoKey })} />;
   })();
 
   const notices = editingMode && base && !inventoryError ? (
@@ -1098,7 +1203,8 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
     const number = numbers.get(element.key);
     // The name carries the new text, so a screen reader hears what the painted text shows.
     const name = element.kind === "text" && edits.length ? excerpt(elementText(element, edits), fieldToken) : elementLabel(element, t, fieldToken);
-    return `${t(`kind_${element.kind}`)}${t("label_separator")}${name}${element.editable ? "" : ` · ${t("unsupported_badge")}`}${number ? ` · ${t("unsaved_numbered", { number })}` : ""}`;
+    const invalidValue = invalidChartKeys.includes(element.key) ? ` · ${t("chart_invalid_label")}` : "";
+    return `${t(`kind_${element.kind}`)}${t("label_separator")}${name}${element.editable ? "" : ` · ${t("unsupported_badge")}`}${number ? ` · ${t("unsaved_numbered", { number })}` : ""}${invalidValue}`;
   };
   const overlayFor = (slideOf: InventorySlide | undefined, onStage = false) => slideOf ? slideOf.elements.map((element) => {
     if (!element.box) return null;
@@ -1129,7 +1235,8 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
         style={style}
         data-element-key={element.key}
         data-editable={element.editable || undefined}
-        data-pending={edits.length ? true : undefined}
+        data-pending={edits.length || invalidChartKeys.includes(element.key) ? true : undefined}
+        data-flash={flashKey === element.key || undefined}
         data-selected={isSelected || undefined}
         data-editing={(inPlace?.key === element.key && !(inPlace.kind !== "chart" && inPlace.armed)) || undefined}
         // While its hidden field holds focus, the field stands for the element: no second Tab stop or name.
@@ -1219,7 +1326,7 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
   // Phones (design §7.3): the slides are a list; each slide opens a sheet of its elements, and an element opens its editor as a sheet.
   const phoneInline = inventoryError || !base || inventoryLoading || saved || conflict ? inspector : null;
   const phoneBody = (
-    <div className={styles.phoneBody} ref={phoneBodyRef}>
+    <div className={styles.phoneBody} ref={phoneBodyRef} tabIndex={-1} role="group" aria-label={t("stage_label", { page, count: slideCount })}>
       {notices}
       {phoneInline}
       {renderVisible && phoneWidth > 0 ? Array.from({ length: slideCount }, (_, index) => index + 1).map((number) => {
@@ -1239,8 +1346,9 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
                 </Button>
                 {referencePage(slideOf) ? (
                   <Button variant="secondary" className={styles.phoneReferencePage} onClick={referencePage(slideOf)}
-                    aria-label={t("reference_page_label", { page: number })}>
-                    {t("reference_page")}
+                    aria-pressed={pageReferenced(slideOf)}
+                    aria-label={t(pageReferenced(slideOf) ? "referenced_page_label" : "reference_page_label", { page: number })}>
+                    {t(pageReferenced(slideOf) ? "referenced_page" : "reference_page")}
                   </Button>
                 ) : null}
               </div>
@@ -1283,11 +1391,13 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
   const saveMessage = conflict ? t("conflict_bar", { version: conflict.latest.version_no })
     : saving ? t("saving")
       : saveError && saveError.code !== "edit_refused" ? t("save_failed")
+        : firstInvalidValue ? t("invalid_chart_value", { page: firstInvalidValue.page, name: elementLabel(firstInvalidValue.element, t, fieldToken), category: firstInvalidValue.category })
         : invalid ? t("invalid_pending")
           : t("pending_count", { count: pending.length });
 
   return (
     <div ref={rootRef} className={styles.editor} onKeyDown={onKeyDown} data-testid="presentation-editor">
+      <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <div className={`artifact-viewer-head ${styles.head}`}>
         <div className="artifact-viewer-title">
           <h2 className={styles.title}><strong title={filename}>{filename}</strong></h2>
@@ -1343,15 +1453,16 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
               <ChevronRight size={14} aria-hidden="true" />
             </Button>
           </div>
-          <div className={styles.stage} ref={stageRef} tabIndex={-1} role="group" aria-label={t("page_of", { page, count: slideCount })}>
+          <div className={styles.stage} ref={stageRef} tabIndex={-1} role="group" aria-label={t("stage_label", { page, count: slideCount })}>
             {showPage ? (
               <div ref={pageRef} className={styles.page} style={{ width: pageWidth, height: pageHeight }} data-editing={editingMode || undefined}
                 data-layout-ready={pageLayout?.page === page || undefined}>
                 <PdfPageCanvas pdf={pdf} pageNumber={page} width={pageWidth} label={`${filename} · ${t("page_label", { page })}`} className={styles.pageCanvas}
                   onDrawn={(canvas) => setDrawn((current) => ({ page, canvas, stamp: (current?.stamp ?? 0) + 1 }))} />
-                {pageLayout && slide && editingMode && !conflict ? (
-                  <InPlaceLayer elements={slide.elements} layout={pageLayout} texts={located.texts} tables={located.tables} pending={pending}
-                    page={{ width: pageWidth, height: pageHeight }} editing={inPlace?.kind === "chart" ? null : inPlace} fieldToken={fieldToken}
+                {pageLayout && slide && ((editingMode && !conflict) || (saved && renderState === "loading")) ? (
+                  <InPlaceLayer elements={slide.elements} layout={pageLayout} texts={located.texts} tables={located.tables}
+                    pending={saved ? saved.changes : pending}
+                    page={{ width: pageWidth, height: pageHeight }} editing={saved || inPlace?.kind === "chart" ? null : inPlace} fieldToken={fieldToken}
                     labelFor={inPlaceLabel}
                     onText={(element, paragraph, text) => updateText(element, slide.slide_id, paragraph, text)}
                     onCell={(element, row, col, text) => updateCell(element, slide.slide_id, row, col, text)}
@@ -1375,6 +1486,12 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
           {inspector}
         </aside>
       </div>}
+      {/* The footer keeps its height after a save, so the slide does not move (design §13.7). */}
+      {!editingMode && saved ? (
+        <div className={styles.footer}>
+          <p className={styles.savedFooter}>{statusLine}</p>
+        </div>
+      ) : null}
       {editingMode ? (
         <div className={styles.footer} data-covered={(phone && Boolean(sheetSlide || selected)) || undefined}>
           <SaveBar
@@ -1387,6 +1504,9 @@ export const PresentationEditor = forwardRef<PresentationEditorHandle, {
             saveLabel={saveError && !conflict && saveError.code !== "edit_refused" ? tObject("retry_save") : saveLabel}
             discardLabel={conflict ? t("discard_mine") : t("discard")}
             message={saveMessage}
+            actions={firstInvalidValue && !conflict ? (
+              <Button size="sm" variant="secondary" onClick={() => openInvalidValue()}>{t("go_edit")}</Button>
+            ) : undefined}
           />
         </div>
       ) : null}

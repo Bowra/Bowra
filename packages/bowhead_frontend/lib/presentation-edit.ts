@@ -349,10 +349,15 @@ export function isNoop(edit: PendingEdit): boolean {
 }
 
 /** Put `edit` at the end (most recent); drop it when it no longer changes anything. */
+/** Adds or updates a change in place, so its number (its first edit's order) does not move. */
 export function upsertPendingEdit(edits: PendingEdits, edit: PendingEdit): PendingEdit[] {
   const id = pendingEditId(edit);
-  const rest = edits.filter((item) => pendingEditId(item) !== id);
-  return isNoop(edit) ? rest : [...rest, edit];
+  const index = edits.findIndex((item) => pendingEditId(item) === id);
+  if (isNoop(edit)) return edits.filter((_, position) => position !== index);
+  if (index < 0) return [...edits, edit];
+  const next = [...edits];
+  next[index] = edit;
+  return next;
 }
 
 export function removePendingEdit(edits: PendingEdits, id: string): PendingEdit[] {

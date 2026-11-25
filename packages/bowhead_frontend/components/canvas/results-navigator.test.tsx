@@ -50,6 +50,7 @@ const labels = {
   codeTitle: "code",
   codeLastRun: "last_run",
   sourceUpload: "source_upload",
+  sourceEdited: "source_edited",
   sourceGenerated: "source_generated",
   sourceExport: "source_export",
   sourceWeb: "source_web",

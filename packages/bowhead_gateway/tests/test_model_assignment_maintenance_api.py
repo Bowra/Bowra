@@ -17,7 +17,8 @@ store = config_api_tests.store
 pytestmark = pytest.mark.integration
 
 
-async def _verify_config(store, config, *, expired: bool = False):
+async def _verify_config(store, config, *, evidence: str = "fresh"):
+    """Record a pass for every catalog row: ``fresh``, ``old`` (past its freshness date) or ``stale`` (other config)."""
     verification = TeamLlmVerificationStore(store.db_path)
     ids = {}
     for key in config["providers"]:
@@ -33,7 +34,7 @@ async def _verify_config(store, config, *, expired: bool = False):
                 provider_display_name_snapshot=row.provider_display_name,
                 model_id=row.model_id,
                 capability=row.capability,
-                config_signature=row.config_signature,
+                config_signature=row.config_signature if evidence != "stale" else f"older-{row.config_signature}",
                 testability_contract_version="v1",
                 probe_contract_version="v1",
                 probe_execution_policy_version="v1",
@@ -45,16 +46,17 @@ async def _verify_config(store, config, *, expired: bool = False):
                 batch_id="test-batch",
                 item_id=f"test-item-{row.model_id}-{row.capability}",
                 initiated_by="u_maintain",
-                observed_at=now - timedelta(days=2 if expired else 0),
-                fresh_until=now + timedelta(days=-1 if expired else 1),
+                observed_at=now - timedelta(days=2 if evidence == "old" else 0),
+                fresh_until=now + timedelta(days=-1 if evidence == "old" else 1),
                 duration_ms=1,
             )
         )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("expired", [False, True])
-async def test_verify_later_reconciles_only_fresh_evidence_through_original_writer(client, store, monkeypatch, expired):
+@pytest.mark.parametrize("evidence", ["fresh", "old", "stale"])
+async def test_verify_later_reconciles_evidence_for_the_current_config_through_original_writer(client, store, monkeypatch, evidence):
+    """A pass counts until the configuration changes; its age alone no longer withholds it (2026-11-25)."""
     monkeypatch.setenv("FEATURE_MODEL_ASSIGNMENT_RECONCILIATION", "1")
     await _seed_team(store)
     await _seed_user(store, "u_maintain", "maintain@t.com", is_creator=True)
@@ -62,13 +64,13 @@ async def test_verify_later_reconciles_only_fresh_evidence_through_original_writ
     config["tiers"] = {}
     config["providers"]["main"]["base_url"] = "https://93.184.216.34/v1"
     await store.update_team_llm_config("team_llm", config)
-    await _verify_config(store, config, expired=expired)
+    await _verify_config(store, config, evidence=evidence)
     cookies = {"bowhead_jwt": _jwt_cookie("u_maintain")}
     before = await store.get_team_llm_config_with_version("team_llm")
     result = client.post("/api/v1/admin/llm-config/reconcile-assignments", cookies=cookies)
     assert result.status_code == 200, result.text
     after, version = await store.get_team_llm_config_with_version("team_llm")
-    if expired:
+    if evidence == "stale":
         assert (after, version) == before
     else:
         assert after["tiers"]["primary"] == {"provider": "main", "model": "gpt-main"}

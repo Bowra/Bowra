@@ -1999,6 +1999,24 @@
       ],
       "owner_columns": []
     },
+    "agent_owner_trial_turn": {
+      "columns": [
+        "turn_id",
+        "session_id",
+        "team_id",
+        "agent_id",
+        "owner_user_id",
+        "candidate_id",
+        "revision_ref",
+        "capability_fingerprint",
+        "candidate_kind",
+        "frozen_at",
+        "created_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
     "agent_ranking_coverage": {
       "columns": [
         "singleton",

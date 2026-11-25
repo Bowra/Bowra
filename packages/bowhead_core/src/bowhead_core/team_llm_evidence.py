@@ -246,7 +246,10 @@ def project_latest_evidence(
     if exact is None:
         state: FactState = "stale" if ordered else "unknown"
     elif exact.outcome == "verified":
-        state = "verified" if _utc(now) <= _utc(exact.fresh_until) else "aged"
+        # A pass stays valid until the configuration it was taken under changes (that makes it `stale`).
+        # `fresh_until` is still recorded, but age alone no longer asks anyone to re-verify (2026-11-25,
+        # docs/sprints/model-settings-save-flow-2026-11-25). `aged` stays in `FactState` for older clients.
+        state = "verified"
     else:
         state = exact.outcome
     return EvidenceProjection(

@@ -103,7 +103,7 @@ describe("静置态不出现就绪判决", () => {
     renderOverview({ readiness: { ...READY, may_apply: false, rows: [AGED_ROW] } });
 
     const line = document.querySelector(".overview-quiet");
-    expect(line?.textContent).toContain("1 项模型分工建议重新验证");
+    expect(line?.textContent).toContain("1 项模型分工需重新验证");
     expect(line?.className).not.toContain("is-error");
     expectNoVerdict();
   });

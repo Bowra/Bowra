@@ -18,17 +18,24 @@ const TABLE_TEXT = [["Line", "Sales"], ["B", "2,905"]];
  * A one-slide 960×540 PDF whose title sits where the inventory says the title box is; with
  * `table`, the table's text is drawn in its cells too, so the editor finds them on the render.
  */
-function slidePdf(lines: string[], table = false): Buffer {
+function slidePdf(lines: string[], table = false, pages = 1): Buffer {
   const cells = table
     ? TABLE_TEXT.flatMap((row, r) => row.map((cell, c) => `BT /F1 24 Tf ${60 + c * 240} ${540 - (216 + r * 81 + 50)} Td (${cell}) Tj ET`))
     : [];
   const text = [...lines.map((line, index) => `BT /F1 36 Tf 60 ${470 - index * 50} Td (${line}) Tj ET`), ...cells].join("\n") + "\n";
+  // Page k (from 0) is object 4 + 2k, its content 5 + 2k; later pages say only their number.
+  const pageObjects = Array.from({ length: pages }, (_, index) => {
+    const body = index === 0 ? text : `BT /F1 36 Tf 60 470 Td (Slide ${index + 1}) Tj ET\n`;
+    return [
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`,
+      `<< /Length ${Buffer.byteLength(body)} >>\nstream\n${body}endstream`,
+    ];
+  }).flat();
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Count 1 /Kids [4 0 R] >>",
+    `<< /Type /Pages /Count ${pages} /Kids [${Array.from({ length: pages }, (_, index) => `${4 + index * 2} 0 R`).join(" ")}] >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
-    `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}endstream`,
+    ...pageObjects,
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -43,7 +50,7 @@ function slidePdf(lines: string[], table = false): Buffer {
   return Buffer.from(pdf);
 }
 
-function inventory(id: string, version: number, title: string, table = false, chart = false) {
+function inventory(id: string, version: number, title: string, table = false, chart = false, pages = 1) {
   return {
     artifact_id: id, version_no: version, edit_mode: "version", slide_width: 12192000, slide_height: 6858000, field_token: "￼",
     slides: [{ slide_id: 256, index: 1, inherited_text: false, elements: [
@@ -57,13 +64,20 @@ function inventory(id: string, version: number, title: string, table = false, ch
       // A chart low on the slide, so its data must open higher up to stay inside the page.
       ...(chart ? [{ key: "256:5", shape_id: 5, name: "Sales chart", kind: "chart", box: [0.6, 0.66, 0.22, 0.14], editable: true, reason: null,
         chart: { type: "COLUMN_CLUSTERED", categories: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"], series: [{ name: "Sales", values: [905, 965, 1180, 1010, 990, 1240], format: "#,##0" }] } }] : []),
-    ] }],
+    ] },
+    // Later slides of a longer deck: a title only, matching the PDF's pages.
+    ...Array.from({ length: pages - 1 }, (_, index) => ({ slide_id: 257 + index, index: index + 2, inherited_text: false, elements: [
+      { key: `${257 + index}:2`, shape_id: 2, name: "Title 1", kind: "text", box: [0.05, 0.08, 0.6, 0.12], editable: true, reason: null,
+        paragraphs: [{ text: `Slide ${index + 2}`, mixed_style: false, fields: 0 }] },
+    ] })),
+    ],
   };
 }
 
-async function openDeck(page: Page, options: { table?: boolean; chart?: boolean } = {}) {
+async function openDeck(page: Page, options: { table?: boolean; chart?: boolean; pages?: number } = {}) {
   const table = Boolean(options.table);
   const chart = Boolean(options.chart);
+  const pages = options.pages ?? 1;
   const state = { latest: "art_deck_1", renders: {} as Record<string, number>, saved: null as unknown, conflictOnce: false };
   await page.request.post(`http://127.0.0.1:${apiPort}/api/v1/_test/reset`);
   await page.route("**/api/v1/chat/sessions/*/reference-queue?*", (route) => route.fulfill({ json: { items: [] } }));
@@ -104,7 +118,7 @@ async function openDeck(page: Page, options: { table?: boolean; chart?: boolean 
     if (mode === "pptx-pdf") {
       state.renders[id] = (state.renders[id] ?? 0) + 1;
       const lines = id === "art_deck_1" ? ["Quarterly review"] : ["Quarterly review for", "the whole year"];
-      await route.fulfill({ contentType: "application/pdf", body: slidePdf(lines, table) });
+      await route.fulfill({ contentType: "application/pdf", body: slidePdf(lines, table, pages) });
       return;
     }
     await route.fulfill({ json: { family: "presentation", representation: "details", revision: `details-${id}`, details: {
@@ -114,8 +128,8 @@ async function openDeck(page: Page, options: { table?: boolean; chart?: boolean 
   await page.route("**/api/v1/sessions/*/results/presentation-edit/inventory", async (route: Route) => {
     const { artifact_id: id } = route.request().postDataJSON() as { artifact_id: string };
     await route.fulfill({ json: id === "art_deck_1" || (id === "art_deck_2" && state.conflictOnce === false && state.saved === "conflict")
-      ? inventory(id, id === "art_deck_1" ? 1 : 2, "Quarterly review", table, chart)
-      : inventory(id, Number(id.slice(-1)), "Quarterly review for the whole year", table, chart) });
+      ? inventory(id, id === "art_deck_1" ? 1 : 2, "Quarterly review", table, chart, pages)
+      : inventory(id, Number(id.slice(-1)), "Quarterly review for the whole year", table, chart, pages) });
   });
   await page.route("**/api/v1/sessions/*/results/presentation-edits", async (route: Route) => {
     state.saved = route.request().postDataJSON();
@@ -360,15 +374,77 @@ test("slide marks stay visible, focus stays in the editor, and a low chart's dat
   await expect(confirm).toContainText("这 2 处修改还没保存");
   await confirm.getByRole("button", { name: messages.canvas_object.guard_discard, exact: true }).click();
   await expect(editor.getByText("2 处未保存的修改")).toHaveCount(0);
-  await expect(editor.getByRole("group", { name: "第 1 / 1 页" })).toBeFocused();
+  await expect(editor.getByRole("group", { name: "编辑模式 · 第 1 / 1 页" })).toBeFocused();
 
-  // After a save, focus is on the summary of what was saved.
-  await title.click();
+  // After a save, focus is on the summary of what was saved, and the slide stays where it was (design §13.7).
+  await editor.locator('[data-element-key="256:2"]').click();
   await page.keyboard.type("!");
   await page.keyboard.press("Escape");
+  const beforeSave = await editor.getByRole("img", { name: "Board.pptx · 第 1 页" }).boundingBox();
   await editor.getByRole("button", { name: copy.save_version, exact: true }).click();
   await expect(editor.getByText("已保存为第 2 版", { exact: false }).first()).toBeVisible();
   await expect(page.locator(":focus")).toContainText("1 处修改已存为第 2 版");
+  expect((await editor.getByRole("img", { name: "Board.pptx · 第 1 页" }).boundingBox())?.y).toBe(beforeSave?.y);
+});
+
+test("several pages of a deck gather in one Composer chip and are sent as one reference", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDeck(page, { pages: 3 });
+  const pageButton = (number: number) => page.getByRole("button", { name: new RegExp(`^(引用这一页|已引用) · 第 ${number} 页$`) });
+  await expect(pageButton(3)).toBeVisible();
+
+  // Each 「引用这一页」 is a toggle: pages 1 and 3 join one chip; pressing page 1 again removes it.
+  await pageButton(1).click();
+  await pageButton(3).click();
+  await expect(page.getByText("第 1、3 页", { exact: true }).first()).toBeVisible();
+  await expect(pageButton(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(pageButton(1)).toHaveText(messages.artifact_viewer.referenced_page);
+  await expect(pageButton(2)).toHaveAttribute("aria-pressed", "false");
+  await pageButton(1).click();
+  await expect(page.getByText("第 3 页", { exact: true }).first()).toBeVisible();
+  await expect(pageButton(1)).toHaveAttribute("aria-pressed", "false");
+  await pageButton(2).click();
+  await page.screenshot({ path: test.info().outputPath("11-pages-chip.png") });
+
+  // Send carries one reference with a version 2 page set; afterwards the pages' buttons turn back.
+  const sent = page.waitForRequest((request) => request.url().endsWith("/api/v1/chat/send") && request.method() === "POST");
+  const composer = page.locator("textarea").first();
+  await composer.fill("这两页分别讲什么");
+  await composer.press("Enter");
+  const body = (await sent).postDataJSON() as { attachment_refs?: Array<{ fileId: string; presentationSelection?: unknown }> };
+  const deckRefs = (body.attachment_refs ?? []).filter((ref) => ref.presentationSelection);
+  expect(deckRefs).toEqual([expect.objectContaining({
+    presentationSelection: { version: 2, artifactId: deckRefs[0]?.fileId, slides: [{ slideIndex: 2 }, { slideIndex: 3 }] },
+  })]);
+  await expect(pageButton(2)).toHaveAttribute("aria-pressed", "false");
+  await expect(pageButton(3)).toHaveAttribute("aria-pressed", "false");
+});
+
+test("entering edit mode puts focus on the page, so PageDown turns it at once", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDeck(page, { pages: 3 });
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  const editor = page.getByTestId("presentation-editor");
+  await expect(editor.getByRole("group", { name: "编辑模式 · 第 1 / 3 页" })).toBeFocused();
+  await page.keyboard.press("PageDown");
+  await expect(editor.locator('[data-rail-page="2"]')).toHaveAttribute("aria-current", "page");
+});
+
+test("on a phone, referencing pages stays on Results and a toast leads to the chat", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDeck(page, { pages: 2 });
+  const pageButton = (number: number) => page.getByRole("button", { name: new RegExp(`^(引用这一页|已引用) · 第 ${number} 页$`) });
+  await pageButton(1).click();
+  await pageButton(2).click();
+  // Still on Results, so the next page can be picked; the toast says how many and leads to the chat.
+  await expect(pageButton(2)).toHaveAttribute("aria-pressed", "true");
+  const toast = page.getByText(messages.artifact_viewer.pages_referenced.replace("{count}", "2"), { exact: true });
+  await expect(toast).toBeVisible();
+  // One toast, kept current, not one per page.
+  await expect(page.getByText(/^已引用 \d+ 页$/)).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("12-phone-pages-toast.png") });
+  await page.getByRole("button", { name: messages.artifact_viewer.go_to_chat, exact: true }).last().click();
+  await expect(page.getByText("第 1、2 页", { exact: true }).first()).toBeVisible();
 });
 
 test("the narrow desktop layout swaps the page rail for a page switcher", async ({ page }) => {

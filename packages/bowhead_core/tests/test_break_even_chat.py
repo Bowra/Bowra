@@ -24,12 +24,11 @@ pytestmark = [
 ]
 
 
-@pytest.mark.parametrize("mode", ["standalone", "mixed", "multiple", "receipt_failure", "payload_failure", "text_failure", "cancel", "off"])
+@pytest.mark.parametrize("mode", ["standalone", "mixed", "multiple", "receipt_failure", "payload_failure", "text_failure", "cancel"])
 async def test_break_even_chat(http_start, monkeypatch, mode):
     case = http_start
     case.client.headers["Content-Type"] = "application/json"
     enable_lead_writer(case, monkeypatch)
-    monkeypatch.setenv("FEATURE_CHAT_ANSWER_CARDS", "0" if mode == "off" else "1")
     case.app.state.orchestrator.tool_registry.register(answer_cards.break_even_spec())
     monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("subagent_spawn", answer_cards.TOOL)))
     if mode == "mixed":
@@ -154,4 +153,4 @@ async def test_break_even_chat(http_start, monkeypatch, mode):
     else:
         assert not cards
         assert any(kind == "done" and data.get("status") == "completed" for kind, data in events)
-        assert all(answer_cards.TOOL not in names for names in calls) if mode == "off" else len(calls) >= 2
+        assert len(calls) >= 2

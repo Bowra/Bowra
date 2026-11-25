@@ -17,7 +17,6 @@ import copy
 import difflib
 import io
 import math
-import os
 import re
 import zipfile
 from collections import Counter
@@ -28,7 +27,6 @@ from typing import Any
 
 from lxml import etree
 
-FEATURE_ENV = "FEATURE_PPTX_INLINE_EDIT"
 FIELD_TOKEN = "￼"
 BREAK = "\n"
 MAX_SLIDES = 64
@@ -53,11 +51,6 @@ def is_presentation(mime: str | None, filename: str | None) -> bool:
     from bowhead_core.documents.package_io import OFFICE_MIMES, office_upload_mime
 
     return office_upload_mime(filename or "", mime) == OFFICE_MIMES[".pptx"]
-
-
-def feature_enabled() -> bool:
-    """On unless the deployment sets ``FEATURE_PPTX_INLINE_EDIT=0`` (default on since 2026-11-25, the maintainer's decision)."""
-    return os.environ.get(FEATURE_ENV, "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class EditRefused(Exception):

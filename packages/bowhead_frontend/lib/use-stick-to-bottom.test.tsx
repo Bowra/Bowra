@@ -347,3 +347,96 @@ describe("useStickToBottom — after the Turn ends (2026-11-08 dogfood F8)", () 
     expect(scroll.scrollTop).toBe(200);
   });
 });
+
+/**
+ * F3 (2026-11-24 dogfood): opening Results narrowed the chat column, the text reflowed and the unchanged
+ * pixel scrollTop showed Turn 5 instead of Turn 9. jsdom has no layout: paragraph heights follow a
+ * width-dependent model, and every rect is derived from the fake scroll position.
+ */
+describe("width changes keep the reading position", () => {
+  function mountReflowing(opts: { running?: boolean } = {}) {
+    const { hook, scroll, content } = mount(opts.running ?? false);
+    let width = 800;
+    Object.defineProperty(scroll.el, "clientWidth", { get: () => width });
+    scroll.el.getBoundingClientRect = () => ({ top: 0, bottom: 400 } as DOMRect);
+    const paragraphHeight = () => (width >= 800 ? 100 : width > 0 ? 160 : 0);
+    const paragraphs: HTMLElement[] = [];
+    for (let turnIndex = 0; turnIndex < 3; turnIndex += 1) {
+      const turn = document.createElement("section");
+      turn.setAttribute("data-results-message-token", `t_${turnIndex}`);
+      const first = paragraphs.length;
+      for (let i = 0; i < 4; i += 1) {
+        const p = document.createElement("p");
+        const index = paragraphs.length;
+        p.getBoundingClientRect = () => {
+          const top = index * paragraphHeight() - scroll.scrollTop;
+          return { top, bottom: top + paragraphHeight() } as DOMRect;
+        };
+        paragraphs.push(p);
+        turn.appendChild(p);
+      }
+      turn.getBoundingClientRect = () => {
+        const top = first * paragraphHeight() - scroll.scrollTop;
+        return { top, bottom: top + 4 * paragraphHeight() } as DOMRect;
+      };
+      content.appendChild(turn);
+    }
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    const readAt = (paragraphIndex: number, offset: number) => {
+      act(() => {
+        scroll.el.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+        scroll.setScrollTop(paragraphIndex * paragraphHeight() - offset);
+        scroll.el.dispatchEvent(new Event("scroll"));
+      });
+    };
+    const resize = (next: number) => {
+      width = next;
+      act(() => roCallbacks.forEach((cb) => cb()));
+    };
+    return { hook, scroll, paragraphs, readAt, resize, screenTop: (i: number) => paragraphs[i].getBoundingClientRect().top };
+  }
+
+  it("keeps the paragraph being read at its offset when the column narrows and widens", () => {
+    const view = mountReflowing();
+    // Paragraph 8 is cut by the top edge; paragraph 9 is the first one the reader sees whole.
+    view.readAt(9, 30);
+    expect(view.screenTop(9)).toBe(30);
+
+    view.resize(500);
+    expect(view.screenTop(9)).toBe(30);
+
+    view.resize(800);
+    expect(view.screenTop(9)).toBe(30);
+  });
+
+  it("keeps a block taller than the view at its offset when none starts on screen", () => {
+    const view = mountReflowing();
+    // A 60 px view: paragraph 9 crosses the top edge and paragraph 10 starts below the view.
+    view.scroll.el.getBoundingClientRect = () => ({ top: 0, bottom: 60 } as DOMRect);
+    view.readAt(9, -30);
+    view.resize(500);
+    expect(view.screenTop(9)).toBe(-30);
+  });
+
+  it("restores the position after the column was hidden while Results was maximized", () => {
+    const view = mountReflowing();
+    view.readAt(6, 30);
+    view.resize(0);
+    view.resize(500);
+    expect(view.screenTop(6)).toBe(30);
+  });
+
+  it("leaves the view to following while a running Turn keeps the bottom in view", () => {
+    const view = mountReflowing({ running: true });
+    act(() => {
+      view.scroll.el.dispatchEvent(new Event("scroll"));
+    });
+    view.resize(500);
+    expect(view.hook.result.current.following).toBe(true);
+    // Following, not the reading record, decides the position: the bottom stays in view.
+    expect(view.scroll.atBottom()).toBe(true);
+  });
+});

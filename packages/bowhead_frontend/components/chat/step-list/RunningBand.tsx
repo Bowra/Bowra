@@ -166,28 +166,40 @@ export function formatElapsed(ms: number, t: BandT): string {
  * `startedAt` uses server time, `Date.now()` browser time; measured difference on 116 was 31.4 seconds.
  * Direct subtraction kept the band at "0 秒" for the first half minute (measured frame-by-frame on-device). See that module's header.
  */
-/** Second-resolution now, used for time since the last received bytes.
- *  Same frequency as `useElapsedText`'s ticker but independent: that hook returns only formatted copy,
- *  without the raw timestamp. */
-function useNowTick(running: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+/**
+ * Second-resolution clock for one Turn's timers.
+ *
+ * The band stays mounted between Turns, and the stored tick stops while nothing runs, so it can be
+ * minutes old when the next Turn starts. `turnElapsedMs` anchors a new key on the first `now` it
+ * receives: a stale tick earlier than the new start time takes its clock-skew branch and becomes the
+ * anchor, so the timer counted from page load or from the previous Turn's last tick (116, 2026-11-25:
+ * "1 分 58 秒" five seconds after sending). The tick therefore belongs to an epoch (anchor key and
+ * start time); a render in a newer epoch reads the wall clock until its own interval ticks.
+ */
+function useTurnTick(active: boolean, epoch: string): number {
+  const [tick, setTick] = useState(() => ({ epoch, now: Date.now() }));
   useEffect(() => {
-    if (!running) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    if (!active) return;
+    const id = window.setInterval(() => setTick({ epoch, now: Date.now() }), 1000);
     return () => window.clearInterval(id);
-  }, [running]);
-  return now;
+  }, [active, epoch]);
+  return tick.epoch === epoch ? tick.now : Date.now();
+}
+
+function turnTickEpoch(startedAt: number | null, elapsedKey: string | null): string {
+  return `${elapsedKey ?? ""}|${startedAt ?? ""}`;
+}
+
+/** Second-resolution now, used for time since the last received bytes.
+ *  Same clock as `useElapsedText`, which returns only formatted copy without the raw timestamp. */
+function useNowTick(running: boolean, startedAt: number | null, elapsedKey: string | null): number {
+  return useTurnTick(running, turnTickEpoch(startedAt, elapsedKey));
 }
 
 export function useElapsedText(
   startedAt: number | null, running: boolean, t: BandT, elapsedKey: string | null,
 ): string {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!running || !startedAt) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [running, startedAt]);
+  const now = useTurnTick(running && Boolean(startedAt), turnTickEpoch(startedAt, elapsedKey));
   if (!startedAt) return "";
   return formatElapsed(turnElapsedMs(startedAt, now, elapsedKey), t);
 }
@@ -350,7 +362,7 @@ export function RunningBand({
   // facts at least 30 seconds old; continuing "正在查询数据" would present old facts as current state.
   // ★Heartbeats arrive every 15 seconds and count as bytes, so this branch never fires on a healthy connection:
   //   firing means transport has actually fallen silent.
-  const nowTick = useNowTick(running);
+  const nowTick = useNowTick(running, startedAt, elapsedKey);
   // When did the step list last change? A long tool or model call adds no row for minutes.
   const stepSignature = `${steps.length}:${steps[steps.length - 1]?.stepId ?? ""}:${steps[steps.length - 1]?.state ?? ""}`;
   const lastStepChange = useRef<{ signature: string; at: number }>({ signature: stepSignature, at: Date.now() });

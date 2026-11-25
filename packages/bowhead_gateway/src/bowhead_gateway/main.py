@@ -1331,11 +1331,9 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     register_clarification_dismiss_tool(tool_registry, service=lambda: GatewayClarificationActions(app))
     from bowhead_core.agents.plan_propose_tool import register_plan_propose_tool
     from bowhead_core.answer_cards import break_even_spec
-    from bowhead_core.answer_cards import enabled as answer_cards_enabled
 
     register_plan_propose_tool(tool_registry)
-    if answer_cards_enabled():
-        tool_registry.register(break_even_spec())
+    tool_registry.register(break_even_spec())
     # remember-rebuild (dogfood s_3e854 item 2): remember / recall Lead tools.
     from bowhead_core.memory_tools import register_memory_tools
 

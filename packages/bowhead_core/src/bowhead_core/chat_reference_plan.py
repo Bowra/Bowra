@@ -371,10 +371,13 @@ class ReferencePlanRuntime:
 
     async def admit_step(self, *, runner, spec, ctx):
         from bowhead_core._db import open_shared_ctx
-        from bowhead_core.agent_execution_binding import ExactAgentBindingExpectation
+        from bowhead_core.agent_execution_binding import ExactAgentBindingExpectation, read_owner_trial_turn_in_connection
 
         async with open_shared_ctx(domain_database_path(self.sources.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
+            if await read_owner_trial_turn_in_connection(db, turn_id=self.requirements.source_turn_id) is not None:
+                # Plan steps admit the released version; an Owner draft trial has none (§4.5).
+                raise ValueError("agent_trial_plan_unavailable")
             primary, _, _, _ = await self.validate_in_connection(db)
             step = await _row(db, "SELECT * FROM plan_steps WHERE id=? AND plan_id=?", (spec.task_id, self.plan_id))
             if (

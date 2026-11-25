@@ -77,7 +77,7 @@ for (const scenario of [
       await expect(page.getByRole("heading", { name: /^(Assignment changes|分工修改)$/ })).toBeVisible();
       expect(writes).toBe(0);
       await page.screenshot({ path: testInfo.outputPath("assignment-review.png"), fullPage: true });
-      await page.getByRole("button", { name: /^(Apply once|一次应用)$/ }).click();
+      await page.getByRole("button", { name: /^(Apply|应用)$/ }).click();
       await expect.poll(() => writes).toBe(1);
       await expect(page.getByText(/^(Assignments updated\.|分工已更新。)$/)).toBeVisible();
       expect(config.tiers.fast).toEqual({ provider: "demo", model: "judge" });
@@ -121,7 +121,7 @@ for (const scenario of [
       await expect(review).toBeVisible();
       expect(writes).toHaveLength(0);
       await review.click();
-      const apply = page.getByRole("button", { name: /^(Apply once|一次应用)$/ });
+      const apply = page.getByRole("button", { name: /^(Apply|应用)$/ });
       await expect(apply).toBeVisible();
       expect(writes).toHaveLength(0);
       await apply.click();

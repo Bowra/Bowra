@@ -25,7 +25,10 @@ from bowhead_router import CompatibleProbeRegistry
 # risk-acceptance tokens bound to it must become invalid. Without a version bump they report a hash mismatch,
 # recreating the very 409 this fix addresses and confusing users further. A version bump gives a one-time,
 # explainable invalidation: affected users simply review again.
-READINESS_CONTRACT_VERSION = "team-llm-readiness-v2"
+#
+# v3 (2026-11-25): evidence no longer ages, and risks on connections the draft does not touch no longer need
+# acceptance. Reviews prepared under v2 recheck once.
+READINESS_CONTRACT_VERSION = "team-llm-readiness-v3"
 ReadinessStatus = Literal[
     "ready",
     "warning",
@@ -383,8 +386,14 @@ def compute_team_llm_readiness(
     grandfather_scopes: frozenset[tuple[str, str, Capability, str]] = frozenset(),
     baseline_will_invalidate: bool = False,
     external_rows: tuple[ExternalReadinessRow, ...] = (),
+    touched_provider_ids: frozenset[str] | None = None,
 ) -> ReadinessDecision:
-    """Apply the decision matrix without trusting frontend status."""
+    """Apply the decision matrix without trusting frontend status.
+
+    ``touched_provider_ids`` names the connections whose settings the draft changes. A failed, stale or
+    unknown row on any other connection was already in the applied configuration, so it is reported as a
+    warning instead of asking this save to accept it. ``None`` keeps every such row asking for acceptance.
+    """
 
     rows: list[ReadinessRow] = []
     blocking: list[ReadinessIssue] = []
@@ -417,6 +426,11 @@ def compute_team_llm_readiness(
             if assignment.acceptance_key_for(risk_code) in active_acceptances:
                 status = "risk_accepted"
                 issue_code = f"{risk_code}_risk_accepted"
+            elif not changed and touched_provider_ids is not None and assignment.provider_id not in touched_provider_ids:
+                # The risk sits on a connection this draft leaves alone: editing one connection must not make
+                # the administrator sign for another (2026-11-25, model settings save flow).
+                status = "warning"
+                issue_code = risk_code
             else:
                 status = "risk_acceptance_required"
                 issue_code = risk_code
@@ -426,13 +440,6 @@ def compute_team_llm_readiness(
         elif fact.state == "unknown":
             status = "grandfathered"
             issue_code = "migration_baseline_no_evidence"
-        elif fact.state == "aged":
-            if changed:
-                status = "blocked"
-                issue_code = "capability_aged_after_change"
-            else:
-                status = "warning"
-                issue_code = "capability_evidence_aged"
         elif fact.state == "not_testable":
             if assignment.routing_critical:
                 status = "blocked"
@@ -460,8 +467,8 @@ def compute_team_llm_readiness(
                     if issue_code
                     in {
                         "capability_unknown",
-                        "capability_aged_after_change",
                         "capability_stale",
+                        "capability_failed",
                     }
                     else "declare_capability"
                     if issue_code == "required_capability_not_declared"
@@ -541,6 +548,32 @@ def compute_team_llm_readiness(
         external_rows=external_rows,
         baseline_will_invalidate=baseline_will_invalidate,
         may_apply=not blocking and not required_acceptances,
+    )
+
+
+def touched_provider_ids(
+    current_config: dict[str, Any],
+    draft_config: dict[str, Any],
+    provider_ids: dict[str, str],
+) -> frozenset[str]:
+    """Identities of connections whose stored settings differ between the applied config and the draft.
+
+    Secrets are compared as stored, so a new key touches its connection; the derived ``fingerprint`` and
+    ``has_secret`` projections are ignored. A connection new in the draft is touched.
+    """
+
+    current = current_config.get("providers") or {}
+    draft = draft_config.get("providers") or {}
+
+    def comparable(spec: Any) -> Any:
+        if not isinstance(spec, dict):
+            return spec
+        return {key: value for key, value in spec.items() if key not in {"fingerprint", "has_secret"}}
+
+    return frozenset(
+        provider_ids[str(runtime_key)]
+        for runtime_key, spec in draft.items()
+        if str(runtime_key) in provider_ids and comparable(spec) != comparable(current.get(runtime_key))
     )
 
 

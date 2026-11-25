@@ -464,3 +464,110 @@ async def test_other_bound_tools_still_run_and_other_states_still_fail_closed(pe
         db.execute("DELETE FROM personal_mcp_manifest")
     with pytest.raises(PersonalMcpError, match="binding_unavailable"):
         await build_personal_specs(personal.registry, owner, personal.binding, personal.ctx)
+
+
+async def test_sign_in_is_on_unless_the_deployment_turns_it_off(monkeypatch):
+    from bowhead_core.personal_mcp import personal_mcp_oauth_enabled
+
+    monkeypatch.delenv("FEATURE_PERSONAL_MCP_OAUTH", raising=False)
+    assert personal_mcp_oauth_enabled()
+    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "0")
+    assert not personal_mcp_oauth_enabled()
+
+
+# ── A refused remembered token (116 acceptance, 2026-11-25) ──────────────────
+
+
+def _refusing_remote(monkeypatch, refused: set[str]) -> list[str]:
+    """Remote that answers HTTP 401 for the tokens in ``refused`` and runs the tool for any other."""
+    seen: list[str] = []
+
+    class Remote:
+        async def call_tool(self, name, args):
+            return SimpleNamespace(is_error=False, structured_content={"query": args["query"]}, content=[])
+
+    @asynccontextmanager
+    async def connect(endpoint, headers, **kwargs):
+        token = headers["Authorization"].removeprefix("Bearer ")
+        seen.append(token)
+        if token in refused:
+            request = httpx2.Request("POST", endpoint)
+            raise httpx2.HTTPStatusError("refused", request=request, response=httpx2.Response(401, request=request))
+        yield Remote()
+
+    monkeypatch.setattr("bowhead_core.personal_mcp.connect_remote_mcp", connect)
+    return seen
+
+
+def _remember(personal, token: str = "first-access") -> None:  # noqa: F811
+    from bowhead_core.personal_mcp import prime_personal_oauth
+
+    prime_personal_oauth(personal.registry, personal.ctx.user_id, personal.connection_id, token, 3600)
+
+
+async def test_revoked_access_is_reported_as_not_run_and_asks_to_sign_in_again(personal, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
+    _sign_in(personal)
+    _remember(personal)
+    # n8n deletes the client registration when access is revoked there.
+    seen = _provider(monkeypatch, [(401, {"error": "invalid_client"})])
+    sent = _refusing_remote(monkeypatch, {"first-access"})
+    version = _connection(personal)["version"]
+    result = await _approved_call(personal, monkeypatch)
+    assert result["ok"] is False and result["error_kind"] == "personal_mcp_sign_in_ended" and result["error"].startswith("Not run")
+    assert sent == ["first-access"] and seen == ["stored-refresh"]
+    row = _connection(personal)
+    assert row["status"] == "needs_reauth" and row["version"] == version + 1
+    stored = personal.registry.unseal(personal.ctx.user_id, personal.connection_id, "credentials", row["auth_cipher"])
+    assert stored["oauth_grant_state"]["reason"] == "invalid_client"  # the next sign-in must not reuse that client
+    invocations = await personal.registry.rows("SELECT status FROM personal_mcp_invocation")
+    assert [item["status"] for item in invocations] == ["denied"]  # refused, so never "unknown"
+
+
+async def test_refused_remembered_token_is_renewed_and_the_call_runs_once(personal, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
+    _sign_in(personal)
+    _remember(personal)
+    seen = _provider(monkeypatch, [(200, {"access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rotated"})])
+    sent = _refusing_remote(monkeypatch, {"first-access"})
+    result = await _approved_call(personal, monkeypatch)
+    assert result == {"ok": True, "data": {"query": "q"}}
+    assert sent == ["first-access", "renewed-access"] and seen == ["stored-refresh"]
+    assert _connection(personal)["status"] == "ready"
+    invocations = await personal.registry.rows("SELECT status FROM personal_mcp_invocation")
+    assert [item["status"] for item in invocations] == ["ok"]
+
+
+async def test_refused_static_credential_is_reported_as_not_run(personal, monkeypatch):  # noqa: F811
+    _refusing_remote(monkeypatch, {"sensitive-personal-token"})
+    result = await _approved_call(personal, monkeypatch)
+    assert result["ok"] is False and result["error_kind"] == "personal_mcp_credential_rejected"
+    assert _connection(personal)["status"] == "needs_reauth"
+    invocations = await personal.registry.rows("SELECT status FROM personal_mcp_invocation")
+    assert [item["status"] for item in invocations] == ["denied"]
+
+
+async def test_signing_in_again_registers_a_new_client(personal, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
+    _sign_in(personal)
+    owner, identity = personal.ctx.user_id, personal.connection_id
+    row = _connection(personal)
+    stored = personal.registry.unseal(owner, identity, "credentials", row["auth_cipher"])
+    # A stored client that matches the callback would be reused unless each sign-in registers afresh.
+    stored["oauth_client_info"] = {
+        "client_id": "deleted-at-the-service",
+        "redirect_uris": ["http://bowhead.example/api/v1/personal-mcp/oauth/callback"],
+        "token_endpoint_auth_method": "none",
+    }
+    with sqlite3.connect(personal.fixture.db_path) as db:
+        db.execute(
+            "UPDATE personal_mcp_connection SET auth_cipher=? WHERE id=?", (personal.registry.seal(owner, identity, "credentials", stored), identity)
+        )
+    served = _identity_provider(monkeypatch)
+    async with await _oauth_client(personal) as client:
+        started = await client.post("/api/v1/personal-mcp/oauth/authorize", json={"connection_id": identity, "version": row["version"]})
+    assert started.status_code == 200, started.text
+    from urllib.parse import urlsplit
+
+    assert parse_qs(urlsplit(started.json()["authorize_url"]).query)["client_id"] == ["cid"]
+    assert "/register" in served

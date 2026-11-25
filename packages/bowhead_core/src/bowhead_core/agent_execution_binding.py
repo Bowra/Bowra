@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -35,6 +35,7 @@ from bowhead_core.resource_dependency_projection import (
     stable_edges_from_definition,
 )
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 from bowhead_core.team_plugin_store import TeamPluginError, expand_plugins_conn, selected_plugin_ids
 from bowhead_core.team_subagent_access import TeamSubagentAccessResolver
 from bowhead_core.team_subagent_store import release_semantics_active_conn
@@ -63,6 +64,23 @@ def team_agent_dispatchable_state_sql(alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     return " AND ".join(f"{prefix}{column}" for column in _TEAM_AGENT_DISPATCHABLE_COLUMNS)
 
+
+_OWNER_TRIAL_COLUMNS = (
+    "turn_id",
+    "session_id",
+    "team_id",
+    "agent_id",
+    "owner_user_id",
+    "candidate_id",
+    "revision_ref",
+    "capability_fingerprint",
+    "candidate_kind",
+    "frozen_at",
+    "created_at",
+)
+# A trial starts on a saved draft (`prepared`) or on the version in review (`pending`); the
+# persistent guards accept the same two states.
+_OWNER_TRIAL_CANDIDATE_STATES = frozenset({"prepared", "pending"})
 
 AgentSourceKind = Literal["team", "system"]
 AgentDispatchSource = Literal["explicit", "lead", "plan", "system"]
@@ -113,6 +131,26 @@ class ExactAgentExecutionBinding:
     # selected resources from Plugin contributions. Not part of the frozen, compared definition.
     authored_definition: dict[str, Any] | None = None
     parent_execution_id: str | None = None
+    # An Owner draft trial binds a release candidate's frozen revision instead of a release; the
+    # marker comes only from the Turn's trial row (agent_owner_trial_turn), never from a client.
+    trial_candidate_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerTrialTurn:
+    """One Turn in which an Agent's Owner runs its saved draft (migration 0234)."""
+
+    turn_id: str
+    session_id: str
+    team_id: str
+    agent_id: str
+    owner_user_id: str
+    candidate_id: str
+    revision_ref: str
+    capability_fingerprint: str
+    candidate_kind: Literal["draft", "submitted"]
+    frozen_at: str
+    created_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,6 +556,9 @@ class AgentExecutionBindingStore:
         resource = AgentResourceRef.model_validate(resource.model_dump(mode="python"))
         if resource.source_kind != "team":
             raise AgentExecutionBindingError("reference_start_unsupported")
+        if resource.trial_candidate_id is not None:
+            # The live projection binds the released version; a trial is admitted by its own path.
+            raise AgentExecutionBindingError("agent_trial_unavailable")
         previous_factory = db.row_factory
         db.row_factory = aiosqlite.Row
         try:
@@ -647,6 +688,11 @@ class AgentExecutionBindingStore:
                 agent_id=agent_id,
             )
             stable_agent_id = str(aggregate["id"])
+            trial = await _owner_trial_row(db, turn_id=turn_id)
+            if trial is not None and trial.agent_id == stable_agent_id:
+                # In the Owner's trial of this Agent's draft, another run of the same Agent would
+                # bind its released version instead (trial-tech-design §4.5).
+                raise AgentExecutionBindingError("agent_trial_helper_unavailable")
             assignment = await _require_assignment(
                 db,
                 team_id=team_id,
@@ -734,6 +780,183 @@ class AgentExecutionBindingStore:
             if row is None:
                 raise AgentExecutionBindingError("agent_execution_persist_failed")
             return _binding_from_rows(row, current_snapshot)
+        finally:
+            db.row_factory = previous_factory
+
+    async def record_owner_trial_turn_in_connection(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        team_id: str,
+        user_id: str,
+        turn_id: str,
+        agent_id: str,
+        candidate_id: str,
+        revision_ref: str,
+    ) -> OwnerTrialTurn:
+        """Register this Turn as the Owner's trial of a frozen draft, in the caller's Turn transaction.
+
+        The candidate must be ``prepared`` (a saved draft) or ``pending`` (submitted for review) and
+        still name ``revision_ref``. No assignment or audience is consulted: only the Agent's Owner,
+        in their own session, may try its draft. A retry with the same facts returns the same row.
+        """
+        if not db.in_transaction:
+            raise AgentExecutionBindingError("agent_admission_transaction_required")
+        previous_factory = db.row_factory
+        db.row_factory = aiosqlite.Row
+        try:
+            if not await readable_table_exists(db, "agent_owner_trial_turn"):
+                raise AgentExecutionBindingError("agent_trial_unavailable")
+            await _require_turn_scope(db, team_id=team_id, user_id=user_id, turn_id=turn_id)
+            aggregate = await _dispatchable_team_agent(db, team_id=team_id, agent_id=agent_id)
+            if _agent_owner_user_id(aggregate) != user_id:
+                raise AgentExecutionBindingError("agent_trial_owner_required")
+            async with db.execute(
+                """
+                SELECT candidate.revision_id,candidate.capability_fingerprint,candidate.state,
+                       revision.created_at AS frozen_at
+                FROM team_subagent_release_candidate candidate
+                JOIN team_subagent_revision revision
+                  ON revision.team_id=candidate.team_id
+                 AND revision.subagent_id=candidate.subagent_id
+                 AND revision.id=candidate.revision_id
+                WHERE candidate.team_id=? AND candidate.subagent_id=? AND candidate.id=?
+                  AND revision.capability_fingerprint=candidate.capability_fingerprint
+                  AND revision.dependency_fingerprint=candidate.dependency_fingerprint
+                """,
+                (team_id, agent_id, candidate_id),
+            ) as cursor:
+                candidate = await cursor.fetchone()
+            if candidate is None:
+                raise AgentExecutionBindingError("agent_trial_candidate_unavailable")
+            if str(candidate["revision_id"]) != revision_ref:
+                raise AgentExecutionBindingError("agent_candidate_stale")
+            if str(candidate["state"]) not in _OWNER_TRIAL_CANDIDATE_STATES:
+                raise AgentExecutionBindingError("agent_trial_candidate_not_prepared")
+            async with db.execute("SELECT session_id FROM turns WHERE id=?", (turn_id,)) as cursor:
+                turn = await cursor.fetchone()
+            trial = OwnerTrialTurn(
+                turn_id=turn_id,
+                session_id=str(turn["session_id"]),
+                team_id=team_id,
+                agent_id=agent_id,
+                owner_user_id=user_id,
+                candidate_id=candidate_id,
+                revision_ref=revision_ref,
+                capability_fingerprint=str(candidate["capability_fingerprint"]),
+                candidate_kind="draft" if str(candidate["state"]) == "prepared" else "submitted",
+                frozen_at=str(candidate["frozen_at"]),
+                created_at=_now(),
+            )
+            existing = await _owner_trial_row(db, turn_id=turn_id)
+            if existing is not None:
+                if replace(existing, created_at=trial.created_at) != trial:
+                    raise AgentExecutionBindingError("agent_trial_turn_conflict")
+                return existing
+            await db.execute(
+                f"INSERT INTO agent_owner_trial_turn({','.join(_OWNER_TRIAL_COLUMNS)}) VALUES ({','.join('?' for _ in _OWNER_TRIAL_COLUMNS)})",  # noqa: S608 -- fixed column list
+                tuple(getattr(trial, column) for column in _OWNER_TRIAL_COLUMNS),
+            )
+            return trial
+        finally:
+            db.row_factory = previous_factory
+
+    async def admit_owner_trial_execution_in_connection(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        team_id: str,
+        user_id: str,
+        turn_id: str,
+        agent_id: str,
+        candidate_id: str,
+        dispatch_key: str = "reference:primary",
+    ) -> ExactAgentExecutionBinding:
+        """Reserve the primary execution of an Owner draft trial inside the caller's transaction.
+
+        The Turn must already carry its trial row (``record_owner_trial_turn_in_connection``). The
+        execution binds the candidate's frozen revision with no release; no assignment, audience or
+        live release is consulted. A retry with the same dispatch key returns the same execution on
+        the same revision, also after the candidate has been replaced, released or withdrawn.
+        """
+        if not db.in_transaction:
+            raise AgentExecutionBindingError("agent_admission_transaction_required")
+        previous_factory = db.row_factory
+        db.row_factory = aiosqlite.Row
+        try:
+            if not await readable_table_exists(db, "agent_owner_trial_turn"):
+                raise AgentExecutionBindingError("agent_trial_unavailable")
+            await _require_turn_scope(db, team_id=team_id, user_id=user_id, turn_id=turn_id)
+            aggregate = await _dispatchable_team_agent(db, team_id=team_id, agent_id=agent_id)
+            if _agent_owner_user_id(aggregate) != user_id:
+                raise AgentExecutionBindingError("agent_trial_owner_required")
+            trial = await _owner_trial_row(db, turn_id=turn_id)
+            if trial is None or (trial.team_id, trial.agent_id, trial.candidate_id, trial.owner_user_id) != (
+                team_id,
+                agent_id,
+                candidate_id,
+                user_id,
+            ):
+                raise AgentExecutionBindingError("agent_trial_turn_missing")
+            existing = await _execution_by_dispatch_key(db, turn_id=turn_id, dispatch_source="explicit", dispatch_key=dispatch_key)
+            if existing is not None:
+                if (
+                    str(existing["agent_source_kind"]) != "team"
+                    or str(existing["agent_id"]) != agent_id
+                    or str(existing["revision_ref"]) != trial.revision_ref
+                    or existing["release_id"] is not None
+                    or str(existing["capability_fingerprint"]) != trial.capability_fingerprint
+                ):
+                    raise AgentExecutionBindingError("agent_dispatch_identity_conflict")
+                _require_resumable_execution(existing)
+                snapshot = await _team_snapshot_by_execution(db, existing)
+                _validate_team_snapshot(snapshot)
+                return _binding_from_rows(existing, snapshot)
+            async with db.execute(
+                "SELECT state FROM team_subagent_release_candidate WHERE team_id=? AND subagent_id=? AND id=?",
+                (team_id, agent_id, candidate_id),
+            ) as cursor:
+                candidate = await cursor.fetchone()
+            if candidate is None or str(candidate["state"]) not in _OWNER_TRIAL_CANDIDATE_STATES:
+                raise AgentExecutionBindingError("agent_trial_candidate_not_prepared")
+            snapshot = await _candidate_team_snapshot(
+                db, team_id=team_id, agent_id=agent_id, candidate_id=candidate_id, revision_ref=trial.revision_ref
+            )
+            _validate_team_snapshot(snapshot)
+            if str(snapshot["capability_fingerprint"]) != trial.capability_fingerprint:
+                raise AgentExecutionBindingError("agent_trial_candidate_unavailable")
+            policy_fingerprint = _policy_fingerprint(
+                {"agent_row_version": int(aggregate["row_version"]), "candidate_id": candidate_id, "source": "owner_trial"}
+            )
+            resolved_definition_json = await _resolved_team_definition_json(db, team_id=team_id, snapshot=snapshot)
+            execution_id = f"aex_{uuid4().hex}"
+            await db.execute(
+                """
+                INSERT INTO turn_agent_execution(
+                  id,team_id,turn_id,parent_execution_id,agent_id,agent_source_kind,
+                  revision_ref,release_id,dispatch_source,dispatch_key,
+                  runtime_profile_name,capability_fingerprint,policy_fingerprint,
+                  status,created_at,resolved_definition_json
+                ) VALUES (?,?,?,NULL,?,'team',?,NULL,'explicit',?,?,?,?,'admitted',?,?)
+                """,
+                (
+                    execution_id,
+                    team_id,
+                    turn_id,
+                    agent_id,
+                    trial.revision_ref,
+                    dispatch_key,
+                    str(aggregate["name"]),
+                    trial.capability_fingerprint,
+                    policy_fingerprint,
+                    _now(),
+                    resolved_definition_json,
+                ),
+            )
+            row = await _execution_by_id(db, execution_id)
+            if row is None:
+                raise AgentExecutionBindingError("agent_execution_persist_failed")
+            return _binding_from_rows(row, snapshot)
         finally:
             db.row_factory = previous_factory
 
@@ -1295,6 +1518,9 @@ class AgentExecutionBindingStore:
                 _require_resumable_execution(execution)
             if resource.source_kind == "system":
                 snapshot = await _authorized_system_execution_snapshot(db, execution, user_id=user_id)
+            elif resource.trial_candidate_id is not None:
+                # An Owner draft trial keeps its frozen revision; the candidate may have moved on.
+                snapshot = await _authorized_owner_trial_snapshot(db, execution, user_id=user_id, candidate_id=resource.trial_candidate_id)
             else:
                 assignment = await _require_execution_assignment(db, execution, user_id=user_id)
                 snapshot = await _team_snapshot_by_execution(db, execution)
@@ -2201,10 +2427,151 @@ async def _eval_system_snapshot(
     return row
 
 
+def _agent_owner_user_id(aggregate: Mapping[str, Any]) -> str:
+    """The Agent's Owner as the persistent trial guards read it: COALESCE(owner_user_id, created_by)."""
+    owner = aggregate["owner_user_id"] if aggregate["owner_user_id"] is not None else aggregate["created_by"]
+    return str(owner) if owner is not None else ""
+
+
+async def _dispatchable_team_agent(db: aiosqlite.Connection, *, team_id: str, agent_id: str) -> aiosqlite.Row:
+    async with db.execute(
+        f"SELECT * FROM team_subagent WHERE team_id=? AND id=? AND {team_agent_dispatchable_state_sql()}",  # noqa: S608 -- fixed local fragment
+        (team_id, agent_id),
+    ) as cursor:
+        aggregate = await cursor.fetchone()
+    if aggregate is None:
+        raise AgentExecutionBindingError("agent_not_runnable")
+    return aggregate
+
+
+async def _owner_trial_row(db: aiosqlite.Connection, *, turn_id: str) -> OwnerTrialTurn | None:
+    # A frozen legacy single-file database predates the table; it has no trials.
+    if not await readable_table_exists(db, "agent_owner_trial_turn"):
+        return None
+    async with db.execute(
+        f"SELECT {','.join(_OWNER_TRIAL_COLUMNS)} FROM agent_owner_trial_turn WHERE turn_id=?",  # noqa: S608 -- fixed column list
+        (turn_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    return OwnerTrialTurn(*(str(value) for value in tuple(row)))  # type: ignore[arg-type]
+
+
+async def read_owner_trial_turn_in_connection(db: aiosqlite.Connection, *, turn_id: str) -> OwnerTrialTurn | None:
+    """The Owner draft trial this Turn runs, if any; ``None`` also on a layout without trials."""
+    return await _owner_trial_row(db, turn_id=turn_id)
+
+
+async def _candidate_team_snapshot(
+    db: aiosqlite.Connection,
+    *,
+    team_id: str,
+    agent_id: str,
+    candidate_id: str,
+    revision_ref: str,
+) -> aiosqlite.Row:
+    """Load a release candidate's frozen revision with its own Safety report, in any candidate state.
+
+    The revision is immutable, so a started trial keeps running on it after the candidate is
+    replaced, released or withdrawn; starting a trial checks the state separately.
+    """
+    async with db.execute(
+        """
+        SELECT NULL AS release_id,candidate.revision_id,
+               candidate.capability_fingerprint,candidate.dependency_fingerprint,
+               revision.definition_json,revision.listing_json,
+               revision.definition_hash,revision.risk_json,
+               behavior.descriptor_json AS behavior_descriptor_json,
+               safety.status AS safety_status,safety.content_hash AS safety_content_hash,
+               candidate.id AS trial_candidate_id
+        FROM team_subagent_release_candidate candidate
+        JOIN team_subagent_revision revision
+          ON revision.team_id=candidate.team_id
+         AND revision.subagent_id=candidate.subagent_id
+         AND revision.id=candidate.revision_id
+        LEFT JOIN team_subagent_revision_behavior behavior
+          ON behavior.team_id=revision.team_id
+         AND behavior.subagent_id=revision.subagent_id
+         AND behavior.revision_id=revision.id
+        JOIN agent_safety_report safety
+          ON safety.team_id=candidate.team_id
+         AND safety.agent_id=candidate.subagent_id
+         AND safety.id=candidate.safety_report_id
+         AND safety.subject_kind='revision'
+         AND safety.subject_ref=revision.id
+         AND safety.dependency_fingerprint=revision.dependency_fingerprint
+        WHERE candidate.team_id=? AND candidate.subagent_id=? AND candidate.id=?
+          AND candidate.revision_id=?
+          AND revision.capability_fingerprint=candidate.capability_fingerprint
+          AND revision.dependency_fingerprint=candidate.dependency_fingerprint
+        """,
+        (team_id, agent_id, candidate_id, revision_ref),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise AgentExecutionBindingError("agent_trial_candidate_unavailable")
+    await _require_team_extension_snapshot(db, row)
+    return row
+
+
+async def _authorized_owner_trial_snapshot(
+    db: aiosqlite.Connection,
+    execution: Mapping[str, Any],
+    *,
+    user_id: str,
+    candidate_id: str,
+) -> aiosqlite.Row:
+    """Recheck an admitted Owner draft trial: still the Owner, Agent dispatchable, trial row intact.
+
+    The candidate's state is not rechecked: the trial keeps its frozen revision once admitted.
+    """
+    aggregate = await _dispatchable_team_agent(db, team_id=str(execution["team_id"]), agent_id=str(execution["agent_id"]))
+    if _agent_owner_user_id(aggregate) != user_id:
+        raise AgentExecutionBindingError("agent_trial_owner_required")
+    trial = await _owner_trial_row(db, turn_id=str(execution["turn_id"]))
+    if trial is None or (
+        trial.team_id,
+        trial.agent_id,
+        trial.owner_user_id,
+        trial.candidate_id,
+        trial.revision_ref,
+        trial.capability_fingerprint,
+    ) != (
+        execution["team_id"],
+        execution["agent_id"],
+        user_id,
+        candidate_id,
+        execution["revision_ref"],
+        execution["capability_fingerprint"],
+    ):
+        raise AgentExecutionBindingError("agent_trial_turn_missing")
+    snapshot = await _team_snapshot_by_execution(db, execution)
+    _validate_team_snapshot(snapshot)
+    return snapshot
+
+
 async def _team_snapshot_by_execution(
     db: aiosqlite.Connection,
     execution: Mapping[str, Any],
 ) -> aiosqlite.Row:
+    if execution["release_id"] is None and str(execution["agent_source_kind"]) == "team":
+        # Only an Owner draft trial binds a Team revision without a release here; its trial row
+        # names the candidate whose frozen revision every reader and resume loads again.
+        trial = await _owner_trial_row(db, turn_id=str(execution["turn_id"]))
+        if trial is not None and (trial.team_id, trial.agent_id, trial.revision_ref, trial.capability_fingerprint) == (
+            execution["team_id"],
+            execution["agent_id"],
+            execution["revision_ref"],
+            execution["capability_fingerprint"],
+        ):
+            return await _candidate_team_snapshot(
+                db,
+                team_id=trial.team_id,
+                agent_id=trial.agent_id,
+                candidate_id=trial.candidate_id,
+                revision_ref=trial.revision_ref,
+            )
     async with db.execute(
         """
         SELECT release.id AS release_id,release.revision_id,
@@ -2481,6 +2848,7 @@ def _binding_from_rows(
 ) -> ExactAgentExecutionBinding:
     source_kind = str(execution["agent_source_kind"])
     columns = execution.keys()
+    trial_candidate_id = None
     if source_kind == "team":
         # resolved_definition_json was added in 0123; old-schema rows lack it. Fall back to the snapshot definition
         # so admission reaches its *_migration_required checks instead of raising IndexError here.
@@ -2494,6 +2862,10 @@ def _binding_from_rows(
             if (authored_policy.canonical_value() if authored_policy else None) != (resolved_policy.canonical_value() if resolved_policy else None):
                 raise AgentExecutionBindingError("agent_knowledge_access_resolution_changed")
         listing_value = _decode_object(snapshot["listing_json"], "Agent listing")
+        # sqlite Row `in` compares values, not column names.
+        snapshot_columns = snapshot.keys()
+        if "trial_candidate_id" in snapshot_columns and snapshot["trial_candidate_id"] is not None:
+            trial_candidate_id = str(snapshot["trial_candidate_id"])
     else:
         authored = None
         definition = _decode_object(snapshot["definition_json"], "system Agent definition")
@@ -2519,6 +2891,7 @@ def _binding_from_rows(
         behavior_descriptor=_behavior_descriptor_from_snapshot(snapshot),
         authored_definition=authored,
         parent_execution_id=execution["parent_execution_id"] if "parent_execution_id" in columns else None,
+        trial_candidate_id=trial_candidate_id,
     )
 
 
@@ -2661,7 +3034,9 @@ __all__ = [
     "AgentExecutionBindingStore",
     "ExactAgentBindingExpectation",
     "ExactAgentExecutionBinding",
+    "OwnerTrialTurn",
     "ProjectedSystemAgentRevision",
     "TurnAgentBindingInput",
     "project_system_agent_revision",
+    "read_owner_trial_turn_in_connection",
 ]

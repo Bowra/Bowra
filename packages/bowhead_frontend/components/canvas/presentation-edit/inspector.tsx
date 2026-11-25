@@ -3,7 +3,7 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
-import { Chat, Lock, Undo } from "@/components/icons";
+import { Chat, Check, Lock, Undo } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, fieldDescribedBy } from "@/components/ui/field";
@@ -50,7 +50,7 @@ function kindLabel(element: InventoryElement, t: Translate): string {
 }
 
 export function ElementList({
-  slide, pending, numbers, fieldToken, keyboardHint, onSelect, onReferencePage, hideHeading = false,
+  slide, pending, numbers, fieldToken, keyboardHint, onSelect, onReferencePage, pageReferenced = false, hideHeading = false,
 }: {
   slide: InventorySlide;
   pending: ReadonlyArray<PendingEdit>;
@@ -59,8 +59,10 @@ export function ElementList({
   fieldToken: string;
   keyboardHint?: string;
   onSelect: (key: string) => void;
-  /** Reference the whole slide in chat (design §13.2). */
+  /** Reference the whole slide in chat, or stop referencing it (design §13.2, §13.6). */
   onReferencePage?: () => void;
+  /** The slide is in the Composer: the button reads 「已引用」 and is pressed. */
+  pageReferenced?: boolean;
   /** In a sheet whose title already names the slide. */
   hideHeading?: boolean;
 }) {
@@ -75,9 +77,10 @@ export function ElementList({
             <p className={styles.panelHint}>{t("page_list_hint")}</p>
           </div>
           {onReferencePage ? (
-            <Button size="sm" variant="secondary" onClick={onReferencePage} aria-label={t("reference_page_label", { page: slide.index })}>
-              <Chat size={13} aria-hidden="true" />
-              {t("reference_page")}
+            <Button size="sm" variant="secondary" onClick={onReferencePage} aria-pressed={pageReferenced}
+              aria-label={t(pageReferenced ? "referenced_page_label" : "reference_page_label", { page: slide.index })}>
+              {pageReferenced ? <Check size={13} aria-hidden="true" /> : <Chat size={13} aria-hidden="true" />}
+              {t(pageReferenced ? "referenced_page" : "reference_page")}
             </Button>
           ) : null}
         </div>
@@ -563,6 +566,14 @@ export function ChartPanel({
       <PanelHeader element={element} page={page} t={t} fieldToken={fieldToken} onBack={sheet ? undefined : onBack} onReference={onReference}
         meta={t("chart_meta", { page, series: chart.series.length, categories: chart.categories.length })} />
       <p className={styles.panelHint}>{t(inPlace ? "in_place_chart_hint" : "chart_hint")}</p>
+      {/* A value that is not a number holds the save back; say which one here too (design §13.7). */}
+      {invalid.some((row) => row.some(Boolean)) ? (
+        <p className="settings-field__error">
+          {t("chart_invalid_values", {
+            categories: chart.categories.filter((_, c) => invalid.some((row) => row[c])).map((category) => t("quoted", { text: category })).join(t("list_separator")),
+          })}
+        </p>
+      ) : null}
       {inPlace ? null : <ChartGrid element={element} pending={pending} drafts={drafts} invalid={invalid} locale={locale} fieldToken={fieldToken} onDraft={onDraft} />}
       {firstRepeat && repeatedElement ? (
         <ReviewLine actions={[{ label: t("go_edit"), onSelect: () => onSelect(repeatedElement.key) }]}>

@@ -142,12 +142,14 @@ def test_projection_keeps_fact_and_attempt_separate() -> None:
     assert projection.fact_state == "verified"
     assert projection.attempt_state == "cancelled"
 
-    aged = project_latest_evidence(
+    # A pass stays valid past `fresh_until` until the configuration changes (2026-11-25).
+    old = project_latest_evidence(
         [verified],
         current_signature=signature,
         now=NOW + timedelta(days=2),
     )
-    assert aged.fact_state == "aged"
+    assert old.fact_state == "verified"
+    assert old.observed_at == verified.observed_at
 
     stale = project_latest_evidence(
         [verified],

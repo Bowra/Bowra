@@ -81,6 +81,38 @@ function EmptyResponseDetails({ diagnostics }: { diagnostics: VerificationDiagno
   );
 }
 
+/** Why one capability failed, shown under its model row in the connection editor. */
+export function VerificationFailureLine({ item }: { item: VerificationBatch["items"][number] }) {
+  const t = useTranslations("settings.models.v2");
+  const capabilityLabel = useTranslations("settings.models.caps");
+  const failureKey = FAILURE_MESSAGE_KEYS[item.safe_code || ""] || "failure_generic";
+  return (
+    <div className="verification-failure-detail verification-row-failure" role="status">
+      <strong>
+        <AlertTriangle size={12} aria-hidden /> {t("row_failure", { capability: capabilityLabel(item.capability), reason: t(failureKey) })}
+      </strong>
+      <span className="verification-diagnostics">
+        {item.safe_http_status ? <span>{t("failure_http_status", { status: item.safe_http_status })}</span> : null}
+        {item.safe_code ? (
+          <span>
+            {t("failure_code_label")} <code translate="no">{item.safe_code}</code>
+          </span>
+        ) : null}
+        {item.safe_summary_code ? (
+          <span>
+            {t("failure_detail_label")} <code translate="no">{item.safe_summary_code}</code>
+          </span>
+        ) : null}
+      </span>
+      {item.safe_code === "empty_completion"
+        ? item.diagnostics
+          ? <EmptyResponseDetails diagnostics={item.diagnostics} />
+          : <small>{t("diagnostic_unavailable")}</small>
+        : null}
+    </div>
+  );
+}
+
 export function VerificationPanel({
   plan,
   batch,

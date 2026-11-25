@@ -25,6 +25,9 @@ import { staticTranslator } from "./locale-messages";
 const STRING_MAX = 60;
 const QUERY_MAX = 40;
 
+/** `_prettify_input_preview` (bowhead_core/subagent.py) labels a query list "{first} +{n} more". */
+const QUERY_LIST_SUFFIX = /^([\s\S]*?) \+(\d+) more$/;
+
 /**
  * chat-ux-2026-08 batch A—unrecognized values now return empty string instead of `"[no-preview]"`.
  *
@@ -87,6 +90,21 @@ export function prettifyStepLabel(
       } catch {
         /* not valid JSON — a normal label like "[compute] task"; keep it */
       }
+    }
+    // The backend writes a list of queries in one fixed English form; stored Turns carry it too.
+    const more = QUERY_LIST_SUFFIX.exec(t);
+    if (more) {
+      const count = Number(more[2]);
+      return staticTranslator("step_label_phrase")("more", {
+        head: more[1].slice(0, STRING_MAX),
+        count,
+        total: count + 1,
+      });
+    }
+    // A report write without a heading falls back to its kind code ("narrative"); name the kind.
+    if (tool_name === "write_report") {
+      const kinds = staticTranslator("step_facts.section");
+      if (kinds.hasMessage(t)) return kinds(t);
     }
     return t.slice(0, STRING_MAX);
   }

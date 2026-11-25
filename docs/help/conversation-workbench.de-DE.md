@@ -12,7 +12,9 @@ Dieser Artikel beschreibt die Bereiche der Unterhaltungsseite für Fortschritt, 
 
 ## Gewinnschwelle berechnen
 
-Wenn der Rechner verfügbar ist, bitten Sie im Chat um eine bearbeitbare Berechnung der Gewinnschwelle. Geben Sie Stückpreis, variable Stückkosten und Fixkosten in derselben Währung an. Bei 100, 60 und 12.000 liegt die Gewinnschwelle bei 300 Stück. Ändern Sie den Preis auf 90, steigt die Menge auf 400 Stück. Fehlende Beträge können Sie in der Karte ergänzen. Änderungen gelten für Ihre aktuelle Ansicht. Beim erneuten Öffnen erscheinen die ursprünglichen Werte.
+Bitten Sie im normalen Chat um eine bearbeitbare Berechnung der Gewinnschwelle. Geben Sie Stückpreis, variable Stückkosten und Fixkosten in derselben Währung an. Bei 100, 60 und 12.000 liegt die Gewinnschwelle bei 300 Stück. Ändern Sie den Preis auf 90, steigt die Menge auf 400 Stück. Fehlende Beträge können Sie in der Karte ergänzen. Änderungen gelten für Ihre aktuelle Ansicht. Beim erneuten Öffnen erscheinen die ursprünglichen Werte.
+
+Ziehen Sie einen Regler oder geben Sie einen genauen Betrag ein. Die Differenz zur ursprünglichen Menge erscheint beim Ergebnis. Mit **Zurücksetzen** beginnen Sie erneut.
 
 ## Aktionen unter einer Antwort
 
@@ -74,7 +76,7 @@ Beachten Sie:
 - Beim Speichern ändern sich nur die Zeichen, die Sie bearbeiten; übriger Text, Formatierungen und Folien bleiben unverändert.
 - Lässt sich ein Text oder eine Tabelle in der Vorschau nicht finden (etwa ein leeres Textfeld), bearbeiten Sie ihn stattdessen im Bereich rechts.
 - Bilder, SmartArt, eingebettete Objekte, Text in Master und Layouts (etwa eine Fußzeile auf jeder Folie), Notizen sowie Verschieben oder Größenänderungen sind hier nicht möglich. Laden Sie die Datei dafür herunter und nutzen Sie PowerPoint, oder wählen Sie **Dieses Element im Chat referenzieren** und bitten Sie die KI: Die Referenz nennt Folie und Element, Sie beschreiben nur die Änderung. Text, Tabellen und Diagramme lassen sich genauso referenzieren.
-- Für eine Frage zu einer ganzen Folie wählen Sie darunter **Diese Folie referenzieren** (beim Bearbeiten neben „Bearbeitbar auf Folie N“, auf dem Telefon neben **Folie N bearbeiten**). Im Eingabefeld erscheint „Folie N“, und die KI erhält den Titel der Folie und was darauf steht. Die Referenz gilt für die Version, die Sie gerade angesehen haben.
+- Für eine Frage zu einer ganzen Folie wählen Sie darunter **Diese Folie referenzieren** (beim Bearbeiten neben „Bearbeitbar auf Folie N“, auf dem Telefon neben **Folie N bearbeiten**). Im Eingabefeld erscheint „Folie N“, und die KI erhält den Titel der Folie und was darauf steht. Sie können mehrere Folien nacheinander wählen (bis zu 10); sie stehen in einem Eintrag, etwa „Folien 2, 5“, die Schaltfläche zeigt **Referenziert**, und ein erneuter Klick entfernt die Folie wieder. In der Vollansicht und beim Bearbeiten bleiben Sie, wo Sie sind; auf dem Telefon bleiben Sie in den Ergebnissen, und **Zum Chat** im Hinweis führt zum Eingabefeld. Die Referenz gilt für die Version, die Sie gerade angesehen haben.
 - Zahlen in Tabellen sind keine Formeln. Ändern Sie einen Diagrammwert, ändert sich dieselbe Zahl an anderer Stelle der Folie nicht mit; der Editor weist darauf hin.
 - Bei automatisch erzeugtem Inhalt wie Foliennummern und Datumsangaben können Sie den Text davor und danach ändern, ihn selbst aber nicht entfernen.
 - Das erste Speichern einer hochgeladenen Datei legt eine neue Datei „(bearbeitet)“ an; der Upload bleibt unverändert, weitere Speichervorgänge ergänzen Versionen der neuen Datei.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -61,10 +60,6 @@ _COPY = {
         "Saisissez les trois montants dans la même devise.",
     ),
 }
-
-
-def enabled() -> bool:
-    return os.environ.get("FEATURE_CHAT_ANSWER_CARDS", "0") == "1"
 
 
 def amount(value: Any) -> str | None:
@@ -138,7 +133,7 @@ def mixed_currency(request: str, currency_text: str) -> bool:
 
 
 async def show_break_even(args: dict[str, Any], ctx: ToolExecutionContext) -> dict:
-    if not (enabled() and ctx.answer_card_entry and ctx.artifact_presentation_entry):
+    if not (ctx.answer_card_entry and ctx.artifact_presentation_entry):
         return {"ok": False, "error": "The calculator is unavailable for this turn. Continue with the ordinary answer."}
     language = chrome_lang(ctx.language_context)
     labels, finite, unreachable, missing_prompt, invalid_prompt, currency_prompt = _COPY[language]

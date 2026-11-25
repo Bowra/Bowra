@@ -17,6 +17,7 @@ const labels = {
   codeTitle: "Code",
   codeLastRun: "Code",
   sourceUpload: "Uploaded by you",
+  sourceEdited: "Edited by you",
   sourceGenerated: "AI generated",
   sourceExport: "Report export",
   sourceWeb: "Web",
@@ -279,5 +280,25 @@ describe("projectResultsWorkspace", () => {
     });
     expect(items.find((item) => item.key === "artifact:art_image")?.metadata)
       .toBe("AI generated");
+  });
+
+  it("labels a version saved in the deck editor as the person's edit, not AI output", () => {
+    const [item] = projectResultsWorkspace({
+      artifacts: [
+        artifact({
+          id: "art_hand",
+          filename: "deck.pptx",
+          source: "presentation_edit",
+          origin: "other",
+          kind: "deliverable",
+          mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }),
+      ],
+      labels,
+      readOnly: false,
+      reportOnly: false,
+    });
+
+    expect(item?.metadata).toBe("Edited by you");
   });
 });

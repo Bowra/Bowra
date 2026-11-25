@@ -183,6 +183,9 @@ async def _helper(ctx: ToolExecutionContext, db: aiosqlite.Connection, material:
     except AgentExecutionBindingError as exc:
         raise OrdinaryContinuationUnavailable() from exc
     projection = asdict(binding)
+    # Hashes recorded before the trial marker existed stay valid; settled helpers are never trials.
+    if projection.get("trial_candidate_id") is None:
+        projection.pop("trial_candidate_id", None)
     projection["behavior_descriptor"] = binding.behavior_descriptor.model_dump(mode="json") if binding.behavior_descriptor is not None else None
     digest = content_hash(projection)
     if material.get("binding_hash", digest) != digest:

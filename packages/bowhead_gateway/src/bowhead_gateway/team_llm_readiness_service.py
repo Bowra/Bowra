@@ -16,6 +16,7 @@ from bowhead_core.team_llm_readiness import (
     build_required_assignments,
     compute_team_llm_readiness,
     external_readiness_rows,
+    touched_provider_ids,
 )
 from bowhead_core.team_llm_readiness_store import (
     TeamLlmReadinessStore,
@@ -196,6 +197,7 @@ async def evaluate_team_llm_readiness(
         grandfather_scopes=grandfather_scopes,
         baseline_will_invalidate=baseline_will_invalidate,
         external_rows=external_readiness_rows(draft_config),
+        touched_provider_ids=touched_provider_ids(current_config, draft_config, draft_provider_ids),
     )
     return ReadinessEvaluation(
         decision=decision,

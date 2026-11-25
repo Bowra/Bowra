@@ -98,7 +98,8 @@ import {
   type CanvasFocusDataDetail,
   type CanvasOpenResultDetail,
 } from "@/lib/canvas-workspace-focus";
-import { toast } from "@/lib/use-toast";
+import { dismissToast, toast } from "@/lib/use-toast";
+import { MAX_REFERENCED_SLIDES, type SlideToggleOutcome } from "@/lib/presentation-selection";
 import { useCopyDiagnosticsToastAction } from "@/components/error-notice";
 import { reportHeaderActionFailedKey } from "@/lib/report-header-errors";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -592,6 +593,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     for (let i = 0; i < delta; i++) stick.notePendingProgress();
   }, [runner.traceSteps?.length, runner.answer, stick]);
   const resultsT = useTranslations("results_workspace");
+  const viewerT = useTranslations("artifact_viewer");
   const authSession = useOptionalAuthSession();
   // chat-redesign Phase 1.7-B (tech-design §4.6): SteerMessage relocates
   // OUT of TurnContainer's BotTurn flow and pins above the composer per
@@ -1727,6 +1729,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     codeTitle: resultsT("code"),
     codeLastRun: resultsT("last_run"),
     sourceUpload: resultsT("source_upload"),
+    sourceEdited: resultsT("source_edited"),
     sourceGenerated: resultsT("source_generated"),
     sourceExport: resultsT("source_export"),
     sourceWeb: resultsT("source_web"),
@@ -2168,6 +2171,38 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && selectedResult.route.artifactId !== dataFocusArtifactId,
   );
   // A deck element referenced from the editor: one reference per file, carrying the element (design §6.9).
+  // 「引用这一页」 is a toggle: the Composer holds each deck file's page set (design §13.6), and reports
+  // it back so every page button shows 「已引用」 for exactly the pages that will be sent.
+  const [slideToggleRequest, setSlideToggleRequest] = useState<{ file: AttachmentRef; page: number; nonce: number } | null>(null);
+  const slideToggleNonceRef = useRef(0);
+  const pagesToastRef = useRef<string | null>(null);
+  const [referencedSlides, setReferencedSlides] = useState<Record<string, number[]>>({});
+  const referencedSlidesRef = useRef(referencedSlides);
+  useEffect(() => { referencedSlidesRef.current = referencedSlides; }, [referencedSlides]);
+  const togglePresentationSlide = useCallback((file: AttachmentRef, page: number, options?: { stay?: boolean }): SlideToggleOutcome => {
+    const pages = referencedSlidesRef.current[file.fileId] ?? [];
+    const present = pages.includes(page);
+    if (!present && pages.length >= MAX_REFERENCED_SLIDES) {
+      toast({ kind: "warning", text: viewerT("page_reference_limit", { max: MAX_REFERENCED_SLIDES }) });
+      return "limit";
+    }
+    // Ahead of the Composer's report, so a quick second click reads the set it just changed.
+    const next = present ? pages.filter((item) => item !== page) : [...pages, page].sort((a, b) => a - b);
+    referencedSlidesRef.current = { ...referencedSlidesRef.current, [file.fileId]: next };
+    slideToggleNonceRef.current += 1;
+    setSlideToggleRequest({ file, page, nonce: slideToggleNonceRef.current });
+    if (!present) {
+      if (!isDesktop) {
+        // Phones stay on Results so that several pages can be picked; one toast, kept current, leads to the chat.
+        if (pagesToastRef.current) dismissToast(pagesToastRef.current);
+        pagesToastRef.current = toast({ kind: "info", text: viewerT("pages_referenced", { count: next.length }), action: { label: viewerT("go_to_chat"), onAction: () => setChartFollowupReveal((count) => count + 1) } });
+      } else if (!options?.stay) {
+        // A maximized Results pane makes room for the Composer; focus stays on the page buttons.
+        setPanelMode((mode) => (mode === "canvas" ? "split" : mode));
+      }
+    }
+    return present ? "removed" : "added";
+  }, [isDesktop, viewerT]);
   const referencePresentationElement = useCallback((reference: AttachmentRef, options?: { quiet?: boolean }) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
     setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId)
@@ -3208,6 +3243,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             setRestoredDraftNotice(disposition === "applied" ? restored : null);
           }}
           prefillAttachments={composerAttach}
+          slideToggleRequest={slideToggleRequest}
+          onReferencedSlidesChange={setReferencedSlides}
           onPrefillAttachmentsConsumed={(consumed) => {
             setConsumedComposerPrefillKeys((current) => Array.from(new Set([
               ...current,
@@ -3829,6 +3866,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         agentRunning: Boolean(runner.running),
         onOpenVersion: openEditedPresentation,
         onReferenceElement: referencePresentationElement,
+        onToggleSlide: togglePresentationSlide,
+        referencedSlides,
       } : undefined}
     />
   );

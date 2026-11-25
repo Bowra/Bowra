@@ -162,3 +162,28 @@ describe("prettifyStepLabel — invariant: raw JSON dict NEVER in output", () =>
     });
   }
 });
+
+describe("prettifyStepLabel — interface wording for fixed backend forms (chat running state R1.3)", () => {
+  function inLocale<T>(locale: string, run: () => T): T {
+    document.documentElement.lang = locale;
+    try {
+      return run();
+    } finally {
+      document.documentElement.lang = "en-US";
+    }
+  }
+
+  it("words a query list in the interface language, also for stored Turns", () => {
+    expect(inLocale("zh-CN", () => prettifyStepLabel("2026年 营业额 按品牌 +2 more", "bi_query"))).toBe("2026年 营业额 按品牌 等 3 项");
+    expect(inLocale("en-US", () => prettifyStepLabel("Sales by brand +2 more", "bi_query"))).toBe("Sales by brand +2 more");
+    expect(inLocale("de-DE", () => prettifyStepLabel("Umsatz +1 more", "bi_query"))).toBe("Umsatz +1 weitere");
+    expect(inLocale("fr-FR", () => prettifyStepLabel("Ventes +4 more", "bi_query"))).toBe("Ventes +4 autres");
+  });
+
+  it("names a report write by its kind when the stored label is the kind code", () => {
+    expect(inLocale("zh-CN", () => prettifyStepLabel("narrative", "write_report"))).toBe("正文");
+    expect(inLocale("zh-CN", () => prettifyStepLabel("各门店营业额对比", "write_report"))).toBe("各门店营业额对比");
+    // Only report writes: the same word from another Tool is a label, not a code.
+    expect(inLocale("zh-CN", () => prettifyStepLabel("narrative", "kb_search"))).toBe("narrative");
+  });
+});

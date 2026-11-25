@@ -8,6 +8,7 @@ in the sandbox image (see the rollout register).
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 from pathlib import Path
@@ -60,8 +61,39 @@ def test_short_page_full_detail_and_blank_capture() -> None:
     full = vv.render_screens_view(_page_png(4000), kind="html", pages=[1, 4], detail="full")
     assert [image["label"] for image in full["images"]] == ["Screen 2", "Screen 5"]
     assert [image["page"] for image in full["images"]] == [2, 5]
-    assert vv.render_screens_view(_page_png(1600, blank=True), kind="html") == {"status": "not_completed", "reason": "blank_render", "pages": 2}
+    assert vv.render_screens_view(_page_png(1600, blank=True), kind="html") == {"status": "not_completed", "reason": "blank_render", "pages": 3}
     assert vv.render_screens_view(_page_png(1600, blank=True), kind="html", text_present=False)["status"] == "shown"
+
+
+def _content_png(blocks: list[tuple[int, int]], height: int) -> bytes:
+    """A white page whose content blocks are vertical stripes, so every row through them has many colour changes."""
+    image = Image.new("RGB", (1280, height), "white")
+    draw = ImageDraw.Draw(image)
+    for top, bottom in blocks:
+        for left in range(80, 1200, 10):
+            draw.rectangle((left, top, left + 4, bottom), fill=(40, 60, 120))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def test_screens_end_at_blank_bands_instead_of_every_800_px() -> None:
+    # A chart from 600 to 1000 px: an 800 px cut ran through it and models fixed a top that only looked clipped
+    # (findings spike §6).
+    png = _content_png([(100, 300), (600, 1000), (1100, 1500)], 1700)
+    assert [cut[:2] for cut in vv._screen_cuts(Image.open(io.BytesIO(png)).convert("RGB"))] == [(0, 499), (499, 1050), (1050, 1700)]
+    view = vv.render_screens_view(png, kind="html", pages=[0, 1], detail="full")
+    assert view["pages"] == 3 and view["shown"] == "screens 1-2, each at 1280x800 px"
+    first = Image.open(io.BytesIO(base64.b64decode(view["images"][0]["base64"])))
+    assert first.size == (1280, 800) and first.getpixel((640, 700)) == vv.SCREEN_FILL  # filled below the cut
+
+
+def test_a_page_without_a_blank_band_is_cut_at_800_px_and_says_so() -> None:
+    view = vv.render_screens_view(_content_png([(0, 1999)], 2000), kind="html")
+    assert view["pages"] == 3
+    assert view["shown"].endswith(
+        "; screen 1 ends inside content that continues on screen 2; screen 2 ends inside content that continues on screen 3"
+    )
 
 
 def test_svg_capture_is_one_image() -> None:
@@ -239,21 +271,6 @@ async def test_a_declared_fix_of_an_svg_compares_its_text(monkeypatch) -> None:
     assert renamed["presentation_check"] == {"status": "content_changed"}
     assert renamed["content_changes"]["removed_text"] == ["page 1: 营业额(亿元)"] and calls == ["svg"] * 3
     assert len(run.pending) == 3
-
-
-async def test_a_declared_fix_after_the_render_limit_says_why_it_was_not_compared(monkeypatch) -> None:
-    capture, _ = _fake_capture(["Total 163.42"])
-    monkeypatch.setattr(hs, "capture", capture)
-    run = vsc.begin_run(TURN, "lead", accepts_images=True)
-    backend = _Backend()
-    await vsc.attach_visual_view({}, _ctx(backend, "call_1"), _artifact(backend, "a1", "report.html", "<p>v1</p>"), kind="html")
-    run.shown = vsc.MAX_SHOWN_PER_RUN
-    fixed: dict[str, Any] = {}
-    await vsc.attach_visual_view(
-        fixed, _ctx(backend, "call_2"), _artifact(backend, "a2", "report.html", "<p>v2</p>"), kind="html", presentation_fix=True
-    )
-    assert fixed["visual_view"]["reason"] == "turn_limit"
-    assert fixed["presentation_check"]["status"] == "not_checked" and "already showed 20 rendered views" in fixed["presentation_check"]["reason"]
 
 
 # ------------------------------------------------------------------ sandbox adapter

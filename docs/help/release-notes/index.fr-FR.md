@@ -2,6 +2,7 @@
 
 Les instantanés Community ont leur propre historique. Une version de l’application ne signifie pas que des images ou un service hébergé ont été publiés.
 
+- [v1.7.76](releases/v1.7.76.fr-FR.md) — Explorez le seuil de rentabilité, référencez plusieurs diapositives et clarifiez les réglages des modèles.
 - [v1.7.75](releases/v1.7.75.fr-FR.md) — Modifiez le contenu PowerPoint pris en charge et reliez les fichiers révisés à leurs originaux.
 - [v1.7.73](releases/v1.7.73.fr-FR.md) — Épinglez les résultats et améliorez les graphiques, rapports et longues conversations.
 - [v1.7.64](releases/v1.7.64.fr-FR.md) — Écartez les brouillons des résultats choisis et améliorez les indications de crédit, graphiques et Skills.

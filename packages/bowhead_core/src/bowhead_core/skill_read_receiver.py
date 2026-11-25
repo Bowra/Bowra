@@ -175,7 +175,9 @@ def primary_skill_read_receiver(primary: ReferencePrimaryInput, scope: Reference
 
     ordinary_system = binding.agent_source_kind == "system" and has_ordinary_system_skill_scope(definition)
     grants = () if ordinary_system else exact_reference_skill_grants(definition)
-    if binding.agent_source_kind == "team" and not binding.release_id:
+    # A Team receiver runs a release, or the frozen draft of an Owner trial whose grants the
+    # revision pins; the trial marker comes only from the canonical reader's trial row.
+    if binding.agent_source_kind == "team" and not binding.release_id and binding.trial_candidate_id is None:
         _fail()
     return SkillReadReceiverBaseline(
         scope=scope,

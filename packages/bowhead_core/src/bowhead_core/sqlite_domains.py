@@ -312,6 +312,7 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "agent_collaboration_operation",
         "agent_collaboration_participant",
         "agent_collaboration_turn",
+        "agent_owner_trial_turn",
         "approvals",
         "chat_attachment_bundle_inventory",
         "chat_attachment_bundle_members",
@@ -457,6 +458,7 @@ TABLE_DOMAINS = {table: domain for domain, tables in DOMAIN_TABLES.items() for t
 APPENDED_TABLES: dict[str, tuple[str, str]] = {
     "notification_deliveries": ("notifications", "0226_notification_deliveries"),
     "user_result_pins": ("execution", "0232_user_result_pins"),
+    "agent_owner_trial_turn": ("execution", "0234_owner_draft_trial"),
 }
 # Columns appended to a table after the domain split exist only in the domain layout; the legacy
 # single-file schema stays frozen at the reviewed split revision.

@@ -6,7 +6,9 @@ Team owners and administrators manage model services in **Team settings → Mode
 
 ## Manage connections and model capabilities
 
-On **Model connections**, add a connection or edit an existing one. Enter the provider address, authentication, required parameters, model IDs, and supported capabilities. Use **Plan verification** before or after saving the connection to review capabilities, request count, and possible cost before running verification. Verification contacts the provider and may consume credits, but it does not automatically save configuration changes.
+On **Model connections**, add a connection or edit an existing one. Enter the provider address, authentication, required parameters, model IDs, and supported capabilities. Choose **Verify** in the connection editor. A dialog lists the capabilities to check, the request count and possible cost; choose **Confirm and start** to run it. Progress and the count appear at the bottom of the page, and each capability's result appears on its model's capability button: **Verified**, **Not verified**, **Verification failed** or **Verify again**. A failure's reason appears under its model; retry the unresolved items from the bottom bar. Verification contacts the provider and may consume credits, but it does not save the configuration.
+
+A passing result stays valid until the related settings change, and the connection list shows when it was verified. Changing the address or key marks every capability of that connection **Verify again**; changing one model's request parameters affects only that model's capability; a newly ticked capability reads **Not verified**. Credit multipliers and context windows do not affect results.
 
 Mark **Vision** only for models that can read images. When an agent's main model has Vision, Bowhead shows it pictures of the presentations, images, PDFs, HTML pages and SVG files it saves, so it can find and fix layout problems such as overflowing text or a wrong number on a card before it delivers. These checks add a few seconds to each save. Models without Vision are not shown pictures of files; images you attach to a message are sent to the model as before.
 
@@ -27,6 +29,8 @@ Custom HTTP chat connection tests allow up to 1,024 output tokens to reduce empt
 The visible **Request allowance** shows automatic, fixed, capped or omitted values, with separate rows when capabilities differ. Set a request limit in **Request parameters** below; capacity and request policy serve different purposes. An omitted field leaves the server limit unknown. Explicit fixed settings remain fixed and must fit the model's capacity and context.
 
 If a response reaches its output limit, Bowra asks the model for a smaller complete action up to twice, using earlier successful results. It does not execute an incomplete Tool batch or repeat earlier successful writes. The running status shows the correction. If correction still cannot finish, successful earlier results remain available and the failure explains how to request a shorter report or check output settings. Existing time and step limits still apply.
+
+If saving fails, the reason appears next to **Save**. If another administrator changed the model settings while you were editing, choose **Load latest settings (keep my changes)**, then save again; your edits are kept.
 
 ## Automatic context compaction
 
@@ -50,7 +54,7 @@ Generation controls include temperature, top_p and output limits; parallel tools
 
 Choose a capability and **Refresh preview** to inspect a safe synthetic request projection and each value's source. Preview sends no provider request and saves nothing. Unknown advanced values are hidden and remain unverified. Editing makes the prior preview outdated. To test provider acceptance, use the existing **Plan verification** and confirm its request count and possible cost. Excessive fixed budgets are not silently reduced; an untestable item explains the safe limit and recovery choices.
 
-Save the connection, then reopen it to confirm the values. If a review dialog appears, resolve any validation issue or accept the stated risk before applying. Preview or verification alone does not make a draft effective.
+Preview or verification alone does not make a draft effective; it takes effect when you choose **Save**.
 
 ## Set production assignments
 
@@ -82,13 +86,13 @@ Choose **External capabilities** in model settings to open its own page and revi
 
 Choose a saved connection, enter the service model and request method, then select the model the team will use. Manage its address and credentials under **Model connections**. Review index updates and retry failures from **Knowledge base → Files**. Change knowledge base models under **Model assignments**. A saved connection does not mean it has been assigned to production or is ready for use.
 
-**Save** on a connection validates and stores the change, then returns to the model settings list. If a review dialog appears, resolve any validation issue or accept the stated risk before applying. Other sections use **Review and apply**. Reopen the relevant section to confirm the displayed values. Model choice in a conversation is limited to the options made available by the team.
+**Save** on a connection stores the change, returns to the connection list and confirms it was saved; with nothing changed it says there was nothing to save. A **Save** confirmation appears only when this change needs your decision: a capability of this connection that an assignment uses failed, has never been verified or was not verified again after the connection changed, or the knowledge-base index must be rebuilt. Tick the confirmation and save, or go back and verify first. Issues on other connections are shown under **Model assignments** and do not stop this save. Other sections use **Review and apply**. Reopen the relevant section to confirm the displayed values. Model choice in a conversation is limited to the options made available by the team.
 
 ## Connect through Bowra
 
 If your administrator enables the service, **Use Bowra service** appears beside **Add connection**, including when the team has no connections. Only team owners and administrators can use it. Use any valid HTTP/HTTPS application address, including IP, localhost, intranet names and custom ports. The browser returns to this same address and deployment prefix; no public-entry or callback setting is needed. Keep the same browser and sign-in session until the return completes.
 
-Choose **Use Bowra service**, sign in to Bowra and approve access there. On return, the connection editor contains the imported address, credential and models. A verification plan for Chat and Tool capabilities is prepared automatically. Check its request count and possible cost, then choose **Start** to test it; provider requests never start automatically. Model names and declared capabilities are not verification results. Choose **Save** to store the connection, completing the original risk review if it appears. You can also save first and verify later. Existing model assignments stay unchanged; when automatic maintenance is enabled, freshly verified candidates can fill unconfigured roles.
+Choose **Use Bowra service**, sign in to Bowra and approve access there. On return, the connection editor contains the imported address, credential and models. A verification plan for Chat and Tool capabilities is prepared automatically and waits at the bottom of the page. Choose **Review and start** to check its request count and possible cost, then **Confirm and start**; provider requests never start automatically. Model names and declared capabilities are not verification results. Choose **Save** to store the connection. You can also save first and verify later. Existing model assignments stay unchanged; when automatic maintenance is enabled, freshly verified candidates can fill unconfigured roles.
 
 New Bowra imports automatically append `/v1` to the service address when it is missing, preserving any existing path and avoiding a duplicate `/v1`. Saved connections are not changed automatically. If an existing Bowra connection is missing `/v1`, edit its service address, add `/v1` at the end, then review and apply the change.
 

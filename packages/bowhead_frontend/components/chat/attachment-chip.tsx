@@ -11,6 +11,7 @@ import { MenuFloating, useMenu, useMenuItem } from "@/components/ui/menu";
 import { fileExtensionLabel, fileTypeIcon } from "@/lib/file-type-icon";
 import { useFileDownload, type FileDownloadStatus } from "@/lib/use-file-download";
 import { chartSelectedScopeLabel } from "@/lib/chart/selected-context";
+import type { PresentationSelection } from "@/lib/presentation-selection";
 import type { AttachmentRef } from "@/lib/types";
 
 // Attachment chip (Chat Cards Spec §5, D10/D11): 32 high, --r-2, a 16px line icon for the file type (no
@@ -107,6 +108,25 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/**
+ * A deck reference's chip: 「第 3 页 · 名称」 for an element, 「第 3 页」 for a page, up to three pages
+ * listed (「第 2、5、7 页」), and more as 「第 2、5、7 等 6 页」 (design §13.6).
+ */
+function presentationLabel(selection: PresentationSelection | undefined, t: (key: string, values?: Record<string, string | number>) => string): string | null {
+  if (!selection) return null;
+  if (selection.version === 1) {
+    return selection.elementName === undefined
+      ? t("presentation_slide", { page: selection.slideIndex })
+      : t("presentation_element", { page: selection.slideIndex, name: selection.elementName });
+  }
+  const pages = selection.slides.map((slide) => slide.slideIndex);
+  if (pages.length === 1) return t("presentation_slide", { page: pages[0] });
+  const shown = pages.slice(0, 3).join(t("page_list_separator"));
+  return pages.length <= 3
+    ? t("presentation_slides", { pages: shown })
+    : t("presentation_slides_more", { pages: shown, count: pages.length, more: pages.length - 3 });
+}
+
 interface Props {
   item: AttachmentItem;
   /** Disable composer-side mutations while keeping safe read/download affordances available. */
@@ -147,11 +167,7 @@ export function AttachmentChip({
   const t = useTranslations("attachment");
   const locale = useLocale();
   const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext, locale) : null;
-  const elementLabel = item.presentationSelection
-    ? item.presentationSelection.elementName === undefined
-      ? t("presentation_slide", { page: item.presentationSelection.slideIndex })
-      : t("presentation_element", { page: item.presentationSelection.slideIndex, name: item.presentationSelection.elementName })
-    : null;
+  const elementLabel = presentationLabel(item.presentationSelection, t);
   const kind: "file" | "bundle" = item.kind ?? "file";
   const [menuOpen, setMenuOpen] = useState(false);
   const bundleMenu = useMenu({

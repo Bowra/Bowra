@@ -690,3 +690,75 @@ async def test_unconfirmed_gaps_are_listed_in_the_notice_not_as_bare_lines(colla
         f"{answer}\n\nThese requested items could not be confirmed as complete: Monthly sales for 2026; Store ranking by sales. "
         "Before relying on the result, check the limitations stated in the answer and the run's steps."
     )
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["serial", "parallel"])
+@pytest.mark.parametrize("case", ["reviews_first", "helper_failed", "feature_off"])
+async def test_a_note_after_a_helper_states_that_the_final_reply_waits_for_the_review(collab, monkeypatch, parallel, case):
+    """docs/sprints/answer-written-twice-2026-11-25: Lead learned that its reply waits for the delivery review only
+    when its written answer was withdrawn, so it wrote the answer twice in 243 of 244 helper Turns on 116. A note
+    after a successful helper's result now states it with the evidence IDs, so a Lead that reviews first answers once.
+
+    Mutation: drop the note, or its review context → this test fails.
+    """
+    from bowhead_router.runtime_notes import FINAL_REPLY_REVIEW_NOTE_NAME
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0" if case == "feature_off" else "1")
+    monkeypatch.setenv("BOWHEAD_TOOL_FINDING_ENABLED", "0")
+    monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", "1" if parallel else "0")
+    answer = "Revenue is 4200."
+    requests, bounces = 0, 0
+    notes: list[str] = []
+
+    async def spawn(args, ctx):
+        if case == "helper_failed":
+            return {"ok": False, "error": "helper failed", "error_kind": "tool_execution_failed"}
+        return {"ok": True, "final_answer": answer}
+
+    async def provider(request):
+        nonlocal requests, bounces
+        requests += 1
+        if requests == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id=f"helper-{i}", name="subagent_spawn", arguments={"profile": f"p{i}", "task": "Revenue."}) for i in range(2)],
+            )
+        bounces = sum(1 for message in request.messages if message.role == "user" and "review_context (JSON data): " in message.content)
+        notes[:] = [message.content for message in request.messages if message.role == "user" and message.name == FINAL_REPLY_REVIEW_NOTE_NAME]
+        reviewed = any(message.role == "tool" and message.name == "review_delivery" for message in request.messages)
+        if notes and not reviewed:
+            ids = [item["call_id"] for item in json.loads(notes[-1].split(" review_context: ", 1)[1])["successful_calls"]]
+            review = {"requirements": [{"requirement": "Revenue", "status": "fulfilled", "evidence_call_ids": ids}], "issues": []}
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id="review", name="review_delivery", arguments={"payload": {"delivery_review": review}})]
+            )
+        return LLMResponse(content=answer)
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("subagent_spawn", spawn)
+    try:
+        result = await asyncio.wait_for(harness.run(collab.lead, tool_deny=_LEAD_TOOL_DENY, task="Report revenue."), 15)
+        assert not harness.provider.failures, harness.provider.failures
+        if case == "reviews_first":
+            assert len(notes) == 1, "One note after the batch of helper results"
+            note = notes[-1]
+            assert note.startswith("Your final reply to the user after this delegation is delivered only after review_delivery is accepted")
+            context = json.loads(note.split(" review_context: ", 1)[1])
+            spawn_ids = {inv.call_id for inv in result.tool_invocations if inv.tool_name == "subagent_spawn"}
+            assert context["failed_calls"] == [] and {item["call_id"] for item in context["successful_calls"]} == spawn_ids
+            assert result.ok and result.completion == "complete" and result.final_answer.startswith(answer)
+            assert (requests, bounces) == (3, 0), "Reviewed first, answered once, never bounced"
+        else:
+            assert notes == []
+    finally:
+        await harness.bus.close()
+
+
+def test_the_final_reply_review_note_is_turn_local() -> None:
+    from bowhead_core.context_hygiene import MESSAGE_KIND_POLICY
+    from bowhead_router.runtime_notes import FINAL_REPLY_REVIEW_NOTE_NAME, model_messages
+    from bowhead_router.types import Message
+
+    assert MESSAGE_KIND_POLICY[FINAL_REPLY_REVIEW_NOTE_NAME] == "turn_local"
+    projected = model_messages([Message(role="user", name=FINAL_REPLY_REVIEW_NOTE_NAME, content="Your final reply …")])
+    assert projected[0].name is None and projected[0].content == "[Bowhead runtime note — not a message from the user.]\nYour final reply …"

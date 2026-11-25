@@ -101,6 +101,8 @@ async def primary_extension_policy(
     original = replace(primary, binding=replace(binding, status=receiver.status))
     if primary_skill_read_receiver(original, receiver.scope, receiver.turn_id) != receiver:
         _fail()
+    # A published extension policy depends on a release's audience. An Owner draft trial has no
+    # release, so its read-only extension Skills are unavailable and it keeps its baseline.
     policy = (
         await published_extension_policy(
             db,
@@ -110,7 +112,7 @@ async def primary_extension_policy(
             release_id=binding.release_id,
             definition=binding.definition,
         )
-        if binding.agent_source_kind == "team"
+        if binding.agent_source_kind == "team" and binding.trial_candidate_id is None
         else None
     )
     row = await _row(db, "SELECT composition_json FROM chat_reference_resolutions WHERE turn_id=? AND resolution_seq=1", (receiver.turn_id,))
@@ -231,6 +233,10 @@ async def require_current_extension_policy(
     if not db.in_transaction or receiver.agent_source_kind != "team":
         if not db.in_transaction or not isinstance(extension.policy, TaskMethodReadPolicy):
             _fail()
+    if receiver.agent_source_kind == "team" and receiver.release_id is None and not isinstance(extension.policy, TaskMethodReadPolicy):
+        # Only an Owner draft trial has a release-less Team receiver. The live release's policy
+        # below must never decide what its draft may read (trial-tech-design §4.5).
+        raise SkillReadReceiverError("agent_trial_extension_skills_unavailable")
     validate_extension_closure(receiver, closure, extension)
     if isinstance(extension.policy, TaskMethodReadPolicy):
         from bowhead_core.agent_execution_binding import AgentExecutionBindingStore

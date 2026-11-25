@@ -54,6 +54,7 @@ COPY THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
 # escape local gates and surface only during the build.
 COPY contracts/ /contracts/
 COPY config/ /config/
+COPY packages/bowhead_core/tests/fixtures/break-even-cases.json /bowhead_core/tests/fixtures/break-even-cases.json
 # Build each locale separately; the gateway selects the matching static export.
 # en-US (the default language) runs the full lint and type checks; the other locales
 # set BOWHEAD_SKIP_BUILD_CHECKS=1 because those results do not depend on the locale.

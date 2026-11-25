@@ -418,6 +418,12 @@ class V2VerificationPlanBody(BaseModel):
     )
 
 
+class V2DraftEvidenceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_draft: V2ProviderDraft
+
+
 class V2CreateBatchBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -908,6 +914,95 @@ async def create_verification_plan(
             "tool_will_not_execute",
         ],
     }
+
+
+@router.post(
+    "/providers/draft-evidence",
+    dependencies=[
+        Depends(require_model_discovery_v2),
+        Depends(require_not_readonly),
+    ],
+)
+async def project_draft_evidence(
+    body: V2DraftEvidenceBody,
+    user: User = Depends(_REQUIRE_TEAM_ADMIN),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Project stored verification results onto an unsaved connection draft.
+
+    Each declared capability is matched by the configuration signature the draft would have, so an edit
+    shows exactly which results stop applying. It sends no Provider request and reserves no identity; a
+    saved legacy connection may get its identity recorded, as precheck does. A draft that cannot be
+    materialized yet (missing key, invalid field) answers ``draft_invalid`` instead of failing, so the
+    editor keeps the states it shows.
+    """
+
+    draft = body.provider_draft
+    declared = [
+        (model.id.strip(), capability)
+        for model in draft.models
+        for capability in dict.fromkeys(model.capabilities)
+        if capability in _CAPABILITIES and model.id.strip()
+    ]
+    provider_id = await _resolve_identity(user=user, store=store, draft=draft, reserve_new=False)
+    if provider_id is None:
+        return {
+            "provider_id": None,
+            "draft_invalid": False,
+            "items": [
+                {"model_id": model_id, "capability": capability, "fact_state": "unknown", "observed_at": None, "safe_code": None}
+                for model_id, capability in declared
+            ],
+        }
+    try:
+        providers = await _materialize_provider_drafts(user=user, store=store, drafts=[draft])
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise
+        return {"provider_id": provider_id, "draft_invalid": True, "items": []}
+    provider_context = providers[provider_id]
+    registry = CompatibleProbeRegistry()
+    verification_store = _verification_store(store)
+    now = datetime.now(UTC)
+    items: list[dict[str, Any]] = []
+    try:
+        for model_id, capability in declared:
+            plan = registry.plan(
+                provider_context["config"],
+                provider_id=provider_id,
+                provider_display_name=provider_context["display_name"],
+                model_id=model_id,
+                capability=capability,  # type: ignore[arg-type]
+            )
+            signature = compute_config_signature(
+                plan.transport,
+                provider_id=provider_id,
+                model_id=model_id,
+                capability=capability,  # type: ignore[arg-type]
+                testability_contract_version=plan.testability_contract_version,
+                probe_contract_version=plan.probe_contract_version,
+                probe_execution_policy_version=plan.probe_execution_policy_version,
+            )
+            projection = await verification_store.project_evidence(
+                team_id=user.team_id,
+                provider_id=provider_id,
+                model_id=model_id,
+                capability=capability,  # type: ignore[arg-type]
+                current_signature=signature,
+                now=now,
+            )
+            items.append(
+                {
+                    "model_id": model_id,
+                    "capability": capability,
+                    "fact_state": projection.fact_state,
+                    "observed_at": (projection.observed_at.isoformat().replace("+00:00", "Z") if projection.observed_at else None),
+                    "safe_code": projection.safe_code,
+                }
+            )
+    except TeamLlmSignatureKeyError as exc:
+        raise _error(503, "signature_key_unavailable") from exc
+    return {"provider_id": provider_id, "draft_invalid": False, "items": items}
 
 
 @router.post(

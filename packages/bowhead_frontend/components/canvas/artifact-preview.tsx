@@ -16,7 +16,6 @@ import { formatByteSize } from "@/lib/format";
 import { fileExtensionLabel } from "@/lib/file-type-icon";
 import { itemsOnOneLine, noOverflow, writeFitTokens, type FitStep } from "@/lib/toolbar-fit";
 import { useToolbarFit } from "@/lib/use-toolbar-fit";
-import { presentationSlideSelection } from "@/lib/presentation-selection";
 import type { AttachmentRef } from "@/lib/types";
 import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors";
 import type { ResultsViewerMode } from "@/lib/results-workspace-route";
@@ -77,6 +76,13 @@ export interface PresentationEditHost {
   /** Add a reference to one deck element to the Composer (design §6.9). */
   /** `quiet` when the control that asked confirms on its own (「已引用」), so no toast covers the header. */
   onReferenceElement?: (reference: import("@/lib/types").AttachmentRef, options?: { quiet?: boolean }) => void;
+  /**
+   * 「引用这一页」: add a page of `file` to its page set in the Composer, or remove it (design §13.6).
+   * `stay` when the full view or the editor asked: they stay open instead of showing the Composer.
+   */
+  onToggleSlide?: (file: import("@/lib/types").AttachmentRef, page: number, options?: { stay?: boolean }) => import("@/lib/presentation-selection").SlideToggleOutcome;
+  /** The pages of each deck file the Composer references, by file ID. */
+  referencedSlides?: Readonly<Record<string, ReadonlyArray<number>>>;
 }
 
 export function ArtifactPreview({
@@ -338,21 +344,18 @@ export function ArtifactPreview({
     }
     editHost?.onOpenVersion(exit.artifactId, exit.then);
   };
-  // 「引用这一页」 under each page of a deck the person can reference in chat (design §13.2).
-  const referencePage = pptxPreview && editHost?.onReferenceElement && capabilities?.has("reference_in_chat") && !editingPresentation
-    ? (page: number) => {
-        const selection = presentationSlideSelection(fileId, page);
-        if (!selection || !editHost.onReferenceElement) return;
-        const reference: AttachmentRef = {
-          fileId, filename, mime: mime ?? "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          size: sizeBytes ?? 0, referenceKind: "result", presentationSelection: selection,
-        };
-        // In the full view the page's button leaves with it, so the toast confirms there.
-        const quiet = !expanded;
-        if (expanded) setExpanded(false);
-        editHost.onReferenceElement(reference, { quiet });
-      }
+  // 「引用这一页」 under each page of a deck the person can reference in chat: a toggle whose pages
+  // gather in one Composer chip (design §13.2, §13.6). The full view stays open, so several pages
+  // can be picked there.
+  const deckFile: AttachmentRef = {
+    fileId, filename, mime: mime ?? "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    size: sizeBytes ?? 0, referenceKind: "result",
+  };
+  const toggleSlide = editHost?.onToggleSlide && capabilities?.has("reference_in_chat") ? editHost.onToggleSlide : undefined;
+  const referencePage = pptxPreview && toggleSlide && !editingPresentation
+    ? (page: number) => toggleSlide(deckFile, page, { stay: expanded })
     : undefined;
+  const referencedPages = editHost?.referencedSlides?.[fileId];
   useEffect(() => {
     if (!editingPresentation) return;
     markPresentationEditing(fileId, true);
@@ -389,6 +392,8 @@ export function ArtifactPreview({
             onReferenceElement={editHost.onReferenceElement && capabilities?.has("reference_in_chat")
               ? editHost.onReferenceElement
               : undefined}
+            onToggleSlide={toggleSlide ? (file, page) => toggleSlide(file, page, { stay: true }) : undefined}
+            referencedSlides={editHost.referencedSlides}
             onExit={finishEditing}
           />
         ) : <>
@@ -404,7 +409,7 @@ export function ArtifactPreview({
           onClose={inPlaceFullView && expanded ? undefined : onClose}
           showTitle={showHeaderTitle}
         />
-        {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} expanded={inPlaceFullView && expanded} /> : null}
+        {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} referencedPages={referencedPages} expanded={inPlaceFullView && expanded} /> : null}
         </>}
       </InPlaceFullView>
       {expanded && !inPlaceFullView ? (
@@ -424,7 +429,7 @@ export function ArtifactPreview({
               modalClose
             />
             <div className="artifact-viewer-modal-body">
-              <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} expanded />
+              <ArtifactPreviewBody {...bodyProps} onReferencePage={referencePage} referencedPages={referencedPages} expanded />
             </div>
           </div>
           <button
@@ -624,6 +629,7 @@ function ArtifactPreviewBody({
   onOpenFailed,
   documentPreviewCacheRef,
   onReferencePage,
+  referencedPages,
 }: {
   profile: ArtifactViewerProfile;
   /** Syntax grammar derived from the file name/MIME for text previews. */
@@ -667,7 +673,8 @@ function ArtifactPreviewBody({
   onTextViewChange: React.Dispatch<React.SetStateAction<TextViewState>>;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
   documentPreviewCacheRef: React.MutableRefObject<DocumentPreviewCache>;
-  onReferencePage?: (page: number) => void;
+  onReferencePage?: (page: number) => import("@/lib/presentation-selection").SlideToggleOutcome;
+  referencedPages?: ReadonlyArray<number>;
 }) {
   const t = useTranslations("artifact_viewer");
   if (loading && !error) return <div className="artifact-viewer-note loading">{t("loading")}</div>;
@@ -723,6 +730,7 @@ function ArtifactPreviewBody({
           cacheRef={documentPreviewCacheRef}
           thumbnails={profile === "pptx" && !expanded}
           onReferencePage={onReferencePage}
+          referencedPages={referencedPages}
         />
       </div>
     );

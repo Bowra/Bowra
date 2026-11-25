@@ -105,6 +105,22 @@ CHAT_TURN_FAILURE_CODES = frozenset(
     }
 )
 
+#: Features an Owner's trial of an Agent's unreleased draft does not support in its first version,
+#: by the refusal code each one returns (docs/sprints/agent-page-redesign-2026-11-24/trial-tech-design.md
+#: §4.5). Every one would bind or compare against the live release. Each code names its feature so the
+#: chat can say which one is unavailable; it is never folded into a generic failure.
+AGENT_TRIAL_BLOCKED_FEATURE_CODES: Mapping[str, str] = types.MappingProxyType(
+    {
+        "plan_mode": "agent_trial_plan_unavailable",
+        "mcp_references": "agent_trial_mcp_references_unavailable",
+        "extension_skills": "agent_trial_extension_skills_unavailable",
+        "steer_follow_ups": "agent_trial_steer_unavailable",
+        "same_agent_helper": "agent_trial_helper_unavailable",
+        "template_document_tools": "agent_trial_document_tools_unavailable",
+    }
+)
+AGENT_TRIAL_REFUSAL_CODES = frozenset(AGENT_TRIAL_BLOCKED_FEATURE_CODES.values())
+
 CHAT_PEER_FAILURE_CODES = frozenset(
     {
         "peer_configuration_error",

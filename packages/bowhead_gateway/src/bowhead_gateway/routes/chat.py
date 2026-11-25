@@ -35,7 +35,7 @@ from bowhead_core.i18n_flag import (
 )
 from bowhead_core.language_context import resolve_turn_language
 from bowhead_core.model_clock import viewer_clock_scope
-from bowhead_core.presentation_selection import PresentationSelection
+from bowhead_core.presentation_selection import AnyPresentationSelection
 from bowhead_core.rate_card import credits_for_tokens
 from bowhead_core.subagent_authoring_rollout import resolve_subagent_authoring_capabilities
 from bowhead_core.team_language_policy import (
@@ -486,7 +486,7 @@ class ChatAttachmentRef(BaseModel):
         alias="referenceKind",
     )
     selected_context: ChartSelectedContext | None = Field(default=None, alias="selectedContext")
-    presentation_selection: PresentationSelection | None = Field(default=None, alias="presentationSelection")
+    presentation_selection: AnyPresentationSelection | None = Field(default=None, alias="presentationSelection")
     bundle_artifact_ids: list[str] | None = Field(
         default=None,
         alias="bundleArtifactIds",

@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from bowhead_core.artifact_store import PRESENTATION_USER_EDIT_PRODUCER, Artifact, ArtifactStore, VersionTargetRefused
 from bowhead_core.documents.authoring_protocol import MAX_FILE
-from bowhead_core.presentation_edit import MAX_EDITS, edited_filename, feature_enabled, is_presentation
+from bowhead_core.presentation_edit import MAX_EDITS, edited_filename, is_presentation
 from bowhead_core.results_read_model import artifact_kind
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,11 +58,6 @@ def _diagnostic(event: str, **fields: Any) -> str:
     reference = f"pe_{secrets.token_hex(5)}"
     logger.warning("presentation_edit.%s diagnostic=%s %s", event, reference, " ".join(f"{key}={value}" for key, value in fields.items()))
     return reference
-
-
-def require_feature() -> None:
-    if not feature_enabled():
-        raise edit_error(status.HTTP_404_NOT_FOUND, "presentation_edit_unavailable")
 
 
 async def latest_version_facts(app: Any, store: ArtifactStore, latest_id: str | None) -> dict[str, Any] | None:

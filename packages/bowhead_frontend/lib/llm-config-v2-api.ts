@@ -174,6 +174,31 @@ export function precheckV2Provider(
   });
 }
 
+export interface DraftEvidenceItem {
+  model_id: string;
+  capability: ModelCapability;
+  /** `aged` is no longer produced; older servers may still send it. */
+  fact_state: "unknown" | "verified" | "aged" | "failed" | "not_testable" | "stale";
+  observed_at: string | null;
+  safe_code: string | null;
+}
+
+export interface DraftEvidenceResult {
+  provider_id: string | null;
+  /** The draft cannot be built yet (missing key, invalid field); keep the states already shown. */
+  draft_invalid: boolean;
+  items: DraftEvidenceItem[];
+}
+
+/** Stored verification results projected onto an unsaved connection draft; no provider request, no writes. */
+export function fetchDraftEvidence(draft: V2ProviderDraft): Promise<DraftEvidenceResult> {
+  return apiJson("/api/v1/admin/llm-config/providers/draft-evidence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider_draft: draft }),
+  });
+}
+
 export function discoverV2Models(
   providerId: string,
   draft: V2ProviderDraft,

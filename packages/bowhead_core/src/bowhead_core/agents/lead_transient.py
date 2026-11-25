@@ -132,11 +132,8 @@ def init_lead_transient(
     Idempotent: safe to call multiple times (always overwrites). But the
     convention is one call per turn, at peer_ctx construction.
     """
-    from bowhead_core.answer_cards import enabled as answer_cards_enabled
-
     ctx.answer_card_entry = (
-        answer_cards_enabled()
-        and getattr(request, "execution_generation", 1) == 1
+        getattr(request, "execution_generation", 1) == 1
         and getattr(request, "planning_mode", None) != "planning"
         and getattr(getattr(request, "agent_binding", None), "binding_source", "lead") == "lead"
         and not any(

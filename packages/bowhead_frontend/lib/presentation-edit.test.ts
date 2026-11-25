@@ -194,3 +194,17 @@ describe("requests", () => {
     expect(failed.diagnostics).toMatchObject({ status: 503, code: "parse_unavailable", diagnosticCode: "pe_0a1b2c3d4e" });
   });
 });
+
+describe("change order", () => {
+  it("keeps a change in its place when it is edited again, so its number does not move", () => {
+    const a: PendingEdit = { kind: "text", key: "256:2", slideId: 256, paragraph: 0, expect: "甲", text: "甲1" };
+    const b: PendingEdit = { kind: "cell", key: "256:3", slideId: 256, row: 1, col: 1, expect: "1", text: "2" };
+    const edits = upsertPendingEdit(upsertPendingEdit([], a), b);
+    const again = upsertPendingEdit(edits, { ...a, text: "甲2" });
+    expect(again.map((edit) => edit.key)).toEqual(["256:2", "256:3"]);
+    expect(again[0]).toMatchObject({ text: "甲2" });
+    // Back to the original text, the change goes.
+    expect(upsertPendingEdit(again, { ...a, text: "甲" }).map((edit) => edit.key)).toEqual(["256:3"]);
+  });
+});
+

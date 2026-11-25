@@ -14,8 +14,10 @@ import hashlib
 import io
 import re
 import zipfile
+from array import array
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 SINGLE_PAGE_WIDTH = 1280
@@ -236,21 +238,89 @@ def render_image_view(data: bytes) -> dict[str, Any]:
 
 
 SCREEN_HEIGHT = 800
+# A screen ends in the middle of the tallest blank band between these heights below its top. Cut every 800 px, 60 of
+# 110 cuts in 25 agent pages ran through content, and models fixed charts that only looked clipped at a screen edge
+# (docs/sprints/chat-dogfood-findings-2026-11-23/spike.md §6).
+MIN_SCREEN_HEIGHT = 400
+MIN_BLANK_BAND = 8
+# A blank row has at most this many colour changes across its width, such as the edges of a card.
+MAX_BLANK_ROW_CHANGES = 6
+_COLOUR_STEP = 48
+# The sheet's background colour; it fills a screen below its cut.
+SCREEN_FILL = (200, 204, 210)
 
 
-def _screens(image: Any) -> list[Any]:
-    """A page capture cut into 1280x800 screens; the last one padded with white."""
+@dataclass(frozen=True)
+class _Screen:
+    image: Any  # the screen, filled to SCREEN_HEIGHT
+    part: Any  # the part of the page it shows
+    through_content: bool  # its bottom cut runs through content: no blank band was found
+
+
+def _blank_rows(image: Any) -> list[bool]:
+    """Per row: at most ``MAX_BLANK_ROW_CHANGES`` neighbouring pixels differ by more than ``_COLOUR_STEP`` (summed RGB)."""
+    from PIL import Image, ImageChops
+
+    width, height = image.size
+    if width < 2:
+        return [True] * height
+    difference = ImageChops.difference(image.crop((1, 0, width, height)), image.crop((0, 0, width - 1, height)))
+    red, green, blue = difference.split()
+    changes = ImageChops.add(ImageChops.add(red, green), blue).point(lambda value: 255 if value > _COLOUR_STEP else 0)
+    # A one-pixel-wide box resize gives each row's mean; float mode keeps single changes countable.
+    means = array("f", changes.convert("F").resize((1, height), Image.Resampling.BOX).tobytes())
+    return [mean * (width - 1) / 255 <= MAX_BLANK_ROW_CHANGES + 0.5 for mean in means]
+
+
+def _screen_cuts(image: Any) -> list[tuple[int, int, bool]]:
+    """(top, bottom, through content) of each screen of a page capture."""
+    blank = _blank_rows(image)
+    height = image.height
+    cuts: list[tuple[int, int, bool]] = []
+    top = 0
+    while top < height:
+        if height - top <= SCREEN_HEIGHT:
+            cuts.append((top, height, False))
+            break
+        best, best_length, start = None, 0, None
+        for row in range(top + MIN_SCREEN_HEIGHT, top + SCREEN_HEIGHT + 1):
+            if not blank[row]:
+                start = None
+                continue
+            start = row if start is None else start
+            if row - start + 1 >= best_length:
+                best, best_length = (start + row) // 2, row - start + 1
+        if best is not None and best_length >= MIN_BLANK_BAND:
+            cuts.append((top, best, False))
+            top = best
+        else:
+            cuts.append((top, top + SCREEN_HEIGHT, True))
+            top += SCREEN_HEIGHT
+    return cuts
+
+
+def _screens(image: Any) -> list[_Screen]:
+    """A page capture cut at blank bands into screens of at most 1280x800, each filled to 800 px with ``SCREEN_FILL``."""
     from PIL import Image
 
     screens = []
-    for top in range(0, image.height, SCREEN_HEIGHT):
-        screen = image.crop((0, top, image.width, min(top + SCREEN_HEIGHT, image.height)))
-        if screen.height < SCREEN_HEIGHT:
-            padded = Image.new("RGB", (image.width, SCREEN_HEIGHT), (255, 255, 255))
-            padded.paste(screen, (0, 0))
-            screen = padded
-        screens.append(screen)
+    for top, bottom, through_content in _screen_cuts(image):
+        part = image.crop((0, top, image.width, bottom))
+        screen = part
+        if part.height < SCREEN_HEIGHT:
+            screen = Image.new("RGB", (image.width, SCREEN_HEIGHT), SCREEN_FILL)
+            screen.paste(part, (0, 0))
+        screens.append(_Screen(screen, part, through_content))
     return screens
+
+
+def _cut_through(indices: Iterable[int], screens: Sequence[_Screen]) -> str:
+    """``; screen 6 ends inside content that continues on screen 7`` for shown screens cut through content."""
+    return "".join(
+        f"; screen {index + 1} ends inside content that continues on screen {index + 2}"
+        for index in indices
+        if screens[index].through_content and index + 1 < len(screens)
+    )
 
 
 def render_screens_view(
@@ -258,8 +328,8 @@ def render_screens_view(
 ) -> dict[str, Any]:
     """An HTML page capture (slice B) as screens; an SVG capture as one image.
 
-    Default: the first screen at full width and, for a longer page, every screen in a
-    numbered sheet. ``detail`` ``full`` shows up to ``MAX_FULL_PAGES`` chosen screens at
+    Screens are cut at blank bands of the page (``_screen_cuts``), each filled to 1280x800. Default:
+    the first screen at full width and, for a longer page, every screen in a numbered sheet. ``detail`` ``full`` shows up to ``MAX_FULL_PAGES`` chosen screens at
     full width. A capture whose screens are all one colour while the page has text is
     ``blank_render``.
     """
@@ -284,37 +354,37 @@ def render_screens_view(
         }
     screens = _screens(image)
     total = len(screens)
-    if text_present and all(is_uniform(screen) for screen in screens):
+    if text_present and all(is_uniform(screen.part) for screen in screens):
         return {"status": "not_completed", "reason": "blank_render", "pages": total}
     wanted = sorted({index for index in (pages if pages is not None else range(total)) if 0 <= index < total})
     if not wanted:
         return {"status": "not_completed", "reason": "render_failed", "pages": total}
-    width, height = screens[0].width, SCREEN_HEIGHT
+    width, height = screens[0].image.width, SCREEN_HEIGHT
     if detail == "full" or len(wanted) == 1:
         shown, rest = wanted[:MAX_FULL_PAGES], wanted[MAX_FULL_PAGES:]
         noun = "screen" if len(shown) == 1 else "screens"
         return {
             "status": "shown",
             "pages": total,
-            "shown": f"{noun} {page_ranges([i + 1 for i in shown])}, each at {width}x{height} px",
+            "shown": f"{noun} {page_ranges([i + 1 for i in shown])}, each at {width}x{height} px{_cut_through(shown, screens)}",
             "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
             "page_px": [width, height],
-            "images": [{**encode(screens[index]), "label": f"Screen {index + 1}", "page": index + 1} for index in shown],
+            "images": [{**encode(screens[index].image), "label": f"Screen {index + 1}", "page": index + 1} for index in shown],
         }
     in_sheet, rest = wanted[:MAX_PAGES_PER_SHEET], wanted[MAX_PAGES_PER_SHEET:]
-    sheet = tile([screens[index] for index in in_sheet], [f"Screen {index + 1}" for index in in_sheet])
+    sheet = tile([screens[index].image for index in in_sheet], [f"Screen {index + 1}" for index in in_sheet])
     tile_height = round(height * SHEET_TILE_WIDTH / width)
     return {
         "status": "shown",
         "pages": total,
         "shown": (
             f"screen {wanted[0] + 1} at {width}x{height} px, then screens {page_ranges([i + 1 for i in in_sheet])} in 1 sheet, "
-            f"each screen at {SHEET_TILE_WIDTH}x{tile_height} px"
+            f"each screen at {SHEET_TILE_WIDTH}x{tile_height} px{_cut_through(in_sheet, screens)}"
         ),
         "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
         "page_px": [SHEET_TILE_WIDTH, tile_height],
         "images": [
-            {**encode(screens[wanted[0]]), "label": f"Screen {wanted[0] + 1}", "page": wanted[0] + 1},
+            {**encode(screens[wanted[0]].image), "label": f"Screen {wanted[0] + 1}", "page": wanted[0] + 1},
             {**encode(sheet), "label": f"screens {page_ranges([i + 1 for i in in_sheet])}", "pages": [i + 1 for i in in_sheet]},
         ],
     }

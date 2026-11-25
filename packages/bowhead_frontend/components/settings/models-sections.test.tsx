@@ -535,7 +535,9 @@ describe("scoped model settings", () => {
     });
     fireEvent.click(within(view.container.querySelector(".connect") as HTMLElement).getByRole("button", { name: "保存" }));
 
-    expect(await screen.findByRole("heading", { name: "应用模型配置" })).toBeTruthy();
+    // A connection save opens the short confirmation, which lists the blocking issue.
+    expect(await screen.findByRole("heading", { name: "保存 corp" })).toBeTruthy();
+    expect(document.querySelector(".review-panel .review-issues")).toBeTruthy();
     expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
     expect(navigation.push).not.toHaveBeenCalled();
   });
@@ -555,8 +557,8 @@ describe("scoped model settings", () => {
     });
     fireEvent.click(within(view.container.querySelector(".connect") as HTMLElement).getByRole("button", { name: "保存" }));
 
-    await screen.findByRole("heading", { name: "应用模型配置" });
-    fireEvent.click(screen.getByRole("button", { name: "一次应用" }));
+    const confirmation = (await screen.findByRole("heading", { name: "保存 corp" })).closest(".review-panel") as HTMLElement;
+    fireEvent.click(within(confirmation).getByRole("button", { name: "保存" }));
     await waitFor(() => expect(configApi.saveAdminLlmConfig).toHaveBeenCalledOnce());
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/team/settings/models/"));
   });
@@ -659,7 +661,7 @@ describe("scoped model settings", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "检查并应用" }));
     await screen.findByText("没有阻塞问题，可以应用。");
-    fireEvent.click(screen.getByRole("button", { name: "一次应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
     await waitFor(() =>
       expect(configApi.saveAdminLlmConfig).toHaveBeenCalledOnce(),
     );
@@ -703,7 +705,7 @@ describe("scoped model settings", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "检查并应用" }));
     await screen.findByText("没有阻塞问题，可以应用。");
-    const apply = screen.getByRole("button", { name: "一次应用" });
+    const apply = screen.getByRole("button", { name: "应用" });
     expect((apply as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(
       screen.getByRole("checkbox", { name: "我确认应用后开始重建知识库索引" }),
@@ -728,7 +730,7 @@ describe("Configuration Agent model review", () => {
     expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
     fireEvent.click(review);
     await screen.findByText("没有阻塞问题，可以应用。");
-    fireEvent.click(screen.getByRole("button", { name: "一次应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
     await waitFor(() => expect(configApi.saveAdminLlmConfig).toHaveBeenCalledOnce());
     const args = vi.mocked(configApi.saveAdminLlmConfig).mock.calls[0];
     expect(args[0].tiers).toEqual(candidate.tiers);
@@ -836,7 +838,8 @@ describe("Bowra import", () => {
     window.history.replaceState({}, "", "/team/settings/models/?bowra_import=opaque-import");
     vi.mocked(bowraApi.claimBowraImport).mockResolvedValue({ base_url: "https://api.bowra.test/v1", api_key: "private-bowra-key", models: ["first"] });
     const view = show("overview");
-    await screen.findByRole("heading", { name: messages.settings.models.v2.verification_confirm_title });
+    // The prepared plan waits in the save bar; Save and Cancel stay reachable.
+    await screen.findByRole("button", { name: messages.settings.models.v2.status_review_plan });
     fireEvent.click(within(view.container.querySelector(".ui-savebar") as HTMLElement).getByRole("button", { name: messages.settings.models.common.cancel }));
     fireEvent.click(await screen.findByRole("button", { name: messages.settings.models.v4.leave_action }));
     await screen.findByRole("tab", { name: messages.settings.models.sections.tab_connections });
@@ -851,7 +854,7 @@ describe("Bowra import", () => {
     vi.mocked(bowraApi.claimBowraImport).mockResolvedValue({ base_url: "https://api.bowra.test/custom/v1", api_key: "private-bowra-key", models: ["new-model"] });
     show("overview");
     await screen.findByText(messages.settings.models.bowra.imported);
-    await screen.findByText(messages.settings.models.v2.verification_confirm_title);
+    await screen.findByRole("button", { name: messages.settings.models.v2.status_review_plan });
     expect(document.querySelector('select[name="primary_model"]')).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: messages.settings.models.common.save }));
     await waitFor(() => expect(configApi.validateAdminLlmConfig).toHaveBeenCalledWith(expect.objectContaining({

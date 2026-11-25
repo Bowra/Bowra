@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mockAuthedApp } from "./_app-mocks";
 import { routeTerminalChatExecution } from "./_composer-recovery-fixtures";
 
-test("an editable answer restores the saved assumptions in the current and an older turn", async ({ page }) => {
+test("an editable answer restores the saved assumptions in the current and an older turn", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAuthedApp(page);
   await routeTerminalChatExecution(page, () => "legacy_v0");
@@ -45,6 +45,14 @@ test("an editable answer restores the saved assumptions in the current and an ol
   const price = region.getByRole("textbox", { name: "销售单价" });
   const status = region.getByRole("status");
   await expect(status).toContainText("300");
+  const slider = region.getByRole("slider", { name: "调整销售单价" });
+  await slider.focus();
+  await slider.press("ArrowLeft");
+  await expect(price).toHaveValue("99");
+  await expect(status).toContainText("308");
+  await expect(status).toContainText("+8");
+  await region.getByRole("button", { name: "还原数值" }).click();
+  await expect(price).toHaveValue("100");
   await price.focus();
   await price.press("ControlOrMeta+a");
   await price.press("Backspace");
@@ -52,6 +60,13 @@ test("an editable answer restores the saved assumptions in the current and an ol
   await price.pressSequentially("90");
   await expect(status).toContainText("400");
   expect(await region.evaluate(el => el.getBoundingClientRect().right <= window.innerWidth)).toBe(true);
+  await expect(status).toContainText("+100");
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(region).toBeVisible();
+    expect(await region.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await testInfo.attach(`calculator-${width}`, { body: await region.screenshot(), contentType: "image/png" });
+  }
   await expect(page).toHaveURL(new RegExp(`session=${sessionId}`));
   await page.reload();
   await expect(price).toHaveValue("100");

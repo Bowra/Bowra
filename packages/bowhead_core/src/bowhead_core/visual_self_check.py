@@ -35,7 +35,6 @@ VIEW_FILE_TOOL = "view_file"
 MAX_IMAGES_PER_REQUEST = 4
 # A request carrying a view_file render holds up to this many images, earlier pages of the same file version included.
 MAX_IMAGES_WITH_EARLIER_PAGES = 8
-MAX_SHOWN_PER_RUN = 20
 # Renders whose images reached a model, kept so a later view_file of the same file version can bring their pages back.
 _MAX_SEEN_RENDERS = 8
 RENDER_WAIT_SECONDS = 30
@@ -125,7 +124,6 @@ class VisualRun:
 
     enabled: bool
     pending: list[PendingRender] = field(default_factory=list)
-    shown: int = 0
     # Canonical file identity by lineage root and by file name, so versions and same-name saves agree.
     identities: dict[str, str] = field(default_factory=dict)
     slide_hashes: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -283,17 +281,14 @@ async def _render(
     if data is None:
         return {"status": "not_completed", "reason": "too_large"}, None
     rendered["sha256"] = hashlib.sha256(data).hexdigest()
-    turn_full = run.shown >= MAX_SHOWN_PER_RUN
     if kind == "pptx":
         pdf = rendered.get("pdf")
         # One worker process: hashes, snapshot, changed slides and their view.
-        control = {"op": "pptx_render", "previous_hashes": run.slide_hashes.get(identity), "render": not turn_full and pdf is not None}
+        control = {"op": "pptx_render", "previous_hashes": run.slide_hashes.get(identity), "render": pdf is not None}
         inspected = await _worker(control, data, {"pdf": pdf} if pdf is not None else None)
         if inspected is None:
             return {"status": "not_completed", "reason": "render_failed"}, None
         snapshot = inspected["snapshot"]
-        if turn_full:
-            return {"status": "skipped", "reason": "turn_limit"}, snapshot
         if inspected["changed_pages"] == []:
             return {"status": "skipped", "reason": "unchanged"}, snapshot
         if pdf is None:
@@ -306,8 +301,6 @@ async def _render(
             run.keep_pdf(artifact.id, pdf)
         return view, snapshot
     digest = rendered["sha256"]
-    if turn_full:
-        return {"status": "skipped", "reason": "turn_limit"}, None
     if run.digests.get(identity) == digest:
         return {"status": "skipped", "reason": "unchanged"}, None
     if kind in {"html", "svg"}:
@@ -364,11 +357,6 @@ def _check_presentation_fix(
         reason = view.get("reason")
         if reason == "unchanged":
             output["presentation_check"] = {"status": "no_content_change"}
-        elif reason == "turn_limit":
-            output["presentation_check"] = {
-                "status": "not_checked",
-                "reason": f"this run already showed {MAX_SHOWN_PER_RUN} rendered views, so this save was neither shown nor compared",
-            }
         else:
             output["presentation_check"] = {"status": "not_checked", "reason": "the saved content could not be read"}
         return None
@@ -467,7 +455,6 @@ async def attach_visual_view(
     output["visual_view"] = _summary(kind, view)
     images = view.get("images") or []
     if view["status"] == "shown":
-        run.shown += 1
         digest = render_inputs.get("sha256")
         run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view, version=(identity, digest) if digest else None))
     kept = None
@@ -799,7 +786,8 @@ _VIEW_FILE_DESCRIPTION = (
     "Look at a PPTX, PNG, JPEG, WebP, PDF, HTML or SVG file as the user will see it: a file saved in this Turn, a delivered "
     "file or an attached input such as a template. The rendered view comes with your next request; this result says what "
     "was rendered. detail sheet (default) shows up to 12 pages per sheet at 400 px each; detail full shows up to 4 pages at "
-    "1280 px, for checking body text and numbers. An HTML page is shown as 1280x800 screens of its preview. Saved files are "
+    "1280 px, for checking body text and numbers. An HTML page is shown as screens of its preview, 1280 px wide and up to "
+    "800 px tall, each cut where the page is blank; grey fills a screen below its cut. Saved files are "
     "rendered automatically after each save; use this for pages that were not shown, fine detail, or files you did not save."
 )
 _MAX_REQUESTED_PAGES = 24
@@ -849,7 +837,6 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
         _LOG.warning("visual_view.view_file_failed kind=%s error_type=%s", kind, type(exc).__name__)
         view = {"status": "not_completed", "reason": "render_failed"}
     if view["status"] == "shown":
-        run.shown += 1
         version = (_identity(run, artifact), digest) if digest else None
         run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view, version=version, requested=True))
     images = view.get("images") or []
@@ -869,8 +856,6 @@ async def _render_on_request(
     run: VisualRun, ctx: Any, artifact: Any, kind: str, pages: list[int] | None, detail: str, call_id: str
 ) -> tuple[dict[str, Any], str | None]:
     """(view, content digest of the file viewed)."""
-    if run.shown >= MAX_SHOWN_PER_RUN:
-        return {"status": "skipped", "reason": "turn_limit"}, None
     data = await _read(ctx, artifact)
     if data is None:
         return {"status": "not_completed", "reason": "too_large"}, None

@@ -209,10 +209,11 @@
   background: color-mix(in srgb, var(--mark-select) 8%, transparent);
 }
 .updating[data-ready] { background: transparent; border-style: dashed; }
+/* Above the box's corner, where the unsaved number was, so it never covers the first character. */
 .updatingBadge {
   position: absolute;
-  top: -10px;
-  left: -10px;
+  top: -22px;
+  left: -2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -374,3 +375,16 @@
 .savedNotice { border-radius: var(--r-3); }
 .savedNotice:focus { outline: none; }
 .savedNotice:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+
+/* After a save the footer keeps its height with the saved line, so the slide does not move. */
+.savedFooter { display: flex; align-items: center; min-height: 52px; margin: 0; padding: 0 16px; color: var(--c-ink-2); font-size: 0.8125rem; }
+
+/* An undo or redo flashes the element it changed. */
+@media (prefers-reduced-motion: no-preference) {
+  .hit[data-flash] { animation: markFlash 1.2s ease-out; }
+}
+.hit[data-flash] { box-shadow: 0 0 0 1px var(--mark-halo), 0 0 0 4px color-mix(in srgb, var(--mark-select) 45%, transparent); }
+@keyframes markFlash {
+  0%, 40% { box-shadow: 0 0 0 1px var(--mark-halo), 0 0 0 6px color-mix(in srgb, var(--mark-select) 55%, transparent); }
+  100% { box-shadow: 0 0 0 1px var(--mark-halo), 0 0 0 0 transparent; }
+}

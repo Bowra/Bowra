@@ -62,7 +62,8 @@ for (const [count, width] of [[1, 1440], [2, 768], [2, 390]]) {
     const returnUrl = new URL("/connect/bowra/callback/?state=one-use&code=temporary-code", page.url()).href;
     await page.context().route("https://auth.bowra.test/connect/authorize", (route) => route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(returnUrl)})</script>` }));
     await page.getByRole("button", { name: "Use Bowra service" }).click();
-    await expect(page.getByRole("heading", { name: "Confirm verification plan" })).toBeVisible();
+    // The prepared plan waits in the save bar so Save and Cancel stay reachable.
+    await expect(page.getByRole("button", { name: "Review and start" })).toBeVisible();
     expect(startHeader).toBe(new URL(page.url()).origin);
     await expect(page).toHaveURL(/\/team\/settings\/models\/$/);
     await expect(page.locator('select[name="primary_model"]')).toHaveCount(0);
@@ -75,8 +76,10 @@ for (const [count, width] of [[1, 1440], [2, 768], [2, 390]]) {
     expect(box).not.toBeNull();
     expect(box!.y + box!.height).toBeLessThanOrEqual(900);
     await page.screenshot({ path: testInfo.outputPath(`editor-${width}.png`), fullPage: true });
+    await page.getByRole("button", { name: "Review and start" }).click();
+    await expect(page.getByRole("heading", { name: "Confirm verification plan" })).toBeVisible();
     await page.getByRole("button", { name: "Confirm and start", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Model capability check finished" })).toBeVisible();
+    await expect(page.locator(".ui-savebar")).toContainText("Verification finished:");
     expect(providerCalls).toBe(items.length);
     await expect(save).toBeEnabled();
     await save.click();
@@ -87,7 +90,7 @@ for (const [count, width] of [[1, 1440], [2, 768], [2, 390]]) {
     });
     await expect(page.getByRole("button", { name: "Edit connection Bowra" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Verify", exact: true })).toBeVisible();
-    await expect(page.getByText("Chat · Passed", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^Chat · Verified/).first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => Object.values(localStorage).join("") + Object.values(sessionStorage).join(""))).not.toContain(imported.api_key);
     await page.screenshot({ path: testInfo.outputPath(`connections-${width}.png`), fullPage: true });

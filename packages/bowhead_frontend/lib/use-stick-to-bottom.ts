@@ -56,6 +56,19 @@
  *   focus moving to an earlier element, find-in-page, a link to an earlier result). Following scrolls
  *   only move down, and a content shrink clamps the position at the bottom, so neither is mistaken
  *   for the reader.
+ *
+ * ## Width changes keep the reading position (2026-11-24 dogfood F3)
+ *
+ * Opening Results gives the chat column a new width and the sidebar then animates for 200 ms. The text
+ * reflows and the unchanged pixel `scrollTop` pointed at an earlier Turn (Turn 9 → Turn 5 on 116). The
+ * browser's own scroll anchoring is suppressed by width and padding changes on the anchor's ancestors.
+ *
+ * - Reader scrolls record the block at the top edge (a paragraph, list item, heading, code block,
+ *   table or figure inside a Turn) and its offset from that edge.
+ * - When the scroll container's width changes, the position is restored so that block keeps its offset:
+ *   opening and closing Results, dragging the divider, the sidebar animation and window resizes.
+ * - While following owns the view (the bottom is kept), nothing is restored. A hidden column (width 0,
+ *   Results maximized) keeps the record until it is shown again.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -85,6 +98,55 @@ interface DisclosureAnchor {
 
 function offsetWithin(scroller: HTMLElement, el: Element): number {
   return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+}
+
+/** A Turn in the conversation; the reading position is kept on a block inside one. */
+const TURN_SELECTOR = "[data-results-message-token]";
+
+/** Blocks a reader's place is kept on when the column changes width. */
+const READING_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, pre, table, figure, blockquote, img";
+
+interface ReadingAnchor {
+  el: Element;
+  /** Offset of the block from the scroll container's top edge when it was recorded. */
+  offset: number;
+  /** Scroll container width when it was recorded; a different width means the text reflowed. */
+  width: number;
+}
+
+/**
+ * First element of a document-ordered list whose `edge` (top or bottom) lies at or below `y`; binary
+ * search keeps this cheap on long Turns.
+ */
+function firstFrom(list: ArrayLike<Element>, y: number, edge: "top" | "bottom"): Element | null {
+  let lo = 0;
+  let hi = list.length - 1;
+  let found: Element | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (list[mid].getBoundingClientRect()[edge] >= y) {
+      found = list[mid];
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return found;
+}
+
+/**
+ * The block the reader is at: in the first Turn still on screen, the first block that starts at or below
+ * the top edge. Text above it may reflow taller or shorter without moving what the reader sees. When no
+ * block of that Turn starts on screen (one block taller than the view), the block across the edge is used.
+ */
+function readingBlockAt(scroller: HTMLElement): Element | null {
+  const view = scroller.getBoundingClientRect();
+  const turn = firstFrom(scroller.querySelectorAll(TURN_SELECTOR), view.top + 1, "bottom");
+  if (!turn) return null;
+  const blocks = turn.querySelectorAll(READING_BLOCK_SELECTOR);
+  const starting = firstFrom(blocks, view.top - 1, "top");
+  if (starting && starting.getBoundingClientRect().top < view.bottom) return starting;
+  return firstFrom(blocks, view.top + 1, "bottom") ?? turn;
 }
 
 function disclosureState(control: Element): string | null {
@@ -123,6 +185,8 @@ export function useStickToBottom(enabled: boolean): StickToBottomApi {
   /** The reader has interacted with the conversation since it opened or since the last Turn ended. */
   const readerEngagedRef = useRef(false);
   const anchorRef = useRef<DisclosureAnchor | null>(null);
+  /** The block the reader was reading at the top edge, kept through width changes of the column. */
+  const readingRef = useRef<ReadingAnchor | null>(null);
   const [following, setFollowing] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -167,6 +231,29 @@ export function useStickToBottom(enabled: boolean): StickToBottomApi {
     if (!el) return;
     if (!isAtBottom(el)) setFollow(false);
   }, [isAtBottom, setFollow]);
+
+  /**
+   * Put the recorded block back at its offset once the column has a new width. Nothing happens when the
+   * width is unchanged, when the column is hidden (width 0 while Results is maximized: the record waits
+   * for its return), or when following owns the view and keeps the bottom instead.
+   */
+  const restoreReading = useCallback((scroller: HTMLElement) => {
+    const width = scroller.clientWidth;
+    const reading = readingRef.current;
+    if (width === 0 || !reading || reading.width === width) return;
+    reading.width = width;
+    if (followingRef.current && (enabledRef.current || !readerEngagedRef.current)) return;
+    if (!reading.el.isConnected) {
+      readingRef.current = null;
+      return;
+    }
+    const drift = offsetWithin(scroller, reading.el) - reading.offset;
+    if (Math.abs(drift) < 1) return;
+    // `instant` overrides the container's CSS smooth scrolling, so the text never visibly slides.
+    const target = scroller.scrollTop + drift;
+    if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top: target, behavior: "instant" });
+    else scroller.scrollTop = target;
+  }, []);
 
   /**
    * Hold scroll container in state rather than manually adding/removing listeners in ref callback:
@@ -226,12 +313,26 @@ export function useStickToBottom(enabled: boolean): StickToBottomApi {
      * result. Our own following only scrolls down (a smooth scroll mid-animation is still below its
      * target, moving down), and a content shrink clamps the position at the bottom.
      */
+    /** Record where the reader is once per frame; a width change restores it (see the module notes). */
+    let recordFrame: number | null = null;
+    const recordReading = () => {
+      recordFrame = null;
+      const width = scrollEl.clientWidth;
+      if (width === 0) return;
+      // A width change can reach this frame before the resize observer does: the browser's own
+      // adjustment of the reflowed text fires a scroll event first. Restore before recording, so the
+      // record never takes the reflowed position as the reader's place.
+      restoreReading(scrollEl);
+      const block = readingBlockAt(scrollEl);
+      readingRef.current = block ? { el: block, offset: offsetWithin(scrollEl, block), width } : null;
+    };
     const onScroll = () => {
       const top = scrollEl.scrollTop;
       const movedUp = top < lastTop - 1;
       lastTop = top;
       if (isAtBottom(scrollEl)) setFollow(true);
       else if (movedUp) setFollow(false);
+      if (recordFrame === null) recordFrame = window.requestAnimationFrame(recordReading);
     };
 
     scrollEl.addEventListener("wheel", onWheel, { passive: true });
@@ -249,8 +350,20 @@ export function useStickToBottom(enabled: boolean): StickToBottomApi {
       scrollEl.removeEventListener("keydown", onKeyDown);
       scrollEl.removeEventListener("click", onClickCapture, true);
       scrollEl.removeEventListener("scroll", onScroll);
+      if (recordFrame !== null) window.cancelAnimationFrame(recordFrame);
     };
-  }, [scrollEl, onUserIntentUp, isAtBottom, setFollow]);
+  }, [scrollEl, onUserIntentUp, isAtBottom, setFollow, restoreReading]);
+
+  /**
+   * The column changed width (Results opened or closed, divider drag, sidebar animation, window resize):
+   * keep the recorded block at its offset. Following keeps the bottom through the content observer instead.
+   */
+  useEffect(() => {
+    if (!scrollEl || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => restoreReading(scrollEl));
+    ro.observe(scrollEl);
+    return () => ro.disconnect();
+  }, [scrollEl, restoreReading]);
 
   /**
    * Keep a just-toggled disclosure where the reader activated it. Returns true while the toggle owns

@@ -254,6 +254,8 @@ async def authorize_oauth(
             redirect_uri,
             state=state,
             code_challenge=pkce.code_challenge,
+            # Each sign-in registers afresh: revoking Bowhead at the service may have deleted the old client.
+            reuse_client=False,
         )
         await users.create_mcp_oauth_pending(
             state=state,

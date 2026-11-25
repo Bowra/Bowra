@@ -79,6 +79,8 @@ export type ResultModelLabels = {
   codeTitle: string;
   codeLastRun: string;
   sourceUpload: string;
+  /** A version the person saved in the deck editor (source `presentation_edit`). */
+  sourceEdited: string;
   sourceGenerated: string;
   sourceExport: string;
   sourceWeb: string;
@@ -122,6 +124,8 @@ function artifactSourceLabel(
   item: ArtifactItem,
   labels: ResultModelLabels,
 ): string {
+  // A hand edit has no origin of its own (it maps to "other"); without this it read as AI generated.
+  if (item.source === "presentation_edit") return labels.sourceEdited;
   switch (item.origin) {
     case "upload": return labels.sourceUpload;
     case "export": return labels.sourceExport;

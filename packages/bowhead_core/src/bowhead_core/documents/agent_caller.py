@@ -21,6 +21,7 @@ from bowhead_core.agent_execution_binding import (
     _require_turn_scope,
     _team_snapshot_by_execution,
     _validate_team_snapshot,
+    read_owner_trial_turn_in_connection,
     team_agent_dispatchable_state_sql,
 )
 from bowhead_core.document_chat_continuation import DocumentResumeReservation, DocumentTurnOwner
@@ -64,6 +65,12 @@ class DocumentAdmissionGuard:
             raise DocumentRequestError("document_source_action_pending") from exc
 
 
+async def refuse_owner_trial_turn_in_tx(db, *, turn_id: str) -> None:
+    """Template-document work runs on a released Agent in a normal chat; an Owner draft trial has neither (§4.5)."""
+    if await read_owner_trial_turn_in_connection(db, turn_id=turn_id) is not None:
+        raise DocumentRequestError("agent_trial_document_tools_unavailable")
+
+
 async def read_document_caller_in_tx(
     db, *, path: str | Path, scope: DocumentScope, turn_id: str, execution_id: str, retained: bool = False
 ) -> ExactAgentExecutionBinding:
@@ -76,6 +83,7 @@ async def read_document_caller_in_tx(
     db.row_factory = aiosqlite.Row
     try:
         await _require_turn_scope(db, team_id=scope.team_id, user_id=scope.user_id, turn_id=turn_id)
+        await refuse_owner_trial_turn_in_tx(db, turn_id=turn_id)
         execution = await _execution_by_id(db, execution_id)
         if (
             execution is None
