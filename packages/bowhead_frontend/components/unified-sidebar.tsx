@@ -115,6 +115,12 @@ import {
 import type { SessionGroup } from "@/lib/types";
 import { trackInteraction as track } from "@/lib/metrics";
 import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
+import {
+  openResultPinHere,
+  resultPinOpensHere,
+  resultPinRoute,
+  type ResultPin,
+} from "@/lib/result-pins";
 import { useAppRouter } from "@/lib/use-app-router";
 import { notifySessionListChanged } from "@/lib/session-list-events";
 import { useSessionList } from "@/lib/use-sessions";
@@ -783,6 +789,28 @@ export function UnifiedSidebar({
     [closeOverlay, me, presentation, router],
   );
 
+  const handleOpenResultPin = useCallback(
+    async (event: MouseEvent<HTMLAnchorElement>, pin: ResultPin) => {
+      if (!resultPinOpensHere(pin, currentSessionId)) {
+        await handleNav(event, resultPinRoute(pin));
+        return;
+      }
+      if (!shouldHandleAppLinkClick(event)) return;
+      event.preventDefault();
+      if (
+        hasCanvasUnsavedChanges() &&
+        !(await confirmCanvasNavigation())
+      ) {
+        return;
+      }
+      if (presentation === "overlay") closeOverlay();
+      else dispatch({ type: "close-transient" });
+      setCompactGroup(null);
+      openResultPinHere(pin);
+    },
+    [closeOverlay, currentSessionId, handleNav, presentation],
+  );
+
   const handleSearchResult = useCallback(
     async (
       event: MouseEvent<HTMLAnchorElement>,
@@ -829,6 +857,8 @@ export function UnifiedSidebar({
       onNavigateSearchResult={(event, item) =>
         void handleSearchResult(event, item)
       }
+      resultPinsEnabled
+      onOpenResultPin={(event, pin) => void handleOpenResultPin(event, pin)}
       searchInputRef={searchRef}
       showSearch={showSearch}
       navigationSlot={navigationSlot}

@@ -19,6 +19,15 @@ if TYPE_CHECKING:
 
 _REVIEW_ERROR = "tool_delivery_review_required"
 _MAX_REVIEW_REJECTIONS = 2
+# What an accepted review adds when the run withdrew a reply before it. The correction note opens with the same
+# fact (``runtime_notes.WITHDRAWN_ANSWER_FACT``), but the review result is the last text Lead reads before it answers,
+# and for a long answer the note alone was not enough: on 116 (1.7.67, an observed task) Lead wrote a 9,414-character
+# handbook, was sent to the review and closed with "《……手册》已按你的格式写在上面". Replayed on that request with
+# deepseek-flash, the handbook came back in 7 of 10 calls with the note alone and in 10 of 10 with this text as well.
+WITHDRAWN_REPLY_FACT = (
+    "The reply you wrote before this review has been removed from what the user sees. The user sees only your next reply; "
+    "content of the removed reply reaches the user only if your next reply contains it again."
+)
 _MAX_REVIEW_CALLS = 2000
 _REQUIRED_GAP_GUIDANCE = (
     "A missing required result remains unfulfilled even when its absence is correctly disclosed. "
@@ -642,6 +651,8 @@ class LeadDeliveryReview:
         # True once this run's transcript carries the review rules, from the
         # Runner's closeout correction or from an earlier refusal of this Tool.
         self.guidance_given = False
+        # True once the Runner sent a reply of this run back after it had streamed, which takes it out of the chat.
+        self.reply_withdrawn = False
 
     @staticmethod
     def _business_ids(invocations: Sequence[Any]) -> tuple[str, ...]:
@@ -672,6 +683,9 @@ class LeadDeliveryReview:
                         pending.pop(item["artifact_id"], None)
         return list(pending)[:16]
 
+    def _reply_instruction(self, instruction: str) -> str:
+        return f"{instruction} {WITHDRAWN_REPLY_FACT}" if self.reply_withdrawn else instruction
+
     async def current(self, invocations: Sequence[Any], ctx: Any) -> dict[str, Any] | None:
         if self.payload is None or self.call_ids != self._business_ids(invocations):
             return None
@@ -699,7 +713,9 @@ class LeadDeliveryReview:
                     return {
                         "ok": True,
                         "reviewed_completion": "partial",
-                        "instruction": "Disclose unverified delivery in the ordinary answer. Do not repeat confirmed writes.",
+                        "instruction": self._reply_instruction(
+                            "Disclose unverified delivery in the ordinary answer. Do not repeat confirmed writes."
+                        ),
                     }
                 return DeliveryReviewRefusal(ok=False, error_kind=_REVIEW_ERROR, error=message, retryable=False)
 
@@ -732,9 +748,11 @@ class LeadDeliveryReview:
             return {
                 "ok": True,
                 "reviewed_completion": payload.get("completion", "complete"),
-                "instruction": "Answer the user in ordinary prose. "
-                + _DELIVERY_REPLY_GUIDANCE
-                + "Do not output protocol JSON or repeat confirmed writes. Review again if you execute more work.",
+                "instruction": self._reply_instruction(
+                    "Answer the user in ordinary prose. "
+                    + _DELIVERY_REPLY_GUIDANCE
+                    + "Do not output protocol JSON or repeat confirmed writes. Review again if you execute more work."
+                ),
             }
 
         schema = terminal_review_schema(

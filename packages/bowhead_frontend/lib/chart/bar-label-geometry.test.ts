@@ -175,3 +175,72 @@ describe("horizontal bars reach the D3 caps whatever the axis title and paddings
     expect(hbarThicknesses(n, "embed")).toEqual(Array(n).fill(20));
   });
 });
+
+/** Real Chart instance of a single-series horizontal bar chart sized as ChartBlock sizes it in chat; returns the right
+ *  edge (CSS px) of every displayed value label — a label starts at its bar's right end, which for a negative bar is
+ *  the zero line — and the canvas width. */
+function hbarLabelRightEdges(values: number[], widthPx: number): { rights: number[]; canvasWidth: number; padRight: number } {
+  const spec: ChartSpec = {
+    kind: "hbar",
+    title: "门店订单数同比增速",
+    row_count: values.length,
+    columns: [
+      { key: "store", header: "门店", type: "categorical" },
+      { key: "growth", header: "同比增速", type: "numeric", unit: "%" },
+    ],
+    rows: values.map((growth, i) => ({ store: `门店${i + 1}`, growth })),
+  };
+  const ctx = { ...context(widthPx, 300), placement: "chat" as const };
+  const recipe = resolveChartRenderRecipe(ctx, normalizeChartForRenderingV1(spec).shape);
+  const height = recipe.minimumPlotHeightPx + HBAR_AXIS_TITLE_HEIGHT_PX;
+  const cfg = buildChartJSConfig(spec, THEME as never, { renderContext: { ...ctx, bounds: { ...ctx.bounds, heightPx: height } } });
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx;
+  canvas.height = height;
+  canvas.getContext = (() => fakeContext(canvas)) as never;
+  const chart = new Chart(canvas, {
+    type: cfg.type,
+    data: cfg.data,
+    options: { ...cfg.options, responsive: false, animation: false, devicePixelRatio: 1 },
+    plugins: cfg.plugins,
+  } as unknown as ChartConfiguration);
+  charts.push(chart);
+  const x = chart.scales.x!;
+  const ds = chart.data.datasets[0] as unknown as {
+    data: number[];
+    datalabels: { display: unknown; offset: number; font: unknown; formatter: (v: unknown, c: unknown) => string };
+  };
+  const rights: number[] = [];
+  ds.data.forEach((value, dataIndex) => {
+    const arg = { dataIndex, datasetIndex: 0, dataset: ds, chart };
+    const read = (v: unknown) => (typeof v === "function" ? (v as (a: unknown) => unknown)(arg) : v);
+    if (!read(ds.datalabels.display)) return;
+    const size = (read(ds.datalabels.font) as { size: number }).size;
+    const text = ds.datalabels.formatter(value, arg);
+    const start = value < 0 ? x.getBasePixel() : x.getPixelForValue(value);
+    rights.push(start + ds.datalabels.offset + text.length * size * 0.6);
+  });
+  const padRight = ((chart.options.layout?.padding ?? {}) as { right?: number }).right ?? 0;
+  return { rights, canvasWidth: widthPx, padRight };
+}
+
+describe("horizontal bar value labels stay inside the canvas whatever the sign (real Chart instance)", () => {
+  // 116 (1.7.66) year-over-year growth of the top 15 stores: every value negative, so the zero line is the plot's
+  // right edge and every label starts there.
+  const allNegative = [-0.0112, -0.0112, -0.0128, -0.0132, -0.0132, -0.0144, -0.0151, -0.0151, -0.0158, -0.016,
+    -0.016, -0.0166, -0.0182, -0.0199, -0.0204];
+
+  it.each([549, 830])("every value negative, %ipx: all 15 labels fit", (width) => {
+    const { rights, canvasWidth } = hbarLabelRightEdges(allNegative, width);
+    expect(rights).toHaveLength(15);
+    for (const right of rights) expect(right).toBeLessThanOrEqual(canvasWidth);
+  });
+
+  it("mixed signs keep the reserve of their widest positive label: negative labels already sit inside the plot", () => {
+    const mixed = [0.7671, 0.4775, 0.2842, 0.1879, 0.1295, -0.0706, -0.1315, -0.243, -0.2601, -0.279];
+    const { rights, canvasWidth, padRight } = hbarLabelRightEdges(mixed, 830);
+    for (const right of rights) expect(right).toBeLessThanOrEqual(canvasWidth);
+    const positiveOnly = hbarLabelRightEdges(mixed.map((v) => Math.abs(v)), 830).padRight;
+    expect(padRight).toBe(positiveOnly);
+  });
+});

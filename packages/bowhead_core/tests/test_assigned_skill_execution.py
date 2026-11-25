@@ -169,6 +169,94 @@ async def test_entry_script_may_be_written_as_skill_md_links_it(assigned_case, s
         assert case.calls[0]["input"]["_skill_entry"] == expected and case.calls[0]["staged"] is None
 
 
+async def test_script_passed_beside_command_is_named_as_not_used(assigned_case, monkeypatch):
+    """116 2026-11-23: 4 of 20 calls passed both; command ran and the entry name had no effect."""
+    case = assigned_case
+    monkeypatch.setenv("BOWHEAD_SKILL_INVOKE_COMMAND", "1")
+    args = {"name": "method", "script": "run.py", "command": ["python3", "scripts/run.py"], "input": {"inputs": {}}}
+    result = await invoke(case, args=args)
+    assert result["ok"] is True and case.calls[0]["input"]["_skill_command"] == ["python3", "scripts/run.py"]
+    assert list(result["ignored_arguments"]) == ["script"] and "command" in result["ignored_arguments"]["script"]
+    # Script alone, or command alone, has nothing to report.
+    assert "ignored_arguments" not in await invoke(case)
+    assert "ignored_arguments" not in await invoke(case, args={k: v for k, v in args.items() if k != "script"})
+
+
+async def test_command_without_the_command_switch_is_named_on_ordinary_use(assigned_case, monkeypatch):
+    # An Agent's command call is refused as command_disabled; ordinary use runs the script and says command had no effect.
+    case = assigned_case
+    case.ctx.skill_runtime_grants = None
+    case.ctx.skill_runtime_scope = None
+    catalog_root = case.root.parent / "ordinary-catalog"
+    shutil.copytree(case.base.root / "python_sandbox", catalog_root / "python_sandbox")
+    case.registry = ToolRegistry()
+    register_skill_tools(case.registry, SkillCatalog(roots=[catalog_root]), case.runtime)
+    monkeypatch.delenv("BOWHEAD_SKILL_INVOKE_COMMAND", raising=False)
+    result = await invoke(case, args={"name": "method", "script": "run.py", "command": ["python3", "scripts/run.py"], "input": {"inputs": {}}})
+    assert result["ok"] is True and "_skill_command" not in case.calls[0]["input"]
+    assert list(result["ignored_arguments"]) == ["command"] and "not enabled" in result["ignored_arguments"]["command"]
+
+
+async def test_policy_epoch_moving_before_dispatch_is_checked_again(assigned_case, monkeypatch):
+    """116 2026-11-23: another session added and removed a group member while an Agent's call ran.
+
+    The Team policy epoch moved, so the source recheck before dispatch failed although the Skill
+    and the caller's use of it had not changed.
+    """
+    case = assigned_case
+
+    async def hydrate(input_data, ctx):
+        await case.base.sources.access.bump_policy_epoch(ctx.team_id)
+
+    monkeypatch.setattr("bowhead_skill.tools._fill_input_filenames", hydrate)
+    assert (await invoke(case))["ok"] is True
+    assert len(case.calls) == 1 and case.calls[0]["files"]["scripts/run.py"] == b"print('ORIGINAL')\n"
+
+
+@pytest.mark.parametrize("change", ["disabled", "edited"])
+async def test_second_check_still_refuses_a_lasting_change(assigned_case, monkeypatch, change):
+    case = assigned_case
+
+    async def hydrate(input_data, ctx):
+        await case.base.sources.access.bump_policy_epoch(ctx.team_id)
+        if change == "disabled":
+            await case.base.sources.instances.upsert(
+                user_id=ctx.user_id, name="method", source_type="user_upload", source_path=str(case.root), enabled=False
+            )
+        else:
+            # The second check pins the captured revision, so changed bytes are refused rather than run.
+            (case.root / "scripts/run.py").write_text("print('CHANGED_AFTER_CAPTURE')\n")
+
+    monkeypatch.setattr("bowhead_skill.tools._fill_input_filenames", hydrate)
+    result = await invoke(case)
+    assert result["error_kind"] == "skill_unavailable" and not case.calls
+    assert result["reason"] == ("not_visible" if change == "disabled" else "source_changed")
+
+
+@pytest.mark.parametrize("lasting", [False, True])
+async def test_policy_epoch_moving_while_the_package_is_captured(assigned_case, monkeypatch, lasting):
+    import anyio
+    import bowhead_core.skill_read_resolution as resolution
+
+    case = assigned_case
+    original = resolution.capture_skill_package
+    captures = []
+
+    def capture(*args, **kwargs):
+        captures.append(1)
+        if lasting or len(captures) == 1:
+            anyio.from_thread.run(case.base.sources.access.bump_policy_epoch, case.ctx.team_id)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(resolution, "capture_skill_package", capture)
+    result = await invoke(case)
+    assert len(captures) == 2
+    if lasting:
+        assert (result["error_kind"], result["reason"]) == ("skill_unavailable", "source_changed") and not case.calls
+    else:
+        assert result["ok"] is True and len(case.calls) == 1
+
+
 async def test_exact_copies_live_under_the_data_root_and_stale_ones_are_removed(assigned_case):
     from bowhead_core import assigned_skill_execution
 

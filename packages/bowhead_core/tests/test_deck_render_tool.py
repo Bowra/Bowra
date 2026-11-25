@@ -10,7 +10,7 @@ import pytest
 from bowhead_core.agents._lead_context import reset_current_peer_name, set_current_peer_name
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.deck_render_inputs import _materialize_default_template
-from bowhead_core.deck_render_tool import DeckRenderBinding, deck_target, register_deck_render_tool
+from bowhead_core.deck_render_tool import DeckRenderBinding, deck_target, register_deck_render_tool, slides_by_section
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry
 from bowhead_skill.runtime import SkillRuntime
 from pptx import Presentation
@@ -84,7 +84,9 @@ async def deck_case(tmp_path):
 async def test_confirmed_three_slides_are_editable_registered_and_replayable(deck_case):
     ctx, store, render, runtime = deck_case
     receipt = await render(CONTENT, ctx)
-    assert receipt["ok"] and receipt["slide_count"] == 3, receipt
+    assert receipt["ok"] and (receipt["slide_count"], receipt["expected_slides"]) == (3, 3), receipt
+    assert receipt["slides_by_section"] == "slide 1 cover (eyebrow and h1); slides 2-3 insight_card x2 ('本周进展', '下周计划')"
+    assert "do not render again" in receipt["message"]
     art = await store.get(receipt["artifact_id"])
     assert art.created_by == ctx.user_id and art.created_by_turn == ctx.turn_id
     assert art.kind == "deliverable" and art.source == "consultant_deck"
@@ -170,12 +172,37 @@ async def test_read_only_peer_cannot_use_new_deck_authority(deck_case):
     assert runtime.calls == 0
 
 
-async def test_slide_count_mismatch_has_no_download_claim(deck_case):
+async def test_a_slide_count_other_than_expected_is_registered_and_stated(deck_case):
+    """The model's own expected_slides is a fact to compare, not a refusal that discards the deck."""
     ctx, store, render, runtime = deck_case
-    result = await render({**CONTENT, "expected_slides": 4}, ctx)
-    assert not result["ok"] and result["error"] == "deck_validation_failed"
-    assert "3" in result["message"] and "4" in result["message"]
-    assert not await store.list_for_session(session_id=ctx.session_id, user_id=ctx.user_id)
+    eyebrow, h1, *cards = CONTENT["sections"]
+    sections = [
+        eyebrow,
+        h1,
+        {"kind": "recommendations", "payload": {"items": [{"action": "扩充值班"}]}},
+        *cards,
+        {"kind": "kpi_row", "payload": {"cells": [{"lbl": "需求", "val": "20"}]}},
+    ]
+    result = await render({**CONTENT, "sections": sections}, ctx)
+    assert result["ok"] and (result["slide_count"], result["expected_slides"]) == (5, 3), result
+    # Slides follow the renderer's kind order, not the order the sections were given in.
+    assert result["slides_by_section"] == (
+        "slide 1 cover (eyebrow and h1); slide 2 kpi_row; slides 3-4 insight_card x2 ('本周进展', '下周计划'); slide 5 recommendations"
+    )
+    assert "It has 5 slides; expected_slides was 3." in result["message"] and "revises" in result["message"]
+    assert "do not render again" not in result["message"]
+    art = await store.get(result["artifact_id"])
+    assert art.kind == "deliverable" and len(Presentation(io.BytesIO(await store.open_read(art))).slides) == 5
+
+
+@pytest.mark.parametrize("entries", [None, "cover", [{"kind": "cover"}], [{"kind": "cover"}, {"title": "x"}], [{"kind": "cover"}, "kpi_row"]])
+def test_a_missing_or_inconsistent_slide_record_is_not_stated(entries):
+    assert slides_by_section(entries, 2) is None
+
+
+def test_long_slide_titles_are_shortened():
+    stated = slides_by_section([{"kind": "cover"}, {"kind": "chart", "title": "营收" * 30}, {"kind": "chart"}], 3)
+    assert stated == f"slide 1 cover (eyebrow and h1); slides 2-3 chart x2 ('{'营收' * 20}…')"
 
 
 async def test_model_cannot_supply_template_or_output_paths(deck_case):
@@ -410,7 +437,7 @@ async def test_invalid_list_structure_is_rejected_before_rendering(deck_case, pa
 
 @pytest.mark.parametrize("words", ["标题与副标题左对齐，行距放宽", "Leave a placeholder for the photo credit", "请输入你的旅行目的地"])
 async def test_ordinary_wording_is_never_mistaken_for_a_leftover_placeholder(deck_case, words):
-    """116 t_eb5a1e40bc18: the word 副标题 inside a bullet failed three renders in a row."""
+    """an observed execution: the word 副标题 inside a bullet failed three renders in a row."""
     ctx, store, render, _runtime = deck_case
     content = {
         **CONTENT,
@@ -460,5 +487,6 @@ async def test_a_revised_deck_is_recorded_as_the_next_version(deck_case):
     assert second["ok"], second
     stored = await store.get(second["artifact_id"])
     assert (stored.version_of, stored.lineage_id, stored.version_no) == (first["artifact_id"], first["artifact_id"], 2)
+    assert second["revises"] == first["artifact_id"] and "revises" not in first
     stale = await render({**CONTENT, "expected_slides": 3, "revises": first["artifact_id"]}, ctx)
     assert (stale["ok"], stale["error"], stale["latest_id"]) == (False, "version_target_not_latest", second["artifact_id"])

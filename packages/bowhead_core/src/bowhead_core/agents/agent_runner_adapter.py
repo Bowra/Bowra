@@ -47,8 +47,10 @@ from bowhead_core.subagent import (
 
 from .registry import _SYSTEM_PROMPT_DIR, AgentRegistry
 from .task_spec import (
+    PLAN_STEP_DELIVERY_FAILURE_CODES,
     PlanStepAgentBindingError,
     PlanStepBailError,
+    PlanStepDeliveryError,
     PlanStepEmptyOutputError,
     PlanStepModelError,
     PlanStepNeedsUserError,
@@ -102,7 +104,7 @@ _CHAPTER_FORM_CHARS = 120
 def _chapter_block(deliverable: str) -> str:
     """「你只写这一章」约束 + 本步的产出形态 → prompt 块（plan-report-assembly 批 3-b）。
 
-    为什么需要它：批 0/1/2 把**装订**修好了（116 t_c9853b490565：8 条腿的产出排成
+    为什么需要它：批 0/1/2 把**装订**修好了（an observed execution：8 条腿的产出排成
     1 份 8 章、腿级 eyebrow/meta/建议/局限性归了文档级池）。但装订层只排序与归并、
     **不改写腿写的字**（这是「不要写手」决议的落地判据）⇒ 措辞降不了级：腿仍以为
     自己在交一份独立报告，于是各自写「本报告…」、各自重铺一遍全局背景、各自在末尾
@@ -110,7 +112,7 @@ def _chapter_block(deliverable: str) -> str:
 
     ★章名由写手按本章实际内容起，`deliverable` 只当**产出形态**下发（2026-09-25 用户拍板）。
     planner 的约定里步级 `deliverable` 就是「期望产出形态 (insight/表/章节)」（`plan_authoring.SYSTEM_PROMPT`），
-    此前这里却把它当章名，只靠一张形态词表猜哪些不是章名——116 上先后出现 `## insight`（t_40869341f322）、
+    此前这里却把它当章名，只靠一张形态词表猜哪些不是章名——116 上先后出现 `## insight`（an observed task）、
     `## 表+图+insight`（1.3.47 `s_6f8297c12cd1`）、`## 章节(表+图+关键指标)`（1.3.51 `s_bb8f798ebe34`），
     planner 换个写法词表就漏；同名的章在续轮修订时也点不中。
 
@@ -812,6 +814,9 @@ def make_legacy_agent_runner_fn(
                 # The model call still failed after the Router's retries: keep its own
                 # classification instead of a generic internal error.
                 raise PlanStepModelError(result.llm_reason_code)
+            if err_msg in PLAN_STEP_DELIVERY_FAILURE_CODES:
+                # The Agent finished without the file it owes: keep the delivery code as the step kind.
+                raise PlanStepDeliveryError(err_msg)
             raise RuntimeError(err_msg)
 
         # SubagentResult.payload → dict expected by orchestrate_v2.

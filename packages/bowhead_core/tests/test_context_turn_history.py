@@ -15,6 +15,7 @@ from bowhead_core.cross_turn_digest import _strip_markers, render_history_rules_
 from bowhead_core.events import TurnEventBus
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
+from bowhead_router.runtime_notes import WITHDRAWN_ANSWER_FACT
 from bowhead_router.types import Message
 
 from bowhead_router import (
@@ -709,8 +710,8 @@ def test_drop_history_turns_is_a_noop_under_budget_and_with_no_history() -> None
 
 @pytest.mark.unit
 def test_bounce_directive_follows_language() -> None:
-    assert "subagent_spawn" in final_answer_bounce_directive("zh-CN") and "画布" in final_answer_bounce_directive("zh-CN")
-    assert "subagent_spawn" in final_answer_bounce_directive("en-US") and "canvas" in final_answer_bounce_directive("en-US")
+    assert "subagent_spawn" in final_answer_bounce_directive("zh-CN") and "数字" in final_answer_bounce_directive("zh-CN")
+    assert "subagent_spawn" in final_answer_bounce_directive("en-US") and "figures" in final_answer_bounce_directive("en-US")
     # No language → English fallback (language-policy.md).
     assert final_answer_bounce_directive(None) == final_answer_bounce_directive("en-US")
 
@@ -782,53 +783,6 @@ async def test_lead_history_keeps_a_cancelled_turn_with_its_spawn_and_forces_the
     assert "## Recent turns in this session" not in (inv.get("extra_instructions") or "")
 
 
-@pytest.mark.asyncio
-async def test_lead_installs_final_answer_gate_that_bounces_report_claims_without_spawn(
-    monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
-) -> None:
-    """Lead 装了终答闸：零派活 + 声称「见画布」⇒ 退回指令（只一次）；派过活 ⇒ 放行；非 lead ⇒ 放行。"""
-    from bowhead_core.turn_runner import TurnRunner
-
-    helpers = _turn_runner_helpers()
-    _make_orch, _req = helpers._make_orch, helpers._req
-
-    captured: dict[str, Any] = {}
-
-    class _Runner:
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-            self.router = getattr(inner, "router", None)
-
-        async def run(self, **kw: Any) -> Any:
-            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
-            captured["ctx"] = kw["parent_ctx"]
-            return await self._inner.run(**kw)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner))
-    await TurnRunner(orch).run(_req("第二季度"))
-    gate = captured.get("gate")
-    assert gate is not None, "Lead 没装终答闸"
-    spawn_inv = SimpleNamespace(tool_name="subagent_spawn", result={"ok": True, "delivered": "payload"})
-    r6 = "口径已就地改为「第二季度」，全报告各段正文与 5 张图均按新口径重算重画。"
-    assert await gate(r6, "compute", []) is None
-    assert await gate(r6, "lead", [spawn_inv]) is None, "派了活且交付了 ⇒ 放行"
-    assert await gate(r6, "lead", [SimpleNamespace(tool_name="subagent_spawn", result="not-a-dict")]) is None, "结果未知 ⇒ 不在拿不准时退"
-    assert await gate(r6, "lead", [SimpleNamespace(tool_name="subagent_spawn", result={"ok": True, "delivered": "none"}), spawn_inv]) is None, (
-        "有一个交付了就放行"
-    )
-    assert await gate("第二季度营业额 12 亿。", "lead", []) is None, "没声称改过报告就不退"
-    assert await gate("上一轮的报告已在画布，你想改哪一段？", "lead", []) is None, "只指路不算修订声明（review 修）"
-    first = await gate(r6, "lead", [])
-    assert first and "subagent_spawn" in first
-    assert getattr(captured["ctx"], "_lead_narrative_superseded", False) is True, "被退回的旁白已流给前端，必须标 superseded 让渲染层压掉"
-    assert await gate("报告已生成，见画布。", "lead", []) is not None, "r10：上限是 2，第二次仍退"
-    assert await gate("报告已生成，见画布。", "lead", []) is None, "第三次被上限挡住"
-
-
 @pytest.mark.unit
 def test_unsourced_absolute_figures_separates_fabrication_from_restatement() -> None:
     """r8 判据（116 第六轮真机原文）：带绝对量单位、对话里没出处的数字才算编；复述、推算比率、纯指路都不算。"""
@@ -842,13 +796,13 @@ def test_unsourced_absolute_figures_separates_fabrication_from_restatement() -> 
         "2026 年上半年全渠道 1083 个可比品牌合计营业额 91.17 亿元，同比微增 +0.08%。金辉福以 3.80 亿元稳居第一。",
     ]
     pool = build_observed_numbers_from_texts(hist)
-    # t_17a2cb7a3f43: all three figures are fabricated (actual value 3.80 亿), but the final year 2026 matches; the criterion cannot require all numbers to be unmatched.
+    # an observed task: all three figures are fabricated (actual value 3.80 亿), but the final year 2026 matches; the criterion cannot require all numbers to be unmatched.
     assert unsourced_absolute_figures("金辉福约 5010 万。阿迪达斯（约 2217 万）、哥弟（约 2066 万）。这是 2026 上半年前三名", pool) == [
         50100000.0,
         22170000.0,
         20660000.0,
     ]
-    # t_8b05d38e92c7: one fabricated figure plus one matching year
+    # an observed task: one fabricated figure plus one matching year
     assert unsourced_absolute_figures("排名第七的品牌是银凤阁，营业额约 1.63 亿元（据 2026 年上半年数据）", pool) == [163000000.0]
     # E1 / E4: restate historical figures
     assert unsourced_absolute_figures("营业额最高的是金辉福，2026 年上半年 3.80 亿元。", pool) == []
@@ -888,7 +842,7 @@ def test_unsourced_absolute_figures_separates_fabrication_from_restatement() -> 
 
 @pytest.mark.unit
 def test_multi_char_magnitude_units_are_parsed_and_cross_unit_restatement_matches() -> None:
-    """r9（116 第七轮真机 `t_7b1b7bc0fac8`）：Lead 把第七名编成「银凤阁，约 118 百万元」——
+    """r9（116 第七轮真机 `an observed task`）：Lead 把第七名编成「银凤阁，约 118 百万元」——
     `百万` 整个不在 r8 的单位表里，闸看不见就放过去了。而 `百万元 / ¥M` 是本产品自己的规范写法。
     多字单位（万亿 / 百万 / 千万）现在最长优先解析，池子与判据两侧共用同一套 ⇒ 跨单位复述也能对上。"""
     from bowhead_core.analysis_payload import build_observed_numbers_from_texts, unsourced_absolute_figures
@@ -909,8 +863,8 @@ def test_multi_char_magnitude_units_are_parsed_and_cross_unit_restatement_matche
 @pytest.mark.unit
 def test_currency_suffix_notation_is_parsed_both_directions() -> None:
     """r10（116 第八轮真机）：`¥379.55M` 是画布 KPI 卡的默认渲染，用户说一句「金额用 ¥M 展示」后 Lead 整段都这么写。
-    不认识它会**两个方向都错**：`t_efde3ac984b3` 用 `¥85.49M` 编数没被拦；
-    `t_9160f02cec89` 上一轮报告写 `¥9,116.78M`，Lead 如实复述成「91.17 亿元」反被退回。"""
+    不认识它会**两个方向都错**：`an observed task` 用 `¥85.49M` 编数没被拦；
+    `an observed task` 上一轮报告写 `¥9,116.78M`，Lead 如实复述成「91.17 亿元」反被退回。"""
     from bowhead_core.analysis_payload import build_observed_numbers_from_texts, unsourced_absolute_figures
 
     pool_yM = build_observed_numbers_from_texts(
@@ -1005,58 +959,18 @@ async def test_final_answer_gate_bounces_zero_tool_turn_that_states_unsourced_fi
     # `_req` carries no language context, so the bounce directive uses the English fallback.
     from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive as _directive
 
-    assert bounced == _directive("en-US", cause="zero_evidence_numbers") and "subagent_spawn" in bounced
+    assert bounced == _directive("en-US") and "subagent_spawn" in bounced
     assert getattr(captured["ctx"], "_lead_narrative_superseded", False) is True
     assert await gate(made_up, "lead", []) is not None, "r10：上限是 2，第二次仍退"
     assert await gate(made_up, "lead", []) is None, "第三次被上限挡住"
 
 
 @pytest.mark.asyncio
-async def test_final_answer_gate_lets_a_restated_or_negated_report_change_pass(
+async def test_a_turn_bounces_at_most_twice_even_for_the_same_cause(
     monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
 ) -> None:
-    """116 N13 follow-up (the regression case / the regression case): a zero-tool version answer restated the title change an
-    earlier turn reported, and honest answers said no report was made; both were bounced twice as report work."""
-    from bowhead_core.turn_runner import TurnRunner
-
-    helpers = _turn_runner_helpers()
-    _make_orch, _req = helpers._make_orch, helpers._req
-
-    monkeypatch.setenv(_FLAG, "1")
-    captured: dict[str, Any] = {}
-
-    class _Runner:
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-            self.router = getattr(inner, "router", None)
-
-        async def run(self, **kw: Any) -> Any:
-            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
-            return await self._inner.run(**kw)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    ss = _session_store_with(
-        [_turn(1, user="把画布上那份报告的大标题改成《2025年度经营复盘》", answer="画布报告的大标题已改为《2025年度经营复盘》，其余章节均未改动。")],
-        [],
-    )
-    orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner), session_store=ss)
-    await TurnRunner(orch).run(_req("HTML报告现在一共有几个版本？不用重新生成文件。"))
-    gate = captured["gate"]
-    assert gate is not None
-    assert await gate("另外画布上那份报告是另一份产物，标题已改为《2025年度经营复盘》。", "lead", []) is None
-    assert await gate("本轮没有查询数据，也没有生成报告。", "lead", []) is None
-    assert await gate("画布上那份报告的标题已改为《别的标题》。", "lead", []) is not None, "a change no earlier answer reported"
-
-
-@pytest.mark.asyncio
-async def test_each_bounce_cause_fires_once_and_a_turn_bounces_at_most_twice(
-    monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
-) -> None:
-    """r10（116 第八轮真机 `t_b4a7d77462a2`）：原来「一轮只退一次」——那一轮第一次退的是**报告声明**，
-    模型改口后在第二版答案里编了个数，而闸已经用掉唯一的机会。改成每个 cause 各一次、一轮至多两次。"""
+    """r10 (116 `an observed task`): with one bounce per Turn, a second invented figure escaped. The cap counts
+    bounces, not causes: two per Turn."""
     from bowhead_core.turn_runner import TurnRunner
 
     helpers = _turn_runner_helpers()
@@ -1082,23 +996,13 @@ async def test_each_bounce_cause_fires_once_and_a_turn_bounces_at_most_twice(
     orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner), session_store=ss)
     await TurnRunner(orch).run(_req("最高的是哪个"))
     gate = captured["gate"]
-    claim = "全报告各段已按新口径重算重画。"
     made_up = "营业额最高的是金辉福，约 5010 万元。"
     # `_req` carries no language context, so the bounce directive uses the English fallback.
     from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive as _directive
 
-    first = await gate(claim, "lead", [])
-    assert first == _directive("en-US", cause="no_spawn"), "first bounce: the report claim"
-    second = await gate(made_up, "lead", [])
-    assert second == _directive("en-US", cause="zero_evidence_numbers"), "a different cause still bounces"
-    assert await gate("另一个没出处的数：2.02 亿元。", "lead", []) is None, "一轮至多两次——上限是次数，这一条必须被上限挡住"
-    # Two consecutive occurrences of the same cause count twice (review: the second fabrication with the same cause escaped; the limit was always two).
-    captured["gate2"] = None
-    await TurnRunner(orch).run(_req("再问一次"))
-    g2 = captured["gate"]
-    assert (await g2(made_up, "lead", [])) is not None
-    assert (await g2("换一个没出处的数：3.33 亿元。", "lead", [])) is not None, "同 cause 第二次仍要退"
-    assert (await g2("再来一个：4.44 亿元。", "lead", [])) is None, "第三次被上限挡住"
+    assert await gate(made_up, "lead", []) == _directive("en-US")
+    assert (await gate("换一个没出处的数：3.33 亿元。", "lead", [])) is not None, "the same cause bounces a second time"
+    assert (await gate("再来一个：4.44 亿元。", "lead", [])) is None, "the third is stopped by the cap"
 
 
 @pytest.mark.asyncio
@@ -1167,43 +1071,7 @@ async def test_zero_evidence_pool_includes_injected_digest_block(monkeypatch: py
     # `_req` carries no language context, so the bounce directive uses the English fallback.
     from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive as _directive
 
-    assert bounced == _directive("en-US", cause="zero_evidence_numbers"), "the digest arms the gate; unsourced numbers still bounce"
-
-
-@pytest.mark.asyncio
-async def test_report_work_claim_wins_over_zero_evidence_cause(monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result) -> None:
-    """review P2：零工具轮**同时**声称改过报告 + 报了没出处的数 ⇒ 用户最需要听到的是「报告没动」，
-    只有 no_spawn 那条指令带着「不要说已修订 / 见画布」。顺序必须是报告声明优先。"""
-    from bowhead_core.turn_runner import TurnRunner
-
-    helpers = _turn_runner_helpers()
-    _make_orch, _req = helpers._make_orch, helpers._req
-
-    monkeypatch.setenv(_FLAG, "1")
-    captured: dict[str, Any] = {}
-
-    class _Runner:
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-            self.router = getattr(inner, "router", None)
-
-        async def run(self, **kw: Any) -> Any:
-            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
-            return await self._inner.run(**kw)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    ss = _session_store_with([_turn(1, user="各品牌营业额", answer="合计 91.17 亿元。")], [])
-    orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner), session_store=ss)
-    await TurnRunner(orch).run(_req("改成第二季度"))
-    both = "全报告各段已按新口径重算重画，第二季度合计 5010 万元。"
-    d = await captured["gate"](both, "lead", [])
-    # `_req` carries no language context, so the bounce directive uses the English fallback.
-    from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive as _directive
-
-    assert d == _directive("en-US", cause="no_spawn"), "the report-claim directive must win"
+    assert bounced == _directive("en-US"), "the digest arms the gate; unsourced numbers still bounce"
 
 
 @pytest.mark.asyncio
@@ -1270,8 +1138,8 @@ async def test_final_answer_gate_bounces_once_and_the_second_answer_wins(monkeyp
     assert len(router.calls) == 2, "退回后必须再走一圈"
     second = router.calls[1][1]
     assert ("assistant", "口径已改，完整报告见画布。") in second, "被退回的终答作为 assistant 发言留在历史里"
-    assert ("user", "DIRECTIVE_MARKER") in second, "指令作为 user 消息追加"
-    assert second.index(("assistant", "口径已改，完整报告见画布。")) < second.index(("user", "DIRECTIVE_MARKER"))
+    assert ("user", WITHDRAWN_ANSWER_FACT + "DIRECTIVE_MARKER") in second, "指令作为 user 消息追加"
+    assert second.index(("assistant", "口径已改，完整报告见画布。")) < second.index(("user", WITHDRAWN_ANSWER_FACT + "DIRECTIVE_MARKER"))
 
 
 @pytest.mark.unit
@@ -1454,24 +1322,10 @@ async def test_final_answer_gate_bounces_on_the_streaming_path_too(monkeypatch: 
     assert result.final_answer.strip() == "真答" and bounced["n"] == 2 and len(router.calls) == 2
     assert "".join(streamed).startswith("全报告各段均按新口径重算重画"), "被退回的答案确实已经流出去了——所以 Lead 侧必须标 superseded"
     second = router.calls[1][1]
-    assert ("user", "DIRECTIVE_MARKER") in second
+    assert ("user", WITHDRAWN_ANSWER_FACT + "DIRECTIVE_MARKER") in second
     bounced_idx = next(i for i, (r, c) in enumerate(second) if r == "assistant" and c.strip() == "全报告各段均按新口径重算重画。")
-    assert second.index(("user", "DIRECTIVE_MARKER")) > bounced_idx
-    assert second[-1] == ("user", "DIRECTIVE_MARKER"), "指令排最末吃 recency（与 hard-bail 同款，review 修）"
-
-
-@pytest.mark.unit
-def test_report_work_claim_predicate_matches_revision_verbs_but_not_pointers() -> None:
-    from bowhead_core.overclaim_guard import detect_report_work_claims
-
-    assert detect_report_work_claims("口径已就地改为「第二季度」，全报告各段正文与 5 张图均按新口径重算重画。")
-    assert detect_report_work_claims("两段报告已更新并放上画布。")
-    assert detect_report_work_claims("报告已生成，见画布。")
-    assert detect_report_work_claims("第二章已修订。")
-    assert not detect_report_work_claims("上一轮的报告已在画布，你想改哪一段？")
-    assert not detect_report_work_claims("完整报告见画布。")
-    assert not detect_report_work_claims("第二季度营业额 12 亿，同比已更新为 +3%。"), "泛「已更新」不紧邻报告名词时不算"
-    assert not detect_report_work_claims("")
+    assert second.index(("user", WITHDRAWN_ANSWER_FACT + "DIRECTIVE_MARKER")) > bounced_idx
+    assert second[-1] == ("user", WITHDRAWN_ANSWER_FACT + "DIRECTIVE_MARKER"), "指令排最末吃 recency（与 hard-bail 同款，review 修）"
 
 
 # ── r5: this turn's context manifest (pinned datasets / attachments / hints) belongs in the tail block, no longer the stable system prompt ──
@@ -1592,56 +1446,7 @@ async def test_lead_keeps_pinned_block_in_prompt_when_prefix_order_off(
     assert not inv.get("turn_context_block")
 
 
-@pytest.mark.asyncio
-async def test_final_answer_gate_bounces_when_every_spawn_delivered_nothing(
-    monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
-) -> None:
-    """r6：派了活但每个 spawn 都没交付（失败 / delivered=none），终答仍说「已修订」⇒ 退回，指令是「没交付」那套。
-    116 当天实例：派了 4 个工具、画布 0 节、收尾守卫只加了注脚。"""
-    from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive
-    from bowhead_core.turn_runner import TurnRunner
-
-    helpers = _turn_runner_helpers()
-    _make_orch, _req = helpers._make_orch, helpers._req
-    captured: dict[str, Any] = {}
-
-    class _Runner:
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-            self.router = getattr(inner, "router", None)
-
-        async def run(self, **kw: Any) -> Any:
-            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
-            return await self._inner.run(**kw)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    orch = _make_orch(subagent_runner=_Runner(fake_subagent_runner))
-    await TurnRunner(orch).run(_req("第二季度"))
-    gate = captured["gate"]
-    failed = SimpleNamespace(tool_name="subagent_spawn", result={"ok": False, "error": "peer_timeout"})
-    empty = SimpleNamespace(tool_name="subagent_spawn", result={"ok": True, "delivered": "none", "payload_summary": {"exec_summary": "取数超时"}})
-    out = await gate("报告已按新口径修订完成，完整报告见画布。", "lead", [failed, empty])
-    # `_req` carries no language context, so the bounce directive uses the English fallback.
-    assert out == final_answer_bounce_directive("en-US", cause="spawn_delivered_nothing")
-    assert "delivered nothing" in out and "subagent_spawn" not in out.split(".")[0]
-    assert await gate("报告已按新口径修订完成。", "lead", [failed]) is not None, "r10：上限是 2，第二次仍退"
-    assert await gate("报告已按新口径修订完成。", "lead", [failed]) is None, "第三次被上限挡住"
-
-
-@pytest.mark.unit
-def test_bounce_directive_has_two_causes() -> None:
-    from bowhead_core.agents.lead_orchestrator import final_answer_bounce_directive
-
-    a = final_answer_bounce_directive("zh-CN", cause="no_spawn")
-    b = final_answer_bounce_directive("zh-CN", cause="spawn_delivered_nothing")
-    assert a != b and "没有派任何 subagent" in a and "没有交付任何内容" in b
-    assert "delivered nothing" in final_answer_bounce_directive("en-US", cause="spawn_delivered_nothing")
-
-
-# ── r6 review fixes: any successful canvas-writing tool counts as delivery; the gate ignores spawns directly rejected by their handler ──
+# ── r6 review fixes: any successful canvas-writing tool counts as delivery ──
 
 
 def _spawn_handler_result(tool_invocations: list[Any], payload: dict[str, Any] | None, *, profile: str = "compute") -> dict[str, Any]:
@@ -1702,55 +1507,14 @@ class _Inv:
 
 @pytest.mark.unit
 def test_thin_revise_payload_with_write_report_counts_as_delivered() -> None:
-    """revise 模式 payload 刻意只有 exec_summary；peer 用 write_report 改了段 ⇒ delivered=payload，闸不退。
-    （两路 review 独立逮到的 P0：原来只数加图工具，这种轮被判 none，Lead 真的「已修订」被退成「没拿到结果」。）"""
-    from bowhead_core.agents.lead_orchestrator import _spawn_delivered_nothing
-
+    """revise 模式 payload 刻意只有 exec_summary；peer 用 write_report 改了段 ⇒ delivered=payload。"""
     invs = [_Inv("bi_query", {"ok": True}), _Inv("write_report", {"ok": True, "section_id": "sec_1", "rev": 3})]
     out = _spawn_handler_result(invs, {"exec_summary": "口径已改为第二季度", "sources": []})
     assert out.get("delivered") == "payload", out
-    assert _spawn_delivered_nothing(SimpleNamespace(tool_name="subagent_spawn", result=out)) is False
     out2 = _spawn_handler_result([_Inv("remove_chart", {"ok": True, "section_id": "sec_c1"})], {"exec_summary": "旧图已收起", "sources": []})
     assert out2.get("delivered") == "payload", "只收起旧图的修订轮同样算交付"
     out3 = _spawn_handler_result([_Inv("write_report", {"error": "not_owner"})], {"exec_summary": "", "sources": []})
     assert out3.get("delivered") == "none", "写失败 + 空 payload 仍是 none"
-    assert _spawn_delivered_nothing(SimpleNamespace(tool_name="subagent_spawn", result=out3)) is True
-
-
-@pytest.mark.asyncio
-async def test_gate_ignores_handler_rejected_spawns_and_has_a_kill_switch(
-    monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
-) -> None:
-    from bowhead_core.turn_runner import TurnRunner
-
-    helpers = _turn_runner_helpers()
-    captured: dict[str, Any] = {}
-
-    class _Runner:
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-            self.router = getattr(inner, "router", None)
-
-        async def run(self, **kw: Any) -> Any:
-            captured["gate"] = getattr(kw["parent_ctx"], "_final_answer_gate", None)
-            return await self._inner.run(**kw)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-    fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    orch = helpers._make_orch(subagent_runner=_Runner(fake_subagent_runner))
-    await TurnRunner(orch).run(helpers._req("第二季度"))
-    gate = captured["gate"]
-    rejected = SimpleNamespace(tool_name="subagent_spawn", result={"error": "canvas_mode is required", "error_kind": "invalid_args"})
-    failed = SimpleNamespace(tool_name="subagent_spawn", result={"ok": False, "error": "peer_timeout"})
-    claim = "报告已按新口径修订完成。"
-    monkeypatch.setenv("BOWHEAD_LEAD_FINAL_ANSWER_GATE", "0")
-    assert await gate(claim, "lead", [rejected, failed]) is None, "回滚绳：置 0 不退"
-    monkeypatch.setenv("BOWHEAD_LEAD_FINAL_ANSWER_GATE", "1")
-    out = await gate(claim, "lead", [rejected, failed])
-    # `_req` carries no language context → English directive.
-    assert out and "delivered nothing" in out, "rejected spawns do not count as dispatched; the rest all failed ⇒ bounce"
 
 
 def test_tool_failures_are_grouped_in_first_seen_order_and_cut_at_a_character_boundary() -> None:

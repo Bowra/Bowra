@@ -17,6 +17,7 @@ from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
 from bowhead_core.agents.capability_protocols import render_capability_protocols
 from bowhead_core.agents.registry import AgentRegistry
 from bowhead_core.events import TurnEventBus
+from bowhead_core.product_identity import product_name
 from bowhead_core.subagent import (
     PROFILES,
     SubagentRunner,
@@ -37,7 +38,20 @@ from bowhead_router import (
     TokenUsage,
 )
 
-_BLOCK_BUILTINS = frozenset({"business-analyst", "financial-analyst", "kb-analyst", "marketing-analyst"})
+# The Community edition ships a separately reviewed consultant composition without the block.
+_COMMUNITY_CONSULTANT = product_name() == "Bowra"
+_BLOCK_BUILTINS = frozenset(
+    {"business-analyst", "compliance-analyst", "financial-analyst", "kb-analyst", "marketing-analyst"}
+    | (set() if _COMMUNITY_CONSULTANT else {"consultant"})
+)
+# Built-in Agents whose Tools select capability modules but which do not receive them, with the reason.
+# Any other built-in Agent whose Tools select a module must declare the block
+# (docs/sprints/builtin-agent-tool-drift-2026-11-23/spike.md, G1).
+_BLOCK_EXEMPT = {
+    "compute": "keeps its own copies in compute.md; the A/B evaluation kept it off (builtin-capability-composition §12.1)",
+    "lead": "delegates data queries and report writing; its prompt is assembled by lead.py, and adding the modules there is a Lead prompt decision",
+    **({"consultant": "the Community consultant is a reviewed overlay composition"} if _COMMUNITY_CONSULTANT else {}),
+}
 _DATA_PROTOCOL = "# Data query protocol"
 # A deployment that still carries the retired allowlist line (kept in .env until
 # the rollback target no longer reads it) must not change any Agent's prompt.
@@ -54,12 +68,35 @@ def _system_profiles() -> dict:
     return {name: manifest_to_profile(registry.get(name)) for name in registry.list_all()}
 
 
-def test_builtin_manifests_declare_the_block_for_exactly_the_four_analysts() -> None:
+def test_builtin_manifests_declare_the_block_for_the_specialists() -> None:
     profiles = _system_profiles()
     assert "compute" in profiles, "positive control: the system registry did not load"
     declared = {name for name, profile in profiles.items() if profile.capability_protocol_block}
     assert declared == _BLOCK_BUILTINS
     assert profiles["compute"].capability_protocol_block is False
+
+
+def test_every_builtin_whose_tools_select_a_module_receives_it_or_is_exempt() -> None:
+    from bowhead_core.agents.capability_protocols import _selected_modules
+
+    registry = AgentRegistry.bootstrap()
+    selecting: set[str] = set()
+    for name in registry.list_all():
+        manifest = registry.get(name)
+        modules = _selected_modules(tuple(manifest.tools.allow))
+        if not modules:
+            continue
+        selecting.add(name)
+        if name in _BLOCK_EXEMPT:
+            assert manifest_to_profile(manifest).capability_protocol_block is False, f"{name} declares the block; remove its exemption"
+            continue
+        refs = sorted(f"{ref.id}@{ref.version}" for ref in modules)
+        assert manifest_to_profile(manifest).capability_protocol_block is True, (
+            f"{name}'s Tools select {refs}, but its manifest does not declare capability_protocol_block. "
+            "Declare it, or add the Agent to _BLOCK_EXEMPT with the reason."
+        )
+    assert selecting >= _BLOCK_BUILTINS, "positive control: the specialists' Tools select modules"
+    assert set(_BLOCK_EXEMPT) <= selecting, "an exempt Agent's Tools no longer select a module; remove its exemption"
 
 
 class _CaptureRouter(Router):

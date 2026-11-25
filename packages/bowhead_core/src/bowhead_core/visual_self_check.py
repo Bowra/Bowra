@@ -6,7 +6,10 @@ Every run (one Lead or helper execution) registers a ``VisualRun``. When its pri
 reads images, each deliverable a Tool call saves (PPTX, PNG/JPEG/WebP, PDF) is rendered; the Tool result carries a content-free
 ``visual_view`` summary and the images wait in ``VisualRun.pending`` for the next model
 request, where they travel as one ``bowhead_visual_view_v1`` message that is never
-persisted. A save the model declares a presentation-only fix (``presentation_fix``) is
+persisted. A render a ``view_file`` call asked for brings back the pages of the same file
+version shown in earlier requests (``earlier_views``, 2026-11-23, page by page since
+2026-11-24), so a model looking screen by screen has the whole file in one request; any other
+request carries no earlier images. A save the model declares a presentation-only fix (``presentation_fix``) is
 compared with the version of that file the model last saw, and content differences are
 returned as ``content_changes`` (decision D12, 2026-11-17: a file built in steps is not
 compared, so filling it is never reported as a change).
@@ -30,7 +33,11 @@ _LOG = logging.getLogger(__name__)
 
 VIEW_FILE_TOOL = "view_file"
 MAX_IMAGES_PER_REQUEST = 4
+# A request carrying a view_file render holds up to this many images, earlier pages of the same file version included.
+MAX_IMAGES_WITH_EARLIER_PAGES = 8
 MAX_SHOWN_PER_RUN = 20
+# Renders whose images reached a model, kept so a later view_file of the same file version can bring their pages back.
+_MAX_SEEN_RENDERS = 8
 RENDER_WAIT_SECONDS = 30
 _MAX_RUNS = 512
 _IMAGE_MIMES = {
@@ -96,6 +103,20 @@ class PendingRender:
     call_id: str
     file: str
     view: dict[str, Any]
+    # (file identity, content digest) of the version shown; None when unknown.
+    version: tuple[str, str] | None = None
+    # A render a view_file call asked for; only these bring back earlier views of the same version.
+    requested: bool = False
+    # The images went out with the last request built (not the not-sent note).
+    sent: bool = False
+
+
+@dataclass
+class EarlierView:
+    """The images of one earlier render that come back with a requested view, in the render's order."""
+
+    render: PendingRender
+    images: list[dict[str, Any]]
 
 
 @dataclass
@@ -118,6 +139,8 @@ class VisualRun:
     # Sandbox captures of HTML and SVG content in this run, by kind and content digest: unchanged
     # content is not captured again (view_file, or the same bytes saved under another name).
     captures: dict[tuple[str, str], Any] = field(default_factory=dict)
+    # Renders whose images reached a model, oldest first (`settle_renders`); one file version each.
+    seen: list[PendingRender] = field(default_factory=list)
 
     def keep_pdf(self, artifact_id: str, pdf: bytes | None) -> None:
         if pdf is None or len(pdf) > _MAX_KEPT_PDF_BYTES:
@@ -259,6 +282,7 @@ async def _render(
     data = rendered.get("data") or await _read(ctx, artifact)
     if data is None:
         return {"status": "not_completed", "reason": "too_large"}, None
+    rendered["sha256"] = hashlib.sha256(data).hexdigest()
     turn_full = run.shown >= MAX_SHOWN_PER_RUN
     if kind == "pptx":
         pdf = rendered.get("pdf")
@@ -281,7 +305,7 @@ async def _render(
             run.slide_hashes[identity] = inspected["hashes"]
             run.keep_pdf(artifact.id, pdf)
         return view, snapshot
-    digest = hashlib.sha256(data).hexdigest()
+    digest = rendered["sha256"]
     if turn_full:
         return {"status": "skipped", "reason": "turn_limit"}, None
     if run.digests.get(identity) == digest:
@@ -431,9 +455,10 @@ async def attach_visual_view(
     started = time.perf_counter()
     identity = _identity(run, artifact)
     snapshot = None
+    render_inputs = dict(rendered or {})
     try:
         with anyio.fail_after(RENDER_WAIT_SECONDS):
-            view, snapshot = await _render(run, ctx, artifact, identity, kind, rendered or {})
+            view, snapshot = await _render(run, ctx, artifact, identity, kind, render_inputs)
     except TimeoutError:
         view = {"status": "not_completed", "reason": "time_limit"}
     except Exception as exc:
@@ -443,7 +468,8 @@ async def attach_visual_view(
     images = view.get("images") or []
     if view["status"] == "shown":
         run.shown += 1
-        run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view))
+        digest = render_inputs.get("sha256")
+        run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view, version=(identity, digest) if digest else None))
     kept = None
     if ignored:
         output["presentation_check"] = {"status": "not_checked", "reason": ignored}
@@ -485,8 +511,69 @@ def take_renders(run: VisualRun) -> list[PendingRender]:
     return taken
 
 
-def render_message(renders: list[PendingRender]) -> Message:
-    """The ``bowhead_visual_view_v1`` message; the runtime-note prefix is added at projection."""
+def earlier_views(run: VisualRun, renders: list[PendingRender]) -> list[EarlierView]:
+    """Pages of the same file versions shown in earlier requests, for the renders a view_file call asked for.
+
+    A render lives for one request, so a model looking through a file screen by screen never had the whole
+    file in front of it and went back and forth (an observed execution: seven views of one unchanged HTML file;
+    docs/sprints/chat-dogfood-findings-2026-11-23/spike.md §3). Whole earlier views within four images left
+    them out after any view of 3–4 pages, and models viewed those pages again: 7 of 30 replays, none with every
+    earlier page in the request (spike §5). So earlier views come back page by page: each page shown at full
+    size once, newest first, then the newest sheet of those pages unless the request already has one, up to
+    ``MAX_IMAGES_WITH_EARLIER_PAGES`` images together with the new renders. Without the sheet, models with every
+    screen at full size still asked for it (1 of 40 replays). Earlier views come only with a
+    requested render, so a request that follows any other step carries no extra images.
+    """
+    versions = {render.version for render in renders if render.requested and render.version is not None}
+    if not versions:
+        return []
+    room = MAX_IMAGES_WITH_EARLIER_PAGES - sum(len(render.view.get("images") or []) for render in renders)
+    full = {(render.version, image["page"]) for render in renders for image in render.view.get("images") or [] if image.get("page")}
+    in_sheets = {(render.version, page) for render in renders for image in render.view.get("images") or [] for page in image.get("pages") or []}
+    earlier = [render for render in reversed(run.seen) if render.version in versions]
+    picked: dict[int, set[int]] = {}
+    for render in earlier:
+        for index, image in enumerate(render.view.get("images") or []):
+            key = (render.version, image.get("page"))
+            if room > 0 and image.get("page") and key not in full:
+                full.add(key)
+                picked.setdefault(id(render), set()).add(index)
+                room -= 1
+    for render in earlier:
+        for index, image in enumerate(render.view.get("images") or []):
+            pages = {(render.version, page) for page in image.get("pages") or []}
+            if room > 0 and pages and not pages <= in_sheets:
+                in_sheets |= pages
+                picked.setdefault(id(render), set()).add(index)
+                room -= 1
+    return [
+        EarlierView(render, [image for index, image in enumerate(render.view.get("images") or []) if index in picked[id(render)]])
+        for render in earlier
+        if id(render) in picked
+    ]
+
+
+def _earlier_shown(images: list[dict[str, Any]]) -> str:
+    """What earlier images show, worded like the render lines: ``screens 2-4, each at 1280x800 px``."""
+    from bowhead_core.visual_view import SHEET_TILE_WIDTH, page_ranges
+
+    parts: list[str] = []
+    pages = [image for image in images if image.get("page")]
+    if pages:
+        noun = str(pages[0].get("label") or "page").split(" ", 1)[0].lower()
+        numbers = [image["page"] for image in pages]
+        width, height = pages[0].get("px") or (0, 0)
+        size = f"{width}x{height} px" if width and height else "full size"
+        parts.append(f"{noun}s {page_ranges(numbers)}, each at {size}" if len(numbers) > 1 else f"{noun} {numbers[0]}, at {size}")
+    parts.extend(f"{image.get('label')} in 1 sheet, each {SHEET_TILE_WIDTH} px wide" for image in images if image.get("pages"))
+    return ", then ".join(parts)
+
+
+def render_message(renders: list[PendingRender], earlier: list[EarlierView] | None = None) -> Message:
+    """The ``bowhead_visual_view_v1`` message; the runtime-note prefix is added at projection.
+
+    ``earlier`` are pages shown in earlier requests that come back with a requested view (`earlier_views`).
+    """
     lines = ["Rendered view of files saved by your recent Tool calls."]
     images: list[ImageRef] = []
     for render in renders:
@@ -520,6 +607,14 @@ def render_message(renders: list[PendingRender]) -> Message:
                 f"(rendered with {', '.join(fonts.get('rendered_with') or []) or 'other fonts'}). Wrapping and widths may "
                 "differ in the user's application; do not change the layout only for that."
             )
+    for item in earlier or []:
+        first = len(images) + 1
+        images.extend(ImageRef(base64=image["base64"], mime=image["mime"]) for image in item.images)
+        numbers = f"image {first}" if len(images) == first else f"images {first}-{len(images)}"
+        lines.append(
+            f"- {item.render.file} (Tool call {item.render.call_id}): {_earlier_shown(item.images)} ({numbers}), shown again "
+            "from an earlier request; the file has not changed since."
+        )
     lines.append(_CHECK_INSTRUCTIONS)
     return Message(role="user", name=VISUAL_VIEW_NOTE_NAME, content="\n".join(lines), images=images)
 
@@ -568,38 +663,70 @@ async def attach_pending_renders(
     if run is None or not run.pending:
         return request, []
     renders = take_renders(run)
-    candidate = _with_message(request, render_message(renders))
-    fits = False
-    try:
-        measured = await router.request_context_budget(
-            agent_type, candidate, profile, user_pref, **({"target": target} if target is not None else {}), stream=stream, reject_over_capacity=False
-        )
-        fits = bool(measured.budget.fits)
-    except Exception as exc:
-        _LOG.info("visual_view.budget_unavailable error_type=%s", type(exc).__name__)
-    if fits:
-        return candidate, renders
+    for render in renders:
+        render.sent = False
+    earlier = earlier_views(run, renders)
+    # Earlier views are dropped before the new renders are: without room for both, send only the new ones.
+    for extra in [earlier, []] if earlier else [[]]:
+        candidate = _with_message(request, render_message(renders, extra))
+        fits = False
+        try:
+            measured = await router.request_context_budget(
+                agent_type,
+                candidate,
+                profile,
+                user_pref,
+                **({"target": target} if target is not None else {}),
+                stream=stream,
+                reject_over_capacity=False,
+            )
+            fits = bool(measured.budget.fits)
+        except Exception as exc:
+            _LOG.info("visual_view.budget_unavailable error_type=%s", type(exc).__name__)
+            break
+        if fits:
+            for render in renders:
+                render.sent = True
+            if extra:
+                _LOG.info("visual_view.earlier_views renders=%d images=%d", len(extra), sum(len(item.images) for item in extra))
+            return candidate, renders
     _LOG.info("visual_view.render status=skipped reason=context_budget files=%d", len(renders))
     return _with_message(request, not_sent_message(renders)), renders
 
 
 def settle_renders(run: VisualRun | None, renders: list[PendingRender]) -> None:
-    """After a model response: the renders reached a model and are dropped."""
+    """After a model response: the renders reached a model and leave the queue.
+
+    Those whose images went out are remembered for `earlier_views`; a newer version of a file replaces the
+    views of its older versions.
+    """
     if run is None or not renders:
         return
     sent = {id(render) for render in renders}
     run.pending = [render for render in run.pending if id(render) not in sent]
+    for render in renders:
+        if not render.sent or render.version is None:
+            continue
+        identity = render.version[0]
+        run.seen = [seen for seen in run.seen if seen.version is not None and (seen.version[0] != identity or seen.version == render.version)]
+        run.seen.append(render)
+    del run.seen[:-_MAX_SEEN_RENDERS]
 
 
-_DECK_VIEW_MESSAGE = (
-    "The editable PPTX is registered and readable. Its rendered view comes with your next request. If the view shows a "
-    "presentation defect you can fix through these arguments without changing text, numbers or data, render again with "
-    "presentation_fix true; otherwise call subagent_return with a concise Chat summary."
+_DECK_VIEW_REGISTERED = "The editable PPTX is registered and readable."
+_DECK_VIEW_NEXT = (
+    "Its rendered view comes with your next request. If the view shows a presentation defect you can fix through these "
+    "arguments without changing text, numbers or data, render again with presentation_fix true; otherwise call "
+    "subagent_return with a concise Chat summary."
 )
 
 
-async def attach_deck_view(receipt: dict[str, Any], ctx: Any, artifact: Any, *, presentation_fix: Any = None) -> dict[str, Any]:
-    """A ``render_deck`` receipt gains the result view and ``visual_view`` of its deck (§2)."""
+async def attach_deck_view(receipt: dict[str, Any], ctx: Any, artifact: Any, *, presentation_fix: Any = None, deck_facts: str = "") -> dict[str, Any]:
+    """A ``render_deck`` receipt gains the result view and ``visual_view`` of its deck (§2).
+
+    ``deck_facts`` (such as a slide count other than the expected one) stays in the message
+    that announces the view.
+    """
     found = run_for(ctx)
     if found is None:
         return receipt
@@ -616,7 +743,7 @@ async def attach_deck_view(receipt: dict[str, Any], ctx: Any, artifact: Any, *, 
         _LOG.warning("visual_view.deck_view_failed error_type=%s", type(exc).__name__)
         receipt["visual_view"] = {"status": "not_completed", "kind": "pptx", "reason": "render_failed"}
     if receipt.get("visual_view", {}).get("status") == "shown":
-        receipt["message"] = _DECK_VIEW_MESSAGE
+        receipt["message"] = " ".join(part for part in (_DECK_VIEW_REGISTERED, deck_facts, _DECK_VIEW_NEXT) if part)
     return receipt
 
 
@@ -748,9 +875,10 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return _refusal("file_kind_not_viewable", f"{VIEW_FILE_TOOL} shows PPTX, PNG, JPEG, WebP, PDF, HTML and SVG files.")
     started = time.perf_counter()
     zero_based = sorted({page - 1 for page in pages}) if pages else None
+    digest = None
     try:
         with anyio.fail_after(RENDER_WAIT_SECONDS):
-            view = await _render_on_request(run, ctx, artifact, kind, zero_based, detail, call_id)
+            view, digest = await _render_on_request(run, ctx, artifact, kind, zero_based, detail, call_id)
     except TimeoutError:
         view = {"status": "not_completed", "reason": "time_limit"}
     except Exception as exc:
@@ -758,7 +886,8 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
         view = {"status": "not_completed", "reason": "render_failed"}
     if view["status"] == "shown":
         run.shown += 1
-        run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view))
+        version = (_identity(run, artifact), digest) if digest else None
+        run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view, version=version, requested=True))
     images = view.get("images") or []
     _LOG.info(
         "visual_view.render source=request kind=%s status=%s reason=%s pages=%s images=%d ms=%.0f",
@@ -774,12 +903,14 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 async def _render_on_request(
     run: VisualRun, ctx: Any, artifact: Any, kind: str, pages: list[int] | None, detail: str, call_id: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str | None]:
+    """(view, content digest of the file viewed)."""
     if run.shown >= MAX_SHOWN_PER_RUN:
-        return {"status": "skipped", "reason": "turn_limit"}
+        return {"status": "skipped", "reason": "turn_limit"}, None
     data = await _read(ctx, artifact)
     if data is None:
-        return {"status": "not_completed", "reason": "too_large"}
+        return {"status": "not_completed", "reason": "too_large"}, None
+    digest = hashlib.sha256(data).hexdigest()
     control: dict[str, Any] = {"pages": pages, "detail": detail}
     saved_now = getattr(artifact, "created_by_turn", None) == getattr(ctx, "turn_id", None)
     snapshot = None
@@ -791,7 +922,7 @@ async def _render_on_request(
 
             pdf, outcome = await render_presentation_pdf(data)
             if pdf is None:
-                return {"status": "not_completed", "reason": _RENDER_REASONS.get(outcome, "renderer_unavailable")}
+                return {"status": "not_completed", "reason": _RENDER_REASONS.get(outcome, "renderer_unavailable")}, digest
             run.keep_pdf(artifact.id, pdf)
         rendered = await _worker({**control, "op": "pptx_render", "render": True}, data, {"pdf": pdf})
         view = rendered.get("view") if rendered is not None else None
@@ -802,15 +933,15 @@ async def _render_on_request(
     elif kind in {"html", "svg"}:
         view, snapshot = await _render_page(run, kind, data, pages, detail)
         if view.get("status") != "shown":
-            return view
+            return view, digest
     else:
         view = await _worker({"op": "image_view"}, data)
     if not isinstance(view, dict):
-        return {"status": "not_completed", "reason": "render_failed"}
+        return {"status": "not_completed", "reason": "render_failed"}, digest
     # Looking at a file saved in this Turn makes it the version the model last saw (D12).
     if saved_now and view.get("status") == "shown" and snapshot is not None:
         run.baselines[_identity(run, artifact)] = {"snapshot": snapshot, "against": f"the version you viewed with call {call_id}"}
-    return view
+    return view, digest
 
 
 def view_file_spec() -> Any:

@@ -121,6 +121,43 @@ def test_failure_plus_short_answer_only_returns_none() -> None:
     assert _aggregate_subagent_payloads(None, bag=[_failure("financial-analyst"), short_ok]) is None
 
 
+def _partial(profile: str = "compute", summary: str = "合并文件没有生成成功") -> dict[str, Any]:
+    return {
+        "subagent_id": f"sub_{profile}_partial",
+        "profile": profile,
+        "payload": {
+            "completion": "partial",
+            "title": "PPT 合并",
+            "exec_summary": summary,
+            "insights": [{"title": "未完成的原因", "narrative": "保存时出现重复的 part 名。"}],
+            "caveats": ["新 .pptx 文件未生成。"],
+        },
+    }
+
+
+def test_redo_of_a_partial_return_replaces_it() -> None:
+    """an observed execution: the same profile redid a partial merge and returned it complete as a Chat
+    answer. The failed attempt must not become the report payload or the summary the chat guard swaps in."""
+    redone = {"subagent_id": "sub_redo", "profile": "compute", "payload": {"delivery_surface": "chat", "exec_summary": "合并完成，新文件 8 页。"}}
+    assert _aggregate_subagent_payloads(None, bag=[_partial("compute"), redone]) is None
+    merged = _aggregate_subagent_payloads(None, bag=[_partial("compute"), _substantive("compute")])
+    assert merged is not None
+    assert merged["exec_summary"] == "整体营收 5.2 亿" and merged["title"] == "营收分析"
+    assert not merged.get("caveats") and not merged.get("insights")
+
+
+def test_partial_return_stays_unless_the_same_profile_later_completes() -> None:
+    """Positive controls: another profile's return, a later partial return or an earlier one replace nothing."""
+    merged = _aggregate_subagent_payloads(None, bag=[_partial("compute"), _substantive("financial-analyst")])
+    assert merged is not None and merged["exec_summary"] == "合并文件没有生成成功"
+    assert merged["caveats"] == ["新 .pptx 文件未生成。"]
+    merged = _aggregate_subagent_payloads(None, bag=[_partial("compute"), _partial("compute", "第二次也没有完成")])
+    assert merged is not None and merged["exec_summary"] == "合并文件没有生成成功"
+    merged = _aggregate_subagent_payloads(None, bag=[_substantive("compute"), _partial("compute", "后来的部分结果")])
+    assert merged is not None and merged["exec_summary"] == "整体营收 5.2 亿"
+    assert merged["caveats"] == ["新 .pptx 文件未生成。"]
+
+
 def test_bail_with_fallback_text_gets_no_caveat_even_with_substantive() -> None:
     """review P2-3：bail 的 fallback 文本会并入正文——再写「执行失败未纳入」就自相矛盾。"""
     bail_with_fb = {

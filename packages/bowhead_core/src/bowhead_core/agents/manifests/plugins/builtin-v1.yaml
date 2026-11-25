@@ -113,6 +113,47 @@ plugins:
       - canvas_add_external_iframe
     prompt_modules:
       - canvas-report-protocol@1
+  - name: reports-canvas
+    version: 3
+    family: general
+    selectable: true
+    listing:
+      zh-CN:
+        name: 报告与画布
+        description: 把分析写成报告，加入图表、图片和洞察。
+        use_when: 要把结果做成带图表的报告时
+        example: 「把这季度的销售情况写成一份带图表的报告」
+      en-US:
+        name: Reports and canvas
+        description: Write analysis into reports with charts, images and insights.
+        use_when: you want the result as a report with charts
+        example: '"Write this quarter''s sales into a report with charts"'
+      de-DE:
+        name: Berichte und Canvas
+        description: Analysen als Berichte mit Diagrammen, Bildern und Erkenntnissen schreiben.
+        use_when: Sie das Ergebnis als Bericht mit Diagrammen möchten
+        example: „Fasse den Umsatz dieses Quartals in einem Bericht mit Diagrammen zusammen“
+      fr-FR:
+        name: Rapports et canevas
+        description: Rédiger l’analyse en rapports avec graphiques, images et constats.
+        use_when: vous voulez le résultat sous forme de rapport avec graphiques
+        example: « Rédige un rapport avec graphiques sur les ventes de ce trimestre »
+    tools:
+      - write_report
+      - remove_report_section
+      - read_report
+      - present_artifacts
+      - add_chart
+      - read_chart
+      - edit_chart
+      - remove_chart
+      - add_image
+      - canvas_add_insight
+      - canvas_add_spec_block
+      - canvas_add_html_artifact
+      - canvas_add_external_iframe
+    prompt_modules:
+      - canvas-report-protocol@1
   - name: designs
     version: 1
     family: general

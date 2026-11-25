@@ -182,6 +182,30 @@ async def test_missing_rows_leave_files_list_usage_and_model_list(store: Artifac
     assert ids(await store.list_for_session(session_id="s1", user_id="u1")) == {kept}
 
 
+async def test_usage_rows_carry_the_values_of_the_full_artifact(store: ArtifactStore) -> None:
+    """The Files usage totals read only kind, size and what ownership is derived from; those values must
+    equal the full artifact's, including an empty workspace normalized to None."""
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("INSERT INTO sessions VALUES ('s1','ws','u1','2026-01-01','2026-01-01')")
+        await db.commit()
+    ids = [
+        await _put(store, "upload.csv", session_id="s1"),
+        await _put(store, "run.csv", kind="tool_data", created_by_turn="t1", canvas_id="cv1"),
+    ]
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE artifacts SET workspace_id='' WHERE id=?", (ids[1],))
+        await db.commit()
+    rows = {row.id: row for row in await store.list_usage_artifacts_for_user("u1")}
+    assert set(rows) == set(ids)
+    for artifact_id in ids:
+        full = await store.get(artifact_id)
+        assert full is not None
+        expected = (full.kind, full.size, full.workspace_id, full.created_by_turn, full.canvas_id, full.created_at)
+        row = rows[artifact_id]
+        assert (row.kind, row.size, row.workspace_id, row.created_by_turn, row.canvas_id, row.created_at) == expected
+    assert rows[ids[1]].workspace_id is None and rows[ids[1]].created_by_turn == "t1"
+
+
 async def test_pinned_snapshot_skips_missing_but_keeps_objects_without_status() -> None:
     from types import SimpleNamespace
 

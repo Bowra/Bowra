@@ -173,10 +173,6 @@ async def test_retained_file_reuse_is_durable_idempotent_and_snapshot_bounded(pr
         turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store, invocations=[repeated_input]
     )
     assert combined.reused_files == 1
-    from bowhead_core.overclaim_guard import overclaimed_kinds
-
-    assert overclaimed_kinds("已有文件可下载。", ledger) == ()
-    assert overclaimed_kinds("文件已生成，可下载。", ledger) == ("file",)
     events = [event for event in bus._events if event.event_type == "tool_result"]
     assert len(events) == 1
     assert events[0].persist_before_delivery

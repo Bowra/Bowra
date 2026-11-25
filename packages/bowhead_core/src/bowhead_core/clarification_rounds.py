@@ -33,6 +33,26 @@ def question_hashes(questions: list, fallback: str | None) -> list[str]:
     return hashes
 
 
+def complete_skipped_questions(answers: list[dict], context: dict) -> list[dict]:
+    """Answer every card question the user left empty with a skip, in card order.
+
+    Every question on the card is optional: the card lets the user continue with some questions unanswered and says
+    the model decides them from context, which is what a skip means. Answers to questions the card did not declare
+    are kept as given so validation still rejects them.
+    """
+    declared = {question_hashes([question], None)[0]: question for question in context.get(QUESTIONS_KEY) or []}
+    grouped: dict[str, list[dict]] = {}
+    for answer in answers:
+        grouped.setdefault(question_hashes([answer], None)[0], []).append(answer)
+    completed: list[dict] = []
+    for identity in context[CONTEXT_KEY]["question_hashes"]:
+        if identity in grouped:
+            completed.extend(grouped.pop(identity))
+        elif identity in declared:
+            completed.append({"question": declared[identity]["question"], "source": "skip", "skipped": True})
+    return completed + [answer for group in grouped.values() for answer in group]
+
+
 def validate_answer_questions(answers: list[dict], context: dict) -> None:
     """Match question identities once while retaining every multi-select answer."""
     expected = context[CONTEXT_KEY]["question_hashes"]

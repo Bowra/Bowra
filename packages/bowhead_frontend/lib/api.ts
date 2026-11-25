@@ -2214,6 +2214,15 @@ function resolveUploadMime(type: string, ext: string): string {
   return type;
 }
 
+/** Legacy binary Office formats no reader opens, with the format to save them as. */
+const LEGACY_OFFICE_SAVE_AS = new Map([
+  [".ppt", ".pptx"],
+  [".pps", ".pptx"],
+  [".pot", ".pptx"],
+  [".doc", ".docx"],
+  [".dot", ".docx"],
+]);
+
 /** Local prevalidation failure reason: kind selects the UI hint; message is a sentence for users. */
 export interface UploadValidationIssue {
   kind: "size" | "unsupported";
@@ -2234,6 +2243,10 @@ export function validateUpload(file: File): UploadValidationIssue | null {
     };
   }
   const ext = file.name.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
+  const saveAs = LEGACY_OFFICE_SAVE_AS.get(ext);
+  if (saveAs) {
+    return { kind: "unsupported", message: t("legacy_office", { ext, target: saveAs }) };
+  }
   const allowedExt = new Set([
     ".md",
     ".txt",
@@ -2576,6 +2589,7 @@ export interface SessionDetailDTO {
       size: number;
       reference_kind?: "result" | null;
       selected_context?: import("./chart/selected-context").ChartSelectedContext | null;
+      presentation_selection?: import("./presentation-selection").PresentationSelection | null;
       bundle_artifact_ids?: string[] | null;
     }>;
     /** chat-hydrate-overhaul: persisted trace steps. Gracefully use [] when absent on legacy turns. */

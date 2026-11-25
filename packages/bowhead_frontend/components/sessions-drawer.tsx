@@ -61,6 +61,7 @@ import {
 } from "@/lib/canvas-navigation-guard";
 import { trackInteraction as track } from "@/lib/metrics";
 import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
+import { resultPinRoute } from "@/lib/result-pins";
 import {
   unifiedWorkResultHref,
   type UnifiedWorkSearchItem,
@@ -679,6 +680,12 @@ export function SessionsDrawer({
             onUndelete={handleUndelete}
             onRename={sessions?.onRename ?? renameSession}
             onNavigateSearchResult={handleSearchResult}
+            resultPinsEnabled
+            onOpenResultPin={(event, pin) => {
+              if (!shouldHandleAppLinkClick(event)) return;
+              event.preventDefault();
+              void handleUnifiedNav(resultPinRoute(pin));
+            }}
             surface="drawer"
             navigationSlot={drawerNavigation()}
             olderSessions={olderSessions}

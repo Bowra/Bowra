@@ -55,12 +55,18 @@ _CLOSE_TAG = "</response_kind>"  # 16 chars
 # response_kind decision. Body cap 200 chars (FE display further caps to 30
 # chars; backend 200 is forgiving safety margin so we still capture truncated
 # value rather than dropping on overflow).
-_HEADLINE_OPEN = "<headline>"
 _HEADLINE_CLOSE = "</headline>"
-# Receiver-only tolerance for the observed model typo; prompts keep canonical spelling.
-_HEADLINE_OPENS = (_HEADLINE_OPEN, "<healine>")
-_HEADLINE_CLOSES = (_HEADLINE_CLOSE, "</healine>")
-_HEADLINE_OPEN_RE = re.compile(r"<(?:headline|healine)>", re.IGNORECASE)
+# Receiver-only tolerance for misspelled headline tags; prompts keep the canonical
+# spelling. Models garble the start of the word and keep its `line` ending: 116
+# answers hold healine, handline, hheadline, highline, hline, headerline and
+# deadline, and a user reported hedline. Any tag of one to six letters followed by `line` counts; the body
+# rules below (single line, within the cap) still decide whether it is a marker.
+_HEADLINE_NAME = r"[a-z]{1,6}line"
+_HEADLINE_OPEN_RE = re.compile(rf"<{_HEADLINE_NAME}>", re.IGNORECASE)
+_HEADLINE_CLOSE_RE = re.compile(rf"</{_HEADLINE_NAME}>", re.IGNORECASE)
+# Text that can still grow into a headline open or close tag (no `>` yet).
+_HEADLINE_TAG_PREFIX_RE = re.compile(r"</?(?:[a-z]{0,6}|[a-z]{1,6}l(?:i(?:ne?)?)?)", re.IGNORECASE)
+_MAX_HEADLINE_CLOSE = len("</>") + 6 + len("line")
 _MAX_HEADLINE_BUFFER = 200
 # Clean full-form match — `<response_kind>chat</response_kind>` (case-insensitive,
 # whitespace tolerated inside tags). Strict (chat|canvas) enum — Unicode
@@ -131,7 +137,7 @@ class ScannerState:
 # a newline before `</headline>` is prose (for example an XML sample in a code
 # block); the streaming filter and the post-hoc sanitizer share this rule.
 _HEADLINE_FULL_RE = re.compile(
-    r"<(?:headline|healine)>([^\n]{0,200}?)</(?:headline|healine)>",
+    rf"<{_HEADLINE_NAME}>([^\n]{{0,200}}?)</{_HEADLINE_NAME}>",
     re.IGNORECASE,
 )
 
@@ -149,7 +155,7 @@ _HEADLINE_FULL_RE = re.compile(
 # tags and non-enum bodies stay as text (same rule as the streaming filter).
 _POST_HOC_SANITIZE_RE = re.compile(
     r"(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*</\s*(?:response_kind|headline)\s*>"
-    r"|<\s*(?:headline|healine)\s*>[^\n]{0,200}?</\s*(?:headline|healine)\s*>",
+    rf"|<\s*{_HEADLINE_NAME}\s*>[^\n]{{0,200}}?</\s*{_HEADLINE_NAME}\s*>",
     re.IGNORECASE,
 )
 # Blank lines directly after a marker that sat on its own line.
@@ -214,7 +220,7 @@ def strip_response_kind_markers(text: str) -> str:
     if not text:
         return text
     lower = text.lower()
-    if "_kind>" not in text and "response_kind" not in lower and "<headline" not in lower and "<healine" not in lower:
+    if "_kind>" not in text and "response_kind" not in lower and "line" not in lower:
         return text
     cleaned, removed = _remove_markers(text)
     if not removed:
@@ -432,10 +438,12 @@ def _headline_open_status(state: ScannerState, tail: str) -> str:
     "prose"    — a newline or the cap came first: never a headline. A single-line
                  overflow still records the first chars as a truncated headline (R-2).
     """
-    opening = next(tag for tag in _HEADLINE_OPENS if tail.lower().startswith(tag))
-    body = tail[len(opening) :]
-    closes = [offset for tag in _HEADLINE_CLOSES if (offset := body.lower().find(tag)) >= 0]
-    close = min(closes, default=-1)
+    opening = _HEADLINE_OPEN_RE.match(tail)
+    if opening is None:
+        return "prose"
+    body = tail[opening.end() :]
+    closing = _HEADLINE_CLOSE_RE.search(body)
+    close = closing.start() if closing else -1
     newline = body.find("\n")
     if close != -1 and (newline == -1 or close < newline) and close <= _MAX_HEADLINE_BUFFER:
         return "complete"
@@ -445,10 +453,10 @@ def _headline_open_status(state: ScannerState, tail: str) -> str:
         return "hold"
     # A body of exactly the cap may still be followed by a close tag that is
     # arriving in pieces: keep holding while the overflow is a prefix of it.
-    overflow = body[_MAX_HEADLINE_BUFFER:].lower()
-    if len(overflow) < len(_HEADLINE_CLOSE) and newline == -1:
-        for split in range(max(0, len(body) - len(_HEADLINE_CLOSE) + 1), _MAX_HEADLINE_BUFFER + 1):
-            if any(tag.startswith(body[split:].lower()) for tag in _HEADLINE_CLOSES):
+    overflow = body[_MAX_HEADLINE_BUFFER:]
+    if len(overflow) < _MAX_HEADLINE_CLOSE and newline == -1:
+        for split in range(max(0, len(body) - _MAX_HEADLINE_CLOSE + 1), _MAX_HEADLINE_BUFFER + 1):
+            if body[split] == "<" and _HEADLINE_TAG_PREFIX_RE.fullmatch(body[split:]):
                 return "hold"
     if state.headline_text is None:
         state.headline_text = body[:_MAX_HEADLINE_BUFFER]
@@ -530,7 +538,6 @@ def _feed_response_kind(
     return safe_text, state
 
 
-_OPEN_PREFIXES = (_OPEN_TAG, *_HEADLINE_OPENS)
 _MISSING_OPEN_PREFIX = "_kind>"
 _KIND_BODY_RE = re.compile(r"\s*(?:chat|canvas)\s*</(?:response_kind|headline)>", re.IGNORECASE)
 _KIND_WORDS = ("chat", "canvas")
@@ -571,7 +578,7 @@ def _classify_angle(state: ScannerState, buf: str, i: int) -> tuple[str, int]:
     if low == _OPEN_TAG:
         action, length = _kind_body_status(tail[len(_OPEN_TAG) :])
         return action, i + len(_OPEN_TAG) + length
-    if any(tail.lower().startswith(tag) for tag in _HEADLINE_OPENS):
+    if _HEADLINE_OPEN_RE.match(tail):
         state.headline_seen_open = True
         m = _HEADLINE_FULL_RE.match(tail)
         if m:
@@ -584,7 +591,10 @@ def _classify_angle(state: ScannerState, buf: str, i: int) -> tuple[str, int]:
             return "drop", i + m.end()
         status = _headline_open_status(state, tail)
         return ("hold", i) if status == "hold" else ("text", i)
-    if any(len(tail) < len(tag) and tag.startswith(tail.lower()) for tag in _OPEN_PREFIXES):
+    if len(tail) < len(_OPEN_TAG) and _OPEN_TAG.startswith(tail.lower()):
+        return "hold", i
+    # An open tag still arriving in pieces (`<hed`, `<headlin`); orphan closes are text.
+    if not tail.startswith("</") and _HEADLINE_TAG_PREFIX_RE.fullmatch(tail):
         return "hold", i
     return "text", i
 

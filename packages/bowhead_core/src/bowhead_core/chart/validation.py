@@ -14,11 +14,17 @@ from bowhead_core.chart.types import (
 
 _MAX_LINE_POINTS = 3000
 
-_LINE_KINDS = frozenset({"line", "area_stacked", "dual_axis", "combo"})
+_LINE_KINDS = frozenset({"line", "area_stacked"})
 
-_MAX_BAR_SLOTS = 1000
+# A bar needs a band of its own and, on a horizontal bar, its name a row of its own. Past 100 categories neither fits a
+# screen or an export page; on 116 every chart above it (113 and 1,082 bars) was a Top N the model never prepared,
+# drawn under a "TOP10" title (chart display range, 2026-11-23). Kinds that draw bars share it, with or without a line.
+_MAX_BAR_CATEGORIES = 100
 
-_TIME_AXIS_KINDS = frozenset({"line", "area_stacked", "bar", "stacked_bar", "dual_axis", "combo", "waterfall"})
+_BAR_KINDS = frozenset({"bar", "hbar", "stacked_bar", "waterfall", "dual_axis", "combo"})
+
+# Slices of one whole stay comparable only in small numbers; more categories read better as a horizontal bar.
+_MAX_PIE_SLICES = 12
 
 _MAX_DRAWN_SERIES = 100
 
@@ -122,18 +128,29 @@ def _undrawable_reason(spec: ChartSpec, shape: dict[str, Any] | None = None) -> 
         from bowhead_core.chart_style_presentation import normalize_chart_for_rendering_v1
 
         _, shape = normalize_chart_for_rendering_v1(spec_to_dict(spec))
+    # Axis slots, **not** distinct values in the data: long tables have one slot per category only when pivotable
+    # (one numeric column + two dimensions + sufficient fill); otherwise each row gets a slot.
+    # Measurement: 12 months × 100 brands × **two measures** cannot pivot, producing 1200 slots with each month repeated 100 times.
+    # Checked before the series count: every pie slice is a series of its own, and the slice limit is the one that applies.
+    slots = int(shape.get("categoryCount") or 0)
+    if spec.kind in _LINE_KINDS and slots > _MAX_LINE_POINTS:
+        return f"Rendered axis slots: {slots}; maximum: {_MAX_LINE_POINTS}"
+    if spec.kind in _BAR_KINDS:
+        # The waterfall's computed total is a bar of its own, not a prepared category.
+        categories = slots - 1 if spec.kind == "waterfall" else slots
+        if categories > _MAX_BAR_CATEGORIES:
+            return (
+                f"{spec.kind} draws at most {_MAX_BAR_CATEGORIES} categories and this result has {categories}; "
+                "save only the categories to show (for example a Top N) before drawing"
+            )
+    if spec.kind == "pie" and slots > _MAX_PIE_SLICES:
+        return (
+            f"pie draws at most {_MAX_PIE_SLICES} slices and this result has {slots}; "
+            "draw more categories as hbar, or merge the smaller ones into one row before drawing"
+        )
     n_series = int(shape.get("seriesCount") or 0)
     if n_series > _MAX_DRAWN_SERIES:
         return f"Rendered series: {n_series}; maximum: {_MAX_DRAWN_SERIES}"
-    if spec.kind in _TIME_AXIS_KINDS:
-        # Actual horizontal-axis slot count, **not** the time-point count in the data: long tables have one slot per time only when pivotable
-        # (one numeric column + two dimensions + sufficient fill); otherwise each row gets a slot.
-        # Measurement: 12 months × 100 brands × **two measures** cannot pivot, producing 1200 slots with each month repeated 100 times.
-        slots = int(shape.get("categoryCount") or 0)
-        # Validate the complete supplied result against the native line/bar limits.
-        slots_cap = _MAX_LINE_POINTS if spec.kind in _LINE_KINDS else _MAX_BAR_SLOTS
-        if slots > slots_cap:
-            return f"Rendered axis slots: {slots}; maximum: {slots_cap}"
     shape_bytes = len(json.dumps(shape, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"))
     if shape_bytes > _MAX_DRAWN_SHAPE_BYTES:
         return f"Rendered structure: {shape_bytes} bytes; maximum: {_MAX_DRAWN_SHAPE_BYTES}"

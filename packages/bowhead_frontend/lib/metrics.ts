@@ -44,6 +44,7 @@ export type MetricName =
   | "bowhead_sidebar_recent_opened_total"
   | "bowhead_sidebar_search_total"
   | "bowhead_sidebar_session_action_total"
+  | "bowhead_result_pin_total"
   | "bowhead_settings_opened_total"
   | "bowhead_admin_destination_opened_total"
   | "bowhead_dark_toggle_total"

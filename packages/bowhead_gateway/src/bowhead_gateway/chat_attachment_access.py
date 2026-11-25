@@ -137,3 +137,11 @@ async def validate_chat_attachment_access(
             await resolve_selected_contexts(artifact_store, refs, user_id=user_id, workspace_id=workspace_id, session_id=session_id or "")
         except (ValueError, TypeError, KeyError, StopIteration) as exc:
             raise ChatAttachmentAccessError(409, "chart_selection_unavailable") from exc
+
+    if any(ref.get("presentationSelection") is not None for ref in refs):
+        from bowhead_core.presentation_selection import resolve_presentation_selections
+
+        try:
+            await resolve_presentation_selections(artifact_store, refs, user_id=user_id, workspace_id=workspace_id, session_id=session_id or "")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ChatAttachmentAccessError(409, "presentation_selection_unavailable") from exc

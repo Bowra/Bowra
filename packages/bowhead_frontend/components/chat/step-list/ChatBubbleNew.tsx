@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import { scanFigureAnchors } from "@/lib/md";
 
 import type { ChartSpec } from "@/lib/chart/types";
@@ -62,7 +64,10 @@ export interface ChatBubbleNewProps {
  * cards open the same object in Results while keeping download independent;
  * it does not add a generic "open canvas" action to prose.
  */
-export function ChatBubbleNew({
+// Memoized for the same reason as `LeadNarrative`: an answer whose text and artifacts did not change is not
+// rendered again when another Turn streams. The figure callback below is created per render, so the skip has to
+// happen here, before it is created.
+export const ChatBubbleNew = memo(function ChatBubbleNew({
   text,
   isStreaming = false,
   artifacts = [],
@@ -131,7 +136,7 @@ export function ChatBubbleNew({
       ) : null}
     </div>
   );
-}
+});
 
 interface ArtifactSlotProps {
   artifact: ChatInlineArtifact;

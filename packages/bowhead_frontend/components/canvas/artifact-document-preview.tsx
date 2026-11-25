@@ -61,6 +61,15 @@ async function fetchDocumentBytes(href: string, maxBytes: number, signal?: Abort
   return data;
 }
 
+/** The rendered PDF of a deck, as the preview fetches it (the editor reuses it, design §7.2). */
+export function fetchPresentationPdf(href: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return fetchDocumentBytes(href, MAX_PDF_PREVIEW_BYTES, signal);
+}
+
+export function isPresentationPreviewBusy(error: unknown): boolean {
+  return error instanceof PresentationPreviewBusyError;
+}
+
 type DocumentProfile = "pdf" | "docx" | "pptx";
 
 export type DocumentPreviewCache = {

@@ -8813,6 +8813,10 @@ class UserStore:
         if privacy_guard:
             payload = [(*row, row[2]) for row in payload]
         async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+            # Take execution's writer lock before the privacy guard reads core. In an implicit
+            # transaction the guard's core lease came first and stayed held while the batch queued
+            # for the writer lock, which kept core's authority writers waiting (1.46 s on 116).
+            await db.execute("BEGIN IMMEDIATE")
             cursor = await db.executemany(
                 "INSERT INTO llm_usage_events(id,team_id,user_id,workspace_id,turn_id,reason,"
                 "agent_type,provider,model,tokens_input,tokens_output,tokens_cached,streamed,created_at) "

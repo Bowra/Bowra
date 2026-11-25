@@ -630,7 +630,7 @@ async def promote_document_chrome(
 
     为什么需要：亲笔路的收尾器（`report_writer_loop._maybe_finish_peer_authored_report`）
     **一次排序都不做**，纯 append ⇒ 封面落在画布最末。
-    生产 t_a06cfbe66ec8 的 seq 76-80 就是它的 append 序：eyebrow→h1→meta→kpi_row→caveats。
+    生产 an observed task 的 seq 76-80 就是它的 append 序：eyebrow→h1→meta→kpi_row→caveats。
     （`_apply_canonical_order` 全仓只有一个调用点，在**代笔路** `compose_canvas_via_writer_loop`，
     亲笔路够不着它。）
 
@@ -795,7 +795,7 @@ async def reorder_canvas_by_slots(
         return []
     # Within a slot, preserve persisted relative order by seq (composer determines chapter order; do not disrupt it).
     ordered = [s.id for s in sorted(owned, key=lambda s: (slot_of_owner[str(s.owner)], s.seq))]
-    # ★G1 (116 device t_c9853b490565): the no-op gate **cannot compare only the relative order of owned sections**.
+    # ★G1 (116 device an observed task): the no-op gate **cannot compare only the relative order of owned sections**.
     # `reorder_sections` means listed sections first + unlisted sections trailing in original relative order, making unowned sections'
     # absolute positions part of the result. Production shape: after early chapters, canvas = [ch0..ch5][charts/code…],
     # then ch6 appends after the charts. Owned sections still appear as ch0..ch6 in slot order,
@@ -1545,7 +1545,7 @@ async def compose_canvas_from_payload(
 
         # M137 follow-up: move payload sections to the canvas top, trailing preexisting streaming sections
         # (subagent add_chart charts / realtime_stream sql_block, etc.)
-        # afterward. Measurement t_97a57d365e04: six charts + 11 sql_block sections appeared above the title,
+        # afterward. Measurement an observed task: six charts + 11 sql_block sections appeared above the title,
         # forcing users through tables/SQL before the structured report, a poor experience.
         # ψ-E r2: reorder skip if no new sections this call (Eng P0 #5).
         # Without skip, eager call's `target_order = []` would push everything
@@ -1755,13 +1755,14 @@ def _build_bi_fallback_sections(
     的 sample_rows. 这个 helper 直接从 sample_rows 提取 KPI 和 data_table section,
     保证 canvas 至少有数据 section.
 
-    返 [{kind: 'kpi_row', cells: [...]}] + 可选 [{kind: 'data_table', ...}].
-    每个 single-row result → kpi cell; multi-row → data_table.
+    返 [{kind: 'data_table', ...}]：每个有数据的 result 一张表（单行结果也是一行的表）。
+
+    No KPI cards (docs/sprints/report-kpi-authorship-2026-11-24): whether a report shows KPI cards is the
+    model's decision, and here no model chose any, so single-row results are shown as one-row tables.
     """
     if not tool_invocations:
         return []
     sections: list[dict[str, Any]] = []
-    kpi_cells: list[dict[str, Any]] = []
     table_rows_per_query: list[tuple[str, list[dict[str, Any]]]] = []
 
     for inv in tool_invocations:
@@ -1782,25 +1783,11 @@ def _build_bi_fallback_sections(
             if not isinstance(sample_rows, list) or not sample_rows:
                 continue
             if len(sample_rows) == 1 and isinstance(sample_rows[0], dict):
-                row = sample_rows[0]
-                non_empty = [(k, v) for k, v in row.items() if v not in (None, "")]
-                if not non_empty:
+                if not any(v not in (None, "") for v in sample_rows[0].values()):
                     continue
-                for k, v in non_empty:
-                    label = f"{query_text}" if len(non_empty) == 1 else f"{query_text} · {k}"
-                    if len(non_empty) == 1:
-                        label = str(k)  # column name is the metric name
-                    kpi_cells.append(
-                        {
-                            "lbl": label[:60],
-                            "val": str(v)[:40],
-                        }
-                    )
+                table_rows_per_query.append((query_text, sample_rows[:1]))
             elif len(sample_rows) > 1:
                 table_rows_per_query.append((query_text, sample_rows[:50]))
-
-    if kpi_cells:
-        sections.append({"kind": "kpi_row", "cells": kpi_cells[:8]})
 
     for query_text, rows in table_rows_per_query[:3]:
         if not rows:

@@ -97,6 +97,16 @@ describe("live code", () => {
     expect(box.querySelector("button")).toBeNull();
   });
 
+  it("keeps the box twelve lines tall while the code grows", () => {
+    // User request on an observed deployment: the box grew line by line and jumped on wrapped long lines. The height lives in CSS
+    // (`.codewrap.is-fixed`), so this checks the box declares it. Mutation: drop `fixedLines` → this test fails.
+    feedLive(helperWriting("t-fixed"));
+    const { container } = render(<AgentTrace steps={views("t-fixed")} peerNames={{ peer_compute: "compute" }} peerProse={{}} />);
+    const box = openHelperRow(container).querySelector(".codewrap") as HTMLElement;
+    expect(box.classList.contains("is-fixed")).toBe(true);
+    expect(box.style.getPropertyValue("--code-lines")).toBe("12");
+  });
+
   it("shows the purpose but no box before the code starts, never the arguments' JSON", () => {
     feedLive(helperWriting("t-early", { withCode: false }));
     const [view] = views("t-early");

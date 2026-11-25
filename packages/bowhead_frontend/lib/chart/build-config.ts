@@ -158,6 +158,10 @@ export function resolveDataLabels(
   if (hasNoReadbackPath(opts)) return true;
   if (opts.forceDataLabels) return true;
   if (recipe?.forceDataLabels) return true;
+  // A horizontal bar's label sits at its own bar end, on its own row, and the chart grows one row per bar: the number
+  // of bars never crowds the labels. The capacity below is for labels that share one line (vertical bars, points).
+  // Without labels, a long hbar showed no values (its value axis scrolls with the plot) and a zero looked like no data.
+  if (spec.kind === "hbar") return nSeries === 1;
   const capacity = recipe?.widthClass === "compact" ? 6 : recipe?.widthClass === "wide" ? 16 : 12;
   return nSeries === 1 && nCats <= capacity;
 }
@@ -2195,7 +2199,12 @@ const EDGE_LABEL_PADDING_PLUGIN: Plugin = (() => {
  * displayed label plus 8px — a label never moves into the bar and is never clipped by the canvas edge.
  *
  * Measured with the label's own font and formatter (same discipline as `EDGE_LABEL_PADDING_PLUGIN`); charts without
- * displayed labels keep their padding. Labels of negative values point left and are not covered here.
+ * displayed labels keep their padding.
+ *
+ * A negative bar's label also points right: datalabels orients every horizontal bar's `end` rightward, so the label
+ * starts at the bar's right edge, the zero line. It needs only what the plot right of zero does not already give.
+ * ☠ 116 (1.7.66): with every value negative the zero line is the plot's right edge, and all 15 labels of a
+ * year-over-year growth chart were cut off by the canvas edge.
  */
 const HBAR_LABEL_RESERVE_PX = 8;
 const HBAR_LABEL_PADDING_PLUGIN: Plugin = {
@@ -2206,8 +2215,11 @@ const HBAR_LABEL_PADDING_PLUGIN: Plugin = {
     if ((chart.options as { indexAxis?: string }).indexAxis !== "y") return;
     const count = chart.data.labels?.length ?? 0;
     if (count < 1) return;
+    const pad = (chart.options.layout?.padding ?? {}) as { right?: number };
+    const curRight = typeof pad.right === "number" ? pad.right : 0;
     const ctx = chart.ctx;
     let widest = 0;
+    let negativeNeed = 0;
     ctx.save();
     chart.data.datasets.forEach((ds, datasetIndex) => {
       const dl = (ds as { datalabels?: Record<string, unknown> }).datalabels;
@@ -2218,7 +2230,10 @@ const HBAR_LABEL_PADDING_PLUGIN: Plugin = {
         const read = (value: unknown) => (typeof value === "function" ? (value as (a: unknown) => unknown)(arg) : value);
         if (!read(dl.display)) continue;
         const value = data[dataIndex];
-        if (typeof value === "number" && value < 0) continue;
+        const negative = typeof value === "number" && value < 0;
+        const meta = negative ? chart.getDatasetMeta(datasetIndex) : undefined;
+        // A stacked segment does not start at the zero line; its label is the stack total's (see buildBar).
+        if (meta?._stacked) continue;
         const text = typeof dl.formatter === "function"
           ? (dl.formatter as (v: unknown, a: unknown) => unknown)(value, arg)
           : String(value ?? "");
@@ -2226,13 +2241,24 @@ const HBAR_LABEL_PADDING_PLUGIN: Plugin = {
         const font = read(dl.font) as { family?: string; size?: number; weight?: number } | undefined;
         const offset = read(dl.offset);
         ctx.font = `${font?.weight ? `${font.weight} ` : ""}${font?.size ?? 12}px ${font?.family ?? CHART_FONT_SANS_FALLBACK}`;
-        widest = Math.max(widest, ctx.measureText(text).width + (typeof offset === "number" ? offset : 4));
+        const width = ctx.measureText(text).width + (typeof offset === "number" ? offset : 4);
+        if (!negative) {
+          widest = Math.max(widest, width);
+          continue;
+        }
+        const share = shareRightOfBase(meta?.vScale);
+        const area = chart.chartArea;
+        if (share === null || !area) continue;
+        // Plot width without this plugin's padding, so the result does not depend on its own effect.
+        const naturalWidth = area.right - area.left + curRight;
+        // With padding p the plot is (naturalWidth - p) wide and zero sits share·(naturalWidth - p) from its right end;
+        // the label fits when that distance plus p covers it: p ≥ (width + reserve − share·naturalWidth) / (1 − share).
+        negativeNeed = Math.max(negativeNeed, (width + HBAR_LABEL_RESERVE_PX - share * naturalWidth) / (1 - share));
       }
     });
     ctx.restore();
-    const pad = (chart.options.layout?.padding ?? {}) as { right?: number };
-    const curRight = typeof pad.right === "number" ? pad.right : 0;
-    const nextRight = widest > 0 ? Math.ceil(widest + HBAR_LABEL_RESERVE_PX) : curRight;
+    const need = Math.max(widest > 0 ? widest + HBAR_LABEL_RESERVE_PX : 0, negativeNeed);
+    const nextRight = need > 0 ? Math.ceil(need) : curRight;
     if (Math.abs(nextRight - curRight) <= 1) return;
     chart.options.layout = { ...chart.options.layout, padding: { ...pad, right: nextRight } };
     guard._hbarPadBusy = true;
@@ -2243,6 +2269,20 @@ const HBAR_LABEL_PADDING_PLUGIN: Plugin = {
     }
   },
 };
+
+/**
+ * Share of the value axis lying right of the bars' base (Chart.js linear base value: 0 inside the range, else the
+ * nearer end). 0 = the base is the plot's right edge. Null when the scale has no usable range.
+ */
+function shareRightOfBase(scale: { min?: number; max?: number } | undefined): number | null {
+  const min = scale?.min;
+  const max = scale?.max;
+  if (typeof min !== "number" || typeof max !== "number" || !Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (max <= min) return null;
+  const base = max < 0 ? max : min > 0 ? min : 0;
+  const share = (max - base) / (max - min);
+  return share < 1 ? share : null;
+}
 
 /**
  * Upward label nearest the canvas top: return `[anchor y in this layout, label box height + gap]` for `topLabelPadding`.

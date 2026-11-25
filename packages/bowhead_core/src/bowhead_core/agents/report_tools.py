@@ -178,7 +178,7 @@ def write_report_enabled() -> bool:
 
 
 def register_report_tools(registry: Any) -> None:
-    """Register read_report + write_report. Called (flag-gated) at startup."""
+    """Register read_report, write_report and remove_report_section. Called (flag-gated) at startup."""
     from bowhead_core.chart.edit_guard import coordinate_chart_handler
 
     registry.register(
@@ -189,6 +189,8 @@ def register_report_tools(registry: Any) -> None:
         )
     )
     registry.register(ToolSpec(schema=_write_report_schema(), handler=coordinate_chart_handler(_write_report)))
+    # Removal may delete charts with a section, so it waits on chart edits like write_report.
+    registry.register(ToolSpec(schema=_remove_report_section_schema(), handler=coordinate_chart_handler(_remove_report_sections)))
 
 
 def _resolve_writer_id(ctx: Any) -> str:
@@ -798,6 +800,75 @@ async def _append_chapters_after(
     return ids
 
 
+async def _place_following_chapters(
+    canvas_store: Any,
+    ctx: Any,
+    canvas_id: str,
+    turn_id: str | None,
+    writer: str,
+    kind: str,
+    target_id: str,
+    chapters: list[Any],
+    payloads: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Place the chapters after the first one of an explicit multi-chapter update (§2.4).
+
+    A chapter whose title matches another current chapter of this writer is patched in place; any
+    other chapter is inserted after the chapter before it, starting at the target. Without the
+    match, a writer that resent its whole body under its first section's id added every other
+    chapter a second time (116 `an observed task`, business and financial chapters). As in the
+    whole-body resend, chapters the new content leaves out are kept, and the result names them.
+    """
+    from bowhead_core.report_chapters import normalize_title
+
+    own = [
+        section
+        for section in await canvas_store.list_sections(canvas_id)
+        if section.id != target_id
+        and getattr(section, "owner", None) == writer
+        and section.kind == kind
+        and not getattr(section, "superseded", False)
+    ]
+    mine: dict[str, Any] = {}
+    for section in own:
+        meta = (section.payload or {}).get("_meta") if isinstance(section.payload, dict) else None
+        title = normalize_title(str((meta or {}).get("chapter_title") or ""))
+        if title:
+            mine.setdefault(title, section)
+    placed: list[str] = []
+    updated: list[str] = []
+    appended: list[str] = []
+    anchor = target_id
+    for chapter, chapter_payload in zip(chapters, payloads, strict=False):
+        match = mine.pop(normalize_title(chapter.title), None) if chapter.title else None
+        if match is not None:
+            res = await _do_update(canvas_store, match.id, chapter_payload, match.rev, writer, turn_id, ctx=ctx, canvas_id=canvas_id)
+            if isinstance(res, dict) and not res.get("ok"):
+                return {**res, "section_ids": [target_id, *placed], "updated": updated, "appended": appended}
+            updated.append(match.id)
+            anchor = match.id
+        else:
+            new_ids = await _append_chapters_after(canvas_store, ctx, canvas_id, turn_id, writer, kind, [chapter_payload], after_section_id=anchor)
+            appended.extend(new_ids)
+            anchor = new_ids[-1] if new_ids else anchor
+        placed.append(anchor)
+    return {
+        "section_ids": [target_id, *placed],
+        "updated": updated,
+        "appended": appended,
+        **_not_in_body([section for section in own if section.id not in updated]),
+    }
+
+
+_NOT_IN_BODY_NOTE = "These sections of yours were not in this body; they remain in the report unchanged."
+
+
+def _not_in_body(sections: list[Any]) -> dict[str, Any]:
+    """The writer's own sections a resent body matched none of: they stay in the report as they were."""
+    left = [{"section_id": section.id, "title": _outline_title(section)} for section in sections]
+    return {"not_in_body": left, "not_in_body_note": _NOT_IN_BODY_NOTE} if left else {}
+
+
 async def _reconcile_chapters(
     canvas_store: Any,
     ctx: Any,
@@ -854,6 +925,7 @@ async def _reconcile_chapters(
         "owner": writer,
         # B2-2: old text recommended canvas_delete_section, unavailable to compute (canvas-writer only): unreachable tool.
         "hint": "整篇重投已按章合并：同标题的章就地更新，新章追加在末尾，旧章保留、不会自动删除。",
+        **_not_in_body([s for s in existing if s.id not in touched]),
     }
 
 
@@ -867,6 +939,146 @@ async def _write_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "The section was saved without these values: a bare number is not a source id. "
             "A source id is the artifact_id or call id returned with a result."
         )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# remove_report_section (docs/sprints/report-own-section-removal-2026-11-24/tech-design.md)
+# ─────────────────────────────────────────────────────────────
+REMOVE_REPORT_SECTION = "remove_report_section"
+_REMOVE_MAX_IDS = 12
+
+
+def _remove_report_section_schema() -> ToolSchema:
+    return ToolSchema(
+        name=REMOVE_REPORT_SECTION,
+        description=(
+            "Remove report sections you wrote in this Turn, by the section_id that write_report or read_report gave you. "
+            "Charts and images that only those sections reference are removed with them. Sections written by others or "
+            "in earlier Turns cannot be removed, and you keep at least one section of your own: to change your last "
+            "section, rewrite it with write_report."
+        ),
+        input_schema={
+            "type": "object",
+            "required": ["section_ids"],
+            "properties": {
+                "section_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": _REMOVE_MAX_IDS,
+                    "description": "Ids of your own sections to remove.",
+                },
+            },
+        },
+    )
+
+
+async def _emit_section_removed(ctx: Any, canvas_id: str, section_id: str) -> None:
+    """`canvas.section_removed` for a deleted section, so the live Canvas drops it as the store did. Best-effort."""
+    bus = getattr(ctx, "parent_bus", None)
+    if bus is None:
+        return
+    turn_id = getattr(ctx, "turn_id", None)
+    try:
+        await bus.emit(_event(turn_id, "canvas.section_removed", {"turn_id": turn_id, "canvas_id": canvas_id, "section_id": section_id}))
+    except Exception as e:  # noqa: BLE001 - the deletion is already persisted
+        logger.warning("remove_report_section: canvas.section_removed emit failed: %s", e)
+
+
+def _forget_removed_sections(ctx: Any, writer: str, removed: set[str]) -> None:
+    """Drop deleted ids from the writer's continuation record, so a later write never targets them."""
+    my = _my_sections_map(ctx)
+    if not my:
+        return
+    for key in [key for key in my if key[0] == writer]:
+        recorded = my[key]
+        kept = [sid for sid in ([recorded] if isinstance(recorded, str) else list(recorded or [])) if sid not in removed]
+        if kept:
+            my[key] = kept
+        else:
+            my.pop(key, None)
+
+
+def _removal_rejection(section: Any, writer: str, turn_id: str | None) -> str | None:
+    if section is None or getattr(section, "superseded", False):
+        return "not_found"
+    if getattr(section, "owner", None) != writer:
+        return "not_yours"
+    if (getattr(section, "turn_id", None) or None) != turn_id:
+        return "earlier_turn"
+    if getattr(section, "kind", "") not in _WRITE_KINDS:
+        return "not_report_text"
+    return None
+
+
+async def _remove_report_sections(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Delete report text the caller wrote in this Turn (hard delete with a restorable revision)."""
+    reject_unclassified_direct_mutation("report.remove_report_section")
+    from bowhead_core.chart.edit_guard import blocked, denial
+
+    protected = await blocked(ctx)
+    if protected:
+        return {"ok": False, **denial(history_unavailable="chart_guard_history_unavailable" in protected)}
+    raw = args.get("section_ids")
+    if isinstance(raw, str):
+        raw = [raw]
+    ids = list(dict.fromkeys(str(item).strip() for item in raw if isinstance(item, str) and item.strip())) if isinstance(raw, list) else []
+    if not ids:
+        return {"ok": False, "error": "section_ids_required", "hint": "Pass the section_id of each of your sections to remove."}
+    ids = ids[:_REMOVE_MAX_IDS]
+    canvas_store = getattr(ctx, "canvas_store", None)
+    session_id = getattr(ctx, "session_id", None)
+    turn_id = getattr(ctx, "turn_id", None)
+    canvas = await canvas_store.get_canvas_by_session(session_id) if canvas_store is not None and session_id else None
+    if canvas is None:
+        return {"ok": False, "error": "nothing_removed", "rejected": [{"section_id": sid, "reason": "not_found"} for sid in ids]}
+    writer = _resolve_writer_id(ctx)
+    removed: list[dict[str, str]] = []
+    removed_figures: list[str] = []
+    rejected: list[dict[str, str]] = []
+    async with _guard_lock(canvas.id):
+        sections = await canvas_store.list_sections(canvas.id, include_hidden=True)
+        by_id = {section.id: section for section in sections}
+        admitted = []
+        for sid in ids:
+            reason = _removal_rejection(by_id.get(sid), writer, turn_id)
+            if reason:
+                rejected.append({"section_id": sid, "reason": reason})
+            else:
+                admitted.append(by_id[sid])
+        admitted_ids = {section.id for section in admitted}
+        remaining = [section for section in sections if _removal_rejection(section, writer, turn_id) is None and section.id not in admitted_ids]
+        if admitted and not remaining:
+            return {
+                "ok": False,
+                "error": "keeps_none",
+                "hint": "Removing these would leave you no section in the report. Keep one and rewrite it with write_report.",
+                "rejected": rejected,
+                "your_sections": [{"section_id": section.id, "title": _outline_title(section)} for section in admitted],
+            }
+        deleted_ids: set[str] = set()
+        for section in admitted:
+            deleted = await canvas_store.delete_section(section_id=section.id, by_turn_id=turn_id, canvas_id=canvas.id, cascade=True)
+            if not deleted:
+                rejected.append({"section_id": section.id, "reason": "not_found"})
+                continue
+            removed.append({"section_id": section.id, "title": _outline_title(section)})
+            removed_figures.extend(sid for sid in deleted if sid != section.id)
+            deleted_ids.update(deleted)
+            for sid in deleted:
+                await _emit_section_removed(ctx, canvas.id, sid)
+        _forget_removed_sections(ctx, writer, deleted_ids)
+    result: dict[str, Any] = {
+        "ok": bool(removed),
+        "removed": removed,
+        "rejected": rejected,
+        "your_sections": [{"section_id": section.id, "title": _outline_title(section)} for section in remaining],
+    }
+    if removed_figures:
+        result["removed_figures"] = removed_figures
+    if not removed:
+        result["error"] = "nothing_removed"
     return result
 
 
@@ -961,7 +1173,7 @@ async def _write_report_section(args: dict[str, Any], ctx: Any) -> dict[str, Any
     # D6 hides every section of a chat-delivered turn, but those figures are
     # still real sections of this canvas. A later report that anchors them by
     # id ("turn the analysis above into a report, with charts") must get them
-    # back under the same id. 116 `t_6846eb7b274a` rejected four such anchors
+    # back under the same id. 116 `an observed task` rejected four such anchors
     # as "unknown" three times, then redrew the same charts. Superseded figures
     # stay unreferenceable; they are collected only to explain the rejection.
     _all_sections = await canvas_store.list_sections(canvas.id, include_hidden=True)
@@ -1084,7 +1296,7 @@ async def _write_report_section(args: dict[str, Any], ctx: Any) -> dict[str, Any
         # A rejection has to carry the right answer, otherwise the model can
         # only guess: the old hint named `read_report` -- a tool the writer
         # prompt tells it not to call -- and never said which ids were allowed,
-        # so 116 `t_6846eb7b274a` resent the same bytes three times.
+        # so 116 `an observed task` resent the same bytes three times.
         valid = sorted(referenceable_fig_ids)
         replaced = [fid for fid in bad if fid in superseded_fig_ids]
         parts: list[str] = []
@@ -1126,14 +1338,23 @@ async def _write_report_section(args: dict[str, Any], ctx: Any) -> dict[str, Any
         _chapters_upd = _split_for_write(kind, content)
         if _chapters_upd is not None and len(_chapters_upd) > 1:
             _payloads_upd = _chapter_payloads(_chapters_upd, payload, _baked_unv)
-            _res = await _do_update(
-                canvas_store, section_id, _payloads_upd[0], expected_rev, writer, turn_id, ctx=ctx, canvas_id=canvas.id, old_sec=_old_sec
-            )
-            if isinstance(_res, dict) and _res.get("ok"):
-                _extra = await _append_chapters_after(
-                    canvas_store, ctx, canvas.id, turn_id, writer, kind, _payloads_upd[1:], after_section_id=section_id
+            # Serialized with the continuation guard: both read this writer's chapters before placing new ones.
+            async with _guard_lock(canvas.id):
+                _res = await _do_update(
+                    canvas_store, section_id, _payloads_upd[0], expected_rev, writer, turn_id, ctx=ctx, canvas_id=canvas.id, old_sec=_old_sec
                 )
-                _res = {**_res, "section_ids": [section_id, *_extra], "chapters": len(_payloads_upd)}
+                if isinstance(_res, dict) and _res.get("ok"):
+                    _placed = await _place_following_chapters(
+                        canvas_store, ctx, canvas.id, turn_id, writer, kind, section_id, _chapters_upd[1:], _payloads_upd[1:]
+                    )
+                    # A refused chapter patch reports its own error; the target and the chapters placed before it stay written.
+                    _res = {**_res, **_placed, "chapters": len(_payloads_upd), **({"ok": False} if "error" in _placed else {})}
+                    _my = _my_sections_map(ctx)
+                    _recorded = _my.get((writer, kind)) if _my is not None else None
+                    _recorded_ids = [_recorded] if isinstance(_recorded, str) else list(_recorded or [])
+                    if _my is not None and section_id in _recorded_ids and _placed.get("appended"):
+                        # A later call without section_id reconciles these chapters too instead of adding them again.
+                        _my[(writer, kind)] = [*_recorded_ids, *_placed["appended"]]
             _consume_t7_pending(ctx, writer, kind, _res)
             _note_write_ok(ctx, writer, _res)
             return _res

@@ -881,6 +881,18 @@ describe("★★ 116 dogfood 逮到的两条", () => {
     expect(m.current?.what).toBe("整理结果");
   });
 
+  it("words the renamed return heading from the catalog too", () => {
+    // an observed deployment dogfood (an observed task): the step's real heading is "智能体完成" since the 2026-09-20 rename,
+    // so the band read "正在智能体完成"; the fixtures above still carry the old heading.
+    // Mutation: remove `/^\s*智能体完成\s*$/` from `INTERNAL_TOKENS` → this test fails.
+    const m = buildBandModel({
+      steps: [step({ stepId: "r", state: "active", toolName: "subagent_return", headerZh: "智能体完成", subagentId: "p1" })],
+      peerNames: { p1: "compute" },
+    });
+    expect(m.current?.what).toBe("整理结果");
+    expect(stripInternal("智能体完成（3 次工具 / 1200 tok）")).toBe("智能体完成（3 次工具 / 1200 tok）");
+  });
+
   it("★★ 当前行取**不带「正在」**的名字（渲染层会包一层「正在{what}」）", () => {
     // Catalog `activeName` already contains `正在`; wrapping it with `band_doing` produces
     // `正在正在整理结果`. Previously backend headings almost always prevented catalog fallback.
@@ -1318,5 +1330,19 @@ describe("Turn visibility FR1: history rows say what the step did", () => {
       ],
     });
     expect(m.history.map((r) => r.label)).toEqual(["查询数据", "运行代码"]);
+  });
+
+  it("keeps the saved file type in a finished step's summary", () => {
+    // an observed deployment dogfood (an observed task): a code step that saved one CSV read "运行成功 · 1 输出" in the band
+    // and "运行成功 · 1 输出（CSV）" in the trace; the heading-slug strip took "（CSV）" off the summary.
+    // Mutation: run the summary through `stripInternal` again → this test fails.
+    const m = buildBandModel({
+      steps: [
+        step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", summary: "运行成功 · 1 输出（CSV）" }),
+        step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", summary: "exit_code=0" }),
+        step({ stepId: "c", state: "active" }),
+      ],
+    });
+    expect(m.history.map((r) => r.meta)).toEqual(["运行成功 · 1 输出（CSV）", ""]);
   });
 });

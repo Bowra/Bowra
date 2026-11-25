@@ -260,7 +260,7 @@ def surface_sandbox_tool_name(tool_name: str, args: Any) -> str:
     """展示面工具名——沙箱三入口一律收敛回 `python_sandbox`（批 5ⓑ既定处置，
     同 `subagent._surface_inner_skill_name`）。
 
-    真实理由（2026-08-29 真机 `t_1831b22ed3c1`：Sources 第 1 条显示 `python_exec`，
+    真实理由（2026-08-29 真机 `an observed task`：Sources 第 1 条显示 `python_exec`，
     e2-r2 让懒注册条目首次真产出后暴露）：`label` 直接渲给用户，内部入口名对读者
     没有意义；`tool` 收敛则让同一次沙箱调用在两条登记路（peer 自报 / 系统懒注册）
     上取值一致。
@@ -274,7 +274,7 @@ def surface_sandbox_tool_name(tool_name: str, args: Any) -> str:
 
 # Tools that read or change the report itself. Reading or editing a chart already in the report fetches no data,
 # so naming one of them does not make that chart a new source; its data is already listed.
-REPORT_SELF_TOOLS = frozenset({"read_report", "write_report", "read_chart", "edit_chart", "add_chart", "remove_chart"})
+REPORT_SELF_TOOLS = frozenset({"read_report", "write_report", "remove_report_section", "read_chart", "edit_chart", "add_chart", "remove_chart"})
 
 
 def revision_payload_sources(payload_sources: Any, tool_invocations: Any) -> list[dict[str, Any]]:
@@ -284,7 +284,7 @@ def revision_payload_sources(payload_sources: Any, tool_invocations: Any) -> lis
     existing source in new words and without an ``artifact_id``: "Python 沙箱质数计算" became
     "primes_by_interval.csv（…Python 计算产出）", and a recolor cited the chart it read. Sources dedupes by artifact,
     label or (tool, query) and cannot match free wording, so every presentation edit added a row for the same
-    data (116 1.7.32 dogfood D2 and the same-day HEX recheck). Keep an entry that names an artifact, one without
+    data (an observed deployment dogfood D2 and the same-day HEX recheck). Keep an entry that names an artifact, one without
     a tool (nothing to check it against), and one whose tool this run invoked and that is not a report tool.
     """
     invoked = {
@@ -1171,7 +1171,7 @@ class TurnSourcesRegistry:
                     if entry.get(k) is not None and existing.get(k) is None:
                         existing[k] = entry[k]
                 return existing_n
-            # ★Regression check 1.0.93 P3 (t_c8959fde27ca): peer-reported payload sources
+            # ★Regression check 1.0.93 P3 (an observed task): peer-reported payload sources
             # (label present, artifact_id absent) and actual tool results for the same query are the same source,
             # but aid lookup misses aidless entries, producing duplicate pairs in Sources; the aidless
             # row renders "Source is currently unavailable". Bridge by (tool, query):

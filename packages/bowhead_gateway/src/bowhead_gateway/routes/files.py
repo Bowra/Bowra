@@ -1765,7 +1765,9 @@ async def build_file_preview(store: ArtifactStore, art: Any, *, mode: str, max_r
             import io as _io
 
             delim = "," if art.mime == "text/csv" else "\t"
-            text_data = data.decode("utf-8", errors="replace")
+            # `utf-8-sig`: CSVs saved for Excel start with a BOM, which would otherwise stay in
+            # the first column name and fail every consumer that matches columns by name.
+            text_data = data.decode("utf-8-sig", errors="replace")
             reader = _csv.DictReader(_io.StringIO(text_data), delimiter=delim)
             cols = list(reader.fieldnames or [])
             rows: list[dict[str, Any]] = []

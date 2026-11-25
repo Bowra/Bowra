@@ -56,6 +56,7 @@ import { SessionRenameDialog } from "./session-rename-dialog";
 import {
   RecoveryGroups,
   type RecoveryFocusRequest,
+  type RecoveryGroupEntry,
   type RecoveryRenderGroup,
 } from "./recovery-groups";
 import { CharIcon } from "@/components/char-icon";
@@ -63,6 +64,16 @@ import { LucideGlyph } from "@/components/icon-refresh";
 import { ChevronDown } from "lucide-react";
 import { OlderSessionsRow, type OlderSessionsPaging } from "./older-sessions-row";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
+import { appPath } from "@/lib/base-path";
+import { fileExtensionLabel, fileTypeIcon } from "@/lib/file-type-icon";
+import { resultPinErrorText } from "@/lib/use-result-pin-actions";
+import {
+  resultPinRoute,
+  resultPinTitle,
+  unpinResult,
+  useResultPins,
+  type ResultPin,
+} from "@/lib/result-pins";
 
 export type SessionMutationResult = "success" | "cancelled";
 
@@ -103,6 +114,16 @@ interface WorkRecoveryProps {
   listStatusSlot?: ReactNode;
   /** Older-session paging (spec 4a): renders the "Show older" row at the end of the list when present. */
   olderSessions?: OlderSessionsPaging;
+  /**
+   * Show pinned files and reports in the pinned group (result-pins tech design §5.2). The list is loaded here for the
+   * given Space; every pinned row then carries its kind's icon.
+   */
+  resultPinsEnabled?: boolean;
+  /** Open a pinned result (the row is a link to `resultPinRoute`); the owner closes overlays and navigates. */
+  onOpenResultPin?: (
+    event: MouseEvent<HTMLAnchorElement>,
+    pin: ResultPin,
+  ) => void;
 }
 
 export function WorkRecovery({
@@ -127,9 +148,14 @@ export function WorkRecovery({
   navigationSlot,
   listStatusSlot,
   olderSessions,
+  resultPinsEnabled = false,
+  onOpenResultPin,
 }: WorkRecoveryProps) {
   const t = useTranslations("session");
+  const tPins = useTranslations("result_pins");
   const lifecycleErrorText = useSessionLifecycleErrorText();
+  const resultPins = useResultPins(workspaceId, { enabled: resultPinsEnabled });
+  const railListDate = useRailListDate();
   const locale = useLocale();
   // Behavior batch A: disabled items keep their label with the reason on a second line.
   // Session deletion needs no confirmation or “…”; allow 8-second undo (2026-08-24 triage, 2026-09-27 user confirmation: undoable deletes need no confirmation).
@@ -694,8 +720,10 @@ export function WorkRecovery({
     item: SessionItem,
     {
       onActionMenuOpenChange,
+      withIcon = false,
     }: {
       onActionMenuOpenChange?: (open: boolean) => void;
+      withIcon?: boolean;
     } = {},
   ) => (
     <div
@@ -722,6 +750,7 @@ export function WorkRecovery({
         aria-current={currentSessionId === item.id ? "page" : undefined}
         title={item.title}
       >
+        {withIcon ? <Chat aria-hidden className="unified-work-item-icon" /> : null}
         {/* Unread is the bold title alone; the state is spoken through hidden text. */}
         <span className="unified-work-copy">
           <span className="unified-work-title">{item.title}</span>
@@ -827,12 +856,110 @@ export function WorkRecovery({
     );
   };
 
+  const unpinResultRow = async (pin: ResultPin) => {
+    try {
+      await unpinResult(pin.kind, pin.pin_id);
+      track("bowhead_result_pin_total", { action: "unpin", kind: pin.kind, surface: "sidebar" });
+      toast({ kind: "success", text: tPins("unpinned_toast") });
+    } catch (error) {
+      track("bowhead_result_pin_total", { action: "unpin_failed", kind: pin.kind, surface: "sidebar" });
+      toast({ kind: "error", text: resultPinErrorText(tPins, error) });
+    }
+  };
+
+  const renderResultPin = (
+    pin: ResultPin,
+    {
+      onActionMenuOpenChange,
+    }: {
+      onActionMenuOpenChange?: (open: boolean) => void;
+    } = {},
+  ) => {
+    const title = resultPinTitle(pin);
+    const Icon = pin.kind === "report" ? Doc : fileTypeIcon(pin.title, pin.mime ?? "");
+    const kindLabel = pin.kind === "report"
+      ? tPins("report")
+      : fileExtensionLabel(pin.title) || tPins("file");
+    const versionLabel = pin.kind === "file" && (pin.version_no ?? 1) > 1
+      ? tPins("version", { n: pin.version_no ?? 1 })
+      : null;
+    const date = railListDate(pin.changed_at);
+    return (
+      <div
+        className="unified-work-item has-more"
+        key={`${pin.kind}:${pin.pin_id}`}
+        data-result-pin={`${pin.kind}:${pin.pin_id}`}
+      >
+        <a
+          className="unified-work-item-main"
+          href={appPath(resultPinRoute(pin))}
+          title={title}
+          onClick={(event) => {
+            track("bowhead_sidebar_recent_opened_total", {
+              source: "pinned",
+              kind: pin.kind,
+              surface,
+            });
+            onOpenResultPin?.(event, pin);
+          }}
+        >
+          <Icon aria-hidden className="unified-work-item-icon" />
+          <span className="unified-work-copy">
+            <span className="unified-work-title">{title}</span>
+            <span className="unified-work-meta">
+              <span className="unified-work-meta-signals">
+                {versionLabel ? `${kindLabel} · ${versionLabel}` : kindLabel}
+              </span>
+              {date ? (
+                <time dateTime={date.dateTime} title={date.title}>
+                  {date.label}
+                </time>
+              ) : null}
+            </span>
+          </span>
+        </a>
+        <SessionActionMenu
+          label={tPins("more_actions_for", { title: truncateSessionTitle(title) })}
+          onOpenChange={onActionMenuOpenChange}
+          actions={[
+            {
+              id: "unpin",
+              label: tPins("unpin"),
+              icon: <Pin aria-hidden fill="currentColor" />,
+              onSelect: () => void unpinResultRow(pin),
+            },
+          ]}
+        />
+      </div>
+    );
+  };
+
+  const pinnedListVisible = mode === "active" && !globalSearchActive;
+  const pinnedResults = resultPinsEnabled && pinnedListVisible ? resultPins.pins : [];
+  // A failed load is shown only when the person is known to have pins; a first-time failure stays quiet otherwise.
+  const pinnedNotice =
+    resultPinsEnabled &&
+    pinnedListVisible &&
+    resultPins.status === "error" &&
+    (pinned.length > 0 || resultPins.loadedOnce) ? (
+      <div className="unified-search-failure unified-work-pins-notice">
+        <span role="status">
+          {withHttpFailureReason(tPins("load_failed"), resultPins.error, { read: true })}
+        </span>
+        <button type="button" onClick={resultPins.reload}>
+          {tPins("retry")}
+        </button>
+      </div>
+    ) : null;
+
   const recoveryGroups: RecoveryRenderGroup[] = [];
-  if (mode === "active" && !globalSearchActive && pinned.length) {
+  if (pinnedListVisible && (pinned.length || pinnedResults.length || pinnedNotice)) {
     recoveryGroups.push({
       id: "pinned",
       label: t("rail_pinned_label"),
       items: pinned,
+      entries: resultPinsEnabled ? mergePinnedEntries(pinned, pinnedResults) : undefined,
+      notice: pinnedNotice ?? undefined,
     });
   }
   if (
@@ -1206,6 +1333,7 @@ export function WorkRecovery({
             groups={recoveryGroups}
             scrollRef={listRef}
             renderItem={renderItem}
+            renderResult={renderResultPin}
             focusRequest={olderFocusRequest}
             onFocusRequestSettled={clearOlderFocusRequest}
           />
@@ -1339,6 +1467,23 @@ function formatSessionTime(
         ? "rail_time_hours_ago"
         : "rail_time_days_ago";
   return t(key, { count });
+}
+
+/**
+ * The pinned group's order (result-pins PRD §4.2): conversations and results together by their last change, newest
+ * first. A conversation without an ISO time (older Gateways) keeps its list position after the dated rows.
+ */
+export function mergePinnedEntries(
+  sessions: readonly SessionItem[],
+  pins: readonly ResultPin[],
+): RecoveryGroupEntry[] {
+  const dated: { at: string; entry: RecoveryGroupEntry }[] = [
+    ...sessions.map((item) => ({ at: item.updatedAt ?? "", entry: { kind: "session" as const, item } })),
+    ...pins.map((pin) => ({ at: pin.changed_at, entry: { kind: "result" as const, pin } })),
+  ];
+  return dated
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .map(({ entry }) => entry);
 }
 
 function matchesFilter(item: SessionItem, filter: string): boolean {

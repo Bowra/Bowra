@@ -220,7 +220,9 @@ def test_live_lead_callsite_passes_the_unfiltered_bag() -> None:
 
     src = _P(_lo.__file__).read_text(encoding="utf-8")
     assert "peer_payloads=_peer_bag_for_compose," in src
-    assert 'peer_payloads_all=list(getattr(runtime.parent_ctx, "_m137_subagent_payloads", None) or []),' in src
+    # The decision bag drops only returns a later complete return redid, never Chat (short) answers.
+    assert "peer_payloads_all=_live_bag," in src
+    assert "_live_bag = [entry for index, entry in enumerate(_turn_bag) if index not in _superseded_returns]" in src
 
 
 async def test_force_canvas_reaches_composer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -356,7 +358,7 @@ def _mk_canvas_runtime() -> Any:
 
 @pytest.mark.asyncio
 async def test_export_only_turn_does_not_compose(monkeypatch: pytest.MonkeyPatch) -> None:
-    """★ 穿过闸本身：`t_5b91c70281c9` 的真实形状进来，composer **一次都不能被调用**。
+    """★ 穿过闸本身：`an observed task` 的真实形状进来，composer **一次都不能被调用**。
 
     修复前：这一轮 compose 出一份「标题 = 用户那句导出指令」的伪报告，把真报告 11 段
     全 supersede，于是下一次导出的 xlsx 只有 5117 字节、一个数据都没有。
@@ -424,7 +426,7 @@ async def test_bi_only_contentless_turn_skips_compose(monkeypatch: pytest.Monkey
 
     旧断言保护的「Lead 偷懒 bi-only path」（空 payload 也进 composer 让
     bi-fallback 强行成报告）正是「简单查数被写成画布报告」的通路之一
-    （116 t_b816e1879d6d / t_0f32354e8f81，discovery §3.2）——按 tech-design
+    （an observed execution / an observed task，discovery §3.2）——按 tech-design
     §4.4 该形态改为 skip：答案留在 chat，数据留在「数据」。
     真报告不受影响：上一条 test_real_report_not_blocked 是它的正对照。
     """
@@ -911,7 +913,7 @@ async def test_recommendations_only_payload_reaches_cards_composer(monkeypatch: 
     assert len(calls) == 1 and "recommendations" in kinds
 
 
-# ── Unsent-email fallback (116 1.3.43 t_4eabdf899529) ────────────
+# ── Unsent-email fallback (116 1.3.43 an observed task) ────────────
 
 _MAIL_TO = "exampleuser@example.com"
 _UNVERIFIED_MAIL = {

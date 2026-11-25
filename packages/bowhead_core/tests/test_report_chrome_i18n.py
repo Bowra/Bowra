@@ -8,7 +8,6 @@ from bowhead_core.agents.lead_orchestrator import (
 )
 from bowhead_core.canvas_composer import _build_sections_from_payload
 from bowhead_core.language_context import LanguageContext
-from bowhead_core.overclaim_guard import detect_completion_claims
 from bowhead_core.report_chrome_text import chrome_lang, chrome_text
 from bowhead_core.report_writer_loop import _report_meta_pills
 
@@ -70,7 +69,6 @@ def test_pointer_guards_recognize_en_canonical() -> None:
     stripped = _strip_canvas_pointer(text)
     assert "canvas" not in stripped.lower()
     assert "Revenue is up 3%." in stripped
-    assert "report" in detect_completion_claims(_EN_POINTER)
 
 
 def test_pointer_guards_zh_unchanged() -> None:
@@ -183,13 +181,12 @@ def test_en_pointer_variants_close_the_loop() -> None:
         "Full report is on the canvas.",
     ):
         assert _claims_canvas_pointer(v), v
-        assert "report" in detect_completion_claims(v), v
 
 
 async def test_pointer_appends_on_psi_eager_composed_turn() -> None:
     """dogfood 2026-08-19：ψ-E eager compose 在 peer return 时落画布，Lead 末轮
     compose 幂等跳过 → composer_emitted_kinds 空 → canonical append 从不触发。
-    判据补 _psi_compose_done。这里测判据本身（真机 t_1045d5398ca1 复现形状）。"""
+    判据补 _psi_compose_done。这里测判据本身（真机 an observed task 复现形状）。"""
     from types import SimpleNamespace
 
     bus = SimpleNamespace(_psi_compose_done=True)
@@ -212,22 +209,8 @@ def test_remember_bullet_label_localized() -> None:
     assert _strip_to_text("• 偏好：用净利率") == "用净利率"
 
 
-def test_overclaim_caveat_localized() -> None:
-    from bowhead_core.overclaim_guard import caveat_for
-
-    en = caveat_for(("report",), "en-US")
-    assert en.startswith("\n\n_Note: ")
-    assert "No content landed on the canvas" in en
-    zh = caveat_for(("report",), "zh-CN")
-    assert zh.startswith("\n\n_注：")
-    assert "本轮没有内容落到画布上" in zh
-    # No language → English fallback.
-    assert caveat_for(("report",)) == en
-    assert caveat_for((), "en-US") == ""
-
-
 def test_fabrication_caveat_localized_and_filter_bilingual() -> None:
-    """dogfood t_ea634e084407：全英文报告里唯剩「数据可信度提示」块中文——守卫指控
+    """dogfood an observed task：全英文报告里唯剩「数据可信度提示」块中文——守卫指控
     句在 en 轮也得英文。⚠前缀是 provenance_caveats 的识别标记且随 payload 落库：
     filter 必须双语种认（老 zh caveat 永续在库）。"""
     from bowhead_core.analysis_payload import (

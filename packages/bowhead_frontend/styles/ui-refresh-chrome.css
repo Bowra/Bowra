@@ -599,6 +599,21 @@
 :root:root .unified-work-copy {
   gap: 0;
 }
+/* Pinned group (result pins D1): every row leads with its kind's icon, aligned to the title line. */
+:root:root .unified-work-item-icon {
+  flex: none;
+  align-self: flex-start;
+  width: 14px;
+  height: 14px;
+  margin: 2px 8px 0 0;
+  color: var(--c-ink-3);
+}
+:root:root a.unified-work-item-main {
+  text-decoration: none;
+}
+:root:root .unified-work-pins-notice {
+  margin: 2px 0 6px;
+}
 :root:root .unified-work-title {
   color: var(--c-ink);
   font: 500 var(--fs-md) / 1.125rem var(--font-control);

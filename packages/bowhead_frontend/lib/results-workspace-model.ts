@@ -39,7 +39,10 @@ export type ResultCapability =
   | "copy_code"
   | "open_outputs"
   | "view_run_details"
-  | "feedback_unsupported";
+  | "feedback_unsupported"
+  | "edit_presentation"
+  /** Pin to the sidebar (result pins): readable files outside a shared-report view, and the report; reading is enough. */
+  | "pin_result";
 
 export interface ResultItem {
   key: string;
@@ -187,6 +190,10 @@ export function projectResultsDTO(
   return items.map((item) => {
     const artifact = artifactItemFromResultDTO(item);
     const capabilities = new Set<ResultCapability>(item.capabilities);
+    // Pinning needs only read access, which a downloadable file or a listed report already proves.
+    if (item.object_type === "report" || (item.object_type === "artifact" && capabilities.has("download"))) {
+      capabilities.add("pin_result");
+    }
     const route: ResultsRouteTarget = item.route.type === "artifact"
       ? {
           type: "artifact",
@@ -276,6 +283,8 @@ export function deriveArtifactCapabilities({
   const role = artifactResultRole(item);
   capabilities.add("download");
   capabilities.add("view_details");
+  // A shared report's files belong to its owner: the viewer can read them in the report but cannot pin them.
+  if (!reportOnly) capabilities.add("pin_result");
   if (
     !reportOnly
     && (role === "deliverable" || role === "input" || role === "unsupported")
@@ -350,6 +359,7 @@ export function projectResultsWorkspace(input: ProjectResultsInput): ResultItem[
       "read_report",
       "export_report",
       "view_history",
+      "pin_result",
     ]);
     if (!input.readOnly && !input.reportOnly && input.report.editable) {
       capabilities.add("edit_report");

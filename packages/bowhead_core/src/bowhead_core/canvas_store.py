@@ -31,7 +31,7 @@ from bowhead_core.sqlite_domains import domain_database_path, domain_layout_acti
 from bowhead_core.terminal_llm_invocation import detached_auxiliary_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,30 @@ def _effective_status(stored: str, quarantined_count: int) -> str:
 #: Sections excluded from report surface (workspace attachments: SQL/code/bare tables), matching frontend selectReportSurfaceSections.
 _REPORT_SURFACE_EXCLUDED_KINDS = frozenset({"code_block", "data_table"})
 _REPORT_AUXILIARY_KINDS_SQL = ", ".join(f"'{kind}'" for kind in sorted(_REPORT_SURFACE_EXCLUDED_KINDS | {"sql_block"}))
+
+
+def _first_section_titles(rows: Iterable[tuple[str, str | None]]) -> dict[str, str]:
+    """Per canvas, the first non-empty heading-like field of its sections, given in ``seq`` order.
+
+    The fallback name of an untitled report (h1 → h2 → h3 → title → heading → text), cut to 200 characters.
+    """
+    titles: dict[str, str] = {}
+    for canvas_id, raw in rows:
+        if canvas_id in titles:
+            continue
+        try:
+            payload = json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for key in ("h1", "h2", "h3", "title", "heading", "text"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                titles[canvas_id] = value.strip()[:200]
+                break
+    return titles
+
 
 #: Terminal done field for report sections saved this turn and visible after refresh; identical across live/persistence/replay.
 REPORT_SECTIONS_SAVED_FIELD = "report_sections_saved"
@@ -1043,7 +1067,7 @@ class CanvasStore:
         D6 hides every section of a chat-delivered turn. When the user follows up
         with "turn the analysis above into a report", the writer correctly cites
         those sections by their real ids, and they must become visible again
-        under the same id (116 `t_6846eb7b274a`: four such anchors were rejected
+        under the same id (116 `an observed task`: four such anchors were rejected
         as unknown and the turn redrew the same charts).
 
         Unlike `unhide_turn`, this is keyed by section and is driven by an
@@ -2094,6 +2118,45 @@ class CanvasStore:
             await self._fire_anchor_invalidation("section_deleted", canvas_id, cleared_id, None)
         return n
 
+    async def report_pin_rows(self, canvas_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        """Canvas facts a sidebar report pin needs, by canvas ID; unknown IDs are absent.
+
+        ``report_sections`` counts what the report surface shows (visible sections other than code and
+        bare tables), so a cleared or code-only canvas reads 0, as in the Reports list. ``first_section_title``
+        names an untitled report the same way.
+        """
+        ids = [canvas_id for canvas_id in dict.fromkeys(canvas_ids) if canvas_id]
+        if not ids:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        report_kinds = f" AND kind NOT IN ({_REPORT_AUXILIARY_KINDS_SQL})"
+        visible = await self._account_visibility_sql("c")
+        async with open_pooled_read_ctx(self._path) as db:
+            db.row_factory = aiosqlite.Row
+            for start in range(0, len(ids), 400):
+                chunk = ids[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                async with db.execute(
+                    "SELECT c.id, c.session_id, c.workspace_id, c.user_id, c.title, c.created_at, c.updated_at, "  # noqa: S608 — fixed fragments
+                    f"(SELECT COUNT(*) FROM canvas_sections s WHERE s.canvas_id = c.id AND s.hidden_for_chat_mode = 0{report_kinds}) AS report_sections "
+                    f"FROM canvases c WHERE c.id IN ({placeholders}) AND {visible}",
+                    chunk,
+                ) as cur:
+                    for row in await cur.fetchall():
+                        out[str(row["id"])] = dict(row)
+                async with db.execute(
+                    f"SELECT canvas_id, payload FROM canvas_sections WHERE canvas_id IN ({placeholders}) "  # noqa: S608
+                    f"AND hidden_for_chat_mode = 0{report_kinds} ORDER BY canvas_id, seq ASC",
+                    chunk,
+                ) as cur:
+                    titles = _first_section_titles((str(r["canvas_id"]), r["payload"]) for r in await cur.fetchall())
+                for canvas_id, title in titles.items():
+                    if canvas_id in out:
+                        out[canvas_id]["first_section_title"] = title
+        for row in out.values():
+            row.setdefault("first_section_title", None)
+        return out
+
     async def delete_canvas(self, *, canvas_id: str) -> bool:
         """P4.1: 整 canvas 删 (含 sections + revisions cascade).
         返 True 如命中. revision history 也删 (cascade) — 用户接受不可恢复.
@@ -2269,27 +2332,7 @@ class CanvasStore:
                 )
                 async with db.execute(section_sql, canvas_ids) as cur:
                     sec_rows = await cur.fetchall()
-                seen: set[str] = set()
-                for sr in sec_rows:
-                    cid = sr["canvas_id"]
-                    if cid in seen:
-                        continue
-                    try:
-                        payload = json.loads(sr["payload"] or "{}")
-                    except (ValueError, TypeError):
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    # Select the first nonempty string-like field by priority.
-                    for key in ("h1", "h2", "h3", "title", "heading", "text"):
-                        v = payload.get(key)
-                        if isinstance(v, str) and v.strip():
-                            first_title_map[cid] = v.strip()[:200]
-                            seen.add(cid)
-                            break
-                    else:
-                        # No title-like field here; advance to the next section without marking seen.
-                        continue
+                first_title_map.update(_first_section_titles((sr["canvas_id"], sr["payload"]) for sr in sec_rows))
         return [
             {
                 "id": r["id"],

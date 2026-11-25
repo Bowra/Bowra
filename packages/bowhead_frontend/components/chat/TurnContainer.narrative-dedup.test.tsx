@@ -110,13 +110,13 @@ describe("TurnContainer · narrative-vs-answer dedup (0.39.8 #5)", () => {
     expect(container.textContent).toContain("Original task");
   });
 
-  it("hides a narrative that repeats the answer around internal markers", () => {
+  it.each(["headline", "hedline", "handline"])("hides a narrative that repeats the answer around internal markers (<%s>)", (tag) => {
     // 116, 2026-10-06: the Lead streamed its whole answer as narrative with internal markers between
     // paragraphs; final_answer had the markers removed. The markers are hidden at render time, so the
     // user saw the same prose twice while the raw-text overlap probe missed it.
     const narrative =
       "已记住：以后给你汇报 GMV时，都会同时给出环比和同比。\n\n<response_kind>chat</response_kind>\n\n" +
-      "<headline>已记住：GMV汇报同时给环比与同比</headline>\n\n已存为长期记忆，可在设置里查看或修改。\n\n" +
+      `<${tag}>已记住：GMV汇报同时给环比与同比</${tag}>\n\n已存为长期记忆，可在设置里查看或修改。\n\n` +
       "补一句提醒：刚才那份华东区分析只给了环比，没有同比。";
     const answer =
       "已记住：以后给你汇报 GMV 时，都会同时给出环比和同比。\n\n\n\n\n\n已存为长期记忆，可在设置里查看或修改。\n\n" +

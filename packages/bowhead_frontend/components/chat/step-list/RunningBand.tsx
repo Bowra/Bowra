@@ -357,7 +357,11 @@ export function RunningBand({
   if (lastStepChange.current.signature !== stepSignature) {
     lastStepChange.current = { signature: stepSignature, at: Date.now() };
   }
-  const progressAgents = agentProgress?.agents ?? [];
+  // The frame is sent only while some agent runs, so the last one can still name an agent whose run has ended.
+  const progressAgents = (agentProgress?.agents ?? []).filter((agent) => {
+    const ended = peerTerminalById?.[agent.subagentId];
+    return !ended || ended.rerunning;
+  });
   const progressQuiet = running && progressAgents.length > 0 && nowTick - lastStepChange.current.at >= PROGRESS_QUIET_MS;
   const elapsedMinutes = startedAt !== null ? Math.max(0, Math.floor(turnElapsedMs(startedAt, nowTick, elapsedKey) / 60_000)) : 0;
   const silentMs = transport ? msSinceLastEvent(transport, nowTick, startedAt) : null;
@@ -396,8 +400,13 @@ export function RunningBand({
     : progressQuiet
     ? progressAgents.length === 1
       ? t("still_running_progress", {
-        agent: progressAgents[0].displayName || peerDisplayNames?.[progressAgents[0].subagentId] || progressAgents[0].profile,
-        step: progressAgents[0].step,
+        // A built-in's display name defaults to its identifier ("compute"); agentDisplayName words it as the trace does.
+        agent: agentDisplayName(
+          progressAgents[0].profile,
+          progressAgents[0].displayName || peerDisplayNames?.[progressAgents[0].subagentId],
+        ),
+        // No step number: the frame counts the helper's model calls, while the band's "第 N 步" counts the Turn's trace
+        // rows, so the two numbers disagreed on screen (an observed deployment: "第 1 步" here, "第 2 步" beside it).
         minutes: elapsedMinutes,
       })
       : t("still_running_many", { count: progressAgents.length, minutes: elapsedMinutes })

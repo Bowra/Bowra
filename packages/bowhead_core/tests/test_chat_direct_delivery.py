@@ -78,12 +78,6 @@ def test_ineligible_on_multi_peer_turn() -> None:
     assert _chat_direct_eligible(_Ctx(2), SHORT_ANSWER, primary=True) is False
 
 
-def test_ineligible_when_overclaim_directive_present() -> None:
-    """review F-8：peer 声称产了文件而账单为 0 时的纠偏 directive 指望 Lead 改口，
-    短路会把它连同谎报一起放行。"""
-    assert _chat_direct_eligible(_Ctx(), SHORT_ANSWER, primary=True, no_file_directive="⚠ 本轮没有产出文件…") is False
-
-
 def test_ineligible_on_empty_text() -> None:
     assert _chat_direct_eligible(_Ctx(), "   ", primary=True) is False
 
@@ -187,7 +181,7 @@ class _ProseRunner:
         ("canvas_section", False),
         ("unknown_file_ledger", False),
         ("unknown_canvas_ledger", False),
-        ("overclaim", False),
+        ("file_mentioned_in_text", True),
     ],
 )
 async def test_selected_team_plaintext_delivery_keeps_existing_boundaries(monkeypatch, case, eligible) -> None:
@@ -216,7 +210,7 @@ async def test_selected_team_plaintext_delivery_keeps_existing_boundaries(monkey
         subagent_id="sub_selected",
         ok=case != "failed",
         error="peer_failed" if case == "failed" else None,
-        final_answer="PDF 已生成，可直接下载。" if case == "overclaim" else "Revenue: 800\nProfit: 120\nMargin: 15.0%",
+        final_answer="PDF 已生成，可直接下载。" if case == "file_mentioned_in_text" else "Revenue: 800\nProfit: 120\nMargin: 15.0%",
         tool_invocations=[ToolInvocation(tool_name="write_report" if case == "canvas_write" else "python_sandbox", arguments={}, result={"ok": True})]
         if case in tool_cases
         else [],
@@ -283,86 +277,34 @@ async def test_prose_peer_leaves_no_trace_in_payload_bag() -> None:
     assert not (getattr(ctx, "_m137_subagent_payloads", None) or [])
 
 
-async def test_handler_feeds_exec_summary_into_overclaim_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """★review#2 F-5：上一版那条测试直接调 guard 函数，**没钉住 wiring**——把
-    `_claim_text` 改回只用 `fa` 全文件照绿。这条监视 handler 真正喂进去的文本。"""
-    seen: list[str] = []
-    import bowhead_core.subagent as sub_mod
+@pytest.mark.parametrize(("language", "marker"), [("en-US", "the user cannot get it"), ("zh-CN", "用户拿不到")])
+async def test_helper_result_states_how_files_reach_the_user_in_the_answer_language(
+    monkeypatch: pytest.MonkeyPatch, language: str, marker: str
+) -> None:
+    """The note follows the Turn's answer language and does not depend on what the helper wrote."""
+    from bowhead_core.deliverable_ledger import DeliverableLedger
+    from bowhead_core.language_context import LanguageContext
 
-    def _spy(ledger: Any, peer_answer: Any) -> tuple[dict, str]:
-        seen.append(str(peer_answer or ""))
-        return {}, ""
+    async def ledger(**_kwargs: Any) -> DeliverableLedger:
+        return DeliverableLedger(files=1, file_names=("rows.csv",))
 
-    # Handler imports within the function (`from bowhead_core.overclaim_guard import ...`);
-    # patch the source module to affect the symbol actually called in production.
-    import bowhead_core.overclaim_guard as og_mod
-
-    monkeypatch.setattr(og_mod, "peer_facts_and_directive", _spy)
-    _ = sub_mod  # Retain reference to show the patch targets the handler's upstream source module.
-
-    class _EmptyFaRunner:
-        """★fixture 必须还原**生产真形状**：M137 #145 下 peer 交 payload 时
-        `final_answer` 故意留空。初版 fixture 两边都填 ⇒ 突变成 `fa` 也含
-        exec_summary ⇒ 摘掉修复照样绿（自查逮到，正是本条要防的假绿）。"""
-
-        async def run(self, **kwargs: Any) -> SubagentResult:
-            return SubagentResult(
-                profile=str(kwargs.get("profile_name") or "compute"),
-                subagent_id="sub_spy",
-                ok=True,
-                final_answer="",  # Actual production shape
-                payload={"delivery_surface": "chat", "exec_summary": SHORT_ANSWER},
-            )
-
+    monkeypatch.setattr("bowhead_core.deliverable_ledger.build_deliverable_ledger", ledger)
     registry = build_default_registry()
     register_subagent_tool(registry)
     ctx = ToolExecutionContext(
         workspace_id="1",
         member_uid="m",
         user_id="u",
-        turn_id="t_cd_spy",
+        turn_id="t_cd_note",
         datarc=None,
-        subagent_runner=_EmptyFaRunner(),
+        subagent_runner=_ShortAnswerRunner(),
         parent_bus=_FakeBus(),
     )
-    await registry.execute("subagent_spawn", {"profile": "compute", "task": "查营业额"}, ctx)
-    assert seen, "guard 未被调用 — harness 断在更上游"
-    assert SHORT_ANSWER in seen[0], f"喂进 guard 的文本必须含 exec_summary，实际={seen[0]!r}"
-
-
-def test_overclaim_detection_reads_exec_summary_not_empty_final_answer() -> None:
-    """★review F-B：谎报检测必须看**用户实际读到的那段文本**。
-
-    M137 #145 下 peer 交 payload 时 `final_answer` 故意留空（答案在
-    exec_summary），只喂 final_answer ⇒ 恒空串 ⇒ 检测恒不触发 ⇒ 「已生成 PDF
-    可下载」这类谎报在短答路上从没被查过。这里直接对拍 guard 的两种输入。
-
-    ⚠ 不走 spawn handler 端到端：鸭子 ctx 的 ledger `files_verified=False`
-    （账本不可信）时 guard 按「误判比漏判更伤」的双条件原则**故意不追加**
-    directive ——那是设计，端到端会因此恒绿＝测不到我改的那行（初版这么写，
-    当场被自己证伪）。
-    """
-    from bowhead_core.deliverable_ledger import DeliverableLedger
-    from bowhead_core.overclaim_guard import peer_facts_and_directive
-
-    claim = "报告已生成，PDF 文件可直接下载。"
-    verified_empty = DeliverableLedger(
-        files=0,
-        file_exts=frozenset(),
-        file_names=(),
-        sections=0,
-        memories=0,
-        ok_tools=frozenset(),
-        files_verified=True,  # Trusted ledger with zero entries ⇒ both conditions hold
-        sections_verified=True,
-        memories_verified=True,
-    )
-    _, directive_from_claim = peer_facts_and_directive(verified_empty, claim)
-    _, directive_from_empty = peer_facts_and_directive(verified_empty, "")
-    assert directive_from_claim, "账本为 0 而 peer 声称有文件 → 必须给纠偏 directive"
-    assert not directive_from_empty, "空文本无从判断 → 不该乱加（正对照）"
-    # ⇒ Nonempty exec_summary yields the directive; final_answer (always empty under DF-04) does not.
-    assert _chat_direct_eligible(_Ctx(), SHORT_ANSWER, primary=True, no_file_directive=directive_from_claim) is False
+    ctx.language_context = LanguageContext(ui_language=language, output_language=language)  # type: ignore[attr-defined]
+    inv = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Read revenue."}, ctx)
+    assert inv.error is None, inv.error
+    assert inv.result["produced"]["file_names"] == ["rows.csv"]
+    assert marker in inv.result["directive"]
 
 
 async def test_spawn_omits_sentinel_on_multi_peer_turn() -> None:

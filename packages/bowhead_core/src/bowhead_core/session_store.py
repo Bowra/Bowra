@@ -2368,6 +2368,27 @@ class SessionStore:
                     out[str(session_id)] = workspace_id
         return out
 
+    async def live_session_owners(self, session_ids: Sequence[str]) -> dict[str, str]:
+        """``{session_id: owner}`` for ordinary conversations that are not deleted; archived ones count.
+
+        Result pins open a file or report only in a conversation that still exists (tech design §4.2).
+        """
+        ids = list(dict.fromkeys(sid for sid in session_ids if sid))
+        out: dict[str, str] = {}
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            async with (
+                open_shared_ctx(self._db_path) as db,
+                db.execute(
+                    f"SELECT id, user_id FROM sessions WHERE id IN ({placeholders}) AND deleted_at IS NULL AND origin='normal'",  # noqa: S608 - placeholders only
+                    chunk,
+                ) as cur,
+            ):
+                for session_id, owner in await cur.fetchall():
+                    out[str(session_id)] = str(owner)
+        return out
+
     async def list_sessions(
         self,
         *,
@@ -2682,6 +2703,75 @@ class SessionStore:
                 (user_id, session_id),
             )
             await db.commit()
+
+    # Result pins (docs/sprints/result-pins-2026-11-24/tech-design.md §4.1) ─────────
+    # A person's sidebar shortcuts to files (by lineage root) and reports (by canvas ID). The table is
+    # appended by revision 0232 to the execution file only; the frozen legacy single-file layout lacks it,
+    # so every method first asks whether it exists.
+    async def result_pins_supported(self) -> bool:
+        async with open_shared_ctx(self._db_path) as db:
+            return await readable_table_exists(db, "user_result_pins")
+
+    async def pin_result(self, *, user_id: str, target_kind: str, target_id: str) -> None:
+        """Idempotent; pinning again keeps the first ``pinned_at``."""
+        async with open_shared_ctx(self._db_path) as db:
+            await db.execute(
+                "INSERT INTO user_result_pins(user_id, target_kind, target_id, pinned_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user_id, target_kind, target_id) DO NOTHING",
+                (user_id, target_kind, target_id, _now()),
+            )
+            await db.commit()
+
+    async def unpin_result(self, *, user_id: str, target_kind: str, target_id: str) -> None:
+        """Idempotent."""
+        async with open_shared_ctx(self._db_path) as db:
+            await db.execute(
+                "DELETE FROM user_result_pins WHERE user_id=? AND target_kind=? AND target_id=?",
+                (user_id, target_kind, target_id),
+            )
+            await db.commit()
+
+    async def list_result_pins(self, *, user_id: str) -> list[tuple[str, str, str]]:
+        """Every ``(target_kind, target_id, pinned_at)`` row of the person, newest pin first; none without the table."""
+        async with open_shared_ctx(self._db_path) as db:
+            if not await readable_table_exists(db, "user_result_pins"):
+                return []
+            async with db.execute(
+                "SELECT target_kind, target_id, pinned_at FROM user_result_pins WHERE user_id=? ORDER BY pinned_at DESC, target_id",
+                (user_id,),
+            ) as cur:
+                return [(str(row[0]), str(row[1]), str(row[2])) for row in await cur.fetchall()]
+
+    async def result_pin_targets(self, *, target_kind: str) -> list[str]:
+        """Every distinct target of one kind, for removing pins whose target is gone."""
+        async with open_shared_ctx(self._db_path) as db:
+            if not await readable_table_exists(db, "user_result_pins"):
+                return []
+            async with db.execute(
+                "SELECT DISTINCT target_id FROM user_result_pins WHERE target_kind=? ORDER BY target_id",
+                (target_kind,),
+            ) as cur:
+                return [str(row[0]) for row in await cur.fetchall()]
+
+    async def delete_result_pins(self, *, target_kind: str, target_ids: Sequence[str]) -> int:
+        """Remove every person's pins of targets that no longer exist."""
+        ids = [target_id for target_id in dict.fromkeys(target_ids) if target_id]
+        if not ids:
+            return 0
+        removed = 0
+        async with open_shared_ctx(self._db_path) as db:
+            if not await readable_table_exists(db, "user_result_pins"):
+                return 0
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                cur = await db.execute(
+                    f"DELETE FROM user_result_pins WHERE target_kind=? AND target_id IN ({','.join('?' for _ in chunk)})",  # noqa: S608 — placeholders only
+                    (target_kind, *chunk),
+                )
+                removed += cur.rowcount or 0
+                await cur.close()
+            await db.commit()
+        return removed
 
     # ─── Sprint chat-redesign-2026-05-21 Phase 1.1 — Steer mode infra ───────
     # Gateway uses these to decide "new user msg = steer (buffer + emoji_ack)

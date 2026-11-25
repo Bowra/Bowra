@@ -37,7 +37,7 @@ ANSWERS = [
 ]
 
 
-@pytest.mark.parametrize("mode", ["resume", "pending_followup", "answered_followup", "invalid_then_corrected", "stray_options"])
+@pytest.mark.parametrize("mode", ["resume", "partial_answer", "pending_followup", "answered_followup", "invalid_then_corrected", "stray_options"])
 async def test_question_card_continuity(http_start, monkeypatch, mode):
     case = http_start
     case.client.headers["Content-Type"] = "application/json"
@@ -115,6 +115,22 @@ async def test_question_card_continuity(http_start, monkeypatch, mode):
                     failure.setattr("bowhead_gateway.turn_service.spawn_resume_turn", unavailable)
                     resolved = await case.client.post(f"/api/v1/clarifications/{card['request_id']}/resolve", json={"answers": ANSWERS})
                 assert resolved.status_code == 409
+            elif mode == "partial_answer":
+                # The card lets the user leave a question empty: the Turn continues and the model gets a skip for it.
+                sections = [answer for answer in ANSWERS if answer["question"] == "Which sections?"]
+                resolved = await case.client.post(f"/api/v1/clarifications/{card['request_id']}/resolve", json={"answers": sections})
+                assert resolved.status_code == 200, resolved.text
+                await settled(turn_id)
+                assert (await case.app.state.session_store.get_turn(turn_id)).status == "completed"
+                # Adjacent user messages may be joined; the answers are their own JSON document after the request.
+                marker = '{"clarification_responses"'
+                content = next(message["content"] for message in calls[-1]["messages"] if marker in str(message.get("content")))
+                sent, _end = json.JSONDecoder().raw_decode(content[content.index(marker) :])
+                assert sent["clarification_responses"][0]["answers"] == [
+                    {"question": "Which city?", "source": "skip", "skipped": True},
+                    *[{key: value for key, value in answer.items() if value is not None} for answer in sections],
+                ]
+                return
             else:
                 resolved = await case.client.post(f"/api/v1/clarifications/{card['request_id']}/resolve", json={"answers": ANSWERS})
                 assert resolved.status_code == 200, resolved.text

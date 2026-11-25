@@ -730,8 +730,12 @@ class CollaborationStore:
 
     @_repeat_when_authority_busy
     async def next_deadline(self, worker: DocumentTurnOwner, *, execution_id: str) -> float:
-        """Derive a wake deadline from the original task and pending questions."""
-        async with self._transaction(worker) as db:
+        """Derive a wake deadline from the original task and pending questions.
+
+        A waiting helper asks for it again and again. It only sets when to look next and grants
+        nothing, so it reads without the writer lock or the core lease, like ``obligations``.
+        """
+        async with self._transaction(worker, write=False, live=True) as db:
             task, _ = await self._task(db, worker)
             await self._participant(db, worker, execution_id)
             row = await _row(
@@ -982,10 +986,10 @@ class CollaborationStore:
         allowance. It remains available when the task's effort/time is exhausted.
         An open required dependency closes as `blocked`: a recorded limitation,
         never evidence. Otherwise nobody is prompted to close it, and the
-        requester could never complete (116 t_649dfe4abb48).
+        requester could never complete (an observed execution.
 
         Every completion check calls this first, and usually nothing is due. That
-        check is a read, so only due questions open the write transaction (116 1.7.49
+        check is a read, so only due questions open the write transaction (an observed deployment
         the regression case: the write transaction lost the core lease to a Space save and
         the helper failed).
         """

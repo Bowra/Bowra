@@ -120,6 +120,26 @@ describe("PlanCard 批3", () => {
     expect(button("修订重试")?.className).not.toContain("primary");
   });
 
+  it("a step whose Agent returned no deck shows readable copy and makes revising primary", () => {
+    // an observed execution: the card showed the raw "deck_delivery_missing" and "RuntimeError".
+    const plan = blockedPlanWithFailedStep();
+    plan.steps[1] = {
+      ...plan.steps[1],
+      errorKind: "deck_delivery_missing",
+      reason: "This step must deliver a new PowerPoint file, and none was produced.",
+    };
+    const { container } = renderIntl(<PlanCard plan={plan} recovery={recovery()} />);
+    const detail = container.querySelector(".pblock.is-failed") as HTMLElement;
+    expect(detail.textContent).toContain("这一步要交付一份新的 PPT 文件，但没有生成。");
+    expect(detail.textContent).not.toContain("deck_delivery_missing");
+    expect(detail.textContent).not.toContain("PowerPoint file");
+    expect(detail.querySelector(".why")).toBeNull();
+    const bar = container.querySelector(".pblock-acts") as HTMLElement;
+    const button = (label: string) => [...bar.querySelectorAll("button")].find((b) => b.textContent?.includes(label));
+    expect(button("修订重试")?.className).toContain("primary");
+    expect(button("继续执行")?.className).not.toContain("primary");
+  });
+
   it("superseded 死行滤除渲染; 替代步上「已修订」章; 进度分母收窄", () => {
     const { container } = renderIntl(
       <PlanCard plan={blockedPlanWithFailedStep()} recovery={recovery()} />,

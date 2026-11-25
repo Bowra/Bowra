@@ -7,6 +7,7 @@ from bowhead_core.events import TurnEventBus
 from bowhead_core.subagent import PROFILES, UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.subagent_return_tool import register_subagent_return_tool
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
+from bowhead_router.runtime_notes import WITHDRAWN_ANSWER_FACT
 from test_subagent import _router
 
 from bowhead_router import LLMResponse, ToolCall, ToolSchema
@@ -44,7 +45,7 @@ async def _run(monkeypatch, *script):
 
 
 def _notes(request) -> int:
-    return sum(message.content == UNRETURNED_WORK_NOTE for message in request.messages)
+    return sum(message.content == WITHDRAWN_ANSWER_FACT + UNRETURNED_WORK_NOTE for message in request.messages)
 
 
 async def test_prose_after_work_gets_the_facts_once_with_tools_still_offered(monkeypatch):

@@ -48,6 +48,7 @@ export function FileDrawer({
   onAddToKb,
   onRemoveFromKb,
   onFileUpdated,
+  pin,
 }: {
   file: FileDTO;
   tab: FilesTab;
@@ -58,6 +59,8 @@ export function FileDrawer({
   onUseInChat: () => void;
   onAddToKb: () => void;
   onRemoveFromKb: () => void;
+  /** Pin / Unpin to the sidebar (result pins); omitted in the trash. */
+  pin?: { label: string; busy: boolean; onToggle: () => void };
   onFileUpdated: (f: FileDTO) => void;
 }) {
   const t = useTranslations("files_page");
@@ -241,6 +244,9 @@ export function FileDrawer({
         {tab !== "trash" && (
           <button type="button" className="btn sec" onClick={onUseInChat}>{t("use_in_chat")}</button>
         )}
+        {pin ? (
+          <button type="button" className="btn sec" disabled={pin.busy} onClick={pin.onToggle}>{pin.label}</button>
+        ) : null}
         {tab === "trash" ? null : file.in_kb ? (
           <>
             <button type="button" className="btn pri" onClick={onGotoKb}>{t("kb.manage")} <CharIcon ch="→" /></button>

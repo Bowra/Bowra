@@ -29,7 +29,8 @@ import {
 } from "@/lib/results-workspace-errors";
 import { X } from "@/components/icons";
 import { Tab, TabList, Tabs } from "@/components/ui/tabs";
-import { ArtifactPreview } from "./artifact-preview";
+import { ArtifactPreview, type PresentationEditHost } from "./artifact-preview";
+import { isPresentationEditing } from "./presentation-edit/handoff";
 import { ResultObjectActions, type CompactResultToolbar } from "./result-object-actions";
 import type { CanvasExportFmt } from "@/lib/api";
 import { useArtifactRepresentation } from "@/lib/use-artifact-representation";
@@ -70,7 +71,8 @@ export type ArtifactRefreshReason =
   | "export-completed"
   | "document-published"
   | "window-focus"
-  | "permissions-changed";
+  | "permissions-changed"
+  | "presentation-edited";
 type ExportFmt = CanvasExportFmt;
 
 export function fmtArtifactSize(n: number): string {
@@ -254,6 +256,7 @@ export function DataTabFiles({
   downloadLabel,
   onOpenArtifactHistory,
   onOpenFailed,
+  presentationEdit,
 }: {
   sessionId: string | null;
   scope?: ArtifactScope;
@@ -277,6 +280,8 @@ export function DataTabFiles({
   downloadLabel?: string;
   onOpenArtifactHistory?: (trigger?: HTMLElement) => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
+  /** Owner Results only: lets a deck be edited in place (pptx-inline-edit design §7). */
+  presentationEdit?: Omit<PresentationEditHost, "sessionId">;
 }) {
   const t = useTranslations("data_files");
   const [search, setSearch] = useState("");
@@ -295,13 +300,23 @@ export function DataTabFiles({
   // The viewer shows the file its route names. An earlier selection must not
   // stand in for a file that is missing from the list, or Download would
   // fetch a different file than the one the user opened.
-  const visibleSelected = viewerOnly && focusArtifactId
+  const listedSelected = viewerOnly && focusArtifactId
     ? items?.find((item) => item.id === focusArtifactId) ?? null
     : selected && items?.some((item) => item.id === selected.id) ? selected : null;
+  // A deck open in the editor keeps its viewer while the list drops that version for a moment (a newer
+  // version arrived and the list is located again); remounting would discard the unsaved edits.
+  const lastViewerItemRef = useRef<ArtifactItem | null>(null);
+  const retainedForEditing = viewerOnly && focusArtifactId && !listedSelected
+    && lastViewerItemRef.current?.id === focusArtifactId && isPresentationEditing(focusArtifactId)
+    ? lastViewerItemRef.current
+    : null;
+  const visibleSelected = listedSelected ?? retainedForEditing;
+  if (viewerOnly && listedSelected) lastViewerItemRef.current = listedSelected;
   const reportedOpenFailureRef = useRef<string | null>(null);
 
   useEffect(() => {
     let failure: ResultsWorkspaceErrorClass | null = null;
+    if (retainedForEditing) return;
     if (viewerOnly && err) failure = err;
     else if (viewerOnly && items && focusArtifactId && !items.some((item) => item.id === focusArtifactId)) {
       failure = "unavailable";
@@ -314,7 +329,7 @@ export function DataTabFiles({
     if (reportedOpenFailureRef.current === key) return;
     reportedOpenFailureRef.current = key;
     onOpenFailed?.(failure as ResultsWorkspaceErrorClass);
-  }, [err, focusArtifactId, items, onOpenFailed, viewerOnly]);
+  }, [err, focusArtifactId, items, onOpenFailed, retainedForEditing, viewerOnly]);
 
   useFocusedItemScroll({
     focusId: focusArtifactId,
@@ -335,7 +350,7 @@ export function DataTabFiles({
   }
 
   if (viewerOnly) {
-    if (err) {
+    if (err && !retainedForEditing) {
       return (
         <div className="v2-empty" role="alert">
           <p>{t(`error_${err}`)}</p>
@@ -345,7 +360,7 @@ export function DataTabFiles({
         </div>
       );
     }
-    if (!items || (focusArtifactId && !visibleSelected)) {
+    if ((!items && !retainedForEditing) || (focusArtifactId && !visibleSelected)) {
       return (
         <div className="v2-empty">
           <p>{items ? t("focused_missing") : t("loading")}</p>
@@ -384,6 +399,7 @@ export function DataTabFiles({
         downloadLabel={downloadLabel}
         onOpenHistory={onOpenArtifactHistory}
         onOpenFailed={onOpenFailed}
+        presentationEdit={presentationEdit}
         onClose={onFocusedArtifactChange
           ? () => onFocusedArtifactChange(null)
           : undefined}
@@ -566,6 +582,7 @@ export function FilePreviewer({
   downloadLabel,
   onOpenHistory,
   onOpenFailed,
+  presentationEdit,
 }: {
   item: ArtifactItem;
   sessionId: string;
@@ -586,6 +603,7 @@ export function FilePreviewer({
   downloadLabel?: string;
   onOpenHistory?: (trigger?: HTMLElement) => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
+  presentationEdit?: Omit<PresentationEditHost, "sessionId">;
 }) {
   const dataT = useTranslations("data_files");
   // Feishu 07.06 #21: unified ArtifactPreview header means FilePreviewer no longer draws its own copy.
@@ -737,6 +755,9 @@ export function FilePreviewer({
           onOpenHistory={onOpenHistory}
           onFeedbackUnsupported={recordUnsupportedFeedback}
           onClose={onClose}
+          presentationEdit={presentationEdit && scope === "session" && !representation.scopeUnavailable
+            ? { ...presentationEdit, sessionId }
+            : undefined}
         />
       )}
     </div>

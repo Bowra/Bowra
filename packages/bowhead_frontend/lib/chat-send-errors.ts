@@ -41,6 +41,7 @@ export const CHAT_SEND_BACKEND_CODES = [
   "attachment_validation_unavailable",
   "result_reference_unavailable",
   "chart_selection_unavailable",
+  "presentation_selection_unavailable",
   "auth_session_generation_inactive",
   "chat_action_not_found",
   "client_refresh_required",

@@ -590,6 +590,8 @@ const _REASON_COPY_KEYS = new Map<string, string>([
   ["needs_user_input", "blocked_needs_context"],
   ["llm_provider_timeout", "failed_model_timeout"],
   ["llm_provider_unavailable", "failed_model_unavailable"],
+  // The step's Agent owes a new deck and returned none; revising the step is primary.
+  ["deck_delivery_missing", "failed_deck_delivery_missing"],
 ]);
 const _MODEL_FAILURE_KINDS = new Set(["llm_provider_timeout", "llm_provider_unavailable"]);
 

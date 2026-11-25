@@ -232,6 +232,16 @@ export function isNarrativeSegActive(turnId: string, segId: string): boolean {
   return cur != null && cur.active === true && cur.segId === segId;
 }
 
+export interface DispatchToTurnStoreOptions {
+  /**
+   * Set by the live stream reader. A text delta (Lead's `narrative.delta`, a helper's `partial_answer`) then
+   * updates the Turn at once and announces the change to subscribers with the next frame (`turn-store.ts`,
+   * "Streamed text is announced once per frame"). Replay and direct callers leave it unset and keep one
+   * announcement per event.
+   */
+  frameBatchedText?: boolean;
+}
+
 /**
  * Try to dispatch a raw SSE frame into the turn-store. Returns true if
  * the event was claimed (so caller may skip its own legacy handling for
@@ -242,6 +252,7 @@ export function dispatchToTurnStore(
   rawPayload: unknown,
   source: "live" | "replay" = "live",
   streamTurnId?: string,
+  options?: DispatchToTurnStoreOptions,
 ): boolean {
   if (!rawPayload || typeof rawPayload !== "object") return false;
   const payload = rawPayload as Record<string, unknown>;
@@ -869,7 +880,7 @@ export function dispatchToTurnStore(
         // peer prose (caught by golden replay tests).
         if (shouldSkipAppliedSeq(cardId, payload)) return true;
         const delta = typeof payload.delta === "string" ? payload.delta : "";
-        if (delta) applyPeerProse(cardId, parentAgentId, delta);
+        if (delta) applyPeerProse(cardId, parentAgentId, delta, options?.frameBatchedText === true);
         return true;
       }
       return false;
@@ -941,7 +952,7 @@ export function dispatchToTurnStore(
       // final_answer / clarification_required clear the cursor so the
       // next narrative.delta opens a fresh segment (tech-design §2.2).
       const segId = _currentNarrativeSeg(ev.card_id);
-      applyNarrativeAppend({ turnId: ev.card_id, text: ev.delta, segId });
+      applyNarrativeAppend({ turnId: ev.card_id, text: ev.delta, segId, frameBatched: options?.frameBatchedText === true });
       return true;
     }
 

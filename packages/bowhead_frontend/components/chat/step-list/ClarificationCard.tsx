@@ -403,6 +403,7 @@ export function ClarificationCard({
     <div className="ui-card-turn-slot" ref={slotRef}>
       <ChatCard
         intent="input"
+        className="ui-clarification-card"
         data-testid="clarification-card"
         eyebrow={documentDraft ? t("document_eyebrow") : t("needs_answer")}
         meta={documentDraft ? `${t("document_meta")} · ${questionMeta}` : questionMeta}

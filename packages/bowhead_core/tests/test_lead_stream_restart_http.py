@@ -1,6 +1,6 @@
 """A Lead stream that drops after its first text is retried, and its text withdrawn.
 
-116 dogfood `t_041e52fa751b`: a model stream ended with ``ReadError`` after it
+116 dogfood `an observed task`: a model stream ended with ``ReadError`` after it
 had started replying, the physical receipt became unknown and the Turn failed as
 ``lead_internal_error``. The attempt is now settled as not applied, the Router
 retries it, and one durable ``llm.stream_restarted`` withdraws the interrupted

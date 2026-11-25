@@ -732,6 +732,70 @@
   }
 }
 
+/* ═══ Question card (ClarificationCard) in a narrow column ═══
+ * The card measures its own width: on desktop the chat column narrows to 360 beside the Canvas, where the
+ * viewport rule for narrow footers does not apply. Below a 480 card (its content box is 30 narrower) the question
+ * head and the footer stack. */
+:root:root .ui-card.ui-clarification-card {
+  container: clarification-card / inline-size;
+}
+/* "Remember my choice" takes its own line above the actions (the first one's text lines up with the body); a
+ * footer that still wraps (long labels) keeps the primary action at the right */
+:root:root .ui-card.ui-clarification-card .ui-card__footer > .ui-card-check {
+  flex: 1 1 100%;
+}
+:root:root .ui-card.ui-clarification-card .ui-card__footer > .ui-card-check + .ui-card__btn--plain {
+  margin-left: -12px;
+}
+:root:root .ui-card.ui-clarification-card .ui-card__footer > .settings-button:last-child {
+  margin-inline-start: auto;
+}
+@container clarification-card (max-width: 449.98px) {
+  /* Status and progress may take two lines instead of squeezing the status word */
+  :root:root .ui-card.ui-clarification-card .ui-card__eyebrow {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  /* "Question N" and its type on the first line, the question across the full width below */
+  :root:root .ui-card-question__head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 2px;
+  }
+  :root:root .ui-card-question__text {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  :root:root .ui-card-question__type {
+    grid-column: 2;
+    grid-row: 1;
+    margin-left: 0;
+  }
+  /* Footer: the secondary actions share a line (each takes a line when they do not fit), the primary action
+   * takes the last line at full width, and a label longer than its line wraps instead of overflowing the card */
+  :root:root .ui-card.ui-clarification-card .ui-card__footer > .settings-button {
+    min-width: 0;
+    padding-block: 4px;
+    white-space: normal;
+    text-align: center;
+  }
+  :root:root .ui-card.ui-clarification-card .ui-card__footer > .settings-button.ui-card__btn--plain {
+    flex: 1 1 auto;
+    margin-left: 0;
+    --ui-btn-bg: var(--c-fill-2);
+    --ui-btn-bg-hover: var(--c-fill-3);
+    --ui-btn-fg: var(--c-ink);
+  }
+  :root:root .ui-card.ui-clarification-card .ui-card__footer > .ui-card__footer-space {
+    display: none;
+  }
+  :root:root .ui-card.ui-clarification-card .ui-card__footer > .settings-button:last-child {
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+  }
+}
+
 /* ═══ File / deliverable card (§6): 28 download button (touch 44), done = positive soft; spacing below the answer ═══ */
 :root:root .chat-deliverable {
   margin: 12px 0 4px;

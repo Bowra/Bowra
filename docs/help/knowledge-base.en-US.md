@@ -222,6 +222,10 @@ If no relevant evidence is found after a bounded search, the answer explains wha
 
 In larger collections, recent sources with maintained descriptions or categories receive priority in the assistant’s initial source hints. The assistant can use the source directory to find additional files by category name; a missing hint does not mean a file is unavailable.
 
+## When sources change during a conversation
+
+If a source is deleted, re-parsed or your access to it changes, later questions in the same conversation still continue. New searches use only the sources that are still available. Content the assistant already read earlier in the conversation may still be taken into account, and earlier answers stay in the conversation. Check any fact that came from the changed source, and start a new conversation if that content must be left out entirely.
+
 ## When sources change during a paused task
 
-If a task waiting for your answer reports **Knowledge sources changed**, start a new conversation and ask again using the currently available sources. Changes to a source, its description or your access can make the earlier context unusable. The assistant checks current sources before continuing with them. The same source-change status is shown after refreshing or replaying the chat.
+If a task waiting for your answer reports **Knowledge sources changed**, a source that task read has changed. Start a new conversation and ask again using the currently available sources. Changes to a source, its description or your access can make the earlier context unusable. The assistant checks current sources before continuing with them. The same source-change status is shown after refreshing or replaying the chat.

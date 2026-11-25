@@ -6,7 +6,7 @@ Utilisez un fichier PPTX existant pour conserver la structure des diapositives t
 
 ## Envoyer la demande
 
-1. Joignez le PPTX dans le chat, ou nommez un PPTX déjà disponible dans la conversation. Si vous joignez plusieurs fichiers, indiquez séparément le modèle et le fichier de données.
+1. Joignez le PPTX dans le chat, ou nommez un PPTX déjà disponible dans la conversation. Si vous joignez plusieurs fichiers, indiquez séparément le modèle et le fichier de données. Les anciens fichiers .ppt ne peuvent pas être lus ; enregistrez-les d’abord au format .pptx dans PowerPoint ou WPS.
 2. Précisez les diapositives, textes, tableaux ou graphiques à modifier ainsi que les éléments à conserver. Fournissez les valeurs de remplacement ou indiquez la source de données connectée et la période à utiliser. Par exemple, « Mets à jour les diapositives 3 à 5 de Bilan trimestriel.pptx avec les ventes d’octobre de Ventes.xlsx. Conserve l’ordre, la mise en page et les autres diapositives. »
 3. Si Bowra demande une précision, répondez sur la carte de question. Si vous autorisez les valeurs d’exemple, indiquez-le explicitement et vérifiez les chiffres que la réponse signale comme illustratifs.
 

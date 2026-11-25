@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
 from pptx import Presentation
 from test_lead_llm_failure_persistence import _read_turn, _wait_done_event
 from test_lead_llm_failure_persistence import r4_app as r4_app
@@ -12,8 +13,11 @@ from test_lead_llm_failure_persistence import r4_app as r4_app
 from bowhead_router import LLMChunk, LLMResponse, ToolCall
 
 
-async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_app):
+@pytest.mark.parametrize("first_count", [3, 2], ids=["as_expected", "revised_after_count_mismatch"])
+async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_app, first_count):
+    """A deck whose slide count differs from expected_slides is kept and stated; a revision replaces it for Lead."""
     app, db_file = r4_app
+    renders_planned = 1 if first_count == 3 else 2
     orch = app.state.orchestrator
     user_text = "Create a new editable 3-slide PPTX: cover Service Desk Weekly; progress: Completed 20 requests, Closed 8 defects, Released 2 improvements; next week: Improve search, Expand help, Contact 5 users. Blue and white."
     sections = [
@@ -56,18 +60,18 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
                 ],
             )
         if phase == "consultant":
-            if previous == 0:
-                return LLMResponse(
-                    content="",
-                    tool_calls=[
-                        ToolCall(
-                            id="render",
-                            name="render_deck",
-                            arguments={"sections": sections, "expected_slides": 3, "style": {"accent": "2F6FCE", "background": "FFFFFF"}},
-                        )
-                    ],
-                )
-            assert previous == 1, "Native deck closeout must finish after its original render"
+            rendered = [json.loads(m.content) for m in request.messages if m.role == "tool" and m.name == "render_deck"]
+            if previous < renders_planned:
+                arguments = {
+                    "sections": sections,
+                    "expected_slides": 3 if previous else first_count,
+                    "style": {"accent": "2F6FCE", "background": "FFFFFF"},
+                }
+                if rendered:
+                    assert rendered[-1]["ok"] and "It has 3 slides; expected_slides was 2." in rendered[-1]["message"], rendered[-1]
+                    arguments["revises"] = rendered[-1]["artifact_id"]
+                return LLMResponse(content="", tool_calls=[ToolCall(id=f"render{previous}", name="render_deck", arguments=arguments)])
+            assert previous == renders_planned, "Native deck closeout must finish after its renders"
             return LLMResponse(
                 content="",
                 tool_calls=[
@@ -80,6 +84,7 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
             )
         spawn_messages = [json.loads(message.content) for message in request.messages if message.role == "tool" and message.name == "subagent_spawn"]
         assert spawn_messages[-1]["delivered"] == "files"
+        assert [d["slide_count"] for d in spawn_messages[-1]["deliverables"]] == [3]
         assert spawn_messages[-1]["deliverables"][0]["artifact_id"].startswith("art_")
         assert "downloadable PPTX" in spawn_messages[-1]["directive"]
         assert "composer" not in spawn_messages[-1]["final_answer"]
@@ -95,6 +100,21 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
 
     orch.router.invoke = invoke
     orch.router.stream = stream
+    if renders_planned == 2:
+        # File versions live in the domain layout; give this legacy-layout store the 0228 columns.
+        from importlib import import_module
+
+        import aiosqlite
+
+        contract = import_module("bowhead_core.migrations.versions.0228_artifact_versions")
+        async with aiosqlite.connect(orch.artifact_store.db_path) as db:
+            for column, declaration in contract.COLUMNS:
+                await db.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {declaration}")
+            for statement in (contract.LINEAGE_INDEX, contract.VERSION_OF_UNIQUE, contract.VERSION_IMMUTABLE):
+                await db.execute(statement)
+            await db.execute("CREATE TABLE IF NOT EXISTS artifact_purge_claims (artifact_id TEXT PRIMARY KEY)")
+            await db.commit()
+        orch.artifact_store._version_cols_present = None
     live = []
     from bowhead_core.types import TurnRequest
     from bowhead_gateway.turn_service import admit_legacy_chat_execution
@@ -127,11 +147,14 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
     assert row["status"] == "completed", [(e["event_type"], e["payload_json"]) for e in events if e["event_type"] in {"turn_failed", "tool_result"}]
     payloads = [(e["event_type"], json.loads(e["payload_json"])) for e in events]
     renders = [p for kind, p in payloads if kind == "tool_result" and p.get("tool_name") == "render_deck"]
-    assert len(renders) == 1 and renders[0]["ok"]
-    receipt = renders[0]["result_inline"]
+    assert len(renders) == renders_planned and all(render["ok"] for render in renders)
+    receipt = renders[-1]["result_inline"]
     spawn = next(p["result_inline"] for kind, p in payloads if kind == "tool_result" and p.get("tool_name") == "subagent_spawn")
     assert spawn["delivered"] == "files"
-    assert spawn["deliverables"][0]["artifact_id"] == receipt["artifact_id"]
+    # Lead gets the latest version only; an earlier version stays in the file's version history.
+    assert [d["artifact_id"] for d in spawn["deliverables"]] == [receipt["artifact_id"]]
+    if renders_planned == 2:
+        assert receipt["revises"] == renders[0]["result_inline"]["artifact_id"]
     art = await orch.artifact_store.get(receipt["artifact_id"])
     assert art.created_by_turn == tid and art.created_by == member.id
     deck = Presentation(io.BytesIO(await orch.artifact_store.open_read(art)))
@@ -145,7 +168,7 @@ async def test_confirmed_deck_is_registered_and_projected_in_live_and_replay(r4_
             if paragraph._p.xpath("./a:pPr/a:buChar")
         ]
         assert points == section["payload"]["bullets"]
-    assert calls.count("consultant") == 2
+    assert calls.count("consultant") == renders_planned + 1
     assert not any(
         kind == "step_started" and p.get("tool_name") in {"bi_query", "skill_read", "skill_list", "python_sandbox"} for kind, p in payloads
     )

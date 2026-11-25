@@ -16814,6 +16814,17 @@ textarea {
   max-height: 70vh;
   overflow-y: auto;
 }
+/* Code still being written (AgentTrace `LIVE_CODE_LINES`): exactly `--code-lines` lines tall and unwrapped, so new
+   lines and long lines (inline HTML data) no longer resize the trace. Padding and border stay outside the lines. */
+.bh-step-list .ag-trace .codewrap.is-fixed .code {
+  box-sizing: content-box;
+  height: calc(var(--code-lines) * 1.55em);
+  max-height: none;
+  overflow: hidden;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
 .bh-step-list .ag-trace .code-more {
   position: relative;
   z-index: 1;

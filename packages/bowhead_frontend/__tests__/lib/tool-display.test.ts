@@ -70,9 +70,9 @@ describe("toolDisplay", () => {
     // Includes the current-user reader; Google delivery Tools require the connection.
     expect(GOOGLE_DELIVERY_TOOL_REFS.size).toBe(3);
     expect(caps.map((tool) => tool.ref)).toContain("get_current_user");
-    expect(caps.length).toBe(40);
+    expect(caps.length).toBe(41);
     for (const ref of GOOGLE_DELIVERY_TOOL_REFS) expect(withGoogle).toContain(ref);
-    expect(withGoogle.length).toBe(43);
+    expect(withGoogle.length).toBe(44);
   });
 
   it("lists system capabilities apart from the selectable Tools, named in every locale", () => {

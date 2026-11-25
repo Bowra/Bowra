@@ -1,12 +1,8 @@
-"""said-not-done Seam B —— **穿过闸本身**的接线测试。
+"""said-not-done Seam B: the Turn ledger read at the end of ``_compose_turn_output``.
 
-`test_deliverable_ledger.py` / `test_overclaim_guard.py` 测的是两个模块的纯逻辑。
-它们全绿**并不能证明这个闸在真 turn 里会跑** —— 接线错了（flag 名写错、块放在
-early-return 之后、拿错 store）单测一条都不会红。
-[[feedback_verify_at_the_gate_not_around_it]]：闸上游/下游验证都不算数。
-
-所以本文件直接调 `_compose_turn_output`（收尾定稿的真实入口，新块就挂在它末尾），
-断言**它返回的文案**变了或没变。
+``test_deliverable_ledger.py`` covers the ledger itself. These cases go through the real finishing entry, so a
+wrong flag name, a block placed after an early return or the wrong store shows up here. The ledger only feeds the
+worked-but-produced-nothing signal; the answer text is returned as written.
 """
 
 from __future__ import annotations
@@ -31,11 +27,7 @@ class _FakeBus:
 
 
 class _FakeArtifactStore:
-    """★ 必须带 `filename`：真 `ArtifactStore.list_deliverables_for_turn` 返回的是完整
-    `Artifact` 记录（`artifact_store.py:1507`）。此前这个 fake 只给 `id`，比真实现宽松 ——
-    那样 `file_exts` 恒为空、`count_for_ext()` 恒返 -1 恒放行，
-    **按格式对账的新逻辑会全部"绿"而实际从未被执行**（fake 比真协作者宽松 = 假绿）。
-    """
+    """Returns full records with ``filename``, like ``ArtifactStore.list_deliverables_for_turn``."""
 
     def __init__(self, n: int, ext: str = ".pptx") -> None:
         self._n = n
@@ -79,15 +71,16 @@ def _mk_sctx() -> Any:
     )
 
 
-def _mk_result(text: str) -> Any:
-    return SimpleNamespace(final_answer=text, payload=None, intent=None, tool_invocations=[])
+def _mk_result(text: str, *, dispatched: bool = False) -> Any:
+    invocations = [SimpleNamespace(tool_name="subagent_spawn", result={"ok": True}, nested=[])] if dispatched else []
+    return SimpleNamespace(final_answer=text, payload=None, intent=None, tool_invocations=invocations)
 
 
-async def _run(*, files: int, sections: int, text: str = PROD_FALSE_CLAIM, ext: str = ".pptx", lang: str | None = "zh-CN") -> str:
+async def _run(*, files: int, sections: int, text: str = PROD_FALSE_CLAIM, dispatched: bool = False) -> str:
     _, out = await _compose_turn_output(
-        runtime=_mk_runtime(files=files, sections=sections, ext=ext, lang=lang),
+        runtime=_mk_runtime(files=files, sections=sections),
         sctx=_mk_sctx(),
-        result=_mk_result(text),
+        result=_mk_result(text, dispatched=dispatched),
         aggregated_payload={},
         user_text="做成一份可下载的PPT演示稿",
         peer_payloads=[],
@@ -95,73 +88,24 @@ async def _run(*, files: int, sections: int, text: str = PROD_FALSE_CLAIM, ext: 
     return out
 
 
-# ── Intervention ON: false claims must receive an honest correction ──────────────
+# ── The ledger's signal ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_overclaim_gets_caveat_when_intervention_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """★ 核心：声明「已生成PPT，可直接下载」+ 账单 files=0 → 追加诚实说明。"""
+async def test_dispatched_work_that_left_nothing_is_logged(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=0, sections=11)
-    assert "没有成功生成可下载文件" in out, "闸没接上：谎报原样发出去了"
-
-
-@pytest.mark.asyncio
-async def test_overclaim_caveat_uses_english_without_a_language_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=0, sections=11, lang=None)
-    assert "No downloadable file was successfully produced this turn" in out
-
-
-@pytest.mark.asyncio
-async def test_no_caveat_when_file_really_exists(monkeypatch: pytest.MonkeyPatch) -> None:
-    """★ 反向：真出了文件的轮次绝不能被扣帽子（误判比漏判更伤）。"""
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=1, sections=11)
-    assert "没有成功生成可下载文件" not in out
-
-
-@pytest.mark.asyncio
-async def test_no_caveat_when_answer_makes_no_claim(monkeypatch: pytest.MonkeyPatch) -> None:
-    """纯分析答案（静默漏掉那一类）——闸不管，交给 ledger_empty 指标去看。"""
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=0, sections=11, text="分析完成。7 月营业额约 9.8 亿。")
-    assert "没有成功生成" not in out
-
-
-# ── Default intervention + explicit rollback ─────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_intervention_is_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DGF-04：定向语料通过后默认必须收敛成诚实终态。"""
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.delenv("BOWHEAD_OVERCLAIM_GUARD_V2", raising=False)
-    out = await _run(files=0, sections=11)
-    assert "没有成功生成可下载文件" in out
-    assert "已生成PPT演示稿" not in out
-
-
-@pytest.mark.asyncio
-async def test_intervention_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "0")
-    out = await _run(files=0, sections=11)
-    assert "没有成功生成可下载文件" not in out
+    with caplog.at_level("WARNING"):
+        out = await _run(files=0, sections=0, dispatched=True)
+    assert any("lead.worked_but_produced_nothing" in r.getMessage() for r in caplog.records)
     assert PROD_FALSE_CLAIM.split("。")[0] in out
 
 
 @pytest.mark.asyncio
-async def test_ledger_flag_off_is_full_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """kill-switch：整块关掉 = 完全恢复现状。"""
+async def test_ledger_flag_off_reads_nothing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "0")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=0, sections=11)
-    assert "没有成功生成可下载文件" not in out
+    with caplog.at_level("WARNING"):
+        await _run(files=0, sections=0, dispatched=True)
+    assert not any("lead.worked_but_produced_nothing" in r.getMessage() for r in caplog.records)
 
 
 # ── Best effort: store failures must not break finalization ───────────────────────
@@ -170,7 +114,6 @@ async def test_ledger_flag_off_is_full_noop(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.asyncio
 async def test_store_failure_does_not_break_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
 
     class _Boom:
         async def list_deliverables_for_turn(self, turn_id: str) -> list[Any]:
@@ -186,46 +129,12 @@ async def test_store_failure_does_not_break_turn(monkeypatch: pytest.MonkeyPatch
         user_text="q",
         peer_payloads=[],
     )
-    assert out
-    assert "已生成PPT演示稿" not in out
-    assert "暂时无法核验" in out
+    assert PROD_FALSE_CLAIM.split("。")[0] in out
 
 
 @pytest.mark.asyncio
-async def test_wrong_format_gets_caveat_when_intervention_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """★ deliverable-format-fidelity W1 端到端：用户要 PPT，本轮产出的是 PDF。
-
-    总数口径 `files == 1` 看着"有产出"，旧闸整条放行（真机 t_1c11f59a7ba3 的形状）；
-    按格式核之后必须补上诚实说明。走 `_compose_turn_output` 是为了穿过闸本身，
-    不是只测纯函数。
-    """
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    out = await _run(files=1, sections=11, ext=".pdf")
-    assert "已成功生成：out_0.pdf" in out
-    assert "PPTX 未生成" in out, "格式不符没被抓到：兜底产物把双条件挡掉了"
-
-
-@pytest.mark.asyncio
-async def test_wrong_format_can_use_explicit_measurement_only_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式 _V2=0 保留只打点、不改用户可见文案的回滚路径。"""
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "0")
-    out = await _run(files=1, sections=11, ext=".pdf")
-    assert "没有成功生成可下载文件" not in out
-
-
-@pytest.mark.asyncio
-async def test_guard_failure_is_logged_loudly_not_silently(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    """★ 守卫抛异常必须留 warning —— prod 不开 debug，debug 级等于完全静默。
-
-    真机 116 t_72011a27fce9 出现过「复算该报却零日志零修订」，当时无从判断是没跑到
-    还是抛了异常，正因为这条路径没留痕。
-
-    ⚠ 不能用"让 artifact_store 抛"来造这个态：`build_deliverable_ledger` 是
-    **按项 best-effort** 的，store 炸了只让 files=0/-1，走的是 `ledger_unverified`
-    分支，根本到不了守卫的 except。要覆盖 except 必须让取数入口本身炸。
-    """
+async def test_ledger_failure_is_logged_loudly_not_silently(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Production debug logging is off, so a failing ledger read must leave a warning (an observed execution."""
     monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
 
     import bowhead_core.deliverable_ledger as _dl
@@ -244,34 +153,5 @@ async def test_guard_failure_is_logged_loudly_not_silently(monkeypatch: pytest.M
             user_text="q",
             peer_payloads=[],
         )
-    assert out, "守卫挂掉不能把收尾带崩"
-    assert any("deliverable_ledger_guard_failed" in r.getMessage() for r in caplog.records), "守卫抛异常却没留 warning —— prod 上等于静默失效"
-
-
-class _EarlierVersionStore(_FakeArtifactStore):
-    """This Turn wrote nothing; an earlier Turn of the session delivered version 4 of the report."""
-
-    def __init__(self) -> None:
-        super().__init__(0)
-
-    async def list_session_deliverables(self, **_scope: Any) -> list[Any]:
-        return [SimpleNamespace(filename="2025年经营分析报告.html", version_no=4)]
-
-
-@pytest.mark.asyncio
-async def test_an_answer_about_an_earlier_version_keeps_its_text_and_gets_no_footer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """116 dogfood N13: asked how many versions the report had, the answer lost a true sentence and got the footer."""
-    monkeypatch.setenv("BOWHEAD_DELIVERABLE_LEDGER", "1")
-    monkeypatch.setenv("BOWHEAD_OVERCLAIM_GUARD_V2", "1")
-    runtime = _mk_runtime(files=0, sections=0)
-    runtime.parent_ctx.artifact_store = _EarlierVersionStore()
-    text = "HTML 报告一共 4 个版本，最新的是第 4 版。\n补充一点：第4版那次交付的回执显示执行中断，但文件本身已生成并登记为第4版。"
-    _, out = await _compose_turn_output(
-        runtime=runtime,
-        sctx=_mk_sctx(),
-        result=_mk_result(text),
-        aggregated_payload={},
-        user_text="HTML报告现在一共有几个版本？最新的是第几版？",
-        peer_payloads=[],
-    )
-    assert "交付核验" not in out and "文件本身已生成并登记为第4版" in out
+    assert out
+    assert any("deliverable_ledger_guard_failed" in r.getMessage() for r in caplog.records)

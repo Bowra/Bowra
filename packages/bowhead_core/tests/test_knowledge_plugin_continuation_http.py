@@ -148,7 +148,7 @@ async def test_direct_search_question_resume_retains_policy_budget_and_results(h
 
 
 @pytest.mark.parametrize("metadata_changed", [False, True])
-async def test_source_navigation_only_question_retains_current_metadata_authority(
+async def test_source_navigation_only_question_resumes_with_current_metadata(
     http_start, initialize_migrated_kb_files_database, monkeypatch, tmp_path, metadata_changed
 ):
     from bowhead_core.kb.files_store import KbFilesStore
@@ -229,5 +229,9 @@ async def test_source_navigation_only_question_retains_current_metadata_authorit
         assert answered.status_code == 200, answered.text
         await settled(turn_id)
     turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
-    assert len(requests) == (1 if metadata_changed else 2)
-    assert (turn["status"] == "completed") is not metadata_changed
+    # The navigation sample is rebuilt from current metadata before every send and is not a
+    # retained dependency, so a description edited while the question waits does not end the Turn.
+    assert len(requests) == 2
+    assert turn["status"] == "completed", turn
+    if metadata_changed:
+        assert "Travel approvals and reimbursement." not in json.dumps(requests[1])

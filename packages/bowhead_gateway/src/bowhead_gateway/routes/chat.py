@@ -35,6 +35,7 @@ from bowhead_core.i18n_flag import (
 )
 from bowhead_core.language_context import resolve_turn_language
 from bowhead_core.model_clock import viewer_clock_scope
+from bowhead_core.presentation_selection import PresentationSelection
 from bowhead_core.rate_card import credits_for_tokens
 from bowhead_core.subagent_authoring_rollout import resolve_subagent_authoring_capabilities
 from bowhead_core.team_language_policy import (
@@ -485,6 +486,7 @@ class ChatAttachmentRef(BaseModel):
         alias="referenceKind",
     )
     selected_context: ChartSelectedContext | None = Field(default=None, alias="selectedContext")
+    presentation_selection: PresentationSelection | None = Field(default=None, alias="presentationSelection")
     bundle_artifact_ids: list[str] | None = Field(
         default=None,
         alias="bundleArtifactIds",
@@ -5016,7 +5018,7 @@ async def get_chat_action(
 # history INCLUDING that paused `done`; markTerminal there strands the (often
 # minutes-long) resumed pass — one transport blip during a quiet gap and the
 # final answer never lands ("点击 clarification 没返回"; prod turn
-# t_f2f6a88ad3cc — 210s resume, 51s/71s silent gaps, full report generated +
+# an observed task — 210s resume, 51s/71s silent gaps, full report generated +
 # persisted but never delivered to the browser).
 _PAUSED_DONE_STATUSES = frozenset({"clarification_pending", "approval_pending"})
 # #9 (dingsiyan 2026-07-07): every TRULY-terminal turn status (turn is done and will

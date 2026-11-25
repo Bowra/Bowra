@@ -6,7 +6,7 @@ Use an existing PPTX when you want to keep its slide structure and update specif
 
 ## Send the request
 
-1. Attach the PPTX in Chat, or name a PPTX already available in the conversation. If you attach multiple files, name the template and the data file separately.
+1. Attach the PPTX in Chat, or name a PPTX already available in the conversation. If you attach multiple files, name the template and the data file separately. Old .ppt files can't be read; save them as .pptx in PowerPoint or WPS first.
 2. Say which slides, text, tables or charts to update and which parts to preserve. Provide the replacement values or identify the connected data source and reporting period to use. For example, “Update slides 3–5 in Quarterly review.pptx with October sales from sales.xlsx. Keep the slide order, layout and other slides.”
 3. If Bowra asks a question, answer on the question card. When you want sample figures, explicitly allow them and check which values the answer identifies as illustrative.
 

@@ -122,7 +122,7 @@ async def test_scope_mismatch_never_exposes_navigation():
 
 
 @pytest.mark.parametrize("profile", ["lead", "business-test"])
-async def test_each_ordinary_model_request_gets_fresh_ephemeral_hint_with_provenance(monkeypatch, profile):
+async def test_each_ordinary_model_request_gets_a_fresh_ephemeral_hint_that_is_not_retained(monkeypatch, profile):
     ctx, _ = with_sources(source("kbf_a", "Travel policy.pdf"))
     responses = [calculate_response(), LLMResponse(content="Completed.") if profile == "lead" else closeout()]
     result, _, router = await run_shared(monkeypatch, responses, profile_name=profile, ctx=ctx)
@@ -135,7 +135,37 @@ async def test_each_ordinary_model_request_gets_fresh_ephemeral_hint_with_proven
                 responses = request.messages[index + 1 : index + 1 + len(message.tool_calls)]
                 assert all(response.role == "tool" for response in responses)
                 assert {response.tool_call_id for response in responses} == {call.id for call in message.tool_calls}
-    assert ctx.knowledge_source_uses == {"kbf_a": "generation-kbf_a"}
+    # The sample is rebuilt and rechecked before each send; it is not a retained source dependency.
+    assert ctx.knowledge_source_uses == {}
+    assert ctx.knowledge_navigation_uses == {}
+
+
+async def test_a_sampled_file_deleted_mid_turn_leaves_the_next_sample_and_the_turn_continues(monkeypatch):
+    """116 (1.7.65): ten new-session Turns ran 5-20 model calls and then failed with
+    knowledge_source_changed because a file listed only in their sample was deleted meanwhile."""
+    import test_knowledge_plugin_direct_use as direct_use
+
+    ctx, rows = with_sources(source("kbf_a", "Travel policy.pdf"), source("kbf_b", "Expense rules.pdf"))
+    original = direct_use.ToolRegistry
+
+    class DeletingRegistry(original):
+        def register(self, spec):
+            if spec.schema.name == "calculate":
+                handler = spec.handler
+
+                async def calculate_then_delete(args, tool_ctx):
+                    rows["kbf_a"].soft_deleted_at = "2026-11-23T03:58:00+00:00"
+                    return await handler(args, tool_ctx)
+
+                spec.handler = calculate_then_delete
+            return super().register(spec)
+
+    monkeypatch.setattr(direct_use, "ToolRegistry", DeletingRegistry)
+    result, _, router = await run_shared(monkeypatch, [calculate_response(), LLMResponse(content="Completed.")], profile_name="lead", ctx=ctx)
+    assert result.ok and result.final_answer == "Completed."
+    first, second = ([m.content for m in request.messages if "authorized_source_sample" in m.content][0] for request in router.requests)
+    assert "Travel policy.pdf" in first and "Expense rules.pdf" in first
+    assert "Travel policy.pdf" not in second and "Expense rules.pdf" in second
 
 
 async def test_no_hint_or_catalog_read_without_actual_search_tool(monkeypatch):
@@ -161,7 +191,7 @@ async def test_personal_team_and_space_filters_do_not_cross_current_authority():
 
 
 @pytest.mark.usefixtures("_fernet")
-async def test_continuation_rechecks_retained_source_names_before_any_model_call(migrated_legacy_core_db, monkeypatch):
+async def test_continuation_after_a_sampled_file_is_deleted_continues_without_it(migrated_legacy_core_db, monkeypatch):
     from dataclasses import replace
 
     from bowhead_core.session_store import SessionStore
@@ -176,17 +206,19 @@ async def test_continuation_rechecks_retained_source_names_before_any_model_call
     assert result.ok and result.resume_checkpoint_id
     checkpoint = await sr.claim(db_path, checkpoint_id=result.resume_checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
     material = sr.open_material(checkpoint, db_path=db_path)
-    assert material.knowledge_sources == {"kbf_a": "generation-kbf_a"}
+    # Only the sample named the file, so the checkpoint retains no dependency on it.
+    assert not material.knowledge_sources
     assert all("Travel policy.pdf" not in message.content for message in material.messages)
     rows["kbf_a"].soft_deleted_at = "deleted"
     resumed = replace(ctx, turn_id="t_2")
-    with pytest.raises(KnowledgeAccessError, match="source_changed"):
-        await run_shared(
-            monkeypatch,
-            [calculate_response(), closeout()],
-            ctx=resumed,
-            resume_grant=sr.ResumeGrant(checkpoint=checkpoint, material=material, instruction="Continue."),
-        )
+    resumed_result, _, router = await run_shared(
+        monkeypatch,
+        [calculate_response(), closeout()],
+        ctx=resumed,
+        resume_grant=sr.ResumeGrant(checkpoint=checkpoint, material=material, instruction="Continue."),
+    )
+    assert resumed_result.ok
+    assert all("Travel policy.pdf" not in str(request.messages) for request in router.requests)
 
 
 async def test_revocation_between_discovery_and_send_omits_the_hint(monkeypatch):

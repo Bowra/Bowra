@@ -283,3 +283,22 @@ async def test_text_preview_keeps_shared_bounded_extraction_instead_of_recroppin
     assert r.json()["text"] == content.decode()
     assert len(r.json()["text"]) > 1500
     assert r.json()["truncated"] is False
+
+
+async def test_rows_preview_drops_the_excel_utf8_bom_from_the_first_column(app_client) -> None:
+    """A table expands only when every column name matches; a BOM kept in `\\ufeff品牌` broke that."""
+    client, store = app_client
+    art = await _put(
+        store,
+        filename="brands.csv",
+        mime="text/csv",
+        content="品牌,销售额\n甲,1\n乙,2\n".encode("utf-8-sig"),
+    )
+
+    r = client.get(f"/api/v1/files/{art.id}/preview?mode=rows&max_rows=10000", headers=_H)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["columns"] == ["品牌", "销售额"]
+    assert body["rows"] == [{"品牌": "甲", "销售额": "1"}, {"品牌": "乙", "销售额": "2"}]
+    assert body["total_rows"] == 2

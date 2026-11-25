@@ -316,6 +316,7 @@ const DEFINITIVE_PRE_ADMISSION_REJECTION_CODES = new Set([
   "request_validation_failed",
   "result_reference_unavailable",
   "chart_selection_unavailable",
+  "presentation_selection_unavailable",
   "subagent_draft_unsaved_changes",
   "agent_draft_target_unavailable",
   "session_deleted",

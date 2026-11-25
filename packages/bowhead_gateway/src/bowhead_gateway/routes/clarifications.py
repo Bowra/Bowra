@@ -287,7 +287,7 @@ def _merge_clarified_user_text(original: str, chosen_values: list[str]) -> str:
     B1 (clarification-true-continuation): APPEND ALL answers, not just the first.
     A multi-question clarification stores one entry per question in chosen_values
     (each already prefixed "问题: 答案"); the old single-value merge silently
-    dropped questions 2..N -- prod t_f2f6a88ad3cc lost the "时间范围: 今年至今"
+    dropped questions 2..N -- prod an observed task lost the "时间范围: 今年至今"
     answer, so the resumed turn ran without the time filter. Falls back to the
     pick(s) alone when the original ask was empty.
     """
@@ -1733,7 +1733,7 @@ async def resolve_one(
 
     # SSE event, dingsiyan #11: must use emit_out_of_band. Plain get_or_create+emit previously failed after pause
     # in two ways: <5s hit closed gen1 bus, silently discarded without persistence; >5s new bus started seq at 0,
-    # colliding with early turn events and losing them to FE replay dedupe (prod t_1ccf9e0aec11 confirmed payload seq=1).
+    # colliding with early turn events and losing them to FE replay dedupe (prod an observed task confirmed payload seq=1).
     # Card removal never worked in production, the delivery-layer cause of repeated clicks / panels staying open.
     resolution_event_payload = {
         "request_id": request_id,
@@ -2883,6 +2883,16 @@ async def resume_turn(
                 and turn_req.document_clarification_id is None
             ):
                 raise
+            from bowhead_core.ordinary_lead_runtime import capture_failure_site
+
+            # The response carries only the finite stage; name the refusing check here (no request content).
+            logger.info(
+                "clarify.resume_preflight_unavailable req=%s turn=%s cause=%s failure_site=%s",
+                request_id,
+                turn_req.turn_id,
+                type(exc).__name__,
+                capture_failure_site(exc),
+            )
             raise rule_clarification_http_error(
                 409,
                 "clarification_resume_unavailable",

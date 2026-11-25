@@ -611,14 +611,58 @@ function _notify(turnId: string): void {
   for (const cb of _anyTurnListeners) cb();
 }
 
+// ── Streamed text is announced once per frame ──────────────────────────────
+// A streaming reply arrives as hundreds of small text deltas per second (Lead's `narrative.delta`, a helper's
+// `partial_answer`). Each delta updates the Turn's state at once, so readers and later events always see the
+// full text; subscribers are told at most once per frame, so React renders the growing text once per frame and
+// not once per delta. Any other commit of the same Turn announces immediately, and the pending text goes out
+// with it.
+//
+// The frame comes from `requestAnimationFrame`. A hidden tab gets no frames, so a timer runs beside it and the
+// first of the two delivers the announcement; browsers slow that timer down in the background on their own.
+const TEXT_FRAME_FALLBACK_MS = 100;
+const _textFramePending = new Set<string>();
+let _textFrame: { raf: number | null; timer: ReturnType<typeof setTimeout> } | null = null;
+
+function _cancelTextFrame(): void {
+  if (!_textFrame) return;
+  if (_textFrame.raf != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(_textFrame.raf);
+  clearTimeout(_textFrame.timer);
+  _textFrame = null;
+}
+
+function _flushTextFrame(): void {
+  _cancelTextFrame();
+  const pending = Array.from(_textFramePending);
+  _textFramePending.clear();
+  for (const turnId of pending) _notify(turnId);
+}
+
+function _notifyOnNextFrame(turnId: string): void {
+  _textFramePending.add(turnId);
+  if (_textFrame) return;
+  _textFrame = {
+    raf: typeof requestAnimationFrame === "function" ? requestAnimationFrame(_flushTextFrame) : null,
+    timer: setTimeout(_flushTextFrame, TEXT_FRAME_FALLBACK_MS),
+  };
+}
+
 /**
  * Replace the state object reference for `turnId`, then notify only the
  * subscribers that bound to this turnId. We always create a new top-level
  * object so `useSyncExternalStore` sees a !== snapshot and re-renders.
+ *
+ * `announce: "frame"` is for streamed text only (see above): the state changes now, subscribers hear of it with
+ * the next frame.
  */
-function _commit(turnId: string, next: TurnState): void {
+function _commit(turnId: string, next: TurnState, announce: "now" | "frame" = "now"): void {
   _states.set(turnId, next);
   _revisions.set(turnId, (_revisions.get(turnId) ?? 0) + 1);
+  if (announce === "frame") {
+    _notifyOnNextFrame(turnId);
+    return;
+  }
+  _textFramePending.delete(turnId);
   _notify(turnId);
 }
 
@@ -842,6 +886,8 @@ export function _pendingProseKeyCountForTesting(turnId: string): number {
 /** Test helper — clears all turns (used by unit tests' beforeEach). */
 export function _resetAllTurnsForTesting(): void {
   _pendingProseKeys.clear();
+  _cancelTextFrame();
+  _textFramePending.clear();
   // Fire all known listener buckets so React subscribers re-read.
   const ids = Array.from(_states.keys());
   _states.clear();
@@ -1244,14 +1290,14 @@ export function applyPeerProseKey(
  *  canonical turn-store, keyed by the peer id (partial_answer.parent_agent_id).
  *  Driven by dispatchToTurnStore on BOTH the live and replay paths, so the render
  *  reads one store everywhere (no separate runner/archived prose store). */
-export function applyPeerProse(turnId: string, peerId: string, delta: string): void {
+export function applyPeerProse(turnId: string, peerId: string, delta: string, frameBatched = false): void {
   if (!turnId || !peerId || !delta) return;
   const prev = _states.get(turnId) ?? _emptyTurnState(turnId);
   const peerProse = {
     ...prev.peerProse,
     [peerId]: (prev.peerProse[peerId] ?? "") + delta,
   };
-  _commit(turnId, { ...prev, peerProse });
+  _commit(turnId, { ...prev, peerProse }, frameBatched ? "frame" : "now");
 }
 
 /**
@@ -1817,6 +1863,8 @@ export interface ApplyNarrativeAppendInput {
    * Caller must pass segId in 1.7-A wiring.
    */
   segId: string;
+  /** Live stream only: subscribers hear of this text with the next frame, not once per delta. */
+  frameBatched?: boolean;
 }
 
 export function applyNarrativeAppend(input: ApplyNarrativeAppendInput): void {
@@ -1835,7 +1883,7 @@ export function applyNarrativeAppend(input: ApplyNarrativeAppendInput): void {
   } else {
     nextBeats = [...prev.beats, { kind: "narrative", segId: input.segId, text: input.text }];
   }
-  _commit(input.turnId, { ...prev, beats: nextBeats });
+  _commit(input.turnId, { ...prev, beats: nextBeats }, input.frameBatched ? "frame" : "now");
 }
 
 /**

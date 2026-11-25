@@ -61,6 +61,7 @@ class TurnAttachmentDTO(BaseModel):
         exclude_if=lambda value: value is None,
     )
     selected_context: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    presentation_selection: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     bundle_artifact_ids: list[str] | None = None
 
 

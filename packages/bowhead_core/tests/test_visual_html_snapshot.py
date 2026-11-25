@@ -47,6 +47,9 @@ def test_a_long_page_is_one_full_screen_and_a_sheet() -> None:
     view = vv.render_screens_view(_page_png(2000), kind="html")
     assert view["status"] == "shown" and view["pages"] == 3
     assert [image["label"] for image in view["images"]] == ["Screen 1", "screens 1-3"]
+    # Page numbers let a later view_file bring back each page once (visual_self_check.earlier_views).
+    assert [(image.get("page"), image.get("pages")) for image in view["images"]] == [(1, None), (None, [1, 2, 3])]
+    assert view["images"][0]["px"] == [1280, 800]
     assert view["shown"].startswith("screen 1 at 1280x800 px, then screens 1-3 in 1 sheet")
     assert view["page_px"] == [400, 250]
 
@@ -56,6 +59,7 @@ def test_short_page_full_detail_and_blank_capture() -> None:
     assert single["shown"] == "screen 1, each at 1280x800 px" and len(single["images"]) == 1
     full = vv.render_screens_view(_page_png(4000), kind="html", pages=[1, 4], detail="full")
     assert [image["label"] for image in full["images"]] == ["Screen 2", "Screen 5"]
+    assert [image["page"] for image in full["images"]] == [2, 5]
     assert vv.render_screens_view(_page_png(1600, blank=True), kind="html") == {"status": "not_completed", "reason": "blank_render", "pages": 2}
     assert vv.render_screens_view(_page_png(1600, blank=True), kind="html", text_present=False)["status"] == "shown"
 

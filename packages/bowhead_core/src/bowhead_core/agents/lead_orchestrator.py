@@ -53,7 +53,7 @@ from bowhead_core.published_diagnostics import (
     get_or_build_chat_llm_failure,
     get_or_build_chat_turn_failure,
 )
-from bowhead_core.tool_delivery_review import delivery_summary_input
+from bowhead_core.tool_delivery_review import LeadDeliveryReview, delivery_summary_input
 from bowhead_core.turn_failure_text import keep_sections_visible_on_failure
 from bowhead_core.types import IntentType, TurnStatus, utc_now_iso
 from bowhead_router import InvocationOutcomeUnknownError
@@ -264,7 +264,7 @@ _CITE_MARKER_RE = re.compile(r"\[cite:(\d+)\]")
 # frontend citation plugins intentionally skip code, displaying literal [cite:1] (116 1.3.53). Remove backticks first.
 _BACKTICKED_MARKER_RE = re.compile(r"`\s*(\[(?:cite|ref|data):[^\]`\n]*\])\s*`")
 
-# prod-bug-bash-039 P0 bug A (0.39.3 ship dogfood, turn t_83cc7740c011):
+# prod-bug-bash-039 P0 bug A (0.39.3 ship dogfood, an observed task):
 # Prod LLM (DeepSeek v4) emitted `[data:1] [data:2] [data:3]` — integer N
 # after the `data:` prefix instead of `art_HEX`. This is a hallucination
 # mixing old format (`[data:art_X]`) with new format (`[cite:N]`). Neither
@@ -274,7 +274,7 @@ _BACKTICKED_MARKER_RE = re.compile(r"`\s*(\[(?:cite|ref|data):[^\]`\n]*\])\s*`")
 # integer N) as a `[cite:N]` alias — same registry lookup + orphan handling.
 _DATA_INT_MARKER_RE = re.compile(r"\[data:(\d+)\]")
 
-# kb-dogfood-fixes Bug 11 (0.40.5 — prod turn t_13b24e763c23, chat narrative
+# kb-dogfood-fixes Bug 11 (0.40.5 — prod an observed task, chat narrative
 # from Lead leaked `[ref:chunk_a30cafb175d2c30c88387342]` markers inline).
 # Root cause: `kb_search` tool description literally nudges the LLM to emit
 # `[ref:s_xxx]` for chunk citations, but the chat-narrative renderer
@@ -298,7 +298,7 @@ def _strip_bare_artifact_ids(text: str) -> str:
 
     Prose code wrappers go only when their content is a suppressed ID. Canvas, section
     and revision IDs follow the shared `strip_internal_object_ids` rule (116
-    t_7edbc155f8d8 exposed `sec_…` in the final answer).
+    an observed task exposed `sec_…` in the final answer).
     """
     from bowhead_core.analysis_payload import remove_id_matches, strip_internal_object_ids
 
@@ -386,7 +386,7 @@ def _resolve_citations(text: str, parent_ctx: object | None, *, invocations: lis
     # → `[cite:N]` ONLY when registry has matching seq; else strip silently
     # (NOT `[?]` — those are LLM hallucinations with no backing data; better
     # UX to drop them than to insert a confusing orphan marker mid-sentence).
-    # Prod turn t_83cc7740c011 emitted 3 such orphans into a chat reply with
+    # Prod an observed task emitted 3 such orphans into a chat reply with
     # empty registry; user perception: "raw protocol leakage". Same fix in
     # _strip_data_markers legacy path strips unconditionally.
     def _data_int_to_cite_or_strip(m: re.Match[str]) -> str:
@@ -763,7 +763,7 @@ def is_report_worthy(
       它只在 `FEATURE_DELIVERY_AUTONOMY` **关**时生效，随该开关在 `83f9ac35c`
       一并删除。现在由 agent 声明交付面，图的张数不再强制 canvas。
       （注释留到删除之后就是假话——它把我骗过一次：照它读会以为 chart×2 的轮
-      不会被隐藏，而实测 116 `t_7f66c0d681c6` 正是 chart×2 被整轮隐藏。
+      不会被隐藏，而实测 116 `an observed task` 正是 chart×2 被整轮隐藏。
       [[feedback_comment_states_intent_not_outcome]]）
 
     Multi-agent: sections aggregate per turn (all peers + Lead self + composer),
@@ -1127,7 +1127,7 @@ async def _apply_terminal_surface_decision(bus: TurnEventBus, *, status: str | N
                     rationale,
                 )
         # Failed turn ⇒ chat never rendered final answer, so hiding premise that figures inline into bubbles fails.
-        # Without reversal, turn outputs are in neither canvas nor chat (116 `t_7f66c0d681c6`: both 2 figures lost).
+        # Without reversal, turn outputs are in neither canvas nor chat (116 `an observed task`: both 2 figures lost).
         if sections and keep_sections_visible_on_failure(status, response_kind):
             # Change decision to canvas, **do not return**: keep branch below must still run
             # (fold prior-turn blocks, etc.). Early return skips those side effects.
@@ -2850,6 +2850,15 @@ def _plan_step_partial(step: Any) -> dict | None:
     return partial if isinstance(partial, dict) else None
 
 
+# Plan steps that failed because their Agent returned without a file it owes (PlanStepDeliveryError kinds).
+_PLAN_STEP_DELIVERY_GAPS = {
+    "deck_delivery_missing": (
+        "「{step}」这一步要交付一份新的 PPT 文件，但没有生成文件，这一步没有完成。"
+        "不需要 PPT 时，可以在计划卡上点「修订重试」，把这一步交给其他专家；需要 PPT 时，点「继续执行」重新运行这一步。"
+    ),
+}
+
+
 def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
     """FIX-2 (2026-06-25 prod incident): "data gap" caveats for a PARTIAL plan report.
 
@@ -2915,20 +2924,30 @@ def _plan_report_gap_caveats(final_steps: list[Any]) -> list[str]:
                         )
             continue
         ek = getattr(s, "error_kind", None) or ""
+        if st == "failed" and ek in _PLAN_STEP_DELIVERY_GAPS:
+            # The Agent may have returned analysis before the delivery check failed it, so the caveat names
+            # the missing file and the way forward instead of claiming the report lacks its results.
+            _step = str(getattr(s, "objective", "") or "").strip()[:80] or str(getattr(s, "agent_name", "?"))
+            out.append(_GAP + _PLAN_STEP_DELIVERY_GAPS[ek].format(step=_step))
+            continue
         out.append(
             _GAP + f"「{getattr(s, 'agent_name', '?')}」这步{_why.get(st, '未完成')}" + (f"({ek})" if ek else "") + ",本报告未包含其分析结果。"
         )
     return out
 
 
-def _closing_chapter_header(peer_payloads: list[Any]) -> tuple[str, list[Any]]:
-    """收口章的 (title, kpis) —— 文档封面就用这一条腿的，别跨章聚合（决议 #2/#6.6）。
+def _closing_chapter_header(peer_payloads: list[Any]) -> str:
+    """收口章的 title —— 文档标题就用这一条腿的，别跨章聚合（决议 #6.6）。
+
+    KPI no longer comes from here (docs/sprints/report-kpi-authorship-2026-11-24): the closing step's
+    KPIs are that step's own, so they stay with its chapter instead of standing in for the document.
+    The history below explains why the cover used to take them.
 
     收口章＝`peer_payloads` 里**最后一条有 title 的腿**。`_peer_payloads` 的顺序来自
     `plan_store.list_steps`（`ORDER BY level, seq`）⇒ 末条就是最深层最后一步；
     跳过没 title 的腿是因为交付面选 chat 的腿本来就不出 title（生产基率 9.6%）。
 
-    **为什么 KPI 必须跟标题取同一条腿**（G3，116 真机 t_c9853b490565 逮到）：
+    **为什么 KPI 必须跟标题取同一条腿**（G3，116 真机 an observed task 逮到）：
     决议 #2 把「文档级 KPI 抄某一章的行业数字」逐字点名成 bug 形态——
       > 本案实证：文档级 KPI 要么抄某一章的——**那就是今天 seq79 那个 bug 的形态**
       > （抄了步 0+步 1 的行业数字当全文 KPI，纯噪音）…
@@ -2937,19 +2956,15 @@ def _closing_chapter_header(peer_payloads: list[Any]) -> tuple[str, list[Any]]:
     （`_aggregate_subagent_payloads` 的 kpis 是跨章 first-wins 累积），
     收口章自己的「估值区间下限/基准/上限/退款率」一张都没上封面。
 
-    收口章没有 KPI 时返空 list —— **宁可不渲这条带，也不拿跨章聚合的噪音充数**
-    （决议 #2 的「不新造」）。
     """
     for _e in reversed(list(peer_payloads or ())):
         _p = (_e.get("payload") or {}) if isinstance(_e, dict) else {}
         if not isinstance(_p, dict):
             continue
         _t = str(_p.get("title") or "").strip()
-        if not _t:
-            continue
-        _k = _p.get("kpis")
-        return _t, list(_k) if isinstance(_k, list) else []
-    return "", []
+        if _t:
+            return _t
+    return ""
 
 
 def _plan_fallback_report_payload(final_steps: list[Any]) -> dict[str, Any] | None:
@@ -2967,7 +2982,9 @@ def _plan_fallback_report_payload(final_steps: list[Any]) -> dict[str, Any] | No
 
     insights: list[dict[str, Any]] = []
     kpis: list[Any] = []
-    _all_kpis: list[Any] = []
+    # KPI cards follow their author (docs/sprints/report-kpi-authorship-2026-11-24): the cover carries a
+    # step's KPIs only when that step is the single contributor; several steps' KPIs are never picked or merged.
+    _contributors = 0
     sources: list[dict[str, Any]] = []
     _seen_src: set[str] = set()
     from bowhead_core.plan_store import is_retired_plan_agent
@@ -2986,18 +3003,12 @@ def _plan_fallback_report_payload(final_steps: list[Any]) -> dict[str, Any] | No
         summary = str(p.get("exec_summary") or "").strip()
         leg_title = str(p.get("title") or "").strip() or str(getattr(s, "objective", "") or "")[:60]
         _leg_kpis = p.get("kpis")
-        _leg_kpis = list(_leg_kpis[:4]) if isinstance(_leg_kpis, list) else []
-        # Fallback accumulation: **only feeds empty-report criterion below**, keeping it verbatim
-        # (otherwise KPI-only plans without exec_summary change from partial report to no report).
-        _all_kpis.extend(_leg_kpis)
+        _leg_kpis = list(_leg_kpis) if isinstance(_leg_kpis, list) else []
+        if summary or _leg_kpis:
+            _contributors += 1
+            kpis = _leg_kpis
         if summary:
             insights.append({"title": leg_title, "narrative": summary})
-            # G3 (decision #2): cover KPI band uses **closing chapter** leg, never across chapters.
-            # Same criterion as main _closing_chapter_header: title and KPIs from same leg
-            # (title chain here is insights[-1]["title"], so follow insights).
-            # Previously stacked 4 per leg ⇒ cover mixed chapter 1/2 cards, exactly
-            # decision's cited defect: industry numbers from steps 0+1 used as whole-report KPI, pure noise.
-            kpis = _leg_kpis
         # Batch4 (review-confirmed fallback source black hole): aggregate/deduplicate leg sources—same key as
         # _aggregate_subagent_payloads (artifact_id first, else label|tool|query).
         for src in p.get("sources") or []:
@@ -3009,10 +3020,8 @@ def _plan_fallback_report_payload(final_steps: list[Any]) -> dict[str, Any] | No
                 continue
             _seen_src.add(_key)
             sources.append(src)
-    # No closing chapter (no leg has exec_summary) → original accumulation—these turns lack
-    # eligible closing chapter; G3 must not narrow P0 fallback of report whenever results exist.
-    if not kpis:
-        kpis = _all_kpis
+    if _contributors > 1:
+        kpis = []
     if not insights and not kpis:
         return None
     # Batch 2-c (decision #6.6): title **never falls back to plans.title** (=user request first 80 chars,
@@ -3825,14 +3834,11 @@ async def _run_plan_execution_turn(
                     # ("…联网检索 2025-2026 年中国商超行业宏观数据（市场规模、").
                     # Fallback: closing chapter own title (last-level step payload, conclusion written after reading all)
                     # → aggregate primary title → "计划执行报告".
-                    _tail_title, _tail_kpis = _closing_chapter_header(_peer_payloads)
+                    _tail_title = _closing_chapter_header(_peer_payloads)
                     _cw_payload["title"] = _tail_title or str(_cw_payload.get("title") or "").strip() or "计划执行报告"
-                    # G3 (decision #2): cover KPI band **from closing chapter**, not first N cross-chapter aggregates.
-                    # Aggregation first-wins accumulation ⇒ chapter 1/2 cards duplicated verbatim in evidence
-                    # (a reproduced task); decision explicitly calls this bug, pure noise.
-                    # Closing chapter without KPI → omit band (do not invent), never fill with noise.
-                    if _tail_title:
-                        _cw_payload["kpis"] = _tail_kpis
+                    # KPI cards follow their author (docs/sprints/report-kpi-authorship-2026-11-24): the cover takes no
+                    # step's KPIs. With several steps the aggregate carries none; each step's own KPIs stay with its
+                    # chapter (eager chapter band, or the finisher's author band for a written chapter).
                     # Full-fidelity merge primary fields are first-wins—other legs'
                     # exec_summary would be entirely lost (old thin merge kept each). Hybrid:
                     # turn nonprimary leg exec_summary into insight, lose none.
@@ -3853,7 +3859,7 @@ async def _run_plan_execution_turn(
             # no-leg fallback) converge, one connection covers all
             # (same lesson: one concept implemented N places, fixing one leaves others broken).
             # Deterministic fallback ceiling: cover title always one chapter's title—116
-            # t_c9853b490565: cover h1 identical to chapter 8 h1. Generate only
+            # an observed task: cover h1 identical to chapter 8 h1. Generate only
             # **one title line**, touch no chapter body, distinct from rejected writer.
             # Generation failure → empty → retain deterministic title already computed below (fail-open).
             # ⚠ _chrome_lang is **local import in another function** (:7569), inaccessible
@@ -3942,7 +3948,7 @@ async def _run_plan_execution_turn(
                         tout += sum(u[1] for u in _compose_usage)
                 _content_kinds = [k for k in composer_emitted_kinds if k != "meta"]
                 if not _content_kinds and getattr(bus, "_psi_compose_done", False):
-                    # ★Regression check 1.0.93 P1 (t_d4be37936054 / t_4c9c5997643a, reproduced twice):
+                    # ★Regression check 1.0.93 P1 (an observed task / an observed task, reproduced twice):
                     # After default card authorship, ψ-E persisted report **during step execution**; final composer correctly
                     # skipped via _psi_compose_done (avoid duplicate compose) → kinds always empty → subsequent
                     # success copy falsely claims report content not generated, demotes completed plan to
@@ -4018,7 +4024,7 @@ async def _run_plan_execution_turn(
             # **success**, not failure. Never enter plan_report_empty below (demotes successful
             # turn BLOCKED + reports content not generated, while user explicitly requested
             # no report).
-            # ★Regression check 1.0.93 P1 (t_cde94266cbf4): DF-04 excluded short-answer payload
+            # ★Regression check 1.0.93 P1 (an observed task): DF-04 excluded short-answer payload
             # from aggregate → main prose chain falls to user_text → final echoes user request,
             # gives no brand profits (steps ✓Verified). **Step output** is answer authority:
             # trust prose-chain output only if not echo; otherwise read done legs'
@@ -4986,7 +4992,7 @@ async def _compose_turn_output_unchecked(
         return bool(_revised_memo)
 
     _evidence_any = _evidence_canvas_write(result.tool_invocations) or _payload_has_report_content(aggregated_payload) or await _peer_authored_hit()
-    # canvas-update-turn batch B0 (116 1.2.66 t_78d2ee478a61): reads delivery in spawn **call args**,
+    # canvas-update-turn batch B0 (116 1.2.66 an observed task): reads delivery in spawn **call args**,
     # not handler-converged value—Lead requests delivery=chat for wording revision, handler coerces to
     # report by mode (lead.delivery_coerced), final turn still chooses chat ⇒no compose ⇒no revision finalizer.
     # In-place revision/add-chapter necessarily changes canvas: mode wins.
@@ -5043,7 +5049,7 @@ async def _compose_turn_output_unchecked(
     # eager-compose already ran on peer subagent_return (flag on parent_bus,
     # turn-scope). Was previously dead flag (set on peer ctx, Lead never
     # read it) → double-compose → canvas had 18 sections (2 copies of
-    # 9-section report). Real bug from prod t_e6a617842126.
+    # 9-section report). Real bug from prod an observed task.
     _psi_compose_done_bus = getattr(runtime.parent_bus, "_psi_compose_done", False)
     if _psi_compose_done_bus:
         logger.info(
@@ -5072,7 +5078,7 @@ async def _compose_turn_output_unchecked(
         elif await _revised_hit():
             logger.info("lead.compose_admit_revised turn=%s — 无 payload 但本轮就地改了上一轮正文，放行修订收尾器", sctx.turn_id)
             _composer_entry_ok = True
-    # 116 prod 1.0.79 dogfood P1 (t_5b91c70281c9)—**never compose turn without reportable content**.
+    # 116 prod 1.0.79 dogfood P1 (an observed task)—**never compose turn without reportable content**.
     #
     # Reproduce (three natural steps): report →export Word →export again as Excel.
     # Second turn did no analysis (only skill_read/skill_invoke(canvas-docx));
@@ -5473,28 +5479,13 @@ async def _compose_turn_output_unchecked(
             _oce,
         )
 
-    # said-not-done Seam B (WP-1/2/3)—**general** final reconciliation.
-    #
-    # Deck guard above recognizes only subagent_spawn(profile="consultant") output path;
-    # 08-04 morning skill_invoke(bowhead-slides) turns never triggered it,
-    # delivered "已生成PPT演示稿，可直接下载" unchanged (production: 0 pptx for turn).
-    # This block ignores producer/path, compares answer completion claims with database facts.
-    # Covers discovery §5.5 four entries (no dispatch / dispatched bad output / disabled peer / custom agent
-    # not autonomously routed)—same fact at finalization.
-    #
-    # Two flags: ledger default ON; intervention also default ON after format/count mixed-corpus calibration.
-    # Explicit BOWHEAD_OVERCLAIM_GUARD_V2=0 retains measurement-only emergency rollback.
+    # said-not-done Seam B: the Turn's stored outputs, read for the worked-but-produced-nothing signal.
+    # The answer text is not read or rewritten here; helpers' results carry the stored facts to Lead
+    # (docs/sprints/delivery-check-without-patterns-2026-11-24).
     try:
         if os.environ.get("BOWHEAD_DELIVERABLE_LEDGER", "1") == "1":
             from bowhead_core import metrics as _m_led
             from bowhead_core.deliverable_ledger import build_deliverable_ledger
-            from bowhead_core.overclaim_guard import (
-                detect_completion_claims,
-                overclaimed_kinds,
-                reconcile_overclaimed_text,
-                reconcile_unverified_claims,
-                unverifiable_claimed_kinds,
-            )
 
             _pctx_led = runtime.parent_ctx
             _ledger = await build_deliverable_ledger(
@@ -5505,75 +5496,22 @@ async def _compose_turn_output_unchecked(
                 canvas_store=getattr(_pctx_led, "canvas_store", None),
                 memory_notes_store=getattr(_pctx_led, "memory_notes_store", None),
                 invocations=getattr(result, "tool_invocations", None),
-                # A file claim may describe a file an earlier Turn delivered (116 dogfood N13).
-                include_session_files="file" in detect_completion_claims(text_for_chat),
             )
             if _ledger.worked_but_produced_nothing:
-                # Dispatched work left nothing (original sprint C shape). Without answer claim, guard misses it;
-                # only this signal exposes it.
-                # ⚠ Must also require actual peer dispatch: ordinary chat produces no durable output;
-                # unconditional counting includes every casual turn, diluting metric beyond usefulness.
+                # Dispatched work left nothing (original sprint C shape). Ordinary chat produces no durable
+                # output, so only Turns that actually dispatched a peer count.
                 _m_led.inc(
                     "bowhead_deliverable_worked_nothing_total",
                     help="Seam B: 派了 peer 却没有任何持久产出（文件/画布段/记忆全 0）。",
                 )
-                # Production /metrics default disabled, unauthenticated (116 publicly proxied via nginx, must stay closed),
-                # so counters unreadable in production—must keep grep-able log, otherwise
-                # measurement mode is blind.
+                # Production /metrics is disabled by default, so the log line is the readable signal.
                 logger.warning(
                     "lead.worked_but_produced_nothing turn=%s ok_tools=%d",
                     sctx.turn_id,
                     len(_ledger.ok_tools),
                 )
-            _bad = overclaimed_kinds(text_for_chat, _ledger)
-            _unverified = unverifiable_claimed_kinds(text_for_chat, _ledger)
-            # If deck guard already appended honest caveat, do not report/append file class again.
-            if _bad and "自动生成未成功" in (text_for_chat or ""):
-                _bad = tuple(k for k in _bad if k != "file")
-            for _kind in _bad:
-                _m_led.inc(
-                    "bowhead_deliverable_overclaim_total",
-                    labels={"kind": _kind},
-                    help="Seam B: 答案声称某类产物已完成, 而库里该类为 0（说了没做+谎报）。",
-                )
-                logger.warning(
-                    "lead.deliverable_overclaim turn=%s kind=%s files=%d sections=%d memories=%d",
-                    sctx.turn_id,
-                    _kind,
-                    _ledger.files,
-                    _ledger.sections,
-                    _ledger.memories,
-                )
-            if _bad and os.environ.get("BOWHEAD_OVERCLAIM_GUARD_V2", "1") == "1":
-                from bowhead_core.report_chrome_text import chrome_lang as _oc_lang
-
-                text_for_chat = reconcile_overclaimed_text(
-                    text_for_chat,
-                    _ledger,
-                    _bad,
-                    lang=_oc_lang(getattr(runtime.parent_ctx, "language_context", None)),
-                )
-            if _unverified:
-                logger.warning(
-                    "lead.deliverable_ledger_unverified turn=%s kinds=%s",
-                    sctx.turn_id,
-                    ",".join(_unverified),
-                )
-                if os.environ.get("BOWHEAD_OVERCLAIM_GUARD_V2", "1") == "1":
-                    from bowhead_core.report_chrome_text import chrome_lang as _oc_lang2
-
-                    text_for_chat = reconcile_unverified_claims(
-                        text_for_chat,
-                        _ledger,
-                        _unverified,
-                        lang=_oc_lang2(getattr(runtime.parent_ctx, "language_context", None)),
-                    )
     except Exception:
-        # ★ warning, not debug: production debug disabled, exceptions here become **entirely silent**—
-        # guard appears active yet swallowed every turn, despite being final overclaim backstop.
-        # a reproduced task: recalculation deserved flag yet zero logs/revisions; could not tell
-        # unreached vs exception, because no trace here. Include exc_info, otherwise
-        # err=... alone cannot locate failing step.
+        # warning, not debug: production debug logging is off, and a silent failure here looks like a quiet Turn.
         logger.warning(
             "deliverable_ledger_guard_failed turn=%s",
             sctx.turn_id,
@@ -5592,7 +5530,7 @@ async def _compose_turn_output_unchecked(
 
     # User must see unsent email—same final reconciliation as deck/ledger: external answer facts
     # (last send_email this turn failed) deterministically added to final, never trust model disclosure.
-    # 116 1.3.43 t_4eabdf899529: numeric verification blocked send_email →compute recalculation →Lead finalized;
+    # 116 1.3.43 an observed task: numeric verification blocked send_email →compute recalculation →Lead finalized;
     # 832-char answer omitted email, user thought sent. Append at final text; caller final_answer event and
     # _pi_turn_state.final_answer both use returned value ⇒live/persistence/replay identical.
     try:
@@ -5644,11 +5582,9 @@ async def _compose_turn_output_unchecked(
     # ★Batch5 synthetic direct-chat narrative.delta—**emit here**, after final text fixed.
     #
     # review#2 F-3 correction: formerly emitted in _lead_loop immediately after runner.run returned;
-    # text_for_chat not formed yet, later _resolve_citations →deck caveat →
-    # **ledger reconcile_overclaimed_text / reconcile_unverified_claims**
-    # still rewrite it (latter **strips false-claim sentences** and appends verification state). Same sentence
+    # text_for_chat not formed yet, later _resolve_citations and the deck caveat still change it. Same sentence
     # differs in narrative beat/answer bubble; FE 80-char bidirectional dedup probes neither match ⇒
-    # **same text shown twice**, beat still **uncorrected lie**, bubble corrected—worse than no emit.
+    # **same text shown twice**.
     # At final-text point both share source; dedup naturally succeeds (probe needs verbatim equality).
     # ⚠ Emit only actual short-circuit turns: normal deltas already streamed; supplement duplicates display.
 
@@ -7097,21 +7033,16 @@ async def _lead_loop(
 
     runtime.parent_ctx._round_tool_calls_gate = _round_gate  # type: ignore[attr-defined]
 
-    # r4 final gate: **zero dispatch** yet claims "已修订 / 已重算 / 见画布" →bounce for another pass (r10 at most twice/turn).
-    # 116 R6 (s_f3f23fd0a472 turns 8–10): final overclaim_guard knows zero canvas writes, yet only appends
-    # no canvas content this turn, leaving contradictory answer. Reuse guard detect_completion_claims
-    # (one concept, one implementation); zero dispatch = no subagent_spawn in this run invocations.
-    # Still no dispatch/continued claim after bounce ⇒existing final footnote guard remains last net.
-    # r10 (116 eighth turn t_b4a7d77462a2): formerly once/turn; first bounce for **report claim**
-    # (cause=no_spawn), revised answer invented number after model retraction; only chance spent, no recheck.
-    # Now **at most two per turn**, count-based, not cause-deduplicated (review: second invention with same cause escapes too;
-    # cap already 2, repeated-cause bounce does not increase worst-case round trips). Cap 2 bounds extra LLM round trips;
-    # _lead_loop once/turn, closure count never crosses turns.
+    # Lead final-answer gate: sends a final answer back for another pass (at most twice per Turn).
+    # Count-based, not cause-deduplicated (r10, an observed execution: a second invented figure must not escape
+    # because the first bounce had the same cause). Cap 2 bounds extra LLM round trips; _lead_loop runs once
+    # per Turn, so the count never crosses Turns. The report-claim cause (r4/r6) read the answer's wording and
+    # was removed on 2026-11-24 (docs/sprints/delivery-check-without-patterns-2026-11-24).
     _ordinary_state = getattr(runtime.parent_ctx, "ordinary_lead_state", None)
     _final_bounce_count = _ordinary_state.final_bounce_count if _ordinary_state is not None else {"n": 0}
     _FINAL_BOUNCE_MAX = 2
     # A scheduled run in "only when flagged" mode that ends without routine_notify is corrected
-    # once, outside the two-bounce budget so it never displaces the report checks below.
+    # once, outside the two-bounce budget so it never displaces the checks below.
     _unraised_alert_corrected = {"done": False}
     _stream_reset_hook = _stream_state_reset
     _pending_protocol: tuple[frozenset[str], int] | None = None
@@ -7144,7 +7075,7 @@ async def _lead_loop(
     # r8 zero-tool evidence pool = user-visible text (all turn-history messages + current user request).
     def _build_zero_evidence_pool() -> set[float] | None:
         """零证据轮的证据池 = **本轮真给了模型的内容**（历史消息 + 注入的内容块 + 本轮用户原话），
-        不含静态指令提示词——指令里的示例数字不是数据（真机 `t_17a2cb7a3f43` 恰恰是照抄了示例里的
+        不含静态指令提示词——指令里的示例数字不是数据（真机 `an observed task` 恰恰是照抄了示例里的
         「金辉福 5,010万 / 阿迪达斯 2,217万 / 哥弟 2,066万」，那要靠 `prompts/lead.py` 去数字来治，
         不能靠把示例算成「有出处」来放行）。
 
@@ -7186,8 +7117,8 @@ async def _lead_loop(
 
             _m_bounce.inc(
                 "bowhead_lead_final_answer_bounced_total",
-                labels={"kind": "chat" if cause in {"zero_evidence_numbers", "clarification_protocol_text"} else "report", "cause": cause},
-                help="r4 终答闸：Lead 零派活 / 派了活但没交付却声称报告已修订，或 r8 的零证据报数——退回再走一圈的次数。",
+                labels={"kind": "chat", "cause": cause},
+                help="Lead final-answer gate: answers sent back for another pass (zero-evidence figures, uninvoked protocol text).",
             )
             _m_bounce.inc(
                 "bowhead_lead_narrative_superseded_total",
@@ -7196,12 +7127,7 @@ async def _lead_loop(
             )
         except Exception:  # noqa: S110
             pass
-        logger.warning(
-            "lead.final_answer_bounced turn=%s kind=%s cause=%s",
-            sctx.turn_id,
-            "chat" if cause in {"zero_evidence_numbers", "clarification_protocol_text"} else "report",
-            cause,
-        )
+        logger.warning("lead.final_answer_bounced turn=%s kind=chat cause=%s", sctx.turn_id, cause)
         from bowhead_core.report_chrome_text import chrome_lang as _bounce_lang
 
         if cause == "clarification_protocol_text":
@@ -7220,12 +7146,16 @@ async def _lead_loop(
                 ),
                 assistant_history_name=REJECTED_TOOL_SYNTAX_HISTORY_NAME,
             )
-        return final_answer_bounce_directive(_bounce_lang(getattr(runtime.parent_ctx, "language_context", None)), cause=cause)
+        return final_answer_bounce_directive(_bounce_lang(getattr(runtime.parent_ctx, "language_context", None)))
 
     async def _final_answer_gate(text: str, profile_name: str, invocations: list[Any]) -> str | FinalAnswerCorrection | None:
         nonlocal _pending_protocol
         if profile_name == "lead":
-            intended = uninvoked_tool_names(text, tool_names=(runtime.parent_ctx.tool_view or runtime.tool_registry).list_names())
+            # The Runner adds review_delivery to its run-local Tool view only, so this view lacks it; a review
+            # written as text (an observed execution must still read as an uninvoked call.
+            intended = uninvoked_tool_names(
+                text, tool_names=[*(runtime.parent_ctx.tool_view or runtime.tool_registry).list_names(), LeadDeliveryReview.name]
+            )
             if intended is not None:
                 _pending_protocol = (intended, len(invocations))
             if not _protocol_corrected(invocations):
@@ -7261,34 +7191,12 @@ async def _lead_loop(
                 )
         if profile_name != "lead" or _final_bounce_count["n"] >= _FINAL_BOUNCE_MAX:
             return None
-        # r6 review: gate sole behavioral change without rollback; add switch (0=old final footnote guard only).
+        # Rollback switch for the gate causes below (0 = no figure check).
         if os.environ.get("BOWHEAD_LEAD_FINAL_ANSWER_GATE", "1").strip() != "1":
             return None
-        # r6 review: handler-rejected spawn ({"error":…} without ok; missing canvas_mode/retired profile/empty task)
-        # never executed, not dispatched work; otherwise [rejected,failed] makes all() False, incorrectly admits.
-        spawns = [inv for inv in invocations if getattr(inv, "tool_name", "") == "subagent_spawn" and not _spawn_rejected_by_handler(inv)]
-        # r6: not only zero dispatch; every spawn delivered nothing (peer failed or handler delivered=none:
-        # finished with insights/kpis/recommendations/canvas empty), final cannot claim "已修订 / 已重算 / 报告已生成"—
-        # 116 other user hit same day (4 tools dispatched, 0 canvas sections, final guard only footnote).
-        # ⚠ No canvas ledger query: first report mostly written by compose_report **after** Lead loop, ledger always 0 now.
-        # Trust spawn results; nondict unknown treated delivered, never bounce when uncertain.
-        if spawns and not all(_spawn_delivered_nothing(inv) for inv in spawns):
-            return None
-        from bowhead_core.overclaim_guard import detect_report_work_claims as _report_work_claimed
-
-        # Check r4/r6 causes first: zero-tool turn **also** claims report changes, user most needs report unchanged;
-        # only that directive prohibits revised/recalculated/canvas claims (review P2: r8 displaced it).
-        # Review fix: criterion claims report work **this turn**, not mere canvas pointer—
-        # 116 R6 "全报告各段…均按新口径重算重画" missed by old criterion; "上一轮的报告已在画布" legitimate pointer, no bounce.
-        # Earlier answers let a restated change ("标题已改为《…》", reported by the turn that made it) pass.
-        _earlier_answers = [
-            _m.content for _m in _history_msgs or [] if getattr(_m, "role", None) == "assistant" and isinstance(getattr(_m, "content", None), str)
-        ]
-        if _report_work_claimed(text, _earlier_answers):
-            return _bounce("spawn_delivered_nothing" if spawns else "no_spawn")
         # r8 (116 sixth dogfood turn): **zero-tool** final reports numbers unsourced in conversation ⇒bounce.
         # Observed 2/4: user asks no requery, tell X directly, X absent; half the time Lead invents without dispatch
-        # (t_17a2cb7a3f43 "金辉福 5010 万", truth 3.80 亿; t_8b05d38e92c7 "银凤阁 1.63 亿", brand absent from ranking).
+        # (an observed task "金辉福 5010 万", truth 3.80 亿; an observed task "银凤阁 1.63 亿", brand absent from ranking).
         # Both existing guards **structurally fail** here: INV-8 criterion correct, logs only (omicron Phase B never implemented);
         # numeric guard requires aggregated_payload.exec_summary (no payload without dispatch);
         # is_chat_text_fabricated always False for empty observed, necessarily empty on zero-tool turn.
@@ -8707,11 +8615,12 @@ async def _lead_loop(
 
     # planning-mode-audit WP-4: compose + final prose extracted to _compose_turn_output
     # (shared main entry, plan WP-5 integrated). Ordinary path passes original locals, equivalent behavior.
-    _peer_bag_for_compose = [
-        entry
-        for entry in list(getattr(runtime.parent_ctx, "_m137_subagent_payloads", None) or [])
-        if not (isinstance(entry, dict) and is_short_answer_payload(entry.get("payload")))
-    ]
+    # A partial return that a later complete return of the same profile redid leaves the bag here too, as in
+    # the merge above, so the composer and the delivery decision see the same returns.
+    _turn_bag = list(getattr(runtime.parent_ctx, "_m137_subagent_payloads", None) or [])
+    _superseded_returns = _superseded_partial_entries(_turn_bag)
+    _live_bag = [entry for index, entry in enumerate(_turn_bag) if index not in _superseded_returns]
+    _peer_bag_for_compose = [entry for entry in _live_bag if not (isinstance(entry, dict) and is_short_answer_payload(entry.get("payload")))]
     _compose_usage: list[tuple[int, int, int]] = []
     composer_emitted_kinds, text_for_chat = await _compose_turn_output(
         runtime=runtime,
@@ -8721,7 +8630,7 @@ async def _lead_loop(
         user_text=user_text,
         peer_payloads=_peer_bag_for_compose,
         # review-R1: decision uses full bag (short answer=chat declaration, filtered out above for composer)
-        peer_payloads_all=list(getattr(runtime.parent_ctx, "_m137_subagent_payloads", None) or []),
+        peer_payloads_all=_live_bag,
         compose_usage_out=_compose_usage,
     )
     # Writing convergence T4: writer(compose_report) usage into turn totals—result.tokens_*
@@ -8804,7 +8713,7 @@ async def _lead_loop(
             # recommendations (not analysis), inevitably validation
             # missing/empty top-level: .... Download chip only injected on lead.final.payload
             # (_inject_inline_artifacts sole entry) ⇒**file registered, no chat download button**.
-            # dev t_186741818ea0/t_cfd9a579fe2a: artifacts API returned files, no chip.
+            # dev an observed task/an observed task: artifacts API returned files, no chip.
             #
             # ⇒② Emit supplementary minimal payload only with **actual deliverable**, solely to deliver chip;
             # failed turns without deliverable entirely unchanged.
@@ -9131,6 +9040,9 @@ def _aggregate_subagent_payloads(parent_ctx: Any, *, bag: list[dict[str, Any]] |
     failed_entries: list[tuple[str, str, str, bool]] = []  # (profile, kind, message, has_fallback_text)
     substantive_profiles: set[str] = set()  # Delivered profiles (DF-04 short answers too, P2-2)
     report_payload_present = False  # Real nonerror nonshort report output (caveat gate)
+    # KPI cards follow their author (docs/sprints/report-kpi-authorship-2026-11-24): with one author its
+    # kpis are the document's; with several, no model wrote document-level KPIs, so none are merged.
+    kpi_authors = 0
     # π Phase D Item B: include narrative + fallback_markdown so bail envelope
     # (synthesized by subagent_return_tool when strip leaves no evidence) gets
     # surfaced to _resolve final_answer chain at line 1106+.
@@ -9147,9 +9059,10 @@ def _aggregate_subagent_payloads(parent_ctx: Any, *, bag: list[dict[str, Any]] |
     # titles would silently overwrite under last-wins, producing wrong h1.
     # First-wins is also safer when canvas-writer is the wrap-up (its title
     # field is usually empty / boilerplate, not the analysis title).
-    for entry in bag:
+    superseded = _superseded_partial_entries(bag)
+    for index, entry in enumerate(bag):
         p = entry.get("payload") if isinstance(entry, dict) else None
-        if not isinstance(p, dict):
+        if not isinstance(p, dict) or index in superseded:
             continue
         # DF-04: direct Chat payloads still stay in the parent bag long enough
         # for LeadDispatchGuard to observe a successful peer return, but never
@@ -9178,6 +9091,7 @@ def _aggregate_subagent_payloads(parent_ctx: Any, *, bag: list[dict[str, Any]] |
             continue
         if not _agg_is_err:
             report_payload_present = True
+            kpi_authors += 1
         for k in primary_fields:
             if merged.get(k):  # already set — keep first non-empty
                 continue
@@ -9236,9 +9150,41 @@ def _aggregate_subagent_payloads(parent_ctx: Any, *, bag: list[dict[str, Any]] |
 
             _append_sys_cav(merged, f"「{_label}」子任务执行失败，其负责的部分未纳入本报告。")
 
+    if kpi_authors > 1:
+        merged["kpis"] = []
+
     # Drop empty list fields so composer's `if X:` short-circuit skips them.
     cleaned = {k: v for k, v in merged.items() if v}
     return cleaned or None
+
+
+def _superseded_partial_entries(bag: list[Any]) -> set[int]:
+    """Bag positions of partial returns that a later complete return of the same profile redid.
+
+    an observed execution: the first helper returned partial ("合并文件没有生成成功"), Lead sent the same
+    profile to redo the merge, and the second returned the file complete as a Chat answer, which the merge
+    skips. The failed attempt alone became the report payload, and the chat guard swapped Lead's correct
+    answer for its exec_summary. Like a failure envelope followed by a successful retry (rule ③ above),
+    such a partial return leaves the merge: its summary, gaps and reasons describe an outcome the later
+    return replaced, and Lead's own delivery review still discloses whatever remains unmet.
+    """
+    superseded: set[int] = set()
+    for index, entry in enumerate(bag):
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        if not isinstance(payload, dict) or payload.get("completion") != "partial" or payload.get("error"):
+            continue
+        profile = entry.get("profile")
+        for later in bag[index + 1 :]:
+            later_payload = later.get("payload") if isinstance(later, dict) else None
+            if (
+                isinstance(later_payload, dict)
+                and later.get("profile") == profile
+                and later_payload.get("completion") != "partial"
+                and not later_payload.get("error")
+            ):
+                superseded.add(index)
+                break
+    return superseded
 
 
 def _sources_from_invocations(invocations: list[Any]) -> list[dict[str, Any]]:
@@ -9456,36 +9402,6 @@ def _gen_clarification_id(turn_id: str) -> str:
 _INLINE_ARTIFACT_KINDS = ("chart", "kpi_row", "data_table", "image")
 
 
-_FINAL_BOUNCE_DIRECTIVE = {
-    "zh-CN": (
-        "⚠ 你这一轮没有派任何 subagent，画布上没有任何改动。不要说「已修订 / 已重算 / 已重画 / 报告已生成 / 见画布」。"
-        "如果用户这句话是要改口径、重算或改报告，现在就调用 subagent_spawn 派活（该 revise 就 revise）；"
-        "如果只是问答，直接如实回答，不要提画布，也不要把上一轮的数字复述成本轮的结果。"
-    ),
-    "en-US": (
-        "⚠ You dispatched no subagent this turn and nothing on the canvas changed. Do not claim the report was revised, "
-        "recomputed or regenerated, and do not point to the canvas. If the user's message asks to change scope, recompute or "
-        "edit the report, call subagent_spawn now (use revise when appropriate); otherwise answer plainly without referring "
-        "to the canvas and without restating last turn's numbers as this turn's result."
-    ),
-}
-
-
-_FINAL_BOUNCE_DIRECTIVE_NOTHING = {
-    "zh-CN": (
-        "⚠ 你这一轮派出的 subagent 没有交付任何内容（失败，或走完了但 insights / 数据 / 画布全空），画布上不会有任何改动。"
-        "不要说「已修订 / 已重算 / 已重画 / 报告已生成 / 见画布」。如实告诉用户这一轮没拿到结果和原因（照抄 subagent 结果里的说明），"
-        "能换个方式再派就现在派；不要给出任何数字或方向性结论。"
-    ),
-    "en-US": (
-        "⚠ The subagent(s) you dispatched this turn delivered nothing (failed, or finished with no insights, data or canvas output), "
-        "so nothing on the canvas will change. Do not claim the report was revised, recomputed or generated, and do not point to the canvas. "
-        "Tell the user plainly that this turn produced no result and why (quote the subagent's own explanation); re-dispatch differently now if you can; "
-        "do not state any numbers or directional conclusions."
-    ),
-}
-
-
 _FINAL_BOUNCE_DIRECTIVE_ZERO_EVIDENCE = {
     "zh-CN": (
         "⚠ 你这一轮没有调用任何工具，而你写的答案里有对话中找不到出处的数字——那不是你手上有的数据。"
@@ -9503,34 +9419,9 @@ _FINAL_BOUNCE_DIRECTIVE_ZERO_EVIDENCE = {
 }
 
 
-def final_answer_bounce_directive(lang: str | None, *, cause: str = "no_spawn") -> str:
-    """r4 终答闸退回 Lead 的指令（按用户语言）；r6 起按原因分两套：零派活 / 派了活但没交付；r8 加第三套：零证据报数。"""
-    if cause == "zero_evidence_numbers":
-        table = _FINAL_BOUNCE_DIRECTIVE_ZERO_EVIDENCE
-    elif cause == "spawn_delivered_nothing":
-        table = _FINAL_BOUNCE_DIRECTIVE_NOTHING
-    else:
-        table = _FINAL_BOUNCE_DIRECTIVE
-    return table.get(str(lang or ""), table["en-US"])
-
-
-def _spawn_rejected_by_handler(inv: Any) -> bool:
-    """spawn handler 在派活前就拒了（参数不合法等）：结果是 `{"error": …}` 且没有 `ok` 键。"""
-    r = getattr(inv, "result", None)
-    return isinstance(r, dict) and "ok" not in r and bool(r.get("error"))
-
-
-def _spawn_delivered_nothing(inv: Any) -> bool:
-    """spawn 这一次是否**没交付**：handler 抛了异常（`inv.error`，result=None）、peer 失败（ok=False），或 handler 判 delivered=none。
-    结果不是 dict 且没有 error = 未知 ⇒ 按交付了算。"""
-    if getattr(inv, "error", None):
-        return True
-    r = getattr(inv, "result", None)
-    if not isinstance(r, dict):
-        return False
-    if r.get("ok") is False:
-        return True
-    return r.get("delivered") == "none"
+def final_answer_bounce_directive(lang: str | None) -> str:
+    """The final-answer gate's correction for figures with no source in a zero-Tool Turn (r8), in the user's language."""
+    return _FINAL_BOUNCE_DIRECTIVE_ZERO_EVIDENCE.get(str(lang or ""), _FINAL_BOUNCE_DIRECTIVE_ZERO_EVIDENCE["en-US"])
 
 
 def collect_fabrication_tool_results(result: Any, parent_ctx: Any) -> list[Any]:
@@ -9737,7 +9628,7 @@ def _should_emit_minimal_final_payload(
     - payload 非空但 **V4 校验失败**（已 fall through 到 V1 markdown）：
       **纯导出轮**必然落这里 —— 它没有 title/kpis/insights/recommendations，
       本来就不是一次分析。而下载 chip 只在 `lead.final.payload` 上注入，
-      于是**文件登记了、聊天里却没有下载按钮**（真机 dev t_186741818ea0）。
+      于是**文件登记了、聊天里却没有下载按钮**（真机 dev an observed task）。
       ⇒ 只在**确实有交付物**时补发，纯粹为了把 chip 送出去。
     - 同上但**没有**交付物 → 不发，失败轮的行为一个字不动。
     """
@@ -9918,7 +9809,15 @@ def _select_bounded_inline(all_sections: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     kpi_taken = 0
     for sec in all_sections:
-        if getattr(sec, "kind", "") == "kpi_row" and kpi_taken < _INLINE_MAX_KPI_ROWS:
+        # Only a document-level band speaks for the report. A chapter's band holds that chapter author's KPIs
+        # (docs/sprints/report-kpi-authorship-2026-11-24), so it is not copied as the report's KPIs.
+        if getattr(sec, "kind", "") != "kpi_row":
+            continue
+        _sec_payload = getattr(sec, "payload", None)
+        _sec_meta = _sec_payload.get("_meta") if isinstance(_sec_payload, dict) else None
+        if isinstance(_sec_meta, dict) and _sec_meta.get("chapter"):
+            continue
+        if kpi_taken < _INLINE_MAX_KPI_ROWS:
             out.append({"kind": "kpi", "id": sec.id, "data": sec.to_report_section()})
             kpi_taken += 1
     charts = [s for s in all_sections if getattr(s, "kind", "") == "chart" and (getattr(s, "payload", {}) or {}).get("spec") is not None]
@@ -9960,7 +9859,7 @@ def _inline_image_artifact(sec: Any) -> dict[str, Any] | None:
         # But [figure:] anchors use **canvas section** namespace (sec_*, same as report path),
         # so also include section_id alias to target image figure.
         # Without it, listed sec_* cannot match bubble art_* ⇒anchor necessarily misses
-        # (Regression check t_6787e8159e94: list sec_3b2fd54d1c2d / bubble art_a25c9105b3cb).
+        # (Regression check an observed task: list sec_3b2fd54d1c2d / bubble art_a25c9105b3cb).
         "section_id": str(getattr(sec, "id", "") or ""),
         "filename": str(payload.get("caption") or "")[:200] or f"{aid}.png",
         "mime": "image/png",
@@ -10792,7 +10691,7 @@ async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict)
             pass
         # ξ2-F3 (R1 fix): canvas.done fallback emit if composer didn't run / didn't
         # emit. canvas_composer emits via _emit_canvas_done (sites ~318/325/481/488/1137/1148),
-        # but prod traces (t_de250d30c864, t_58de752ba57b) show 0 canvas.done
+        # but prod traces (an observed task, an observed task) show 0 canvas.done
         # despite N chart sections — compose path not hit. FE banner stays "streaming"
         # forever. This chokepoint guarantees at least 1 canvas.done per turn.
         # Idempotent via bus._canvas_done_emitted flag (composer paths set on emit).

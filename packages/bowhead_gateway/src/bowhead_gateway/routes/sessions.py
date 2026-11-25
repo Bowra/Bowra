@@ -922,6 +922,7 @@ async def get_session(
                     size=int(ref["size"]),
                     reference_kind=("result" if ref.get("referenceKind") == "result" else None),
                     selected_context=ref.get("selectedContext"),
+                    presentation_selection=ref.get("presentationSelection"),
                     bundle_artifact_ids=(
                         [str(item) for item in ref["bundleArtifactIds"]] if isinstance(ref.get("bundleArtifactIds"), list) else None
                     ),

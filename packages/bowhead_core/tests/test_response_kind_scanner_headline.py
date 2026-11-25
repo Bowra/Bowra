@@ -28,8 +28,14 @@ from bowhead_core.agents.response_kind_scanner import (
     strip_response_kind_markers,
 )
 
+# Misspellings seen in 116 answers and in the user report (`hedline`).
+_OBSERVED_TYPOS = ("healine", "hedline", "handline", "hheadline", "highline", "hline", "headerline", "deadline")
 
-@pytest.mark.parametrize("opening,closing", [("healine", "healine"), ("healine", "headline"), ("headline", "healine"), ("HEALINE", "HEALINE")])
+
+@pytest.mark.parametrize(
+    "opening,closing",
+    [(typo, typo) for typo in _OBSERVED_TYPOS] + [("healine", "headline"), ("headline", "hedline"), ("HEDLINE", "HEDLINE")],
+)
 @pytest.mark.parametrize("prefix", ["", "<response_kind>chat</response_kind>", "x" * 130])
 @pytest.mark.parametrize("chunk_size", [1, 3, 11, 250])
 def test_observed_headline_typo_is_captured_without_streaming_leaks(opening: str, closing: str, prefix: str, chunk_size: int) -> None:
@@ -47,8 +53,9 @@ def test_observed_headline_typo_is_captured_without_streaming_leaks(opening: str
 
 
 @pytest.mark.parametrize("body", ["x" * 201, "first\nsecond"])
-def test_typo_alias_preserves_non_marker_bodies(body: str) -> None:
-    raw = f"<healine>{body}</healine>"
+@pytest.mark.parametrize("name", ["healine", "hedline"])
+def test_typo_alias_preserves_non_marker_bodies(body: str, name: str) -> None:
+    raw = f"<{name}>{body}</{name}>"
     assert strip_response_kind_markers(raw) == raw
     state = init_per_turn_scanner_state()
     emitted = ""
@@ -57,6 +64,44 @@ def test_typo_alias_preserves_non_marker_bodies(body: str) -> None:
         emitted += text
     tail, _state = flush(state)
     assert emitted + tail == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "<b>粗体</b>后文",
+        "<header>Title</header>后文",
+        "<line>x</line>后文",
+        "<abcdefgline>x</abcdefgline>后文",
+        "<head-line>x</head-line>后文",
+        "a < b and <c",
+    ],
+)
+def test_tags_outside_the_headline_shape_stay_as_text(raw: str) -> None:
+    """Only one to six letters followed by `line` form a headline tag; other tags are prose."""
+    assert strip_response_kind_markers(raw) == raw
+    for chunk_size in (1, 4, 250):
+        state = init_per_turn_scanner_state()
+        emitted = ""
+        for offset in range(0, len(raw), chunk_size):
+            text, state = feed(state, raw[offset : offset + chunk_size])
+            emitted += text
+        tail, state = flush(state)
+        assert emitted + tail == raw
+        assert state.headline_text is None
+
+
+def test_typo_open_split_after_the_lock_is_held_until_it_completes() -> None:
+    """A misspelled open tag arriving in pieces after the lock never leaks its fragments."""
+    state = init_per_turn_scanner_state()
+    emitted, state = feed(state, "<response_kind>chat</response_kind>")
+    for piece in ("<hed", "lin", "e>DBD 代表 9 月医生覆盖与拜访统计</hed", "line>\n\n正文"):
+        text, state = feed(state, piece)
+        emitted += text
+    tail, state = flush(state)
+    assert emitted + tail == "\n\n正文"
+    assert state.headline_text == "DBD 代表 9 月医生覆盖与拜访统计"
+    assert strip_response_kind_markers("<hedline>DBD 代表 9 月医生覆盖与拜访统计</hedline>\n\n正文") == "正文"
 
 
 def test_headline_clean_full_form() -> None:

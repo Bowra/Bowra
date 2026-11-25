@@ -98,6 +98,7 @@ READ_REPORT = "read_report"
 RECALL = "recall"
 REMEMBER = "remember"
 REMOVE_CHART = "remove_chart"
+REMOVE_REPORT_SECTION = "remove_report_section"
 RENDER_DECK = "render_deck"
 REVIEW_DELIVERY = "review_delivery"
 ROUTINE_NOTIFY = "routine_notify"
@@ -214,6 +215,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "recall",
     "remember",
     "remove_chart",
+    "remove_report_section",
     "render_deck",
     "review_delivery",
     "routine_notify",

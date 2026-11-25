@@ -276,7 +276,7 @@
       ]
     },
     {
-      "name": "more than 1000 categories cannot become vertical bars",
+      "name": "100 categories still offer every bar",
       "spec": {
         "kind": "line",
         "title": "Fixture",
@@ -308,13 +308,56 @@
         }
       },
       "generatedRows": {
-        "count": 1001,
+        "count": 100,
         "x": "bin",
         "y": "count"
       },
       "expected": [
         "line",
+        "bar",
         "hbar",
+        "area_stacked"
+      ]
+    },
+    {
+      "name": "more than 100 categories cannot become any bar",
+      "spec": {
+        "kind": "line",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [],
+        "row_count": 0,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "generatedRows": {
+        "count": 101,
+        "x": "bin",
+        "y": "count"
+      },
+      "expected": [
+        "line",
         "area_stacked"
       ]
     },

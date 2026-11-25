@@ -671,6 +671,14 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     kind: "tool",
     risk: "destructive",
   },
+  remove_report_section: {
+    label: { "zh-CN": "删除报告段落", "en-US": "Remove Report Section", "de-DE": "Berichtsabschnitt entfernen", "fr-FR": "Supprimer une section du rapport" },
+    blurb: { "zh-CN": "删除智能体为当前请求写进报告的段落；只被这些段落引用的图表一并删除。", "en-US": "Remove report sections the agent wrote for the current request, together with charts only they use.", "de-DE": "Berichtsabschnitte entfernen, die der Agent für die aktuelle Anfrage geschrieben hat, samt nur dort verwendeter Diagramme.", "fr-FR": "Supprimer les sections du rapport rédigées par l’agent pour la demande en cours, avec les graphiques qu’elles seules utilisent." },
+    sigil: "✂️",
+    category: "canvas",
+    kind: "tool",
+    risk: "artifact_write",
+  },
   render_deck: {
     label: { "zh-CN": "创建新演示稿", "en-US": "Create New Presentation", "de-DE": "Neue Präsentation erstellen", "fr-FR": "Créer une nouvelle présentation" },
     blurb: { "zh-CN": "从提供的内容新建可编辑 PPTX，不修改上传 PPT 的原页面。", "en-US": "Create a new editable PPTX from supplied content, without editing an uploaded presentation's existing slides.", "de-DE": "Eine neue bearbeitbare PPTX aus bereitgestellten Inhalten erstellen, ohne vorhandene Folien einer hochgeladenen Präsentation zu ändern.", "fr-FR": "Créer un nouveau PPTX modifiable à partir du contenu fourni, sans modifier les diapositives d’une présentation importée." },

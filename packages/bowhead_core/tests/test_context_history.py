@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 from bowhead_core.context_history import load_conversation_context
 from bowhead_core.context_store import ContextStoreError
 from bowhead_core.session_store import SessionStore, completion_write_open
@@ -337,3 +338,174 @@ async def test_cursor_reads_more_than_two_hundred_business_turns_without_droppin
     assert sum(message.role == "tool" for message in history.messages) == 205
     assert history.messages[1].tool_calls[0].arguments["task"] == "Check 1"
     assert history.through_seq == 205 and history.generation_id is None
+
+
+def _kb_source(identity, team_id, **overrides):
+    values = {
+        "file_id": identity,
+        "team_id": team_id,
+        "scope": "space",
+        "scope_id": "ws_1",
+        "soft_deleted_at": None,
+        "active_generation_id": f"generation-{identity}",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _kb_reader(rows, *, batch=None):
+    async def get_many(ids, **_):
+        return [rows[identity] for identity in ids if identity in rows]
+
+    async def allow(files, *_):
+        return {file.file_id: True for file in files}
+
+    return SimpleNamespace(get_many=get_many), SimpleNamespace(batch=batch or allow)
+
+
+async def _publish_head_retaining(collab, context_case, monkeypatch, sources, *, worker=None, execution_id=None, replaced=None):
+    from bowhead_core.chat_reference_storage import ReferenceCipher
+    from bowhead_core.context_dependencies import ContextSourceValidator, capture_context_dependencies
+    from bowhead_core.context_execution import ExecutionContextView
+
+    from bowhead_core import knowledge_source_runtime
+
+    if worker is None:
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+        collab.store.cipher = ReferenceCipher(key)
+    worker = worker or collab.worker
+    source_ctx = SimpleNamespace(
+        turn_id=worker.turn_id,
+        session_id=worker.session_id,
+        session_store=SimpleNamespace(db_path=collab.path),
+        knowledge_scope=None,
+        knowledge_source_uses=dict(sources),
+        knowledge_source_ancestors=(),
+        ordinary_lead_state=None,
+        context_source_observations=None,
+    )
+    execution = ExecutionContextView(
+        db_path=collab.path,
+        worker=worker,
+        execution_id=execution_id or collab.lead,
+        lane="ordinary",
+        cipher=collab.store.cipher,
+        validate_sources=ContextSourceValidator(source_ctx),
+        activity=AsyncMock(),
+        source_dependencies=lambda: capture_context_dependencies(source_ctx),
+        replaced_generation=replaced,
+    )
+    with monkeypatch.context() as patch:
+        # The sources are current while this Turn publishes them.
+        patch.setattr(knowledge_source_runtime, "validate_retained_sources", AsyncMock())
+        await prepare(execution, context_case)
+        publication = await execution.conversation_publication(context_case.request.messages)
+        store = SessionStore(collab.path)
+        assert await store.mark_completed(**completion(SimpleNamespace(worker=worker), publication))
+        await store.finalize_turn(session_id=worker.session_id, current_turn_id=worker.turn_id, next_turn_id=None)
+    return publication
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param({"soft_deleted_at": "2026-11-23T04:03:04+00:00"}, id="deleted"),
+        pytest.param({"active_generation_id": "generation-reparsed"}, id="reparsed"),
+        pytest.param({"team_id": "org_other"}, id="moved"),
+    ],
+)
+async def test_a_changed_knowledge_source_of_earlier_history_rebuilds_from_summaries(collab, context_case, monkeypatch, change):
+    """116 s_c575d9b33d13 (1.7.65): a file the head retained was deleted, so the next Turn and every
+    later one failed with knowledge_source_changed. Like a refused material, it now rebuilds history
+    from Turn summaries and lets this Turn replace the head."""
+    from bowhead_core import context_history
+
+    publication = await _publish_head_retaining(collab, context_case, monkeypatch, {"kbf_a": "generation-kbf_a"})
+    assert any(message.name == "context_source_dependencies_v1" for message in publication.dependencies)
+    ctx = await next_context(collab)
+    rows = {"kbf_a": _kb_source("kbf_a", ctx.team_id)}
+    ctx.kb_files_store, ctx.kb_file_authorizer = _kb_reader(rows)
+    published = await load_conversation_context(ctx)
+    assert published.generation_id and published.replaced_generation_id is None
+
+    for name, value in change.items():
+        setattr(rows["kbf_a"], name, value)
+    ctx.knowledge_source_uses = {"kbf_current": "generation-current"}
+    original = context_history.read_context_graph_in_tx
+
+    async def read_after_an_earlier_generation_recorded_a_proof(*args, **kwargs):
+        ctx.knowledge_source_uses["kbf_from_discarded_head"] = "generation-old"
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(context_history, "read_context_graph_in_tx", read_after_an_earlier_generation_recorded_a_proof)
+    rebuilt = await load_conversation_context(ctx)
+    assert rebuilt.generation_id is None and rebuilt.replaced_generation_id == published.generation_id
+    assert any(message.content == "Verified final answer." for message in rebuilt.messages)
+    assert not any(message.name == "context_source_dependencies_v1" for message in rebuilt.messages)
+    # Nothing from the discarded head stays retained on this Turn.
+    assert ctx.knowledge_source_uses == {"kbf_current": "generation-current"}
+
+
+async def test_an_authorization_outage_while_loading_history_fails_the_turn_and_keeps_the_head(collab, context_case, monkeypatch):
+    await _publish_head_retaining(collab, context_case, monkeypatch, {"kbf_a": "generation-kbf_a"})
+    ctx = await next_context(collab)
+
+    async def undecided(*_args, **_kwargs):
+        return None
+
+    ctx.kb_files_store, ctx.kb_file_authorizer = _kb_reader({"kbf_a": _kb_source("kbf_a", ctx.team_id)}, batch=undecided)
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_authorization_unavailable"):
+        await load_conversation_context(ctx)
+    ctx.kb_files_store, ctx.kb_file_authorizer = _kb_reader({"kbf_a": _kb_source("kbf_a", ctx.team_id)})
+    assert (await load_conversation_context(ctx)).replaced_generation_id is None
+
+
+async def test_the_turn_after_a_rebuild_publishes_a_head_that_later_turns_load_normally(collab, context_case, monkeypatch):
+    """The conversation heals: the replacing head no longer carries the deleted source."""
+    from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
+    from bowhead_core.document_chat_continuation import DocumentTurnOwner
+    from bowhead_core.subagent import SubagentProfile, _system_profile_snapshot
+
+    await _publish_head_retaining(collab, context_case, monkeypatch, {"kbf_a": "generation-kbf_a"})
+    ctx = await next_context(collab)
+    rows = {"kbf_a": _kb_source("kbf_a", ctx.team_id, soft_deleted_at="2026-11-23T04:03:04+00:00")}
+    ctx.kb_files_store, ctx.kb_file_authorizer = _kb_reader(rows)
+    rebuilt = await load_conversation_context(ctx)
+    assert rebuilt.generation_id is None and rebuilt.replaced_generation_id
+
+    worker = DocumentTurnOwner(
+        team_id=ctx.team_id,
+        user_id=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+        generation=1,
+        owner_id=ctx.execution_owner_id,
+    )
+    bindings = AgentExecutionBindingStore(collab.path)
+    binding = await bindings.admit_system_execution(
+        team_id=worker.team_id,
+        user_id=worker.user_id,
+        turn_id=worker.turn_id,
+        profile_name="lead",
+        dispatch_key="call:context-next-lead",
+        definition=_system_profile_snapshot(
+            SubagentProfile(name="lead", llm_agent_type="analyst", tool_whitelist=("probe",), system_prompt="Answer.", max_iterations=8)
+        ),
+        manifest_fingerprint="sha256:" + "1" * 64,
+        override_version=None,
+        system_required=True,
+        enforce_current_override=False,
+    )
+    await bindings.mark_running(binding.execution_id)
+    publication = await _publish_head_retaining(
+        collab, context_case, monkeypatch, {}, worker=worker, execution_id=binding.execution_id, replaced=rebuilt.replaced_generation_id
+    )
+    assert not any(message.name == "context_source_dependencies_v1" for message in publication.dependencies)
+
+    third = await next_context(collab, turn_id="t_context_third")
+    third.kb_files_store, third.kb_file_authorizer = _kb_reader(rows)
+    restored = await load_conversation_context(third)
+    assert restored.generation_id and restored.generation_id != rebuilt.replaced_generation_id
+    assert restored.replaced_generation_id is None

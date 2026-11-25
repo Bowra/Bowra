@@ -42,6 +42,18 @@ def test_flags_failed_blocked_pending_not_done_or_skipped() -> None:
     assert "compliance-analyst" not in joined  # skipped = user excluded
 
 
+def test_a_step_without_its_deck_names_the_missing_file_and_the_way_forward() -> None:
+    """an observed execution: the Consultant's analysis was on the canvas, yet the caveat read
+    "「consultant」这步执行失败(RuntimeError),本报告未包含其分析结果"."""
+    step = SimpleNamespace(
+        agent_name="consultant", status="failed", error_kind="deck_delivery_missing", objective="基于2025年各品类大类销售额结果，撰写一份HTML简报"
+    )
+    (caveat,) = _plan_report_gap_caveats([_s("compute", "done"), step])
+    assert "「基于2025年各品类大类销售额结果，撰写一份HTML简报」这一步要交付一份新的 PPT 文件，但没有生成文件" in caveat
+    assert "修订重试" in caveat and "继续执行" in caveat
+    assert "deck_delivery_missing" not in caveat and "未包含其分析结果" not in caveat
+
+
 def test_all_done_no_caveats() -> None:
     steps = [_s("financial-analyst", "done"), _s("business-analyst", "done")]
     assert _plan_report_gap_caveats(steps) == []
@@ -115,7 +127,7 @@ def test_done_step_verify_unmet_flows_to_caveats() -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# G3 (actual 116 t_c9853b490565): cover KPI row must come from **closing chapter**,
+# G3 (actual an observed execution: cover KPI row must come from **closing chapter**,
 # never first N across chapters, explicitly called bug by decision #2.
 # ─────────────────────────────────────────────────────────────
 
@@ -124,14 +136,9 @@ def _leg(profile: str, payload: dict) -> dict:
     return {"profile": profile, "payload": payload}
 
 
-def test_closing_chapter_header_takes_title_and_kpis_from_the_last_titled_leg() -> None:
-    """封面的标题与 KPI 带都取**收口章**那一条腿，且取的是同一条腿。
-
-    决议 #2 原文把「抄了步 0+步 1 的行业数字当全文 KPI」直接称为 bug 形态（纯噪音），
-    并定「封面直接用收口章的 KPI 带，不新造」。116 真机 t_c9853b490565 实测出的
-    恰恰就是那个 bug：封面 8 张卡 = 第 1 章 4 张 + 第 2 章 4 张，标签与数值逐字相同，
-    而收口章自己的「估值区间下限/基准/上限/退款率」一张都没上封面。
-    """
+def test_closing_chapter_header_takes_the_title_of_the_last_titled_leg() -> None:
+    """The closing chapter supplies the report title. Its KPIs stay its own
+    (docs/sprints/report-kpi-authorship-2026-11-24): the header returns no KPIs for the cover."""
     from bowhead_core.agents.lead_orchestrator import _closing_chapter_header
 
     legs = [
@@ -139,48 +146,32 @@ def test_closing_chapter_header_takes_title_and_kpis_from_the_last_titled_leg() 
         _leg("compute", {"title": "竞品对标", "kpis": [{"label": "永辉营收", "value": "133.67亿"}]}),
         _leg("consultant", {"title": "尽调结论与报价建议", "kpis": [{"label": "估值基准", "value": "290.7亿"}]}),
     ]
-    title, kpis = _closing_chapter_header(legs)
-    assert title == "尽调结论与报价建议", title
-    assert [k["label"] for k in kpis] == ["估值基准"], kpis
+    assert _closing_chapter_header(legs) == "尽调结论与报价建议"
 
 
 def test_closing_chapter_header_skips_untitled_tail_legs() -> None:
-    """收口章＝**最后一条有标题的**腿（交付面选 chat 的腿不出 title），
-
-    且 KPI 必须跟着同一条腿走 —— 不能标题取这条、KPI 取那条。
-    """
+    """The closing chapter is the last leg with a title; a chat-surface leg without one is skipped."""
     from bowhead_core.agents.lead_orchestrator import _closing_chapter_header
 
     legs = [
-        _leg("compute", {"title": "行业宏观", "kpis": [{"label": "社零", "value": "51.2万亿"}]}),
-        _leg("consultant", {"title": "尽调结论", "kpis": [{"label": "估值基准", "value": "290.7亿"}]}),
+        _leg("compute", {"title": "行业宏观"}),
+        _leg("consultant", {"title": "尽调结论"}),
         _leg("financial-analyst", {"exec_summary": "chat 面短答，没有 title", "kpis": [{"label": "噪音", "value": "1"}]}),
     ]
-    title, kpis = _closing_chapter_header(legs)
-    assert title == "尽调结论", title
-    assert [k["label"] for k in kpis] == ["估值基准"], kpis
+    assert _closing_chapter_header(legs) == "尽调结论"
 
 
 def test_closing_chapter_header_empty_when_no_leg_has_a_title() -> None:
-    """负对照：没有任何腿出标题时返空 —— 上游据此走兜底链，别凭空造一个封面。
-
-    KPI 也必须是空：决议 #2 定的是「不新造文档级 KPI 带」，收口章没有就没有，
-    宁可不渲这条带，也不拿跨章聚合的噪音充数。
-    """
+    """No leg has a title: the header is empty and the caller's title chain applies."""
     from bowhead_core.agents.lead_orchestrator import _closing_chapter_header
 
     legs = [_leg("compute", {"exec_summary": "只有短答", "kpis": [{"label": "噪音", "value": "1"}]})]
-    title, kpis = _closing_chapter_header(legs)
-    assert title == ""
-    assert kpis == []
+    assert _closing_chapter_header(legs) == ""
 
 
-def test_fallback_payload_cover_kpis_come_from_the_closing_chapter_only() -> None:
-    """降级路同口径（G3）：封面 KPI 只取收口章那条腿，不跨腿累积。
-
-    原实现是每条腿各取 4 张往上堆 ⇒ 3 条腿就是 12 张卡的拼盘，
-    正是决议 #2 点名的「抄了步 0+步 1 的行业数字当全文 KPI，纯噪音」。
-    """
+def test_fallback_payload_takes_no_cover_kpis_from_several_steps() -> None:
+    """Several steps gave KPIs for their own chapters. The fallback neither picks one step's KPIs for the
+    cover (an observed execution showed a knowledge-base step's sample numbers there) nor stacks them all."""
     steps = [
         _sp("compute", "done", {"title": "行业宏观", "exec_summary": "宏观面", "kpis": [{"label": "社零", "value": "51.2万亿"}]}),
         _sp("compute", "done", {"title": "竞品对标", "exec_summary": "竞品面", "kpis": [{"label": "永辉营收", "value": "133.67亿"}]}),
@@ -188,9 +179,9 @@ def test_fallback_payload_cover_kpis_come_from_the_closing_chapter_only() -> Non
     ]
     p = _plan_fallback_report_payload(steps)
     assert p is not None
-    # Closing-chapter title ⇒ KPIs from same leg, never a three-leg mixture.
     assert p["title"].startswith("尽调结论"), p["title"]
-    assert [k["label"] for k in p["kpis"]] == ["估值基准"], p["kpis"]
+    assert p["kpis"] == []
+    assert [i["narrative"] for i in p["insights"]] == ["宏观面", "竞品面", "结论面"]
 
 
 def test_fallback_payload_still_renders_when_only_kpis_and_no_summary() -> None:

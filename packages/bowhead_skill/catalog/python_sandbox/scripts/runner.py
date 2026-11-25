@@ -2350,6 +2350,9 @@ def main() -> int:
     output_data_errors: list[str] = []
     # Files the code wrote that were not stored, with why; they fail the run without making it a code failure.
     not_saved: list[tuple[str, str]] = []
+    # Saved work files the call neither declared as work (work_outputs, purpose='analysis') nor listed as results:
+    # the Tool tells the model the user does not receive them (116 t_c05606f8b1ee).
+    undeclared_work: list[str] = []
     for p in sorted(workdir.iterdir()):
         if p.name in pre_existing:
             continue
@@ -2409,6 +2412,8 @@ def main() -> int:
             if preview:
                 rec["preview"] = preview
             outputs.append(rec)
+            if _out_kind is None and not _analysis_declared and p.name not in _work_outputs:
+                undeclared_work.append(p.name)
         else:
             not_saved.append((p.name, f"sandbox file {p.name} Data artifact upload failed"))
 
@@ -2487,6 +2492,11 @@ def main() -> int:
     }
     if _saved_as_new_file:
         result["saved_as_new_file"] = _saved_as_new_file
+    if undeclared_work and not _skill_mode:
+        result["undeclared_work_files"] = {
+            "files": undeclared_work,
+            "reason": "listed_other_files" if _output_purpose == "deliverable" else "no_purpose",
+        }
     missing_deliverables = [
         name
         for name in _missing_declared_deliverables(

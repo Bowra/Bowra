@@ -1,6 +1,6 @@
 """Step summaries of dict-shaped Tool errors agree with the failed step state.
 
-116 t_7edbc155f8d8: failed `add_chart` results (`{"error": "chart_edit_incomplete", …}`)
+an observed execution: failed `add_chart` results (`{"error": "chart_edit_incomplete", …}`)
 read "Added · chart" and failed `read_chart` results showed truncated raw JSON, although
 the shared outcome extraction marked both steps failed.
 """
@@ -44,6 +44,24 @@ def test_other_failed_results_name_the_failure_without_raw_json(tool: str, resul
     assert preview(tool, result, None, ui_language="zh-CN") == zh
     assert preview(tool, result, None, ui_language="en-US") == en
     assert "{" not in preview(tool, result, None, ui_language="en-US")
+
+
+@pytest.mark.parametrize(
+    ("code", "zh", "en"),
+    [
+        ("not_found", "未接续：本会话没有这个可接着做的运行", "Not continued: no resumable run with this ID in this conversation"),
+        ("superseded", "未接续：这次运行已被接着做过，进度在更新的运行里", "Not continued: this run was already continued in a newer run"),
+        ("in_use", "未接续：这次运行正在另一条消息里继续", "Not continued: this run is being continued by another message"),
+        ("same_turn", "未接续：这次运行刚在本轮停下", "Not continued: this run stopped in this turn"),
+        ("unknown", "未接续：之前保存的进度不可用", "Not continued: the saved progress is not available"),
+    ],
+)
+def test_a_refused_resume_names_why(code: str, zh: str, en: str) -> None:
+    # an observed execution: Lead guessed resume_checkpoint_id after a clarification; the row read "失败: 执行出错".
+    result = {"ok": False, "error_kind": "resume_refused", "resume_refused": code, "error": "No resumable run with this resume_checkpoint_id"}
+    assert classify_tool_outcome(result).state == "failure"
+    assert preview("subagent_spawn", result, None, ui_language="zh-CN") == zh
+    assert preview("subagent_spawn", result, None, ui_language="en-US") == en
 
 
 def test_expected_outcomes_and_successes_stay_neutral() -> None:

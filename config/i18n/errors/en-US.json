@@ -109,6 +109,7 @@
   "client_chunk_load_failed": "Some page resources could not be loaded. Reload the page.",
   "client_refresh_required": "This page version cannot safely start a new send. Keep the draft and refresh the page.",
   "chart_selection_unavailable": "This chart selection has changed or is unavailable. Reopen the chart, select the scope again, and resend your draft.",
+  "presentation_selection_unavailable": "The presentation element you referenced has changed or is unavailable. Reopen the file, select the element again in Edit, and resend your draft.",
   "subagent_draft_unsaved_changes": "There are unsaved changes on the right. Save or discard them before sending this message; your input is kept.",
   "subagent_draft_store_unavailable": "Drafts are temporarily unavailable, possibly during a service upgrade. Try again later; your Agents are not affected.",
   "clock_tamper": "The server clock is invalid, so this action is unavailable. Ask your system administrator to check the system time.",

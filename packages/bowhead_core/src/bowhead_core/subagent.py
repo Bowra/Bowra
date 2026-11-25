@@ -35,7 +35,7 @@ from uuid import uuid4
 
 from bowhead_router.errors import provider_failure_kind
 from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
-from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME, RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME
+from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME, RUNTIME_CORRECTION_NOTE_NAME, VISUAL_VIEW_NOTE_NAME, WITHDRAWN_ANSWER_FACT
 from bowhead_router.types import TokenUsage
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.sandbox_call_shape import FLAT_SANDBOX_TOOL, SANDBOX_SCRIPT, SANDBOX_SKILL_NAME, SKILL_INVOKE_TOOL, sandbox_entry_for
@@ -845,7 +845,16 @@ def _canvas_sections_from_invocations(invocations: Any) -> list[dict[str, Any]]:
                 "tool": _tn,
             }
         )
-    return out
+    # A section the helper later removed (remove_report_section, with the charts only it referenced) is gone from
+    # the store; Lead must not be offered it as a section or an inline figure.
+    removed: set[str] = set()
+    for _inv in invocations or []:
+        _res = getattr(_inv, "result", None)
+        if canonical_tool_name(getattr(_inv, "tool_name", "") or "") != "remove_report_section" or not isinstance(_res, dict):
+            continue
+        removed.update(str(item.get("section_id")) for item in _res.get("removed") or [] if isinstance(item, dict))
+        removed.update(str(sid) for sid in _res.get("removed_figures") or [])
+    return [entry for entry in out if entry["id"] not in removed] if removed else out
 
 
 # Anchor syntax instructions: append **only when actual inlineable figures exist**, deliberately matching report-path
@@ -1658,6 +1667,7 @@ def get_compute_profile() -> SubagentProfile:
             # ⚠ This and compute.yaml tools.allow are **two** lists, synchronized by
             # test_fallback_whitelist_matches_manifest_allow.
             "write_report",
+            "remove_report_section",
             "read_report",
             # canvas-update-turn batch B2-2: fold replaced prior-turn charts during revision; whitelist entry inert if unregistered.
             "remove_chart",
@@ -2325,17 +2335,14 @@ def _note_tool_result_capped(tool_call_id: str, tool_name: str, full: Any, cappe
         logger.warning("llm_request_record.cap_note_failed tool=%s", tool_name, exc_info=True)
 
 
-def _chat_direct_eligible(ctx: Any, text: str, *, primary: bool = False, no_file_directive: str = "") -> bool:
+def _chat_direct_eligible(ctx: Any, text: str, *, primary: bool = False) -> bool:
     """Deliver a whole-request primary's answer only when no integration is needed.
 
     Count actual dispatches, not payload entries: successful plain-text peers
-    do not enter the payload bag. Corrective output directives still require
-    Lead review. The caller checks payload success and output ledgers; the
-    consumer rechecks the settled batch and competing Lead results.
+    do not enter the payload bag. The caller checks payload success and output
+    ledgers; the consumer rechecks the settled batch and competing Lead results.
     """
     if not primary or not text.strip():
-        return False
-    if no_file_directive:
         return False
     return int(getattr(ctx, "_chat_direct_spawn_count", 0) or 0) <= 1
 
@@ -4677,9 +4684,11 @@ class SubagentRunner:
                     return open_delegations(parent_bus).result(call.id, status)
 
                 publication = await context_view.conversation_publication(repair_pending_tool_calls(messages, known_result))
-                # What the user saw of the reply this ending cut off. A reply the transcript already holds is not repeated.
+                # What the user saw of the reply this ending cut off. A reply this Turn's own transcript already holds
+                # is not repeated; an earlier Turn's answer holding the same text does not count.
                 reply = _shown_narrative()[_reply_from[0] :].strip() if _reply_from else ""
-                held = next((_answer_text(message.content) for message in reversed(messages) if message.role == "assistant"), "")
+                own = messages[sum(_history_sizes) :]
+                held = next((_answer_text(message.content) for message in reversed(own) if message.role == "assistant"), "")
                 return replace(publication, unfinished_reply=reply) if reply and reply not in held else publication
 
             parent_bus._unfinished_context_publication = _unfinished_context_publication  # type: ignore[attr-defined]
@@ -5394,7 +5403,7 @@ class SubagentRunner:
                 # (see tool description and _LEGACY_RESULT_ERROR_PREFIX_TO_PUBLIC_CODE), retained as before.
                 #
                 # **Lead final_answer has no downstream reader; it is the actual text users see**.
-                # Regression check 2026-09-24 t_7f66c0d681c6: Lead ran 1171 seconds against a 900-second cap;
+                # Regression check 2026-09-24 an observed task: Lead ran 1171 seconds against a 900-second cap;
                 # silent-done fallback rendered these model instructions verbatim as the final chat answer:
                 #   「insufficient_data: peer_wallclock_exhausted: 1171s > 900s.
                 #     Stop iterating — return what we have. 已停止迭代以节省用户时间.」
@@ -5721,7 +5730,7 @@ class SubagentRunner:
                     _llm_messages = [*messages, *_tail_msgs, _refs_msg, *_lang_msgs]
 
             if _source_hint is not None and any(schema.name == "kb_search" for schema in _request_schemas):
-                from bowhead_core.knowledge_source_runtime import record_source_uses, validate_retained_sources
+                from bowhead_core.knowledge_source_runtime import validate_retained_sources
 
                 try:
                     await validate_retained_sources(parent_ctx, _source_hint[1])
@@ -5731,10 +5740,11 @@ class SubagentRunner:
                 except Exception:  # A failed final source check omits metadata; no broad fallback.
                     _source_hint = None
                 if _source_hint is not None:
-                    record_source_uses(parent_ctx, _source_hint[1])
-                    from bowhead_core.kb.source_navigation import record_navigation_uses
-
-                    record_navigation_uses(parent_ctx, parent_ctx.knowledge_navigation_pending)
+                    # The sample is rebuilt from current authority and checked right before every
+                    # send, and it never enters canonical messages. It is not retained as a source
+                    # dependency: a sampled file that is deleted, re-parsed or revoked leaves the
+                    # next sample instead of failing the Turn and every later Turn of the session.
+                    # Evidence returned by KB Tools keeps its own retained provenance.
                     _hint_message = Message(role="user", content=_source_hint[0])
                     # Preserve final user instructions without splitting a native
                     # assistant Tool-call batch from its required Tool responses.
@@ -6196,7 +6206,7 @@ class SubagentRunner:
                 dur = int((time.perf_counter() - t0) * 1000)
                 err_type = type(e).__name__
                 llm_failure = project_llm_failure(e)
-                # Regression check 2026-09-25 t_239e8b6cf3dc: compute completed six iterations and ten files; seventh LLM call hit
+                # Regression check 2026-09-25 an observed task: compute completed six iterations and ten files; seventh LLM call hit
                 # **our own** 300-second call deadline while still emitting, failing the entire run. Lead dispatched compute anew,
                 # spending another 560,000 input tokens. This call's context remains; peer retries only this call,
                 # preserving earlier work. No retry if remaining wallclock cannot fit another full deadline.
@@ -6302,7 +6312,7 @@ class SubagentRunner:
                         subagent_id,
                         err_type,
                     )
-                # ξ A5a r2 (prod prod trace t_cdff89be43ca): if Lead was mid-streaming
+                # ξ A5a r2 (prod prod trace an observed task): if Lead was mid-streaming
                 # pre-tool "thinking out loud" text into canvas section, abort that
                 # section so users do not see Lead's internal planning as the final report.
                 # Same fix as κ-11 P0-CTO-1 tool-call-after-prose case, here for
@@ -6632,7 +6642,10 @@ class SubagentRunner:
                         correction = _bounce if isinstance(_bounce, FinalAnswerCorrection) else FinalAnswerCorrection(_bounce)
                         messages.append(Message(role="assistant", content=resp.content or "", name=correction.assistant_history_name))
                         # A server-authored runtime note, never the user's reply to that answer.
-                        messages.append(Message(role="user", name=RUNTIME_CORRECTION_NOTE_NAME, content=correction.instruction))
+                        # The rejected answer is withdrawn (Lead) or never returned (helper); the note says so first.
+                        messages.append(
+                            Message(role="user", name=RUNTIME_CORRECTION_NOTE_NAME, content=WITHDRAWN_ANSWER_FACT + correction.instruction)
+                        )
                         if profile.name == "lead" and _answer_text(resp.content):
                             _final_answer_written = True
                             # The rejected final already streamed; supersede it like every Lead bounce.
@@ -6640,6 +6653,9 @@ class SubagentRunner:
                             if callable(_rejected_hook):
                                 try:
                                     _rejected_hook()
+                                    if delivery_review_carrier is not None:
+                                        # The accepted review states the withdrawal again, right before Lead answers.
+                                        delivery_review_carrier.reply_withdrawn = True
                                 except Exception:  # noqa: BLE001 — presentation bookkeeping must never fail a turn
                                     logger.warning("subagent.final_answer_rejected_hook_failed", exc_info=True)
                         _bounce_pending = True
@@ -6683,7 +6699,7 @@ class SubagentRunner:
             if _round_gate is not None:
                 try:
                     # The gate may author and run a whole Auto Plan. That is this run's work in progress,
-                    # so the stall watchdog must not count it (116 1.7.48 the regression case was cancelled
+                    # so the stall watchdog must not count it (an observed deployment the regression case was cancelled
                     # as agent_stalled 300 s into its plan), just as it does not count a running tool.
                     with runtime_control.owned() if runtime_control is not None else contextlib.nullcontext():
                         _gate_sentinel = await _round_gate(list(resp.tool_calls), profile.name)
@@ -7596,7 +7612,7 @@ class SubagentRunner:
             # (server-emitted workspace selection). Sentinel must terminate the loop in place: feeding it to LLM
             # wastes a call, and act-first qwen-family models may call clarification_ask again,
             # creating duplicate pending rows + N=2 mistaken multi_select (dogfood
-            # t_102a292a65b0 confirmed double questions), or even select a workspace themselves, bypassing server-led choice.
+            # an observed task confirmed double questions), or even select a workspace themselves, bypassing server-led choice.
             if collect_clarification_sentinels(invocations):
                 from bowhead_core.ordinary_lead_runtime import blocked_before_work
 
@@ -8179,7 +8195,7 @@ class SubagentRunner:
         # metrics without retry/mutation. Numeric-hallucination checks are replaced by two layers:
         # number_verifier (text, live) + report_ledger v3 (formula, currently shadow);
         # ledger's opening comment explicitly says v3 replaces this lossy unit-class matching. Migration assessment in impl-notes.
-        # W12 #94: monitor peers completing without subagent_return; production t_aa9ccddc529f
+        # W12 #94: monitor peers completing without subagent_return; production an observed task
         # exposed this deviation. Prompt strengthened (subagent.py:65 top + terminal output contract),
         # The metric tracks whether the prompt change actually reduces the rate.
         if returned_payload is None:
@@ -11198,6 +11214,14 @@ _FAILURE_LABELS: dict[str, tuple[str, str]] = {
     "tool_execution_failed": ("执行出错", "execution error"),
     "tool_delivery_review_required": ("需要核对交付", "delivery check required"),
 }
+#: Step-row reasons for a resume refused before any helper starts (`_RESUME_REFUSAL_GUIDANCE` is the model's text).
+_RESUME_REFUSAL_LABELS: dict[str, tuple[str, str]] = {
+    "not_found": ("本会话没有这个可接着做的运行", "no resumable run with this ID in this conversation"),
+    "superseded": ("这次运行已被接着做过，进度在更新的运行里", "this run was already continued in a newer run"),
+    "in_use": ("这次运行正在另一条消息里继续", "this run is being continued by another message"),
+    "same_turn": ("这次运行刚在本轮停下", "this run stopped in this turn"),
+    "": ("之前保存的进度不可用", "the saved progress is not available"),
+}
 #: Tools whose branches below already word their own failure; they read the shared failure test.
 _TOOLS_WITH_FAILURE_WORDING = frozenset(
     {
@@ -11245,7 +11269,7 @@ def _prettify_output_preview(
         # localize the user-visible summary to Chinese (detailed guidance belongs in Lead's closing answer), preserving
         # the LLM-facing invocation.error English text (separate the two here). This deterministic defense does not depend on
         # the LLM following prompt guidance: even if Lead still calls bi_*, steps no longer show raw English DatarcUnavailableError
-        # (customer report t_b38b537c15f3 and 116 reproduction t_15847f1e2ae5 seq 1 both had this shape).
+        # (customer report an observed task and 116 reproduction an observed task seq 1 both had this shape).
         err_str = str(error)
         if err_str.startswith(("DatarcUnavailableError:", "PbiUnavailableError:")):
             return _t("BI 数据源在本轮不可用（说明见回复）", "BI source unavailable this turn (see reply)")
@@ -11288,6 +11312,12 @@ def _prettify_output_preview(
             return _t("无可访问的工作区 · 名单为空", "No accessible workspaces")
         if _kind == "switch_streak_paused":
             return _t("连环切换已暂停 · 先盘点当前工作区", "Rapid switching paused · inspect current workspace first")
+        if _kind == "resume_refused":
+            # A refusal before any helper starts (no usable checkpoint). an observed execution: Lead guessed a checkpoint id
+            # after a clarification and the row read "失败: 执行出错". A refusal that hands the saved task to a new helper
+            # is worded by the trace from `agent_spawned.resume_refused`.
+            _zh_reason, _en_reason = _RESUME_REFUSAL_LABELS.get(str(result.get("resume_refused") or ""), _RESUME_REFUSAL_LABELS[""])
+            return _t(f"未接续：{_zh_reason}", f"Not continued: {_en_reason}")
 
     # Dict-shaped Tool errors (`{"error": …}`, `{"ok": false, …}`) mark the step failed through the shared
     # outcome extraction; the summary must agree before any per-Tool success wording. a reproduced task:
@@ -11502,7 +11532,7 @@ def _prettify_output_preview(
         # ★★ Rejected writes must not say "已添加". 116 observations: **11.5%** (166/1442) of `add_chart` and
         # **7.2%** (180/2509) of `canvas_add_chart` calls were skipped because `data_artifact_id` was given a sequence number
         # (such as `"15"` / `"40"`); **all 366 calls** showed "已添加 · chart" on the step card.
-        # `t_17e216c2316b` had 52 rejections and no chart in canvas, yet users saw 52 "已添加" steps.
+        # `an observed task` had 52 rejections and no chart in canvas, yet users saw 52 "已添加" steps.
         # This branch previously always returned "已添加", even deriving `kind` from the tool name, so refusals got the same claim.
         if result.get("skipped"):
             return _t(
@@ -12267,7 +12297,7 @@ _SPAWN_LANGUAGE_ALIASES: dict[str, str] = {
     "汉语": "zh-CN",
 }
 
-# Write instructions in the target language itself (self-demonstrating: t_c31e011b4b14 showed Chinese "用英语回答"
+# Write instructions in the target language itself (self-demonstrating: an observed task showed Chinese "用英语回答"
 # did not work with a flash-tier model and all-Chinese context), and explicitly name payload fields; in the same hardware run,
 # "回答用户" was interpreted literally as chat prose only, leaving all payload titles/labels in Chinese.
 _SPAWN_LANGUAGE_LINES: dict[str, str] = {
@@ -12953,7 +12983,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
 
             if _after_miss and _prior_h1 is not None and (canvas_mode == "new_report" or (canvas_mode == "revise" and not _scope_named)):
                 # D3: after a miss, a new report would fold the report the user asked to change, and an unscoped revision would lift the
-                # write fence (116 `t_eb052e2762c8`). Other dispatches are judged on their own arguments.
+                # write fence (116 `an observed task`). Other dispatches are judged on their own arguments.
                 _later_refusal = await _scope_refusal(
                     _scope_missed_items(bus),
                     (
@@ -13009,7 +13039,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 _all_unit_ids = set().union(*(u.section_ids for u in _units)) if _units else set()
                 if _allowed and not _chart_allowed and len(_units) >= 2 and _all_unit_ids <= _allowed:
                     # (Review P2-2: naming the sole addressable unit is not the whole report; other untitled sections remain outside scope.)
-                    # Regression check (1.3.43, `t_49b2fb04ec3d`): user asked "把这份报告改成 1-6 月"; Lead first passed mismatching names,
+                    # Regression check (1.3.43, `an observed task`): user asked "把这份报告改成 1-6 月"; Lead first passed mismatching names,
                     # then, after receiving the chapter list, passed all five, treated as only those five: cover KPI/title unchanged and untitled introduction excluded,
                     # reducing a whole-report scope change to a partial one. Naming every chapter = whole-report revision, with no scope restriction.
                     logger.info("lead.revise_scope_whole turn=%s units=%d", getattr(ctx, "turn_id", None), len(_units))
@@ -13270,7 +13300,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             if language_line:
                 # spawn-language: peers cannot see original user wording, so _LANGUAGE_RULE's instruction to follow the user's
                 # question language is inapplicable; this line is the only language criterion peers can obtain deterministically
-                # (t_c31e011b4b14: user "Answer in English only" + en-US setting,
+                # (an observed task: user "Answer in English only" + en-US setting,
                 # yet three peers delivered Chinese reports; pin language here instead of expecting peer inference).
                 ctx_lines.append(language_line)
             if answer_style_line:
@@ -14044,21 +14074,15 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         except Exception as _w42_exc:
             logger.warning("v4.subagent_summary_emit_failed err=%s", _w42_exc)
         open_delegations(bus).close(_spawn_call_id or "")
-        # said-not-done Seam B prevention: return **facts** about this turn's actual output to Lead.
-        #
-        # Motivation: in Regression check (t_bef61acf9854), a peer said "PDF 已成功导出",
-        # and Lead repeated "你可以在对话附件中直接下载", yet before WP-0 that file never
-        # was registered. **The model was not trying to lie; it only saw skill ok:true and did not know the artifact was not persisted.**
-        # This sprint repeatedly proved prohibitions are not reliably obeyed (`_PEER_DISPATCH`'s last-line prohibition against claiming
-        # report generation was violated 9 times), so the value here is **providing facts**:
-        # `produced` is the main path; the directive appended below is a bonus that can be removed if proven ineffective.
-        #
-        # Read-only, stateless, best-effort: explicitly mark failed items unknown, never disrupting peer finalization.
+        # Facts about what this Turn saved, returned to Lead with the helper result (said-not-done Seam B).
+        # A peer said "PDF 已成功导出" and Lead repeated "你可以在对话附件中直接下载" about a file that was never
+        # registered (an observed task): the model saw the helper's ok:true, not the store. ``produced`` gives the
+        # stored facts, and a fixed note in the Turn's answer language says that only the listed files reach the
+        # user; neither reads the helper's text. Best-effort: an unread item is unknown, never 0.
         _produced_facts: dict[str, Any] = {}
-        _no_file_directive = ""
+        _produced_note = ""
         try:
-            from bowhead_core.deliverable_ledger import build_deliverable_ledger
-            from bowhead_core.overclaim_guard import peer_facts_and_directive
+            from bowhead_core.deliverable_ledger import build_deliverable_ledger, produced_facts, produced_files_note
 
             _led = await build_deliverable_ledger(
                 turn_id=getattr(ctx, "turn_id", None),
@@ -14069,20 +14093,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 memory_notes_store=getattr(ctx, "memory_notes_store", None),
                 invocations=result.tool_invocations,
             )
-            # ★Batch 5 review F-B: detect false claims in **the actual text users will read**.
-            # M137 #145: successful subagent_return **intentionally leaves `final_answer` empty**
-            # (answer lives in payload), especially DF-04 short answers (answer=exec_summary).
-            # Checking only `fa` ⇒ always empty ⇒ detector never triggers; false claims such as a generated downloadable PDF
-            # were never checked on the short-answer path (pre-existing).
-            # Review #2 corrects two points: ① check **both** `fa` and exec_summary; `or` misses the actual delivery when
-            # both are nonempty (DR-1.2 nonterminal return continues the loop;
-            # fa gets resp.content on the final iteration without tool_call).
-            # ② the previous comment wrongly claimed no later layer could correct the answer after short-circuiting: `_compose_turn_output`'s
-            # ledger guard still runs on direct-delivery turns and rewrites final answers (hence F-3's shared-source issue).
-            # This gate rejects **before short-circuiting**; it is not the sole defense.
-            _exec_sum = str((result.payload or {}).get("exec_summary") or "").strip() if isinstance(result.payload, dict) else ""
-            _claim_text = "\n".join(t for t in (fa, _exec_sum) if t)
-            _produced_facts, _no_file_directive = peer_facts_and_directive(_led, _claim_text)
+            _produced_facts = produced_facts(_led)
+            _produced_note = produced_files_note(_led, effective_output_language(bus=bus, language_context=getattr(ctx, "language_context", None)))
         except Exception as _pf_e:  # noqa: BLE001 — best-effort
             logger.debug("produced_facts degraded err=%s", _pf_e)
 
@@ -14118,6 +14130,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 if inv.tool_name == "render_deck" and inv.error is None and isinstance(inv.result, dict) and inv.result.get("ok") is True
             }
             _native_deck_receipts = [dict(receipt) for receipt in _binding.receipts.values() if receipt.get("artifact_id") in _rendered_ids]
+            # A deck re-rendered with revises is the next version of the same file: hand Lead the latest version only.
+            _superseded_decks = {receipt.get("revises") for receipt in _native_deck_receipts}
+            _native_deck_receipts = [receipt for receipt in _native_deck_receipts if receipt.get("artifact_id") not in _superseded_decks]
 
         _retained_artifacts: list[dict[str, str]] = []
         if not result.ok:
@@ -14192,8 +14207,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                             "operation_ref through Coach's read-only agent_operation_get before further work; "
                             "do not retry creation, regenerate proposals or issue new request IDs to recover."
                         )
-            if _no_file_directive:
-                payload["directive"] = (payload.get("directive") or "") + _no_file_directive
+            if _produced_note:
+                payload["directive"] = (payload.get("directive") or "") + "\n" + _produced_note
             if _canvas_changes is not None:
                 from bowhead_core.canvas_revise import CANVAS_CHANGES_DIRECTIVE as _cc_directive
 
@@ -14246,7 +14261,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             return payload
 
         # Hallucination defense: subagent finished with empty/whitespace-only final_answer; ok=true would lead Lead to
-        # assume conclusions exist and fabricate numbers (t_fc0e9e68a8f9 case). Convert explicitly to error,
+        # assume conclusions exist and fabricate numbers (an observed task case). Convert explicitly to error,
         # requiring Lead to avoid fabrication under prompt iron rule 9 after receiving the error code.
         # Use an English code + one English rationale sentence for error, avoiding truncation / misinterpretation of Chinese in prompts;
         # Lead's <process> iron rule 9 matches the error string `subagent_empty_answer`.
@@ -14358,7 +14373,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     # preserving numbers relies solely on model compliance (number rewriting dominates fabrication-gate incident history).
                     # Emit a sentinel instead: short-circuit the loop in place; the backend deterministically promotes the peer answer to the turn's
                     # final answer. Eligibility in `_chat_direct_eligible`
-                    # (single spawn / short answer / non-bail / no corrective directive).
+                    # (primary delegation / non-empty answer / single spawn).
                     # **Retain** the directive: short-circuiting applies only inside the Lead loop; spawns inside peers
                     # and non-lead profiles still use paraphrasing and need it.
                     **(
@@ -14368,12 +14383,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         # ("这张图数据从哪来") still use direct delivery, avoiding another Lead call.
                         if _canvas_changes_empty(_canvas_changes)
                         and result.completion != "partial"
-                        and _chat_direct_eligible(
-                            ctx,
-                            _short_answer,
-                            primary=_primary_delegation,
-                            no_file_directive=_no_file_directive,
-                        )
+                        and _chat_direct_eligible(ctx, _short_answer, primary=_primary_delegation)
                         else {}
                     ),
                 }
@@ -14388,7 +14398,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             kpis_n = len(result.payload.get("kpis") or [])
             _peer_exec_summary = str(result.payload.get("exec_summary") or "").strip()
             _lead_caveats, _lead_caveats_omitted = caveats_for_lead(result.payload)
-            # ★ Caught in Regression check on 2026-08-27 (t_1ee75cbfb876): structured bail envelopes were **invisible** inside Lead's loop.
+            # ★ Caught in Regression check on 2026-08-27 (an observed task): structured bail envelopes were **invisible** inside Lead's loop.
             # The peer used the intended entry: `subagent_return(payload={"error":{"kind":"domain_mismatch",
             # "message":"「火星省」不是本工作区「省」维度下的真实值…"}})`, also faithfully accepted by `validate_payload`
             # (bail requires a nonempty message). But `payload_summary.exec_summary` below reads
@@ -14456,7 +14466,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 _bail_directive = "（通常是取数超时/失败。）"
                 _bail_tail = "可以建议用户重试或缩小查询范围。"
             # ★ Empty payloads also take this branch: root cause of false claims caught on 116, 2026-08-25.
-            # `t_30eb9e8320d6`: all three peer bi_query calls failed; it truthfully wrote exec_summary as
+            # `an observed task`: all three peer bi_query calls failed; it truthfully wrote exec_summary as
             # "数据查询超时，暂未取得可核验结果", also rendered faithfully on canvas, but **the tool result for Lead
             # dropped exec_summary**, still claimed structured report delivery and impending composer canvas
             # rendering, and required a specific number from this turn in each sentence. With no numbers available but required to give
@@ -14517,7 +14527,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     ),
                     "payload_summary": {
                         # ⚠ Omit title when entirely empty: it is the peer's **intent** title (observed
-                        # `t_f81fec522d27` returned "各品牌退款率排名（前 20）"),
+                        # `an observed task` returned "各品牌退款率排名（前 20）"),
                         # while no ranking existed; the title itself asserted delivery.
                         "title": "" if _delivered_nothing else (result.payload.get("title") or "")[:80],
                         "insights_count": ins_n,
@@ -14704,7 +14714,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             and not _produced_facts.get("files")
             and not _produced_facts.get("canvas_sections")
             and (not result.tool_invocations or (_produced_facts.get("files") == 0 and _produced_facts.get("canvas_sections") == 0))
-            and _chat_direct_eligible(ctx, result.final_answer, primary=_primary_delegation, no_file_directive=_no_file_directive)
+            and _chat_direct_eligible(ctx, result.final_answer, primary=_primary_delegation)
         )
         return _with_facts(
             {

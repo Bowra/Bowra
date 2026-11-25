@@ -1,6 +1,6 @@
 """A delivery-review correction keeps Lead's question for the user.
 
-116 t_7edbc155f8d8: a chart edit failed, Lead asked the user how to continue, delivery
+an observed execution: a chart edit failed, Lead asked the user how to continue, delivery
 review bounced that reply with a user-role message, and Lead read it as the answer: it
 started an alternative the user had not approved while the streamed question stayed
 visible. The correction is now a runtime note whose wording leaves the choice to the
@@ -19,7 +19,7 @@ import respx
 from bowhead_core.agents.clarification_tool import register_clarification_tool
 from bowhead_core.subagent import PROFILES
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
-from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME, RUNTIME_CORRECTION_PREFIX
+from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME, RUNTIME_CORRECTION_PREFIX, WITHDRAWN_ANSWER_FACT
 from bowhead_router.types import ToolSchema
 from test_ordinary_lead_question_http import call, response
 from test_reference_http_start import enable_lead_writer, rows, settled
@@ -89,8 +89,9 @@ async def test_review_correction_keeps_the_question_for_the_user(http_start: Sim
             # Providers may merge adjacent user-role turns (collaboration cards); the note keeps its frame.
             guidance = [m["content"] for m in after_question if m["role"] == "user" and "review_context (JSON data): " in m["content"]]
             assert len(guidance) == 1, after_question
-            note = guidance[0][guidance[0].index("Fix requirement scope") - len(RUNTIME_CORRECTION_PREFIX) :]
-            assert note.startswith(RUNTIME_CORRECTION_PREFIX), guidance[0]
+            note = guidance[0][guidance[0].index(RUNTIME_CORRECTION_PREFIX) :]
+            # The note rejects the streamed answer, so it first says the user does not see that answer.
+            assert note.startswith(RUNTIME_CORRECTION_PREFIX + WITHDRAWN_ANSWER_FACT + "Fix requirement scope"), guidance[0]
             assert "do not dispatch, retry or start other work" in note
             assert "keep the question in your answer or ask it with clarification_ask" in note
             guidance = next(m["content"] for m in body["messages"] if m["role"] == "user" and RUNTIME_CORRECTION_PREFIX in m["content"])
@@ -129,3 +130,70 @@ async def test_review_correction_keeps_the_question_for_the_user(http_start: Sim
     assert replay.status_code == 200
     replayed = [json.loads(line[6:]) for line in replay.text.splitlines() if line.startswith("data: ")]
     assert [value.get("narrative_superseded") for value in replayed if value.get("status") == "completed" and "turn_id" in value] == [True]
+
+
+# an observed execution: after the review correction Lead wrote the review as text instead of calling the Tool, and the
+# protocol block reached the user. review_delivery lives only in the Runner's run-local Tool view, so the final gate
+# did not know the name; it now sends such text back for a native call.
+REVIEW_AS_TEXT = (
+    '<review_delivery>\n<parameter name="payload">{"delivery_review": {"requirements": [], "issues": []}}</parameter>\n'
+    "</review_delivery>\n\nThe chart could not be recolored."
+)
+FINAL = "The chart could not be recolored, so it keeps its current color."
+
+
+async def test_review_written_as_text_goes_back_for_a_native_call(http_start: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    case = http_start
+    enable_lead_writer(case, monkeypatch)
+    registry = case.app.state.orchestrator.tool_registry
+    register_clarification_tool(registry)
+
+    async def recolor_chart(args: dict, ctx: ToolExecutionContext) -> dict:
+        return {"error": "chart_edit_incomplete", "hint": "The chart edit did not complete."}
+
+    registry.register(
+        ToolSpec(
+            schema=ToolSchema(name="recolor_chart", description="Recolor a synthetic chart", input_schema={"type": "object"}), handler=recolor_chart
+        )
+    )
+    monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("recolor_chart", "clarification_ask")))
+    calls = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        if not body.get("stream"):
+            return response(body, {"role": "assistant", "content": "Chart color"}, "stop")
+        calls.append(body)
+        if len(calls) == 1:
+            return response(body, call("edit-1", "recolor_chart", {"color": "green"}), "tool_calls")
+        if len(calls) == 2:
+            return response(body, {"role": "assistant", "content": "The chart could not be recolored."}, "stop")
+        if len(calls) == 3:
+            return response(body, {"role": "assistant", "content": REVIEW_AS_TEXT}, "stop")
+        if len(calls) == 4:
+            contents = [m["content"] or "" for m in body["messages"] if m["role"] == "user"]
+            assert any("native tool syntax as text" in content for content in contents), contents[-2:]
+            guidance = next(content for content in contents if "review_context (JSON data): " in content)
+            failed = json.loads(guidance.split("review_context (JSON data): ", 1)[1])["failed_calls"][0]["call_id"]
+            review = {
+                "requirements": [{"requirement": "Recolor the chart green", "status": "unfulfilled", "evidence_call_ids": []}],
+                "issues": [{"call_id": failed, "resolution": "unfulfilled", "evidence_call_ids": [], "explanation": "The edit did not complete."}],
+            }
+            return response(body, call("review", "review_delivery", {"payload": {"delivery_review": review}}), "tool_calls")
+        return response(body, {"role": "assistant", "content": FINAL}, "stop")
+
+    with respx.mock() as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post(
+            "/api/v1/chat/send",
+            json={"workspace_id": case.fixture.scope.workspace_id, "message": "Make the bar chart green."},
+            headers={"Content-Type": "application/json"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        turn_id = accepted.json()["turn_id"]
+        await settled(turn_id)
+    turn = await case.fixture.case.store.get_turn(turn_id)
+    assert turn.status == "completed", turn.error
+    assert len(calls) == 5, "The text review is sent back once, then the native review and the answer follow"
+    assert turn.final_answer.startswith(FINAL)
+    assert "review_delivery" not in turn.final_answer and "delivery_review" not in turn.final_answer

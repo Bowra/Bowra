@@ -182,6 +182,11 @@ class SkillToolDef:
 
 _REVISES_LIMIT = 8
 _EXTRA_ARGS_IGNORED = "Not passed: the script command line is fixed. Pass values in input instead."
+_SCRIPT_IGNORED_WITH_COMMAND = (
+    "Not used: a call with command runs that argv as given, so this entry name had no effect. "
+    "Without command, script runs the entry with --input and --workdir."
+)
+_COMMAND_NOT_ENABLED = "Not used: command mode is not enabled here, so script ran with its fixed command line."
 _VERSION_REFUSAL_HINTS = {
     "version_target_not_found": "The file to revise was not found among your files.",
     "version_target_out_of_scope": (
@@ -367,6 +372,35 @@ def _same_name_version_facts(
     return {"recorded_as_new_version": recorded, "_version_note": " ".join(notes)}
 
 
+_WORK_FILE_CAUSES = {
+    "no_purpose": "this call declared no purpose",
+    "listed_other_files": "this call listed other files in deliverable_outputs",
+}
+
+
+def _undeclared_work_file_note(raw: Any) -> dict[str, str]:
+    """State that the user does not receive the work files a call saved without declaring them.
+
+    an observed execution: a requested CSV was saved without ``purpose``, became a work file, and the
+    model and the answer called it delivered. A result line looks the same for both kinds of file.
+    Replays of that run declared the file in 8/10 with the consequence stated first, against 2/10
+    without it (docs/sprints/chat-dogfood-findings-2026-11-23/spike.md §1).
+    """
+    if not isinstance(raw, dict) or raw.get("reason") not in _WORK_FILE_CAUSES or not isinstance(raw.get("files"), list):
+        return {}
+    files = [str(name) for name in raw["files"] if isinstance(name, str) and name]
+    if not files:
+        return {}
+    one = len(files) == 1
+    it, them, kind = ("it was", "it", "a work file, not as a result file") if one else ("they were", "them", "work files, not as result files")
+    return {
+        "work_file_note": (
+            f"The user does not receive {', '.join(files)}: {_WORK_FILE_CAUSES[raw['reason']]}, so {it} saved as {kind}. "
+            f"To give {them} to the user, save {them} with purpose='deliverable' and list {them} in deliverable_outputs."
+        )
+    }
+
+
 async def _written_by_this_turn(store: Any, artifact_id: str, ctx: Any) -> bool:
     turn_id = getattr(ctx, "turn_id", None)
     if not turn_id or not hasattr(store, "get"):
@@ -438,7 +472,7 @@ _CANVAS_EXPORT_SKILLS: frozenset[str] = frozenset({"canvas-xlsx", "canvas-pptx",
 
 # Section kinds persisted only during compose; their presence means this turn's report has taken shape.
 #
-# Why this criterion is needed (Regression check 1.0.74, t_f3441c8bb6af): the gate below originally checked only
+# Why this criterion is needed (Regression check 1.0.74, an observed task): the gate below originally checked only
 # whether the canvas had content, but tool-stage chart / code_block sections are persisted **before** compose. Thus
 # in a single-turn "create a report + export to Word" request, export ran **6 seconds before** compose (observed: docx
 # at 13:45:14, h1/kpi_row/narrative at 13:45:20). Nonempty `rows` ⇒ allowed ⇒ the exported document was
@@ -451,7 +485,7 @@ _COMPOSED_REPORT_KINDS: frozenset[str] = frozenset({"h1", "narrative", "kpi_row"
 async def _inject_current_canvas_sections(name: str, input_data: dict[str, Any], ctx: Any) -> str | None:
     """canvas-xlsx/pptx/pdf 的 render_from_canvas.py 吃整份 `sections`(ReportSection[])。
     旧契约要求 LLM 把 canvas 全量 JSON(常含 6-10+ chart/table) 逐字塞进 skill_invoke 的
-    流式 tool-call 参数——真实故障(t_76b9db41ad57, 2026-07-19): 8-chart canvas 连续两次
+    流式 tool-call 参数——真实故障(an observed task, 2026-07-19): 8-chart canvas 连续两次
     `streamed tool args JSON invalid/truncated`，LLM 放弃，从未产出 .xlsx，用户看到的
     "下载不下来"其实是文件从没生成。
 
@@ -476,7 +510,7 @@ async def _inject_current_canvas_sections(name: str, input_data: dict[str, Any],
     # ★★ Structural requirement: **every path that failed to populate sections must converge on the same decision**,
     # instead of independently escaping with `return None`.
     #
-    # Incident (116 prod 1.0.74, t_f9c3fc0d5ab4): the previous version blocked only `not rows` (an empty canvas content set),
+    # Incident (116 prod 1.0.74, an observed task): the previous version blocked only `not rows` (an empty canvas content set),
     # but live reproduction hit **another branch**: export ran before the canvas was created,
     # `get_canvas_by_session` returned None, and an earlier return bypassed the block, still producing
     # a 36776B empty `(empty canvas)` .docx registered as a deliverable,
@@ -1120,7 +1154,16 @@ def build_skill_tools(
         # The server fixes the script command line (`--input <workdir>/input.json --workdir <workdir>`).
         # Model arguments used to follow it, and argparse keeps the last value, so they could replace
         # both paths on the host. They are never passed; the result says so.
-        extra_args_ignored = args.get("extra_args") not in (None, "", [])
+        # A supplied value that has no effect is named in the result.
+        # With command, the runner runs that argv and the entry name only labels the staged copy;
+        # 116 had 4 of 20 calls pass both, one of which lost its output to the argv it chose.
+        ignored_arguments: dict[str, str] = {}
+        if _cmd_mode and script:
+            ignored_arguments["script"] = _SCRIPT_IGNORED_WITH_COMMAND
+        elif _cmd_provided and not _cmd_mode:
+            ignored_arguments["command"] = _COMMAND_NOT_ENABLED
+        if args.get("extra_args") not in (None, "", []):
+            ignored_arguments["extra_args"] = _EXTRA_ARGS_IGNORED
 
         # skill-audit batch C (security review P0-conditional): when the multiruntime flag is OFF, user/team
         # skill execution fails closed. Previously it fell back to unisolated execution on the gateway host (.py directly via
@@ -1350,7 +1393,7 @@ def build_skill_tools(
         # Sprint chat-stream-fix C-1 (2026-05-16): inner script can write
         # `{"ok": false, "exit_code": 1, "error": "..."}` to stdout while the
         # subprocess itself exits 0 (skill wrapper ran fine). Prod trace
-        # t_1a9f063efbdc seq=25/30: skill_invoke returned outer ok=True but
+        # an observed task seq=25/30: skill_invoke returned outer ok=True but
         # script's own logic failed → the user kept seeing "report 生成中", and the peer
         # ignored the failure. Now propagate inner ok→outer when result_json
         # is structured.
@@ -1361,6 +1404,9 @@ def build_skill_tools(
         # fails (the runner still exits 0 → result.ok stays True). After unpacking skill_result,
         # **check envelope.ok first**, or the child script's exit 0 hides missing inputs and falsely reports success (s_8a923ed27a cases).
         _env = result.result_json
+        _work_file_note = (
+            _undeclared_work_file_note(_env.pop("undeclared_work_files", None)) if _direct_python_sandbox and isinstance(_env, dict) else {}
+        )
         _rj = _env
         if isinstance(_env, dict) and isinstance(_env.get("skill_result"), dict):
             _rj = _env["skill_result"]
@@ -1379,7 +1425,7 @@ def build_skill_tools(
         # a file path → invalid_artifact_id_format → bi_query re-fetch.
         # feedback-0713 #4b: python_sandbox outputs/workdir no longer expose ephemeral absolute host
         # paths. Every call creates a new mkdtemp directory; old paths become invalid, and reusing them across calls causes
-        # FileNotFoundError (prod t_296fb09131ad seq5). The python_sandbox runner
+        # FileNotFoundError (prod an observed task seq5). The python_sandbox runner
         # already uploads every output as an artifact (output_artifacts references are the correct representation);
         # outputs returns only relative filenames. Other skills (consultant-deck, etc.) still have Lead-side host-path
         # consumers, so preserve their absolute paths.
@@ -1405,6 +1451,8 @@ def build_skill_tools(
             if len(_exts) == 1:
                 _download_name = export_filename(_title, _exts.pop())
         return {
+            # First, so the model reads it before the outputs it qualifies (the replay placement).
+            **_work_file_note,
             "ok": outer_ok,
             # Backend-resolved identity, separate from model arguments and script JSON.
             # Exact released resources retain their identity; no aliases or rebinding.
@@ -1414,7 +1462,7 @@ def build_skill_tools(
                 else {}
             ),
             "exit_code": result.exit_code,
-            **({"ignored_arguments": {"extra_args": _EXTRA_ARGS_IGNORED}} if extra_args_ignored else {}),
+            **({"ignored_arguments": ignored_arguments} if ignored_arguments else {}),
             **(
                 {
                     "download_filename": _download_name,
@@ -1532,7 +1580,9 @@ def build_skill_tools(
                 '"input":{"code":"<python>","inputs":{},"timeout_sec":30,'
                 '"purpose":"analysis|deliverable","deliverable_outputs":["final.mp4"]}}。'
                 '用户明确要求把生成文件交付/下载时传 purpose="deliverable"，并在 '
-                "deliverable_outputs 列出代码实际写出的顶层文件名；计算中间文件保持默认 analysis"
+                "deliverable_outputs 列出代码实际写出的文件；计算中间文件保持默认 analysis。"
+                "deliverable_outputs entries take the same forms as python_exec: a top-level file ('game.html'), "
+                "a nested file ('build/report.pdf', saved as report.pdf) or a folder ending in '/' (saved as one zip)."
             ),
         },
     }
@@ -1542,9 +1592,9 @@ def build_skill_tools(
         "成功时 output_artifacts 是产出文件的 artifact 引用（跨调用复用数据用它的 "
         "artifact_id 重新声明 inputs）。⚠ 沙箱每次调用都是全新工作目录：上次调用"
         "结果里的任何文件路径在下次调用中必然失效，不要复用路径。"
-        # ⚠ This description is **shared by all agents** (financial-/marketing-/business-/compliance-analyst,
-        # consultant, kb-analyst…), but **only compute has** the flat `python_exec`. Therefore the legacy shape
-        # specification must always remain; replacing it with "use python_exec" directs the other 6 peers to a tool they do not have.
+        # ⚠ This description is **shared by every holder of skill_invoke**, and some have no flat `python_exec`
+        # (marketing-analyst, and Team or personal Agents that select skill_invoke alone). Therefore the legacy shape
+        # specification must always remain; replacing it with "use python_exec" directs them to a tool they do not have.
         # Express the preference only as a **conditional statement**, letting the model inspect its own available tools.
         # (This commit already encountered the same pitfall with bi_concept_resolve: descriptions shared across peers must not contain
         #  statements true only for one profile.)
@@ -1631,16 +1681,23 @@ def build_skill_tools(
     defs.append(
         SkillToolDef(
             name="python_exec",
-            # Only compute has this tool (compute.yaml tools.allow), and compute's permanent prompt ④
-            # already covers INPUTS access / producing data instead of charts / statelessness across calls. Do not repeat it here; state only
-            # **what is unique to this tool**: its shape (top-level code) and why it exists.
+            # Held by compute, the built-in specialists and Agents that select the sandbox. compute's prompt ④ and,
+            # for the specialists and Team Agents built from the sandbox Plugin, the sandbox I/O capability module
+            # cover INPUTS access and statelessness across calls.
+            # Do not repeat those here; state **what is unique to this tool** (its shape and why it exists) and the
+            # sandbox's own file facts, which every holder needs (builtin-agent-tool-drift-2026-11-23).
             description=(
                 "在隔离沙箱里跑一段 Python（pandas / numpy / scipy / sklearn / statsmodels / matplotlib 已装，无网络）。"
                 "**`code` 直接放顶层**，不要再包一层 `input={...}`——长代码塞进嵌套对象里的字符串"
                 "容易在流式传输时被截断写坏，这正是本工具存在的理由。"
                 "数据走 `inputs`（只写 artifact_id），代码里用 `INPUTS['<key>']['path']` 读。"
                 "用户明确要求生成可下载文件时，传 `purpose=deliverable` 并在 "
-                "`deliverable_outputs` 精确列出顶层文件名；普通计算保持 analysis。"
+                "`deliverable_outputs` 精确列出代码写出的文件；普通计算保持 analysis。"
+                "A downloadable file draws its own charts in the code that writes it (for example inline SVG in HTML) "
+                "and does not need add_chart. An HTML deliverable is one self-contained file: the Results preview runs "
+                "offline and removes external scripts, styles and fonts, so never load a library from a CDN. For 3D, "
+                "inline /opt/bowhead/browser-libs/three/three.min.js in a classic <script> before your own code when "
+                "the sandbox has it, and use the global THREE."
             ),
             input_schema={
                 "type": "object",

@@ -19,15 +19,28 @@ import type { Citation } from "@/lib/types";
 afterEach(() => cleanup());
 
 describe("LeadNarrative", () => {
-  it.each([true, false])("hides the observed headline typo in streamed and replayed prose (streaming=%s)", (isStreaming) => {
-    const { container } = renderIntl(<LeadNarrative text={"<healine>Fibonacci visualization</healine>\n\nThe corrected result."} isStreaming={isStreaming} />);
-    expect(container.textContent).toContain("The corrected result.");
-    expect(container.textContent).not.toContain("healine");
-    expect(container.textContent).not.toContain("Fibonacci visualization");
+  // Misspellings seen in 116 answers and in the user report (`hedline`).
+  const observedTypos = ["healine", "hedline", "handline", "hheadline", "highline", "hline", "headerline", "deadline"];
+
+  it.each(observedTypos.flatMap((tag) => [true, false].map((isStreaming) => [tag, isStreaming] as const)))(
+    "hides the observed headline typo <%s> in streamed and replayed prose (streaming=%s)",
+    (tag, isStreaming) => {
+      const { container } = renderIntl(<LeadNarrative text={`<${tag}>Fibonacci visualization</${tag}>\n\nThe corrected result.`} isStreaming={isStreaming} />);
+      expect(container.textContent).toContain("The corrected result.");
+      expect(container.textContent).not.toContain(tag);
+      expect(container.textContent).not.toContain("Fibonacci visualization");
+    },
+  );
+
+  it("keeps tags outside the headline shape as text", () => {
+    for (const text of ["<header>Title</header> rest", "<line>x</line> rest", "<abcdefgline>x</abcdefgline> rest"]) {
+      expect(stripInternalMarkers(text)).toBe(text);
+    }
   });
 
   it("holds a pending typo marker and preserves unrelated, multiline and overlong text", () => {
     expect(stripInternalMarkers("Before\n<healine>Pending")).toBe("Before\n");
+    expect(stripInternalMarkers("Before\n<hedline>DBD 代表")).toBe("Before\n");
     expect(stripInternalMarkers("<healine-guide>text</healine-guide>")).toBe("<healine-guide>text</healine-guide>");
     for (const body of ["first\nsecond", "x".repeat(201)]) {
       const text = `<healine>${body}</healine>`;

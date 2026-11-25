@@ -25,7 +25,8 @@ export type ResultCapabilityDTO =
   | "copy_code"
   | "open_outputs"
   | "view_run_details"
-  | "feedback_unsupported";
+  | "feedback_unsupported"
+  | "edit_presentation";
 
 export type ResultArtifactMetadataDTO = {
   mime: string;
@@ -145,7 +146,7 @@ const CAPABILITIES = new Set<ResultCapabilityDTO>([
   "share_report", "view_history", "clear_report", "delete_report",
   "download", "reference_in_chat", "manage_in_files", "view_raw",
   "view_details", "copy_code", "open_outputs", "view_run_details",
-  "feedback_unsupported",
+  "feedback_unsupported", "edit_presentation",
 ]);
 const OBJECT_TYPES = new Set(["report", "artifact", "code"]);
 const VIEWER_PROFILES = new Set(["report", "html", "image", "video", "table", "text", "document", "unsupported", "code"]);

@@ -49,6 +49,7 @@ const CROSS_BROWSER_SPECS = [
   "**/dialog-scroll-lock.spec.ts",
   "**/sidebar-session-delete.spec.ts",
   "**/sidebar-session-archive.spec.ts",
+  "**/sidebar-result-pins.spec.ts",
   "**/dialog-sheet.spec.ts",
   "**/credits-list-rows.spec.ts",
   "**/session-url-history.spec.ts",

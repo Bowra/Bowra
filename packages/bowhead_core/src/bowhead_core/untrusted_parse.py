@@ -217,6 +217,7 @@ async def run_worker_json(
     data: bytes | None = None,
     extra_files: dict[str, bytes] | None = None,
     limits: ExtractLimits = DEFAULT_LIMITS,
+    binary_result: bool = False,
 ) -> tuple[dict[str, Any] | None, str]:
     """Drive the one-shot extraction child: write `control` (+ any raw `data`
     bytes) into a private temp dir, exec the worker (scrubbed env), wall-timeout-
@@ -224,6 +225,10 @@ async def run_worker_json(
     ``(None, reason)`` where reason ∈ {"timeout","oom","failed"} so the caller can
     surface a differentiated fail-soft error record. Gated by the process-wide
     concurrency semaphore.
+
+    ``binary_result`` gives the child a ``result_data_path`` for raw output bytes (an edited
+    file), so large outputs never travel as base64 in the JSON; when the child wrote it, the
+    bytes come back under the reserved key ``_result_bytes``.
 
     The child sets its OWN RLIMIT_CPU/RLIMIT_AS at startup (before importing the
     heavy parsers) — safer than a fork-context `preexec_fn` (no fork-time
@@ -246,6 +251,9 @@ async def run_worker_json(
                 extra_path = tmpdir / f"extra-{index}.bin"
                 await asyncio.to_thread(extra_path.write_bytes, content)
                 ctl[f"{name}_path"] = str(extra_path)
+            result_data_path = tmpdir / "result.bin"
+            if binary_result:
+                ctl["result_data_path"] = str(result_data_path)
             in_path.write_text(json.dumps(ctl), encoding="utf-8")
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -281,6 +289,8 @@ async def run_worker_json(
             except Exception as e:
                 logger.warning("untrusted_parse.worker_bad_result kind=%s err=%s", kind, e)
                 return None, "failed"
+            if binary_result and result_data_path.is_file():
+                result["_result_bytes"] = await asyncio.to_thread(result_data_path.read_bytes)
             return result, "ok"
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

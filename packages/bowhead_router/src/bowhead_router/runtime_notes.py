@@ -22,6 +22,13 @@ RUNTIME_CORRECTION_PREFIX = (
     "[Bowhead runtime note — not a message from the user. The user has not replied since your previous answer; "
     "any question or choice you asked them is still unanswered.]\n"
 )
+# Opens a correction that rejects a final answer. The Runner withdraws that answer from the
+# user's view (Lead) or never returns it (helper), and context hygiene drops it from later
+# Turns; without this fact models pointed the user at "my previous reply" nobody could see.
+WITHDRAWN_ANSWER_FACT = (
+    "Your previous answer was not delivered: the user does not see it, and the answer you write next replaces it in full, "
+    "including any question it asked.\n"
+)
 
 # Visual self-check: renders of saved files for the next request only (never persisted).
 # The framing keeps a user-role render from reading as a user instruction.

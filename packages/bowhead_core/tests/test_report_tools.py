@@ -554,7 +554,7 @@ async def test_unknown_figure_ref_mid_line_is_stripped_not_rejected(ctx) -> None
 
     The invariant the previous version of this test defended -- a fake id must
     never reach the stored prose -- still holds; only the enforcement moved from
-    "reject the whole report" to "strip the token". 116 `t_6846eb7b274a` is why:
+    "reject the whole report" to "strip the token". 116 `an observed task` is why:
     one misplaced anchor sank three consecutive `write_report` calls and the
     turn ended up composed without its writer."""
     tok = _as("compute")
@@ -649,7 +649,7 @@ async def test_unknown_figure_ref_rejection_says_so_when_there_are_no_figures(ct
 
 
 async def test_anchor_to_chat_hidden_figure_promotes_it_under_the_same_id(ctx) -> None:
-    """116 `t_6846eb7b274a`: the previous turn drew charts and answered in chat,
+    """116 `an observed task`: the previous turn drew charts and answered in chat,
     so D6 hid them; "turn the analysis above into a report, with charts" then
     anchored them by their real ids and got `unknown_figure_ref` three times.
     The anchor must be accepted, the figure must come back onto the canvas with
@@ -701,7 +701,7 @@ async def test_read_report_lists_chat_hidden_figures_as_history(ctx) -> None:
 
 
 async def test_read_report_points_chat_hidden_chart_restyling_to_an_in_place_edit(ctx) -> None:
-    """116 1.7.18 `t_d4d4d3a87752`: a presentation change to a chart from an earlier
+    """an observed deployment `an observed task`: a presentation change to a chart from an earlier
     chat answer produced a recolored duplicate. The listing that exposes the chart's
     real ID must also say that restyling edits that chart rather than drawing another."""
     canvas = await ctx.canvas_store.get_canvas_by_session("s1")
@@ -982,6 +982,31 @@ async def test_update_with_multi_chapter_content_inserts_after_target(ctx) -> No
     order = [s["section_id"] for s in secs]
     assert order[:2] == [ids[0], ids[1]] and order[2] == r2["section_ids"][1] and order[3:] == [ids[2], ids[3]]
     assert secs[1]["content"].strip() == "## 品类结构\n\n改。" and secs[2]["content"].strip() == "## 品类补充\n\n补。"
+
+
+async def test_whole_body_resent_under_the_first_section_id_updates_chapters_in_place(ctx) -> None:
+    """116 `an observed task`: a writer resent its whole body with the first section's id and every
+    other chapter appeared twice. Same-title chapters are now patched; a new one follows the chapter
+    before it, and a chapter the new body leaves out is kept."""
+    tok = _as("compute")
+    try:
+        r1 = await _write_report({"kind": "narrative", "content": _THREE}, ctx)
+        ids = r1["section_ids"]
+        rr = await _read_report({}, ctx)
+        rev = next(o["rev"] for o in rr["outline"] if o["section_id"] == ids[0])
+        redo = "改写的导语。\n\n## 品类结构\n\n女装 37.0%。\n\n## 新增一章\n\n补充。\n\n## 结论\n\n女装仍托底。\n"
+        r2 = await _write_report({"kind": "narrative", "section_id": ids[0], "expected_rev": rev, "content": redo}, ctx)
+        # A later resend without section_id reconciles the added chapter instead of adding it again.
+        r3 = await _write_report({"kind": "narrative", "content": redo}, ctx)
+    finally:
+        reset_current_peer_name(tok)
+    assert r2["ok"] and r2["updated"] == [ids[1], ids[3]] and len(r2["appended"]) == 1
+    added = r2["appended"][0]
+    assert r2["section_ids"] == [ids[0], ids[1], added, ids[3]]
+    secs = await _body(ctx)
+    assert [s["section_id"] for s in secs] == [ids[0], ids[1], added, ids[2], ids[3]]
+    assert "女装 37.0%" in secs[1]["content"] and secs[2]["content"].startswith("## 新增一章") and "3 月 -20.2%" in secs[3]["content"]
+    assert r3["ok"] and not r3["appended"] and len(await _body(ctx)) == 5
 
 
 async def test_add_chapter_turn_lands_as_titled_chapter_after_last_body(ctx) -> None:

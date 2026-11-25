@@ -79,6 +79,13 @@ _ALLOWED: dict[str, dict[str, set[str] | None]] = {
     "bowhead_sidebar_recent_opened_total": {
         "source": {"pinned", "recent", "search"},
         "surface": {"expanded", "overlay", "flyout", "drawer"},
+        # Result pins: a pinned file or report opened from the pinned group.
+        "kind": {"file", "report"},
+    },
+    "bowhead_result_pin_total": {
+        "action": {"pin", "unpin", "pin_failed", "unpin_failed"},
+        "kind": {"file", "report"},
+        "surface": {"results", "files", "reports", "sidebar"},
     },
     "bowhead_sidebar_search_total": {
         "action": {"results", "no_results", "partial", "error", "open"},

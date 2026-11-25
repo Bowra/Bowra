@@ -261,7 +261,8 @@ function renderStepDetail(
   // flat→block swap had dropped (the body stayed empty until the step completed).
   if (s.isStreaming && s.partialContent) {
     // Turn visibility FR5: the tag comes from the declared language; code being written shows its last
-    // LIVE_CODE_LINES lines, so the box follows the newest line and keeps its height.
+    // LIVE_CODE_LINES lines in a box that many lines tall, so it follows the newest line at one height
+    // (it grew line by line and jumped on wrapped long lines, e.g. inline HTML data).
     const lang =
       codeLanguageTag(s.codeLanguage) ??
       (s.detail?.kind === "sql" ? "SQL" : s.detail?.kind === "python" ? "Python" : undefined);
@@ -271,7 +272,9 @@ function renderStepDetail(
     // trailing `"inputs":{…}` tail — dogfood 0.72.8).
     if (s.codeLanguage) {
       const code = extractWritingContent(s.partialContent, s.toolName, { fallbackToRaw: false });
-      return code ? <Code code={lastCodeLines(code, LIVE_CODE_LINES)} lang={lang} caret /> : null;
+      return code
+        ? <Code code={lastCodeLines(code, LIVE_CODE_LINES)} lang={lang} caret fixedLines={LIVE_CODE_LINES} />
+        : null;
     }
     const code = extractWritingContent(s.partialContent, s.toolName);
     return <Code code={code} lang={lang} caret />;

@@ -283,6 +283,7 @@ function attachmentRefToItem(attachment: AttachmentRef): AttachmentItem {
     mime: attachment.mime,
     status: "done",
     ...(attachment.selectedContext ? { selectedContext: attachment.selectedContext } : {}),
+    ...(attachment.presentationSelection ? { presentationSelection: attachment.presentationSelection } : {}),
     kind: attachment.bundleArtifactIds?.length ? "bundle" : "file",
     ...(attachment.referenceKind
       ? { referenceKind: attachment.referenceKind }
@@ -301,6 +302,7 @@ function attachmentItemToRef(item: AttachmentItem): AttachmentRef {
     mime: item.mime,
     ...(item.referenceKind ? { referenceKind: item.referenceKind } : {}),
     ...(item.selectedContext ? { selectedContext: item.selectedContext } : {}),
+    ...(item.presentationSelection ? { presentationSelection: item.presentationSelection } : {}),
     ...(item.bundleArtifactIds?.length
       ? { bundleArtifactIds: [...item.bundleArtifactIds] }
       : {}),

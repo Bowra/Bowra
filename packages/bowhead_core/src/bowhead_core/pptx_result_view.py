@@ -2,8 +2,8 @@
 
 The model knows the code it ran, not what the file now is. This view states what
 can be read from the saved file: charts without values, number formats, series of
-very different size, text still equal to the template and added shapes that cover
-others. A render in the sandbox adds where the text was drawn: outside the page,
+very different size, text still equal to the template, added shapes that cover
+others and shapes an opaque rectangle drawn after them hides. A render in the sandbox adds where the text was drawn: outside the page,
 beyond its frame, over other text, or smaller than in the template. It echoes no
 slide content, gives no instruction and no verdict.
 """
@@ -25,6 +25,8 @@ _MAX_DETAIL = 120
 _MAX_GROUPED_DETAIL = 320
 _MAX_CHART_FACTS = 8
 _MAX_OVERLAP_FACTS = 6
+_MAX_COVERED_FACTS = 6
+_MAX_COVERED_NAMES = 4
 _MAX_UNCHANGED_SLIDES = 6
 _MAX_UNCHANGED_NAMES = 5
 _SCALE_FACTOR = 100
@@ -41,7 +43,9 @@ PPTX_RESULT_VIEW_GUIDANCE = (
     "(charts without values, General or percent number formats that do not fit the values, series of very different size, "
     "text and chart titles equal to the attached template, "
     "slides identical to the template, including slides that an earlier file of this Turn had changed, "
-    "added shapes that cover others) and, when the sandbox could render the file, layout facts measured in that render "
+    "added shapes that cover others, shapes under an opaque rectangle drawn after them, "
+    "layout or master pictures under an opaque shape over the whole slide) and, when the sandbox could render the file, "
+    "layout facts measured in that render "
     "(text drawn outside the page, beyond its frame, over other text, or smaller than in the template), "
     "or the fact that the renderer produced no pages from the file. "
     "It lists what was not checked and gives no verdict. The file's content is read by "
@@ -307,6 +311,7 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     presentation = Presentation(io.BytesIO(data))
     slide_area = int(presentation.slide_width) * int(presentation.slide_height)
     reference = _template_index(template) if template is not None else None
+    template_deck = Presentation(io.BytesIO(template)) if template is not None else None
     counts = {"charts": 0, "tables": 0, "pictures": 0}
     chart_facts: list[str] = []
     overlap_facts: list[str] = []
@@ -357,8 +362,8 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     # Whole slides equal to the template, compared by slide id with their charts, workbooks and pictures.
     identical: list[tuple[int, int]] = []
     changed: list[int] = []
-    if template is not None:
-        before, after = _slide_prints(Presentation(io.BytesIO(template))), _slide_prints(presentation)
+    if template_deck is not None:
+        before, after = _slide_prints(template_deck), _slide_prints(presentation)
         for number, slide in enumerate(slides, 1):
             if slide.slide_id not in before:
                 continue
@@ -368,7 +373,7 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
                 changed.append(slide.slide_id)
     identical_numbers = [number for number, _ in identical]
     unchanged = [(number, names) for number, names in unchanged if number not in identical_numbers]
-    facts = []
+    facts = _unlisted_master_facts(presentation, slides)
     if identical_numbers:
         words, verb = _slide_words(identical_numbers)
         facts.append(
@@ -376,6 +381,8 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
         )
     facts += [{"kind": "chart", "detail": detail} for detail in chart_facts[:_MAX_CHART_FACTS]]
     facts += [{"kind": "overlap", "detail": detail} for detail in overlap_facts[:_MAX_OVERLAP_FACTS]]
+    covered_facts = _covered_facts(presentation, slides, template_deck, reference)
+    facts += [{"kind": "covered", "detail": detail} for detail in covered_facts[:_MAX_COVERED_FACTS]]
     for number, names in unchanged[:_MAX_UNCHANGED_SLIDES]:
         rest = len(names) - _MAX_UNCHANGED_NAMES
         listed = "; ".join(names[:_MAX_UNCHANGED_NAMES]) + (f"; and {rest} more" if rest > 0 else "")
@@ -383,6 +390,7 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     omitted = {
         "chart": max(0, len(chart_facts) - _MAX_CHART_FACTS),
         "overlap": max(0, len(overlap_facts) - _MAX_OVERLAP_FACTS),
+        "covered": max(0, len(covered_facts) - _MAX_COVERED_FACTS),
         "same_text_as_template_slides": max(0, len(unchanged) - _MAX_UNCHANGED_SLIDES),
     }
     summary = f"{len(slides)} slides; {counts['charts']} charts, {counts['tables']} tables, {counts['pictures']} pictures"
@@ -407,6 +415,188 @@ def _file_facts(data: bytes, template: bytes | None = None) -> dict[str, Any]:
     return view
 
 
+def _unlisted_master_facts(presentation: Any, slides: list[Any]) -> list[dict[str, str]]:
+    """Slides whose layout belongs to a slide master that presentation.xml does not list.
+
+    an observed execution: a helper copied another deck's master and layouts into the package to insert two of its
+    slides, but did not add the master to presentation.xml. LibreOffice then drew those slides' text about
+    28,000 pt left of the page, and the helper took the outside-page facts for a renderer difference.
+    """
+    listed = {master.part.partname for master in presentation.slide_masters}
+    unlisted: dict[str, list[int]] = {}
+    for number, slide in enumerate(slides, 1):
+        try:
+            master = slide.slide_layout.slide_master.part.partname
+        except (AttributeError, KeyError):
+            continue
+        if master not in listed:
+            unlisted.setdefault(str(master).lstrip("/"), []).append(number)
+    facts = []
+    for master, numbers in unlisted.items():
+        words, _ = _slide_words(numbers)
+        verb = "uses" if len(numbers) == 1 else "use"
+        facts.append(
+            {
+                "kind": "unlisted_master",
+                "detail": _cut(
+                    f"{words} {verb} a layout of the slide master {master}, which ppt/presentation.xml does not list among its "
+                    "slide masters (p:sldMasterIdLst).",
+                    _MAX_GROUPED_DETAIL,
+                ),
+            }
+        )
+    return facts
+
+
+_COVER_GEOMETRIES = frozenset({"rect", "roundRect"})
+_DRAWN_FILLS = ("solidFill", "gradFill", "blipFill", "pattFill")
+_ALWAYS_DRAWN = frozenset({"pic", "graphicFrame", "grpSp"})
+
+
+def _local(element: Any) -> str:
+    return str(element.tag).rsplit("}", 1)[-1]
+
+
+def _hidden(shape: Any) -> bool:
+    from pptx.oxml.ns import qn
+
+    properties = shape._element[0].find(qn("p:cNvPr")) if len(shape._element) else None
+    return properties is not None and properties.get("hidden") in {"1", "true"}
+
+
+def _opaque_cover(shape: Any) -> bool:
+    """A shown rectangle or rounded rectangle whose solid fill has no transparency."""
+    from pptx.oxml.ns import qn
+
+    element = shape._element
+    if _local(element) != "sp" or _hidden(shape) or getattr(shape, "rotation", 0):
+        return False
+    properties = element.find(qn("p:spPr"))
+    geometry = properties.find(qn("a:prstGeom")) if properties is not None else None
+    if geometry is None or geometry.get("prst") not in _COVER_GEOMETRIES:
+        return False
+    fill = properties.find(qn("a:solidFill"))
+    return fill is not None and len(fill) > 0 and fill[0].find(qn("a:alpha")) is None
+
+
+def _draws(shape: Any) -> bool:
+    """Whether the shape puts anything on the page: text, a fill, a picture, a table, a chart or a group."""
+    from pptx.oxml.ns import qn
+
+    element = shape._element
+    if _local(element) in _ALWAYS_DRAWN:
+        return True
+    if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+        return True
+    properties = element.find(qn("p:spPr"))
+    return properties is not None and any(properties.find(qn(f"a:{fill}")) is not None for fill in _DRAWN_FILLS)
+
+
+def _pictures_shown_under(slide: Any) -> list[str]:
+    """Pictures the slide's layout, and its master when the layout shows master shapes, draw below the slide's own shapes."""
+    if slide._element.get("showMasterSp") in {"0", "false"}:
+        return []
+    layout = slide.slide_layout
+    parts = [layout] + ([layout.slide_master] if layout._element.get("showMasterSp") not in {"0", "false"} else [])
+    return [
+        shape.name
+        for part in parts
+        for shape in part.shapes
+        if _local(shape._element) == "pic" and not getattr(shape, "is_placeholder", False) and not _hidden(shape)
+    ]
+
+
+def _covers(slide: Any, width: int, height: int) -> list[tuple[Any, list[Any], list[str]]]:
+    """For each opaque rectangle on the slide: the earlier shapes whose box lies inside it, and the layout or master
+    pictures it hides when it spans the whole slide. A shape is listed under the first such rectangle only."""
+    shapes = list(slide.shapes)
+    found: list[tuple[Any, list[Any], list[str]]] = []
+    listed: set[int] = set()
+    for index, cover in enumerate(shapes):
+        outer = _rect(cover) if _opaque_cover(cover) else None
+        if outer is None:
+            continue
+        under = []
+        for shape in shapes[:index]:
+            box = _rect(shape)
+            if (
+                shape.shape_id in listed
+                or box is None
+                or _hidden(shape)
+                or getattr(shape, "rotation", 0)
+                or not _draws(shape)
+                or not (box[0] >= outer[0] and box[1] >= outer[1] and box[2] <= outer[2] and box[3] <= outer[3])
+            ):
+                continue
+            under.append(shape)
+            listed.add(shape.shape_id)
+        whole = outer[0] <= 0 and outer[1] <= 0 and outer[2] >= width and outer[3] >= height
+        pictures = _pictures_shown_under(slide) if whole else []
+        if under or pictures:
+            found.append((cover, under, pictures))
+    return found
+
+
+def _cover_pairs(presentation: Any) -> set[tuple[int, int, int | None]]:
+    """(slide id, cover id, covered shape id) for every covered shape; None stands for the layout pictures."""
+    width, height = int(presentation.slide_width), int(presentation.slide_height)
+    pairs: set[tuple[int, int, int | None]] = set()
+    for slide in presentation.slides:
+        for cover, under, pictures in _covers(slide, width, height):
+            pairs.update((slide.slide_id, cover.shape_id, shape.shape_id) for shape in under)
+            if pictures:
+                pairs.add((slide.slide_id, cover.shape_id, None))
+    return pairs
+
+
+def _named(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _covered_facts(presentation: Any, slides: list[Any], template: Any, reference: dict | None) -> list[str]:
+    """Shapes an opaque rectangle drawn after them hides, and layout pictures under a rectangle over the whole slide.
+
+    an observed execution: a helper put a full-slide cream rectangle on the QBR cover and inserted two colour bands
+    below it; both bands and the layout's logo were hidden while the answer listed them. Only pairs the template
+    does not have are stated when there is one.
+    """
+    known = _cover_pairs(template) if template is not None else set()
+    width, height = int(presentation.slide_width), int(presentation.slide_height)
+
+    def label(slide: Any, shape: Any) -> str:
+        added = reference is not None and (slide.slide_id, shape.shape_id) not in reference
+        return f"'{shape.name}' (id {shape.shape_id}{', added' if added else ''})"
+
+    facts: list[str] = []
+    for number, slide in enumerate(slides, 1):
+        for cover, under, pictures in _covers(slide, width, height):
+            new = [shape for shape in under if (slide.slide_id, cover.shape_id, shape.shape_id) not in known]
+            if new:
+                names = [label(slide, shape) for shape in new[:_MAX_COVERED_NAMES]]
+                if len(new) > _MAX_COVERED_NAMES:
+                    names.append(f"{len(new) - _MAX_COVERED_NAMES} more shapes")
+                one = len(new) == 1
+                facts.append(
+                    _cut(
+                        f"slide {number}: {_named(names)} {'lies' if one else 'lie'} entirely under {label(slide, cover)}, which is "
+                        f"drawn after {'it' if one else 'them'} with an opaque fill, so {'it' if one else 'they'} cannot be seen.",
+                        _MAX_GROUPED_DETAIL,
+                    )
+                )
+            if pictures and (slide.slide_id, cover.shape_id, None) not in known:
+                quoted = ", ".join(f"'{name}'" for name in pictures[:_MAX_COVERED_NAMES])
+                one = len(pictures) == 1
+                facts.append(
+                    _cut(
+                        f"slide {number}: {label(slide, cover)} covers the whole slide with an opaque fill, so the "
+                        f"{'picture' if one else 'pictures'} of its layout and slide master ({quoted}) "
+                        f"{'does' if one else 'do'} not show on this slide.",
+                        _MAX_GROUPED_DETAIL,
+                    )
+                )
+    return facts
+
+
 _EMU_PER_POINT = 12700
 _MAX_LAYOUT_FACTS = 8
 _MAX_LAYOUT_FACTS_PER_KIND = 3
@@ -414,9 +604,18 @@ _PAGE_SLACK = 2.0
 _FRAME_SLACK = 4.0
 _SIZE_SLACK = 1.0
 _MIN_COLLIDING_GLYPHS = 3
+# Text colour against what the render drew behind it (an observed execution: a cover title set to the cover's own purple).
+# A pixel at least this contrast ratio from the text colour can show the text; text with almost no such pixels
+# under its characters is stated. Pages are sampled at 72 dpi, one pixel per point.
+_VISIBLE_CONTRAST = 1.5
+_FAINT_SHARE = 0.05
+_MIN_FAINT_GLYPHS = 2
 LAYOUT_RENDERER = "LibreOffice in the sandbox; fonts missing there are replaced, so another program may place text differently."
 FILE_NOT_RENDERED = "LibreOffice in the sandbox ran and produced no pages from this file; it could not load or convert it."
-LAYOUT_NOT_CHECKED = "Layout comes from one renderer; chart interiors, pictures and colours are not examined."
+LAYOUT_NOT_CHECKED = (
+    "Layout comes from one renderer; chart interiors and pictures are not examined, and text colour is compared only with "
+    "what is drawn behind the text."
+)
 
 
 def _layout_shapes(presentation: Any):
@@ -459,13 +658,20 @@ def _layout_shapes(presentation: Any):
         yield from visit(slide.shapes, 1.0, 1.0, 0.0, 0.0)
 
 
-def _page_glyphs(page: Any) -> list[tuple[str, float, float, float, float, float]]:
-    """Drawn characters of one PDF page as (character, left, top, right, bottom, size), top-left origin."""
+def _page_glyphs(page: Any) -> list[tuple[Any, ...]]:
+    """Drawn characters of one PDF page, top-left origin.
+
+    Each is (character, left, top, right, bottom, size, fill colour or None, loose box). The tight box measures
+    placement; the loose box (the font's line height) also covers the background between strokes.
+    """
+    import ctypes
+
     import pypdfium2.raw as pdfium_c
 
     height = page.get_height()
     text_page = page.get_textpage()
     glyphs = []
+    red, green, blue, alpha = ctypes.c_uint(), ctypes.c_uint(), ctypes.c_uint(), ctypes.c_uint()
     try:
         for index in range(text_page.count_chars()):
             character = text_page.get_text_range(index, 1)
@@ -474,10 +680,70 @@ def _page_glyphs(page: Any) -> list[tuple[str, float, float, float, float, float
             left, bottom, right, top = text_page.get_charbox(index)
             if right - left <= 0 or top - bottom <= 0:
                 continue
-            glyphs.append((character, left, height - top, right, height - bottom, float(pdfium_c.FPDFText_GetFontSize(text_page.raw, index))))
+            filled = pdfium_c.FPDFText_GetFillColor(text_page.raw, index, red, green, blue, alpha) and alpha.value > 0
+            loose_left, loose_bottom, loose_right, loose_top = text_page.get_charbox(index, loose=True)
+            glyphs.append(
+                (
+                    character,
+                    left,
+                    height - top,
+                    right,
+                    height - bottom,
+                    float(pdfium_c.FPDFText_GetFontSize(text_page.raw, index)),
+                    (red.value, green.value, blue.value) if filled else None,
+                    (loose_left, height - loose_top, loose_right, height - loose_bottom),
+                )
+            )
     finally:
         text_page.close()
     return glyphs
+
+
+def _luminance(color: tuple[int, ...]) -> float:
+    def channel(value: int) -> float:
+        value_ = value / 255
+        return value_ / 12.92 if value_ <= 0.03928 else ((value_ + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
+
+
+def _contrast(first: tuple[int, ...], second: tuple[int, ...]) -> float:
+    light, dark = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def _faint_text(glyphs: list[tuple[Any, ...]], image: Any) -> tuple[tuple[int, ...], tuple[int, ...], float] | None:
+    """(text colour, colour behind it, contrast) when almost nothing behind a shape's text can show it, else None.
+
+    Only characters drawn inside the page count; text off the page is stated by its own fact.
+    """
+    import collections
+
+    by_color: dict[tuple[int, ...], list[tuple[Any, ...]]] = {}
+    for glyph in glyphs:
+        if glyph[6] is not None:
+            by_color.setdefault(glyph[6], []).append(glyph)
+    if not by_color:
+        return None
+    color, members = max(by_color.items(), key=lambda item: len(item[1]))
+    counts: collections.Counter[tuple[int, ...]] = collections.Counter()
+    measured = 0
+    for glyph in members:
+        left, top, right, bottom = (round(value) for value in glyph[7])
+        left, top, right, bottom = max(left, 0), max(top, 0), min(right, image.width), min(bottom, image.height)
+        if right - left < 1 or bottom - top < 1:
+            continue
+        measured += 1
+        area = image.crop((left, top, right, bottom))
+        counts.update({pixel: number for number, pixel in area.getcolors(area.width * area.height) or []})
+    if measured < _MIN_FAINT_GLYPHS:
+        return None
+    total = sum(counts.values())
+    visible = sum(number for pixel, number in counts.items() if _contrast(color, pixel) >= _VISIBLE_CONTRAST)
+    if visible >= _FAINT_SHARE * total:
+        return None
+    behind = counts.most_common(1)[0][0]
+    return color, behind, _contrast(color, behind)
 
 
 def _drawn_layout(data: bytes, pdf: bytes) -> tuple[dict[tuple[int, int], dict[str, Any]], list[tuple[float, float]], int]:
@@ -502,11 +768,11 @@ def _drawn_layout(data: bytes, pdf: bytes) -> tuple[dict[tuple[int, int], dict[s
             glyphs = _page_glyphs(page)
             text = "".join(glyph[0] for glyph in glyphs)
             used = [False] * len(glyphs)
-            owned: list[tuple[tuple[int, int], list[tuple[str, float, float, float, float, float]]]] = []
+            owned: list[tuple[tuple[int, int], list[tuple[Any, ...]]]] = []
             for _, key, name, table, frame, units in by_slide.get(number, []):
                 if frame is None:
                     skipped += 1
-                picked: list[tuple[str, float, float, float, float, float]] = []
+                picked: list[tuple[Any, ...]] = []
                 for unit in units:
                     # The same words can occur twice on a page; take the unused occurrence nearest the frame.
                     best: tuple[float, int] | None = None
@@ -538,6 +804,13 @@ def _drawn_layout(data: bytes, pdf: bytes) -> tuple[dict[tuple[int, int], dict[s
                     "touches": set(),
                 }
                 owned.append((key, picked))
+            if owned:
+                image = page.render(scale=1).to_pil().convert("RGB")
+                try:
+                    for key, mine in owned:
+                        drawn[key]["faint"] = _faint_text(mine, image)
+                finally:
+                    image.close()
             for position, (key, mine) in enumerate(owned):
                 for other_key, theirs in owned[position + 1 :]:
                     a, b = drawn[key]["box"], drawn[other_key]["box"]
@@ -552,6 +825,10 @@ def _drawn_layout(data: bytes, pdf: bytes) -> tuple[dict[tuple[int, int], dict[s
     finally:
         document.close()
     return drawn, pages, skipped
+
+
+def _hex(color: tuple[int, ...]) -> str:
+    return "#" + "".join(f"{value:02X}" for value in color[:3])
 
 
 def _excess(entry: dict[str, Any]) -> tuple[float, float]:
@@ -571,7 +848,7 @@ def layout_facts(data: bytes, pdf: bytes, template: bytes | None = None, templat
     if template is not None and template_pdf is not None:
         reference, reference_pages, _ = _drawn_layout(template, template_pdf)
     found: dict[str, list[tuple[float, str]]] = {
-        kind: [] for kind in ("outside_page", "table_larger_than_frame", "text_over_text", "text_outside_box", "smaller_text")
+        kind: [] for kind in ("outside_page", "low_contrast_text", "table_larger_than_frame", "text_over_text", "text_outside_box", "smaller_text")
     }
     for key, entry in drawn.items():
         number, page = entry["slide"], pages[entry["slide"] - 1]
@@ -617,6 +894,17 @@ def layout_facts(data: bytes, pdf: bytes, template: bytes | None = None, templat
                 (
                     float(len(new)),
                     f"slide {number}: drawn {text_label} overlaps the text of {len(new)} other shape{'s' if len(new) > 1 else ''} ({names}){tail}.",
+                )
+            )
+        faint = entry.get("faint")
+        if faint is not None and (before is None or before.get("faint") is None):
+            text_color, behind, ratio = faint
+            tail = compared if compared is not None else "; in the template it is readable"
+            found["low_contrast_text"].append(
+                (
+                    -ratio,
+                    f"slide {number}: {text_label} is drawn in {_hex(text_color)} on {_hex(behind)} behind it "
+                    f"(contrast {ratio:.1f}:1), so it barely shows{tail}.",
                 )
             )
         if before is not None and before["size"] - entry["size"] > _SIZE_SLACK:

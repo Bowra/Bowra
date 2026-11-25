@@ -1744,6 +1744,19 @@
       ],
       "compiled": "CREATE TRIGGER trg_account_retired_user_session_pins_insert BEFORE INSERT ON \"user_session_pins\" WHEN bowhead_domain_predicate_v1('trg_account_retired_user_session_pins_insert',NEW.\"user_id\")=1 BEGIN SELECT RAISE(ABORT,'account is deleted'); END"
     },
+    "trg_account_retired_user_result_pins_insert": {
+      "source": "CREATE TRIGGER trg_account_retired_user_result_pins_insert BEFORE INSERT ON \"user_result_pins\" WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id=NEW.\"user_id\") BEGIN SELECT RAISE(ABORT,'account is deleted'); END",
+      "domain": "execution",
+      "table": "user_result_pins",
+      "predicate": "SELECT CASE WHEN (EXISTS(SELECT 1 FROM account_deletions WHERE user_id=?1)) THEN 1 ELSE 0 END",
+      "refs": [
+        [
+          "NEW",
+          "user_id"
+        ]
+      ],
+      "compiled": "CREATE TRIGGER trg_account_retired_user_result_pins_insert BEFORE INSERT ON \"user_result_pins\" WHEN bowhead_domain_predicate_v1('trg_account_retired_user_result_pins_insert',NEW.\"user_id\")=1 BEGIN SELECT RAISE(ABORT,'account is deleted'); END"
+    },
     "trg_account_retired_user_session_views_insert": {
       "source": "CREATE TRIGGER trg_account_retired_user_session_views_insert BEFORE INSERT ON \"user_session_views\" WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id=NEW.\"user_id\") BEGIN SELECT RAISE(ABORT,'account is deleted'); END",
       "domain": "execution",

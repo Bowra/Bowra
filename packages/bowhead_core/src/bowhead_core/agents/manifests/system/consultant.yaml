@@ -21,6 +21,7 @@ tools:
     - bi_concept_resolve
     - skill_read
     - skill_invoke
+    - python_exec
     - skill_list
     - add_chart
     - subagent_return
@@ -77,6 +78,7 @@ callable_peers: []
 produces:
   - pptx
 primary_capability: cap_presentation
+capability_protocol_block: true
 
 listing:
   listed: true

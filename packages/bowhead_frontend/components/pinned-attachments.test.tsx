@@ -105,7 +105,7 @@ describe("PinnedAttachmentsStrip", () => {
     await findByText("capex_model.xlsx");
     const x = container.querySelector(".v2-chip__x") as HTMLButtonElement;
     expect(x.getAttribute("aria-label")).toBe(
-      "Unpin (artifact stays, no longer injected into future turns)",
+      "Stop including in later turns (the file stays)",
     );
     act(() => { fireEvent.click(x); });
     await waitFor(() => expect(api.unpinAttachmentFromSession).toHaveBeenCalledWith("s_1", "art_1"));

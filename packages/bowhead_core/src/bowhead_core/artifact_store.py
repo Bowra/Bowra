@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import IO, TYPE_CHECKING, Any, ClassVar, Final, Literal, Protocol
+from typing import IO, TYPE_CHECKING, Any, ClassVar, Final, Literal, NamedTuple, Protocol
 from uuid import uuid4
 
 from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
@@ -172,6 +172,8 @@ _SOURCE_TO_KIND: dict[str, str] = {
     "image_generate": "tool_data",
     "design_flatten": "canvas_export",
     "consultant_deck": "deliverable",
+    # A person's in-place edit of a PowerPoint deliverable or upload (pptx-inline-edit design §6.4).
+    "presentation_edit": "deliverable",
     # ZIP bundle roots are user-owned inputs in Files, but Results filters the
     # grouping carrier itself and presents only session-bound input children.
     "kb_bundle_upload": "user_upload",
@@ -483,6 +485,44 @@ class Artifact:
 VERSION_TARGET_REASONS = frozenset(
     {"version_target_not_found", "version_target_out_of_scope", "version_target_format_changed", "version_target_not_latest"}
 )
+
+
+#: ``producer_kind`` of a version a person saved by editing a deck in place. It has no Turn;
+#: the gateway pins it to the session of the file it edited (pptx-inline-edit design §6.5).
+PRESENTATION_USER_EDIT_PRODUCER = "presentation_user_edit"
+
+
+def version_session_sql(alias: str, *, pins: bool) -> str:
+    """SQL for the session of artifact row ``alias`` in version scope and pruning holds.
+
+    The row's Turn's session; for a person's in-place edit (no Turn) the session it was
+    pinned to when it was written (pptx-inline-edit design §6.5). ``pins`` is False where
+    ``session_attachments`` is unreachable (see ``_session_pins_visible``).
+    """
+    turn = f"(SELECT vt.session_id FROM turns vt WHERE vt.id = {alias}.created_by_turn)"
+    if not pins:
+        return turn
+    return (
+        f"COALESCE({turn}, "
+        f"CASE WHEN {alias}.created_by_turn IS NULL AND COALESCE({alias}.producer_kind, '') = '{PRESENTATION_USER_EDIT_PRODUCER}' "
+        f"THEN (SELECT vsa.session_id FROM session_attachments vsa WHERE vsa.artifact_id = {alias}.id ORDER BY vsa.pinned_at ASC LIMIT 1) END)"
+    )
+
+
+async def _session_pins_visible(db: aiosqlite.Connection) -> bool:
+    """Whether ``session_attachments`` is reachable from this connection (main or an attached domain file).
+
+    Every deployed layout has it; stores opened on a bare file-records database (tests, tools) do not,
+    and SQLite rejects a statement that names a missing table even in a branch it would not evaluate.
+    """
+    async with db.execute("SELECT name FROM pragma_database_list") as cur:
+        schemas = [str(row[0]) for row in await cur.fetchall()]
+    for schema in schemas:
+        quoted = schema.replace('"', '""')
+        async with db.execute(f"SELECT 1 FROM \"{quoted}\".sqlite_schema WHERE type = 'table' AND name = 'session_attachments' LIMIT 1") as cur:  # noqa: S608 — schema names from SQLite itself
+            if await cur.fetchone() is not None:
+                return True
+    return False
 
 
 class VersionTargetRefused(Exception):
@@ -1455,6 +1495,18 @@ def build_artifact_backend_from_env(
     )
 
 
+class UsageArtifact(NamedTuple):
+    """A live artifact as the Files usage totals read it: its size and kind, and what its ownership is derived from."""
+
+    id: str
+    kind: str
+    size: int
+    workspace_id: str | None
+    created_by_turn: str | None
+    canvas_id: str | None
+    created_at: str
+
+
 @dataclass
 class ArtifactStore:
     db_path: str
@@ -1474,6 +1526,7 @@ class ArtifactStore:
     #: Space isolation batch 3: independent detection for the same reason.
     _workspace_col_present: bool | None = field(default=None, repr=False)
     _version_cols_present: bool | None = field(default=None, repr=False)
+    _session_pins_present: bool | None = field(default=None, repr=False)
     _account_deletion_schema_present: bool | None = field(default=None, repr=False)
     # M1: loud flag set when the one-shot backfill fails to refine legacy rows
     # (DEFAULTs keep them valid; this is observable via /health).
@@ -2308,6 +2361,13 @@ class ArtifactStore:
             logger.warning("artifact_store.same_run_version_read_failed art=%s", target.id, exc_info=True)
             return False
 
+    async def session_pins_supported(self) -> bool:
+        """Whether session pins are reachable from the file-records connection (see ``_session_pins_visible``)."""
+        if self._session_pins_present is None:
+            async with _open_db(self.db_path) as db:
+                self._session_pins_present = await _session_pins_visible(db)
+        return bool(self._session_pins_present)
+
     async def versions_supported(self) -> bool:
         """Whether the 0228 version columns exist (the domain layout; the legacy layout is frozen)."""
         if self._version_cols_present is None:
@@ -2340,6 +2400,81 @@ class ArtifactStore:
             return artifact.id if artifact and artifact.status == "ready" else None
         async with _open_read_db(self.db_path) as db:
             return await _latest_live_version(db, lineage_id)
+
+    async def latest_live_versions(self, lineage_roots: Sequence[str]) -> dict[str, str]:
+        """For each lineage root, the newest ready, non-deleted version's ID; roots with none are absent.
+
+        The batch form of ``latest_live_version_id_for_lineage`` (result pins list up to 100 files at once).
+        Without the 0228 version columns a root is its own only version.
+        """
+        roots = [root for root in dict.fromkeys(lineage_roots) if root]
+        if not roots:
+            return {}
+        versions = await self.versions_supported()
+        found: dict[str, str] = {}
+        async with _open_read_db(self.db_path) as db:
+            for start in range(0, len(roots), 400):
+                chunk = roots[start : start + 400]
+                values = ",".join("(?)" for _ in chunk)
+                match = "(a.id = r.root OR a.lineage_id = r.root)" if versions else "a.id = r.root"
+                order = "ORDER BY COALESCE(a.version_no, 1) DESC, a.created_at DESC" if versions else ""
+                sql = (
+                    f"WITH r(root) AS (VALUES {values}) "  # noqa: S608 — placeholders and fixed fragments only
+                    f"SELECT r.root, (SELECT a.id FROM artifacts a WHERE {match} AND a.deleted_at IS NULL "
+                    f"AND a.status = 'ready' {order} LIMIT 1) FROM r"
+                )
+                async with db.execute(sql, chunk) as cur:
+                    found.update({str(row[0]): str(row[1]) for row in await cur.fetchall() if row[1]})
+        return found
+
+    async def lineage_roots_without_rows(self, lineage_roots: Sequence[str]) -> list[str]:
+        """The roots no artifact row (live, trashed or pending) belongs to any more: their files were purged."""
+        roots = [root for root in dict.fromkeys(lineage_roots) if root]
+        if not roots:
+            return []
+        versions = await self.versions_supported()
+        gone: list[str] = []
+        async with _open_read_db(self.db_path) as db:
+            for start in range(0, len(roots), 400):
+                chunk = roots[start : start + 400]
+                values = ",".join("(?)" for _ in chunk)
+                match = "(a.id = r.root OR a.lineage_id = r.root)" if versions else "a.id = r.root"
+                sql = f"WITH r(root) AS (VALUES {values}) SELECT r.root FROM r WHERE NOT EXISTS (SELECT 1 FROM artifacts a WHERE {match})"  # noqa: S608
+                async with db.execute(sql, chunk) as cur:
+                    gone.extend(str(row[0]) for row in await cur.fetchall())
+        return gone
+
+    async def conversation_ids(self, artifact_ids: Sequence[str]) -> dict[str, str]:
+        """The conversation each artifact belongs to, for opening it in that conversation's Results.
+
+        The same session ladder as ``ARTIFACT_WORKSPACE_PROVENANCE_SQL``: the Turn that wrote it, the
+        report it was exported from, the earliest conversation it was attached to (uploads and a
+        person's in-place deck edits), then the conversation an upload was bound to. Artifacts with
+        none are absent; whether the caller may open the conversation is the caller's check.
+        """
+        ids = [artifact_id for artifact_id in dict.fromkeys(artifact_ids) if artifact_id]
+        if not ids:
+            return {}
+        found: dict[str, str] = {}
+        async with _open_read_db(self.db_path) as db:
+            for start in range(0, len(ids), 400):
+                chunk = ids[start : start + 400]
+                sql = (
+                    "SELECT a.id, COALESCE("  # noqa: S608 — placeholders only
+                    "(SELECT t.session_id FROM turns t WHERE t.id = a.created_by_turn), "
+                    "(SELECT c.session_id FROM canvases c WHERE c.id = a.canvas_id), "
+                    "(SELECT sa.session_id FROM session_attachments sa WHERE sa.artifact_id = a.id ORDER BY sa.pinned_at ASC LIMIT 1), "
+                    "(SELECT NULLIF(b.session_id, '') FROM artifact_upload_bindings b WHERE b.artifact_id = a.id)) "
+                    f"FROM artifacts a WHERE a.id IN ({','.join('?' for _ in chunk)})"
+                )
+                try:
+                    async with db.execute(sql, chunk) as cur:
+                        rows = await cur.fetchall()
+                except aiosqlite.OperationalError:
+                    # A store opened without the conversation tables (isolated tests, tools): nothing to open in.
+                    return {}
+                found.update({str(row[0]): str(row[1]) for row in rows if row[1]})
+        return found
 
     async def newer_versions(self, refs: Mapping[str, tuple[str | None, int | None]]) -> dict[str, NewerVersion]:
         """Per artifact ID, the file's newest live version when it is newer than that ID.
@@ -2565,15 +2700,27 @@ class ArtifactStore:
             if await self.versions_supported()
             else ""
         )
+        # A person's in-place edit has no Turn; it is pinned to the session of the file it edited
+        # (pptx-inline-edit design §6.5). Both branches use an index: turns by id, pins by session.
+        if await self.session_pins_supported():
+            members = (
+                "a.id IN (SELECT ta.id FROM artifacts ta JOIN turns t ON t.id = ta.created_by_turn WHERE t.session_id = ? "
+                "UNION ALL SELECT sa.artifact_id FROM session_attachments sa JOIN artifacts ua ON ua.id = sa.artifact_id "
+                f"WHERE sa.session_id = ? AND ua.created_by_turn IS NULL AND ua.producer_kind = '{PRESENTATION_USER_EDIT_PRODUCER}')"
+            )
+            member_params: tuple[object, ...] = (session_id, session_id)
+        else:
+            members = "a.id IN (SELECT ta.id FROM artifacts ta JOIN turns t ON t.id = ta.created_by_turn WHERE t.session_id = ?)"
+            member_params = (session_id,)
         return (
-            "FROM artifacts a JOIN turns t ON t.id = a.created_by_turn "
-            "WHERE t.session_id = ? AND a.created_by = ? AND a.created_by_turn <> ? "
+            f"FROM artifacts a WHERE {members} "
+            "AND a.created_by = ? AND (a.created_by_turn IS NULL OR a.created_by_turn <> ?) "
             "AND a.kind IN ('deliverable', 'deck_preview') AND a.status = 'ready' AND a.deleted_at IS NULL "
             "AND COALESCE(a.producer_kind, '') NOT IN ('template_document_v1', 'template_document_internal_v1') "
             f"AND NOT {internal} "
             "AND NOT EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) "
             f"{latest_only}",
-            (session_id, user_id, exclude_turn_id or "", *internal_params),
+            (*member_params, user_id, exclude_turn_id or "", *internal_params),
         )
 
     async def list_session_deliverables(self, *, session_id: str, user_id: str, exclude_turn_id: str = "", limit: int = 12) -> list[Artifact]:
@@ -3164,15 +3311,16 @@ class ArtifactStore:
             )
             # The trash counts the versions deleted together (what restore brings back); live counts live versions.
             count_state = "m.deleted_at = artifacts.deleted_at" if include_deleted else "m.deleted_at IS NULL"
+            file_key = "COALESCE(artifacts.lineage_id, artifacts.id)"
             version_count = (
-                "(SELECT COUNT(*) FROM artifacts m WHERE COALESCE(m.lineage_id, m.id) = COALESCE(artifacts.lineage_id, artifacts.id) "
-                f"AND m.created_by = artifacts.created_by AND {count_state} AND m.status <> 'missing')"
+                f"(SELECT COUNT(*) FROM artifacts m WHERE {_same_file('m', file_key)} "
+                f"AND +m.created_by = artifacts.created_by AND {count_state} AND m.status <> 'missing')"
             )
             if include_deleted:
                 # B4: versions pruned from a file that still has a live version are not in the trash.
                 where.append(
-                    "NOT EXISTS (SELECT 1 FROM artifacts l WHERE COALESCE(l.lineage_id, l.id) = COALESCE(artifacts.lineage_id, artifacts.id) "
-                    "AND l.created_by = artifacts.created_by AND l.deleted_at IS NULL AND l.status <> 'missing')"
+                    f"NOT EXISTS (SELECT 1 FROM artifacts l WHERE {_same_file('l', file_key)} "
+                    "AND +l.created_by = artifacts.created_by AND l.deleted_at IS NULL AND l.status <> 'missing')"
                 )
         where_sql = " AND ".join(where)
         async with _open_db(self.db_path) as db:
@@ -4215,9 +4363,9 @@ class ArtifactStore:
         if not ids or not await self.versions_supported():
             return ids
         ph = ",".join("?" for _ in ids)
-        owner = " AND created_by = ?" if user_id is not None else ""
+        owner = " AND +a.created_by = ?" if user_id is not None else ""
         async with db.execute(
-            f"SELECT id FROM artifacts WHERE COALESCE(lineage_id, id) IN (SELECT COALESCE(lineage_id, id) FROM artifacts WHERE id IN ({ph})){owner}",  # noqa: S608 — placeholders only
+            f"SELECT a.id FROM artifacts k JOIN artifacts a ON {_same_file('a', 'COALESCE(k.lineage_id, k.id)')} WHERE k.id IN ({ph}){owner}",  # noqa: S608 — placeholders only
             (*ids, *((user_id,) if user_id is not None else ())),
         ) as cur:
             members = [str(row[0]) for row in await cur.fetchall()]
@@ -4229,13 +4377,13 @@ class ArtifactStore:
         if not ids:
             return {}
         ph = ",".join("?" for _ in ids)
-        lineage = "COALESCE(m.lineage_id, m.id) = COALESCE(x.lineage_id, x.id)" if await self.versions_supported() else "m.id = x.id"
+        lineage = _same_file("m", "COALESCE(x.lineage_id, x.id)") if await self.versions_supported() else "m.id = x.id"
         overview: dict[str, tuple[list[str], bool]] = {}
         async with (
             _open_db(self.db_path) as db,
             db.execute(
-                f"SELECT x.id, m.id, m.canvas_id FROM artifacts x JOIN artifacts m ON {lineage} AND m.created_by = x.created_by "  # noqa: S608 — placeholders only
-                f"WHERE x.id IN ({ph}) AND x.created_by = ?",
+                f"SELECT x.id, m.id, m.canvas_id FROM artifacts x JOIN artifacts m ON {lineage} AND +m.created_by = x.created_by "  # noqa: S608 — placeholders only
+                f"WHERE x.id IN ({ph}) AND +x.created_by = ?",
                 (*ids, user_id),
             ) as cur,
         ):
@@ -4303,9 +4451,9 @@ class ArtifactStore:
         if not ids or not await self.versions_supported():
             return ids
         ph = ",".join("?" for _ in ids)
-        owner = " AND m.created_by = x.created_by" + (" AND x.created_by = ?" if user_id is not None else "")
+        owner = " AND +m.created_by = x.created_by" + (" AND +x.created_by = ?" if user_id is not None else "")
         async with db.execute(
-            f"SELECT DISTINCT m.id FROM artifacts x JOIN artifacts m ON COALESCE(m.lineage_id, m.id) = COALESCE(x.lineage_id, x.id) "  # noqa: S608 — placeholders only
+            f"SELECT DISTINCT m.id FROM artifacts x JOIN artifacts m ON {_same_file('m', 'COALESCE(x.lineage_id, x.id)')} "  # noqa: S608 — placeholders only
             f"AND m.deleted_at = x.deleted_at{owner} WHERE x.id IN ({ph}) AND x.deleted_at IS NOT NULL",
             (*((user_id,) if user_id is not None else ()), *ids),
         ) as cur:
@@ -4370,8 +4518,8 @@ class ArtifactStore:
     #: A question answered or an approval decided this recently is still starting its Turn again.
     PRUNE_RESUME_HOLD: ClassVar[timedelta] = timedelta(hours=1)
 
-    async def _session_turn_active_sql(self, db: aiosqlite.Connection, artifact_column: str) -> tuple[str, tuple[str, ...]]:
-        """SQL true when the session that produced ``artifact_column``'s row has a Turn that holds pruning.
+    async def _session_turn_active_sql(self, db: aiosqlite.Connection, alias: str) -> tuple[str, tuple[str, ...]]:
+        """SQL true when the session of artifact row ``alias`` (``version_session_sql``) has a Turn that holds pruning.
 
         A running Turn holds it. A paused Turn holds it only while it can still continue: it paused
         within ``PRUNE_PAUSE_HOLD``, it has an unanswered question or an undecided approval (scheduled
@@ -4393,9 +4541,10 @@ class ArtifactStore:
         if await readable_table_exists(db, "approvals"):
             continuable.append("EXISTS (SELECT 1 FROM approvals p WHERE p.turn_id = active.id AND (p.status = 'pending' OR p.decided_at > ?))")
             params.append(resume_cutoff)
+        session_sql = version_session_sql(alias, pins=await _session_pins_visible(db))
         return (
-            "EXISTS (SELECT 1 FROM turns origin JOIN turns active ON active.session_id = origin.session_id "  # noqa: S608 — fixed fragments
-            f"WHERE origin.id = {artifact_column} AND (active.status = 'running' OR (active.status IN ({','.join('?' for _ in paused)}) "
+            f"EXISTS (SELECT 1 FROM turns active WHERE active.session_id = {session_sql} "  # noqa: S608 — fixed fragments
+            f"AND (active.status = 'running' OR (active.status IN ({','.join('?' for _ in paused)}) "
             f"AND ({' OR '.join(continuable)}))))",
             tuple(params),
         )
@@ -4410,7 +4559,7 @@ class ArtifactStore:
         if not lineage_root or not await self.versions_supported():
             return False
         async with _open_db(self.db_path) as db:
-            active_sql, active_params = await self._session_turn_active_sql(db, "a.created_by_turn")
+            active_sql, active_params = await self._session_turn_active_sql(db, "a")
             async with db.execute(
                 f"SELECT 1 FROM artifacts a WHERE (a.id = ? OR a.lineage_id = ?) AND {active_sql} LIMIT 1",  # noqa: S608 — fixed fragments
                 (lineage_root, lineage_root, *active_params),
@@ -4539,7 +4688,7 @@ class ArtifactStore:
         grant_sql = (
             "EXISTS (SELECT 1 FROM resource_grants g WHERE g.resource_kind = 'artifact' AND g.resource_id = artifacts.id AND g.revoked_at IS NULL)"
         )
-        active_sql, active_params = await self._session_turn_active_sql(db, "artifacts.created_by_turn")
+        active_sql, active_params = await self._session_turn_active_sql(db, "artifacts")
         unprotected: list[str] = []
         for start in range(0, len(candidates), 500):
             chunk = candidates[start : start + 500]
@@ -4753,8 +4902,12 @@ class ArtifactStore:
     async def list_usage_artifacts_for_user(
         self,
         user_id: str,
-    ) -> list[Artifact]:
-        """Return the live rows needed for lifecycle-aware usage totals."""
+    ) -> list[UsageArtifact]:
+        """Return the live rows needed for lifecycle-aware usage totals.
+
+        Only the columns the totals and the ownership ladder read: building a full Artifact per row
+        cost 0.64 s for the 24,008 live artifacts of the shared account on 116 (0.08 s this way).
+        """
 
         kinds = (
             "user_upload",
@@ -4765,14 +4918,16 @@ class ArtifactStore:
             "web_clip",
         )
         placeholders = ",".join("?" for _ in kinds)
-        async with _open_db(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
-                f"SELECT * FROM artifacts WHERE created_by=? AND deleted_at IS NULL AND status <> 'missing' AND kind IN ({placeholders}) AND COALESCE(producer_kind,'')<>'template_document_internal_v1'",  # noqa: S608
+        async with (
+            _open_db(self.db_path) as db,
+            db.execute(
+                f"SELECT {', '.join(UsageArtifact._fields)} FROM artifacts WHERE created_by=? AND deleted_at IS NULL AND status <> 'missing' AND kind IN ({placeholders}) AND COALESCE(producer_kind,'')<>'template_document_internal_v1'",  # noqa: S608
                 (user_id, *kinds),
-            ) as cur:
-                rows = await cur.fetchall()
-        return [_row_to_artifact(row) for row in rows]
+            ) as cur,
+        ):
+            rows = await cur.fetchall()
+        # Same normalization as _row_to_artifact for these fields.
+        return [UsageArtifact(str(row[0]), row[1] or "tool_data", int(row[2]), row[3] or None, row[4] or None, row[5], row[6]) for row in rows]
 
     async def hard_delete_old_soft_deleted(self, *, days: int = 30) -> dict[str, int]:
         """Purge expired soft-deleted artifacts and recover pending storage acknowledgements."""
@@ -5038,6 +5193,17 @@ async def newer_version_facts(store: Any, artifact_ids: Sequence[str]) -> dict[s
     return {item: {"id": state.latest.id, "version": state.latest.version_no or 1} for item, state in newer.items()}
 
 
+def _same_file(alias: str, key: str) -> str:
+    """Rows of `alias` that belong to the file whose lineage key is `key` (an SQL expression).
+
+    Same rows as `COALESCE(alias.lineage_id, alias.id) = key`, which no index can serve: SQLite then read
+    every artifact of the owner for each row it checked (24,660 for the shared account on 116, half a
+    second per Files page). This form uses the lineage index and the primary key. Callers write the owner
+    as `+alias.created_by` so that, without table statistics, the owner index does not win.
+    """
+    return f"({alias}.lineage_id = {key} OR ({alias}.lineage_id IS NULL AND {alias}.id = {key}))"
+
+
 async def _latest_live_version(db: aiosqlite.Connection, root: str) -> str | None:
     if not root:
         return None
@@ -5074,11 +5240,12 @@ async def _version_fields(
     if (kind or "") != "deliverable":
         raise VersionTargetRefused("version_target_out_of_scope")
     internal, internal_params = results_internal_artifact_sql("a")
+    session_sql = version_session_sql("a", pins=await _session_pins_visible(db))
     async with db.execute(
         f"SELECT a.id, a.created_by, a.kind, a.mime, a.status, a.deleted_at, a.workspace_id, a.lineage_id, "  # noqa: S608 — fixed predicate text
-        f"COALESCE(a.producer_kind, '') AS producer, t.session_id AS turn_session, ({internal}) AS internal, "
+        f"COALESCE(a.producer_kind, '') AS producer, {session_sql} AS turn_session, ({internal}) AS internal, "
         "EXISTS (SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id = a.id) AS claimed "
-        "FROM artifacts a LEFT JOIN turns t ON t.id = a.created_by_turn WHERE a.id = ?",
+        "FROM artifacts a WHERE a.id = ?",
         (*internal_params, target_id),
     ) as cur:
         row = await cur.fetchone()

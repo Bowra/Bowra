@@ -70,6 +70,7 @@ ResultCapability = Literal[
     "open_outputs",
     "view_run_details",
     "feedback_unsupported",
+    "edit_presentation",
 ]
 
 RESULTS_SORT_VERSION_V1 = "results-core-v2-report-relations"

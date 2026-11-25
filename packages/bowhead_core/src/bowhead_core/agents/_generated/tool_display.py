@@ -1107,6 +1107,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "🗂️",
         "category": "canvas",
     },
+    "remove_report_section": {
+        "display_zh": "删除报告段落",
+        "display_en": "Remove Report Section",
+        "blurb_zh": "删除智能体为当前请求写进报告的段落；只被这些段落引用的图表一并删除。",
+        "blurb_en": "Remove report sections the agent wrote for the current request, together with charts only they use.",
+        "display_de": "Berichtsabschnitt entfernen",
+        "blurb_de": "Berichtsabschnitte entfernen, die der Agent für die aktuelle Anfrage geschrieben hat, samt nur dort verwendeter Diagramme.",
+        "display_fr": "Supprimer une section du rapport",
+        "blurb_fr": "Supprimer les sections du rapport rédigées par l’agent pour la demande en cours, avec les graphiques qu’elles seules utilisent.",
+        "sigil": "✂️",
+        "category": "canvas",
+    },
     "render_deck": {
         "display_zh": "创建新演示稿",
         "display_en": "Create New Presentation",

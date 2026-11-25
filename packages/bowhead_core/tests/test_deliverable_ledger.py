@@ -19,6 +19,8 @@ from bowhead_core.deliverable_ledger import (
     DeliverableLedger,
     build_deliverable_ledger,
     collect_ok_tools,
+    produced_facts,
+    produced_files_note,
 )
 
 
@@ -154,7 +156,6 @@ async def test_reused_source_is_scoped_to_exact_successful_input_and_not_counted
     )
     assert ledger.files == 1 and ledger.file_names == ("output.pdf",)
     assert ledger.reused_files == 1 and ledger.reused_file_names == ("交付报告.pptx",)
-    assert ledger.count_for_ext(".pptx") == 0 and ledger.count_available_for_ext(".pptx") == 1
 
 
 @pytest.mark.parametrize(
@@ -171,11 +172,6 @@ async def test_supported_sandbox_input_shapes_establish_exact_reuse(tmp_path, to
     invocation = SimpleNamespace(tool_name=tool, arguments=args, result={"ok": True}, nested=[])
     ledger = await build_deliverable_ledger(turn_id="t_new", user_id="user_1", session_id="session_1", artifact_store=store, invocations=[invocation])
     assert ledger.reused_files == 1
-
-
-def test_reused_formats_share_the_existing_extension_alias_contract():
-    ledger = DeliverableLedger(reused_files=1, reused_file_exts=frozenset({".jpeg"}))
-    assert ledger.count_available_for_ext(".jpg") == ledger.count_available_for_ext(".jpeg") == 1
 
 
 @pytest.mark.parametrize("artifact_id", ["art_other", "art_upload", "art_internal", "art_pending", "art_missing"])
@@ -222,7 +218,7 @@ async def test_reuse_read_failure_preserves_new_output_verification(tmp_path, mo
     assert ledger.files_verified and ledger.files == 1 and not ledger.reused_files_verified
 
 
-async def test_results_workspace_counts_visible_sandbox_outputs_by_format(store: ArtifactStore) -> None:
+async def test_results_workspace_counts_visible_sandbox_outputs(store: ArtifactStore) -> None:
     for filename, mime, kind in (
         ("sales.csv", "text/csv", "sandbox_output"),
         ("chart.png", "image/png", "sandbox_output"),
@@ -240,17 +236,10 @@ async def test_results_workspace_counts_visible_sandbox_outputs_by_format(store:
 
     led = await build_deliverable_ledger(turn_id="t_multi", artifact_store=store)
     assert led.files == 3
-    assert led.file_exts == frozenset({".csv", ".png", ".docx"})
-    assert led.count_for_ext(".html") == 0
+    assert set(led.file_names) == {"sales.csv", "chart.png", "report.docx"}
 
 
-# ── Reconcile by format (deliverable-format-fidelity W1) ────────────────────────────
-#
-# These cases **must use real ArtifactStore**: `file_exts`/`file_names` come from real `Artifact.filename`;
-# an id-only fake always yields -1 and permits everything, falsely passing (the discipline noted at this file's start).
-
-
-async def test_file_exts_and_names_from_real_store(store: ArtifactStore) -> None:
+async def test_file_names_from_real_store(store: ArtifactStore) -> None:
     await store.put_bytes(
         content=b"x",
         filename="Bowhead Canvas.pdf",
@@ -260,43 +249,7 @@ async def test_file_exts_and_names_from_real_store(store: ArtifactStore) -> None
         created_by_turn="t_1",
     )
     led = await build_deliverable_ledger(turn_id="t_1", artifact_store=store)
-    assert led.file_exts == frozenset({".pdf"})
     assert led.file_names == ("Bowhead Canvas.pdf",)
-    assert led.count_for_ext(".pdf") == 1
-    assert led.count_for_ext(".docx") == 0, "库里没有 docx 就该是 0"
-
-
-async def test_count_for_ext_is_the_real_docx_miss_shape(store: ArtifactStore) -> None:
-    """★ 真机 t_1c11f59a7ba3：用户要 .docx，peer 拿 canvas-pdf 兜底产了个 PDF。
-
-    旧口径 `files == 1` 让双条件失效、谎报漏网；按格式核才看得见。
-    """
-    await store.put_bytes(
-        content=b"x",
-        filename="Bowhead Canvas.pdf",
-        mime="application/pdf",
-        kind="deliverable",
-        created_by="u_1",
-        created_by_turn="t_docx_miss",
-    )
-    led = await build_deliverable_ledger(turn_id="t_docx_miss", artifact_store=store)
-    assert led.files == 1, "总数口径看起来像是有产出"
-    assert led.count_for_ext(".docx") == 0, "但用户要的那种一个都没有"
-
-
-def test_count_for_ext_returns_minus_one_when_names_unreadable() -> None:
-    """★ 最高风险点：有文件、却读不到文件名（取数降级）⇒ **必须放行**。
-
-    这里若返回 0，会把"读不到名字"误判成"没有该格式"，给真出了文件的轮次扣帽子。
-    """
-    led = DeliverableLedger(files=2, file_exts=frozenset())
-    assert led.count_for_ext(".pdf") == -1
-    assert led.count_for_ext(".docx") == -1
-
-
-def test_count_for_ext_zero_when_genuinely_no_files() -> None:
-    """files==0 时不是"无法对账"，是"确实没有" ⇒ 返回 0 而非 -1。"""
-    assert DeliverableLedger(files=0).count_for_ext(".pdf") == 0
 
 
 def test_file_names_capped() -> None:
@@ -315,7 +268,7 @@ async def test_sections_from_canvas_store() -> None:
 
 
 async def test_sections_count_in_place_revision_real_store(tmp_path: Path) -> None:
-    """116 dogfood R11（`t_bf8659b468c0`）：续轮只就地改上一轮的段、一个新段都不 append。
+    """116 dogfood R11（`an observed task`）：续轮只就地改上一轮的段、一个新段都不 append。
     只数 append 会判 0 ⇒ 答案被追加「本轮没有内容落到画布上」，而画布确实改了。用**真** CanvasStore 测。"""
     from bowhead_core.canvas_store import CanvasStore
 
@@ -375,21 +328,6 @@ async def test_missing_turn_id_returns_tools_only() -> None:
     )
 
 
-# ── count_for: unknown claim types must pass (-1), never become 0 and falsely trigger ─────
-
-
-def test_count_for_known_kinds() -> None:
-    led = DeliverableLedger(files=2, sections=5, memories=1)
-    assert led.count_for("file") == 2
-    assert led.count_for("report") == 5
-    assert led.count_for("memory") == 1
-
-
-def test_count_for_unknown_kind_is_minus_one_not_zero() -> None:
-    """未知类型返回 0 会被闸判成"没产出"→ 误拦。误判比漏判更伤。"""
-    assert DeliverableLedger().count_for("scheduled_job") == -1
-
-
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -434,7 +372,7 @@ def test_a_successful_remember_counts_even_though_it_writes_the_other_table():
     后果是防谎报守卫给用户追加一句「这条信息**没有**被写入长期记忆」，
     而同一轮的工具回执写着「已存为长期记忆」：**同一段话自相矛盾**。
 
-    116（1.2.59）真机复现：turn t_6a73a7a107dd 的 `tool_result` 与 `final_answer`
+    116（1.2.59）真机复现：an observed task 的 `tool_result` 与 `final_answer`
     一个说存了一个说没存。
 
     ★ 突变验证：把 `count_memory_receipts` 的调用去掉（退回只查 notes）⇒ 本用例红。
@@ -486,33 +424,44 @@ async def test_the_ledger_actually_uses_the_receipts_not_just_the_helper():
     assert led.memories_verified is True, "有回执就算核过——不能因为旧表读不到就说'未验证'"
 
 
-class _SessionFilesStore:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.calls: list[dict] = []
-        self._fail = fail
-
-    async def list_result_artifacts_for_turn(self, turn_id: str) -> list:
-        return []
-
-    async def list_session_deliverables(self, **scope) -> list:
-        self.calls.append(scope)
-        if self._fail:
-            raise RuntimeError("store unavailable")
-        return [SimpleNamespace(filename="report.html", version_no=4), SimpleNamespace(filename="rows.xlsx", version_no=None)]
+# ── Facts returned to Lead with a helper result ────────────────────────────────
 
 
-async def test_session_files_are_read_only_when_asked() -> None:
-    store = _SessionFilesStore()
-    led = await build_deliverable_ledger(turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=store)
-    assert led.session_files == () and store.calls == []
-    led = await build_deliverable_ledger(turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=store, include_session_files=True)
-    assert led.session_files == (("report.html", 4), ("rows.xlsx", 1))
-    assert led.session_file_exts == frozenset({".html", ".xlsx"})
-    assert store.calls[0]["exclude_turn_id"] == "t_2" and store.calls[0]["session_id"] == "s_1"
+def test_produced_facts_name_the_files_and_keep_unknown_items_unknown() -> None:
+    facts = produced_facts(DeliverableLedger(files=1, file_names=("r.pdf",), sections=9))
+    assert facts == {
+        "files": 1,
+        "file_names": ["r.pdf"],
+        "reused_files": 0,
+        "reused_file_names": [],
+        "canvas_sections": 9,
+        "memories": 0,
+        "verified": {"files": True, "reused_files": True, "canvas_sections": True, "memories": True},
+    }
+    # A later Turn revises a file by identifier, so delivered files are named with theirs.
+    delivered = produced_facts(DeliverableLedger(files=3, file_names=("r.pdf", "rows.csv"), delivered=(("art_1", "r.pdf"),)))
+    assert delivered["delivered_files"] == [{"artifact_id": "art_1", "name": "r.pdf"}]
+    unread = produced_facts(DeliverableLedger(files=1, files_verified=False, delivered=(("art_1", "r.pdf"),)))
+    assert unread["files"] is None and unread["verified"]["files"] is False and "delivered_files" not in unread
 
 
-async def test_unreadable_session_files_leave_the_file_count_verified() -> None:
-    led = await build_deliverable_ledger(
-        turn_id="t_2", session_id="s_1", user_id="u_1", artifact_store=_SessionFilesStore(fail=True), include_session_files=True
-    )
-    assert led.session_files == () and led.files_verified and led.files == 0
+@pytest.mark.parametrize(
+    ("language", "marker"),
+    [
+        ("zh-CN", "用户拿不到"),
+        ("en-US", "the user cannot get it"),
+        ("de-DE", "nicht geliefert"),
+        ("fr-FR", "n’a pas été livré"),
+        ("ja-JP", "the user cannot get it"),
+    ],
+)
+def test_files_note_is_stated_in_the_answer_language_whatever_the_helper_wrote(language: str, marker: str) -> None:
+    note = produced_files_note(DeliverableLedger(files=0), language)
+    assert "produced.file_names" in note and marker in note
+    assert "reused_file_names" not in note
+
+
+def test_files_note_names_reused_files_only_when_files_were_reused_and_is_absent_when_unread() -> None:
+    reused = DeliverableLedger(files=1, file_names=("output.pdf",), reused_files=1, reused_file_names=("output.pptx",))
+    assert "produced.reused_file_names" in produced_files_note(reused, "en-US")
+    assert produced_files_note(DeliverableLedger(files_verified=False), "zh-CN") == ""

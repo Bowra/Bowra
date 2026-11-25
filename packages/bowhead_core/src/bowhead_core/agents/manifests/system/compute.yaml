@@ -87,6 +87,8 @@ tools:
     # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
     # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
     - write_report
+    # Removes sections this writer wrote in the current Turn (e.g. the old copy of a renamed chapter).
+    - remove_report_section
     - read_report
     # canvas-update-turn batch B2-2: soft-hide prior-turn figures superseded by new ones or removed at the user's request during revisions.
     # Registered only when FEATURE_CANVAS_SECTION_REVISE is enabled; this line is inert when disabled.

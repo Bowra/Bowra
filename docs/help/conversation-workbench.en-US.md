@@ -16,6 +16,7 @@ This article describes the parts of the conversation page that show progress, re
 - The search box at the top of the sidebar always searches all your conversations, not just the ones loaded in the list. A conversation is found by its title or by words from your own messages, so you can find it even after its title was renamed. When a result was found in your message rather than its title, it's tagged **In message** and shows a few words around the match.
 - Each result group shows how many matches it has. The Sessions group shows the first five. Select **Show more sessions (N more)** to add 20 more at a time. Keyboard focus stays on the button while results load, then moves to the first new conversation. Clear the search box to return to your list, where older conversations you already loaded stay visible.
 - If one kind of result can't be searched right now, a line in its place says so, and the other results are still correct.
+- Pinned conversations, files and reports stay together at the top of the list in **Pinned**. See [Pin a file or report to the sidebar](#pin-a-file-or-report-to-the-sidebar).
 
 ## Running progress
 
@@ -73,7 +74,7 @@ When a model call fails, the failure card shows the recorded cause, the HTTP sta
 ## Long-running tasks
 
 - **You can leave the page.** The task keeps running; open the conversation again to see the result. If the connection drops, the page reconnects and shows a failure only once the task has really stopped.
-- **Progress.** When no new step has appeared for a minute, the running band says which agent is working, at which step, and how long the turn has run, for example “Still running · Data analyst · step 37 · 18 min”.
+- **Progress.** When no new step has appeared for a minute, the running band says which agent is working and how long the turn has run, for example “Still running · Data analyst · 18 min”.
 - **Completion popups.** When a task ends while you are not in its conversation, a popup appears at the bottom right; choose **Open** to return to it. The first popup asks whether to send system notifications while the tab is in the background; this is only available on secure (HTTPS) sites.
 - **Partially completed, and Continue.** When a task reaches a run limit set by your Team, the agent returns what it finished and the step list shows which agent stopped at which limit. Select **Continue** below the answer: the same agent picks up the unfinished part with all of its earlier progress instead of starting over. You can also type a follow-up or “continue”. Each continuation gets your Team's current limits again. Saved progress is kept for 30 days. If it has expired, or the agent or its available tools changed in the meantime (for example, a connected service became unavailable), a new agent starts the original task again and the step list says why. If credit ran out, add credit before selecting Continue.
 
@@ -139,13 +140,13 @@ For supported tasks, the assistant can also ask one question after one or more d
 
 For example, you can ask the assistant to read a PPTX, calculate from its contents and then ask about the intended audience, without editing or generating a file. This is a read-only task, not template generation. If the assistant cannot determine the intended use, follow the failure message to clarify whether you want analysis or a layout-preserving edit.
 
-This can also use a template or earlier result already pinned in the same conversation, including after other calculations have produced newer results. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation. Existing chart calculations can remain in Results while you answer.
+This can also use a template or earlier result already kept in context in the same conversation, including after other calculations have produced newer results. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation. Existing chart calculations can remain in Results while you answer.
 
 In supported new tasks, files merely listed for discovery do not count as files the assistant used. Renaming an unused listed file does not by itself invalidate the saved work. If access to listed metadata or a required original input is lost, the message identifies which kind of access needs restoring. Your answer and completed results remain saved. Older questions may retain stricter compatibility checks; follow the action offered on the original card.
 
 This applies to supported built-in and Team Agents. A failed operation returns its diagnostic to the assistant, which can correct the request, retry or choose another available tool. Earlier results remain available. Answering a saved question continues the original task; it does not automatically repeat earlier operations or confirm an unknown result. Actions still follow their normal permissions and approval steps. If the original task could not be saved, it cannot resume.
 
-Supported continuation also keeps earlier conversation files and results that were already included when the question was asked. Pinning another file afterward does not add it to the paused task. Unpinning affects future requests; deleting a required file or losing access to it can prevent continuation.
+Supported continuation also keeps earlier conversation files and results that were already included when the question was asked. Keeping another file in context afterward does not add it to the paused task. Removing a file from context affects future requests; deleting a required file or losing access to it can prevent continuation.
 
 Continuing keeps your original request, earlier answers and the original files. If a file is no longer available to you, the task stops instead of silently switching to another file.
 
@@ -200,6 +201,38 @@ After a revision, **Results** and **Files** show the file once, at its latest ve
 If you own the conversation, open the file in **Results** and choose **More actions → Version History** to download a retained version. Bowhead keeps the three newest versions and older versions protected by references such as reports, knowledge-base entries, documents or saved exports. Older versions are removed only when no answer in the conversation is running or waiting for your reply, so the list can briefly show more. Download a copy while it is available if you need to keep a specific historical version.
 
 Deleting a file from **Files** moves all its versions to the trash. Undo or restore the file to recover them together.
+
+### Pin a file or report to the sidebar
+
+To get back to a result quickly, open **⋯** on a file or on the report in **Results** and choose **Pin**. You can also pin a file from its **⋯** on the **Files** page or in its details there, and a report from its **⋯** on the **Reports** page. To pin a report someone shared with you, open it and use the report's **⋯**. Pinned results appear in the sidebar's **Pinned** group together with your pinned conversations, newest change first; an icon shows whether a row is a conversation, a file or a report.
+
+- Selecting a pinned file opens it in its conversation's **Results**, always at its newest version, so citations, **Reference in chat** and version history work as usual. A file that doesn't belong to a conversation you can open, such as one uploaded on the **Files** page, opens in its details on the **Files** page; a file someone shared with you opens in the shared view.
+- Selecting a pinned report opens its conversation with the report.
+- Pins are personal; nobody else sees them. To remove one, open **⋯** on the pinned row and choose **Unpin**, or choose **Unpin** where you pinned it.
+- A pin you can't open right now is hidden, for example a file in the trash, a cleared report, or a result you no longer have access to. It comes back if the file is restored or your access returns. Pins of permanently deleted results are removed.
+- You can pin up to 100 results; pinned conversations don't count toward this limit.
+- While a query result or code output is pinned, the automatic cleanup of older run data keeps it.
+- A pin only adds a shortcut. It doesn't include the file in later requests; files shown above the composer under **Kept in context** are the ones included in that conversation's later requests.
+
+### Edit a presentation in the preview
+
+When you view a PowerPoint file full screen in **Results** and **Edit** appears above the preview, you can change its text, tables and chart data without downloading it. If the button is missing, editing is not available on your deployment yet, or you cannot change files in this conversation. On a phone, **Edit** is the pencil button above the preview.
+
+1. Open the file and select **Edit**. What you can change shows a dashed box on the slide, and the panel on the right lists it for the current slide; you can also move through it with Tab and Enter.
+2. Select the text, table or chart to change. Text is edited paragraph by paragraph; table cells are edited in place, and the arrow keys move between cells; for a chart you change the numbers, and in a percent series you can type 91%.
+3. Changed items are marked **Unsaved**. The slide keeps showing how it looked before until you save. Press ⌘Z (Ctrl+Z on Windows) to undo the latest change.
+4. Select **Save as new version**. Each save creates one version, and earlier versions can be downloaded from **Version History**. The new preview usually takes about 10 seconds; if some text is longer than before and runs outside its text box, you are told once the new preview is ready and can select **Edit it**.
+
+On a phone the slides are listed one below another. Tap **Edit slide N** under a slide to list what you can change on it; tapping an item opens its editor from the bottom of the screen, and **Done** closes it. **Undo this** discards the changes to that item. Tables with more than 3 columns can only be viewed on a phone; edit them on a computer.
+
+Keep in mind:
+
+- Saving changes only the characters you edit; other text, styles and slides stay as they were.
+- Pictures, SmartArt, embedded objects, text in the master and layouts (such as a footer on every slide), speaker notes, and moving or resizing cannot be changed here. For these, download the file and use PowerPoint, or select **Reference this item in chat** and ask the AI: the reference says which slide and which item you mean, so you only describe the change. Text, tables and charts can be referenced the same way.
+- Numbers in a table are not formulas: changing one cell does not recalculate others. When you change a chart value, the same number written elsewhere on the slide does not follow it; the editor points this out.
+- Generated content such as slide numbers and dates can have text around it changed but cannot be removed.
+- The first save of an uploaded file creates a new “(edited)” file and leaves the upload unchanged; later saves add versions to the new file.
+- If the AI saves a newer version of the file while you are editing, your save is refused and your changes are kept. The editor shows which changes can be **re-applied** to the newer version and which need your decision; re-applied changes still need to be saved.
 
 ## Reviewing and finding document files
 
@@ -318,7 +351,9 @@ Regional time-series figures can link the same period or original row across lin
 - In waterfall charts, the value of a decrease is now shown below its own bar (increases stay above), instead of against the bottom of the previous bar, and labels on the largest step and the total are no longer cut off at the edge of the chart. Waterfall gridlines now follow your chart style settings like other bar charts, so settings such as dashed or lighter gridlines apply to waterfalls too. This also applies when you open or download existing charts.
 - Name labels on scatter charts no longer cover other points. When a name can't be placed without hiding a point, it's left out, so crowded areas may show fewer names than before, and names may sit to the left or right of a point; the point named in the chart's caption always keeps its name; you can still point at a dot to see its name. This also applies when you open or download existing charts.
 - When a table is wider than the space it's shown in, its right edge fades out to show that more columns can be scrolled into view, so a number cut off by the edge no longer looks complete; the first column stays in place while you scroll sideways. In downloaded PDF, PowerPoint, and image files, a table that's too wide is scaled down so every column fits instead of the right-hand columns being cut off; very wide tables are scaled down to at most 60% of their size, keep the faded edge, and get a note under the table saying how many columns aren't shown.
-- In downloaded PDF, PowerPoint, and image files, horizontal bar charts with many categories no longer squeeze every item onto the page: they show as many items as fit legibly (about 30 for a single measure, fewer when bars are grouped), choosing those with the largest values (by absolute value) and keeping their original order, with a note under the chart saying which measure was used and how many of the total are shown. The report page still shows every item, and you can scroll through them.
+- A chart draws a limited amount of data: bar, horizontal bar, stacked bar, waterfall, combination, and dual-axis charts up to 100 categories, pies up to 12 slices, and line and area charts up to 3,000 points. When there is more, the chart is not drawn: the assistant needs to prepare the part to show first (for example the top 10, or the small categories merged into "Other") or use a table instead. Tables are not affected by these limits.
+- A horizontal bar chart with more than 50 items shows 50 at a time on the page; use **Previous** and **Next** under the chart to go through all of them. Every segment uses the same value axis, so bar lengths compare across segments.
+- In downloaded PDF, PowerPoint, and image files, horizontal bar charts with many categories show as many items as fit legibly (about 30 for a single measure, fewer when bars are grouped), with a note under the chart saying how many of the total are shown. Newer charts keep the first items in their order; some earlier charts still choose the items with the largest values (by absolute value) of one measure, keep their original order, and name that measure in the note.
 - Series you hide by clicking a report chart's legend are also left out of the PDF, PowerPoint, or image files you download, so the download matches your screen. This only affects downloads you start: hiding isn't saved to the report, charts other people see or download are unaffected, and hidden series come back when you reload the page.
 - Exported PDF and PowerPoint files use your team's colors: the default blue, or your team's own brand colors once an administrator has published them. Text stays readable on every background, even with very light or very dark brand colors. Your personal appearance settings don't change exported files. A report exported before your team changed its brand colors keeps the old colors; export it again to use the new ones.
 

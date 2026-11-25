@@ -122,6 +122,67 @@ async def test_successful_delegation_reviews_original_required_scope(collab, mon
         await harness.bus.close()
 
 
+@pytest.mark.parametrize("withdrawn", [True, False], ids=["withdrawn", "kept"])
+async def test_an_accepted_review_says_when_the_reply_before_it_left_the_chat(collab, monkeypatch, withdrawn):
+    """116, 1.7.67 (an observed task): Lead wrote a 9,414-character handbook, was sent back for its delivery review,
+    and closed with "《……手册》已按你的格式写在上面". The correction note says the answer was not delivered; for an
+    answer this long Lead still pointed at it in 3 of 10 replays until the accepted review said so too.
+
+    Mutation: drop the statement, or make it without a withdrawal → this test fails.
+    """
+    from bowhead_core.tool_delivery_review import WITHDRAWN_REPLY_FACT
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    monkeypatch.setenv("BOWHEAD_TOOL_FINDING_ENABLED", "0")
+    handbook = "## Opening checks\n\n- Count the float before the doors open.\n\n## Closing checks\n\n- Lock the stock room."
+    withdrawals: list[int] = []
+    results: list[str] = []
+    requests = 0
+
+    async def spawn(args, ctx):
+        return {"ok": True, "final_answer": "Footfall generated for two stores."}
+
+    async def provider(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id="helper", name="subagent_spawn", arguments={"profile": "selected", "task": "Generate footfall."})]
+            )
+        notes = [message.content for message in request.messages if message.role == "user" and "review_context (JSON data): " in message.content]
+        results[:] = [
+            str(message.content) for message in request.messages if message.role == "tool" and "reviewed_completion" in str(message.content)
+        ]
+        if notes and not results:
+            call_id = json.loads(notes[-1].split("review_context (JSON data): ", 1)[1])["successful_calls"][0]["call_id"]
+            review = {"requirements": [{"requirement": "Handbook", "status": "fulfilled", "evidence_call_ids": [call_id]}], "issues": []}
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id="review", name="review_delivery", arguments={"payload": {"delivery_review": review}})]
+            )
+        return LLMResponse(content=handbook)
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("subagent_spawn", spawn)
+    try:
+        result = await asyncio.wait_for(
+            harness.run(
+                collab.lead,
+                tool_deny=_LEAD_TOOL_DENY,
+                task="Generate footfall, then write the store handbook in your answer.",
+                context_changes={"_final_answer_rejected": lambda: withdrawals.append(1)} if withdrawn else None,
+            ),
+            15,
+        )
+        assert not harness.provider.failures, harness.provider.failures
+        assert result.ok and result.final_answer.startswith(handbook)
+        assert len(withdrawals) == (1 if withdrawn else 0)
+        instruction = json.loads(results[-1])["instruction"]
+        assert instruction.startswith("Answer the user in ordinary prose. ")
+        assert instruction.endswith(WITHDRAWN_REPLY_FACT) is withdrawn
+    finally:
+        await harness.bus.close()
+
+
 @pytest.mark.parametrize(
     "case", ["complete", "expected_negative", "missing", "corrected_review", "stale", "revoked", "mixed", "malformed_limit", "text_only"]
 )

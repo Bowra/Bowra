@@ -147,6 +147,9 @@ export function AttachmentChip({
   const t = useTranslations("attachment");
   const locale = useLocale();
   const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext, locale) : null;
+  const elementLabel = item.presentationSelection
+    ? t("presentation_element", { page: item.presentationSelection.slideIndex, name: item.presentationSelection.elementName })
+    : null;
   const kind: "file" | "bundle" = item.kind ?? "file";
   const [menuOpen, setMenuOpen] = useState(false);
   const bundleMenu = useMenu({
@@ -203,6 +206,7 @@ export function AttachmentChip({
       return { text: t("bundle_partial", { ok: indexedChildren.length, failed: failedChildren.length }), tone: "warn" };
     }
     if (scopeLabel) return { text: t("chart_selection", { scope: scopeLabel.length > 24 ? scopeLabel.slice(0, 23) + "…" : scopeLabel }) };
+    if (elementLabel) return { text: elementLabel.length > 28 ? elementLabel.slice(0, 27) + "…" : elementLabel };
     return { text: [ext, formatSize(item.size)].filter(Boolean).join(" · ") };
   })();
 
@@ -239,7 +243,7 @@ export function AttachmentChip({
         title={
           item.status === "error"
             ? t("upload_failed_for", { filename: item.filename, err: item.error ?? t("failed") })
-            : `${item.filename} · ${formatSize(item.size)}${scopeLabel ? " · " + t("chart_selection_detail", { scope: scopeLabel }) : ""}`
+            : `${item.filename} · ${formatSize(item.size)}${scopeLabel ? " · " + t("chart_selection_detail", { scope: scopeLabel }) : ""}${elementLabel ? " · " + elementLabel : ""}`
         }
         role={wholeCardDownloadable ? "button" : undefined}
         tabIndex={wholeCardDownloadable ? 0 : undefined}

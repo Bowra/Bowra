@@ -10531,6 +10531,17 @@
         "user_id"
       ]
     },
+    "user_result_pins": {
+      "columns": [
+        "user_id",
+        "target_kind",
+        "target_id",
+        "pinned_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
     "user_session_archives": {
       "columns": [
         "user_id",

@@ -65,6 +65,7 @@ import { checkKindShape, checkKindUnits, type ShapeGap } from "@/lib/chart/kind-
 import { explicitSwitchKinds } from "@/lib/chart/explicit-switch-kinds";
 import { notAFlowReason } from "@/lib/chart/flow-shape";
 import { fitHbarRowsForExport } from "@/lib/chart/export-fit";
+import { hbarSegment } from "@/lib/chart/segments";
 import { toggleSeriesKey, type SeriesKey } from "@/lib/chart/series-visibility";
 import { setExportHiddenSeries } from "@/lib/chart/export-hidden-series";
 import { createRefLinePlugin, type RefLineSpec } from "@/lib/chart/ref-line-plugin";
@@ -588,11 +589,21 @@ function SingleChartBlock({
     [effectiveSpec],
   );
   // The export frame cannot grow: a long horizontal bar chart draws the rows that fit and discloses the cut
-  // (see `fitHbarRowsForExport`). Screens keep every row — they grow and scroll instead.
+  // (see `fitHbarRowsForExport`). Screens draw a long horizontal bar chart in segments of whole categories with
+  // previous/next controls (`hbarSegment`); other charts keep every row — they grow and scroll instead.
+  // The segment position belongs to one chart's data: a new signature (new data or kind) starts at the first segment.
+  const [segmentAt, setSegmentAt] = useState<{ signature: string; index: number } | null>(null);
+  const segment = useMemo(() => {
+    if (surface === "export" || chromeless) return null;
+    const first = hbarSegment(effectiveSpec, 0);
+    return first && segmentAt?.signature === first.signature && segmentAt.index > 0
+      ? hbarSegment(effectiveSpec, segmentAt.index)
+      : first;
+  }, [effectiveSpec, surface, chromeless, segmentAt]);
   const exportFrameHeight = frozenRenderContext?.bounds.heightPx ?? defaultChartRenderBounds("export").heightPx;
   const drawSpec = useMemo(
-    () => (surface === "export" ? fitHbarRowsForExport(effectiveSpec, exportFrameHeight, hiddenSeries) : effectiveSpec),
-    [effectiveSpec, exportFrameHeight, hiddenSeries, surface],
+    () => (surface === "export" ? fitHbarRowsForExport(effectiveSpec, exportFrameHeight, hiddenSeries) : segment?.spec ?? effectiveSpec),
+    [effectiveSpec, exportFrameHeight, hiddenSeries, surface, segment],
   );
   const unitGaps = useMemo(() => drawSpec._export_analytical ? [] : checkKindUnits(drawSpec, kind), [drawSpec, kind]);
   const compatibles = useMemo(() => spec._export_analytical ? [spec.kind] : _compatibleKinds(spec, composedView).filter((kind) => !focus || observationViewEligible({ ...(focus.scopeSource ?? spec), kind }, focus.binding)), [spec, focus, composedView]);
@@ -756,6 +767,29 @@ function SingleChartBlock({
           hiddenSeries={hiddenSeries}
           onToggleSeries={onToggleSeries}
         />
+        {segment ? (
+          <div className="v2-chart-table-footer" data-chart-segment style={{ color: "var(--c-ink-3)" }}>
+            <span>{tBlock("segment_range", { start: segment.start, end: segment.end, total: segment.total })}</span>
+            <span style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="v2-chart-action-btn"
+                disabled={segment.index === 0}
+                onClick={() => setSegmentAt({ signature: segment.signature, index: segment.index - 1 })}
+              >
+                {tBlock("segment_previous")}
+              </button>
+              <button
+                type="button"
+                className="v2-chart-action-btn"
+                disabled={segment.end >= segment.total}
+                onClick={() => setSegmentAt({ signature: segment.signature, index: segment.index + 1 })}
+              >
+                {tBlock("segment_next")}
+              </button>
+            </span>
+          </div>
+        ) : null}
         <ChartSubcaptions spec={drawSpec} chromeless={chromeless} drawn detailReturnRef={detailReturnRef} surface={surface} />
       </ErrorBoundary>
     </ChartExportSurface>
@@ -950,7 +984,7 @@ function ChartSubcaptions({
           <CharIcon ch="ⓘ" />{" "}
           {spec._export_top
             ? t("chart.truncated_top_by", spec._export_top)
-            : t("chart.truncated_top_n", { shown, total })}
+            : t("chart.truncated_top_n", spec._export_first ?? { shown, total })}
         </div>
       ) : null}
       {spec.auto_charted && !chromeless ? (

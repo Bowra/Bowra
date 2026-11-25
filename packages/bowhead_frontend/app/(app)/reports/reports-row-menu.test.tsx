@@ -9,6 +9,8 @@ import { chooseRowAction, expectConfirmGate, menuDangerNames, menuItemNames, ope
 
 const api = vi.hoisted(() => ({ fetchReports: vi.fn(), deleteCanvas: vi.fn() }));
 const share = vi.hoisted(() => ({ copy: vi.fn() }));
+const pins = vi.hoisted(() => ({ pinResult: vi.fn() }));
+vi.mock("@/lib/result-pins", async (orig) => ({ ...(await orig<Record<string, unknown>>()), ...pins }));
 vi.mock("@/lib/api", () => ({
   deleteCanvas: api.deleteCanvas,
   exportJobDownloadUrl: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock("@/lib/api", () => ({
   setCanvasStatus: vi.fn(),
 }));
 vi.mock("@/lib/report-share", () => ({
+  AUTO_EXPORT_FMTS: ["pdf", "docx", "pptx", "xlsx"],
   copyPermissionedReportLink: share.copy,
   reportExportHrefForSession: () => "/",
   reportHrefForSession: () => "/",
@@ -63,7 +66,7 @@ describe("报告库卡片行内操作", () => {
     renderWithReport();
     const menu = await openRowMenu("「季度复盘」的更多操作");
     // An active report has no status chip. Its row menu provides the status transitions and delete.
-    expect(menuItemNames(menu)).toEqual(["标记为已核对", "归档", "删除…"]);
+    expect(menuItemNames(menu)).toEqual(["置顶", "标记为已核对", "归档", "删除…"]);
     expect(screen.queryByText("报告状态：活跃")).toBeNull();
     expect(menuDangerNames(menu)).toEqual(["删除…"]);
     expect(screen.queryByRole("button", { name: "删除报告 季度复盘" })).toBeNull();
@@ -76,6 +79,15 @@ describe("报告库卡片行内操作", () => {
       confirmName: "删除报告",
     });
     await vi.waitFor(() => expect(api.deleteCanvas).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("报告库卡片置顶", () => {
+  it("pins the report by its canvas ID", async () => {
+    pins.pinResult.mockResolvedValue({ kind: "report", pin_id: report.id });
+    renderWithReport();
+    await chooseRowAction("「季度复盘」的更多操作", "置顶");
+    await vi.waitFor(() => expect(pins.pinResult).toHaveBeenCalledWith("report", report.id));
   });
 });
 

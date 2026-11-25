@@ -153,21 +153,24 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                         slides = sum(re.fullmatch(r"ppt/slides/slide[0-9]+\.xml", name) is not None for name in package.namelist())
                         valid = "[Content_Types].xml" in package.namelist() and "ppt/presentation.xml" in package.namelist()
                     meta = result.result_json
-                    if (
-                        not valid
-                        or slides < 1
-                        or (expected is not None and expected != slides)
-                        or meta.get("placeholder_leftovers") != 0
-                        or meta.get("raw_inline_markers") != 0
-                    ):
+                    # A slide count other than expected_slides is reported in the receipt, not
+                    # refused: the deck is kept and the model judges it (spike: docs/sprints/
+                    # pptx-upload-edit-dogfood-2026-11-23/spike.md, "render_deck slide count").
+                    if not valid or slides < 1 or meta.get("placeholder_leftovers") != 0 or meta.get("raw_inline_markers") != 0:
                         return {
                             "ok": False,
                             "error": "deck_validation_failed",
-                            "message": f"Rendered slide count is {slides}; expected {expected or 'a nonempty deck'}. "
+                            "message": f"Rendered slide count is {slides}. "
                             f"Leftover placeholders: {meta.get('placeholder_leftovers') if type(meta.get('placeholder_leftovers')) is int else 'unknown'}; "
                             f"inline markers: {meta.get('raw_inline_markers') if type(meta.get('raw_inline_markers')) is int else 'unknown'}. Correct the sections and retry.",
                         }
-                    binding.pending[digest] = content, {"slide_count": slides}
+                    facts: dict[str, Any] = {"slide_count": slides}
+                    if expected is not None:
+                        facts["expected_slides"] = expected
+                    slide_map = slides_by_section(meta.get("slide_sections"), slides)
+                    if slide_map:
+                        facts["slides_by_section"] = slide_map
+                    binding.pending[digest] = content, facts
                 except Exception:
                     logger.warning("deck_render.failed turn=%s", ctx.turn_id, exc_info=True)
                     return {
@@ -205,6 +208,8 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                         return _version_refusal(refused.reason, refused.latest_id)
                 elif existing.created_by != ctx.user_id or existing.created_by_turn != ctx.turn_id or existing.path != art.path:
                     raise ValueError("Presentation registration identity differs")
+                # The deck this file was recorded as the next version of, as stored (None without version support).
+                version_of = getattr(art if existing is None else existing, "version_of", None)
 
             except Exception:
                 logger.warning("deck_registration.failed turn=%s", ctx.turn_id, exc_info=True)
@@ -213,19 +218,15 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
                     "error": "deck_registration_failed",
                     "message": "The presentation rendered, but its downloadable file could not be verified. Retry the same render_deck arguments to register the retained bytes without rendering again.",
                 }
-            receipt = {
-                "ok": True,
-                "artifact_id": art.id,
-                "filename": art.filename,
-                **meta,
-                "message": "The editable PPTX is registered and readable. Call subagent_return with a concise Chat summary now; do not render again.",
-            }
+            receipt = {"ok": True, "artifact_id": art.id, "filename": art.filename, **meta, "message": _receipt_message(meta)}
+            if isinstance(version_of, str) and version_of:
+                receipt["revises"] = version_of
             binding.receipts[digest] = receipt
             binding.pending.pop(digest, None)
             from bowhead_core.visual_self_check import attach_deck_view
 
             # Visual self-check: the first receipt of a render carries its view; a repeated call returns the receipt alone.
-            return await attach_deck_view(dict(receipt), ctx, art, presentation_fix=args.get("presentation_fix"))
+            return await attach_deck_view(dict(receipt), ctx, art, presentation_fix=args.get("presentation_fix"), deck_facts=_slide_count_fact(meta))
 
     registry.register(
         ToolSpec(
@@ -274,6 +275,60 @@ def register_deck_render_tool(registry: ToolRegistry, runtime: Any) -> None:
             risk_level="low",
         )
     )
+
+
+_TITLE_CHARS = 40
+
+
+def slides_by_section(entries: Any, slide_count: int) -> str | None:
+    """State which section produced each slide, from the renderer's own record.
+
+    Runs of the same kind are grouped ("slides 3-6 insight_card x4 ('A', 'B', ...)"). Returns
+    None when the record is missing, malformed or disagrees with the counted slides.
+    """
+    if not isinstance(entries, list) or len(entries) != slide_count:
+        return None
+    runs: list[tuple[int, int, str, list[str]]] = []
+    for number, entry in enumerate(entries, 1):
+        kind = entry.get("kind") if isinstance(entry, dict) else None
+        if not isinstance(kind, str) or not kind:
+            return None
+        title = entry.get("title")
+        title = title[:_TITLE_CHARS] + ("…" if len(title) > _TITLE_CHARS else "") if isinstance(title, str) else ""
+        if runs and runs[-1][2] == kind and kind != "cover":
+            start, _, _, titles = runs[-1]
+            runs[-1] = (start, number, kind, [*titles, title])
+        else:
+            runs.append((number, number, kind, [title]))
+    parts = []
+    for start, end, kind, titles in runs:
+        if kind == "cover":
+            parts.append(f"slide {start} cover (eyebrow and h1)")
+            continue
+        span = f"slide {start} {kind}" if start == end else f"slides {start}-{end} {kind} x{end - start + 1}"
+        named = ", ".join(f"'{t}'" for t in titles if t)
+        parts.append(f"{span} ({named})" if named else span)
+    return "; ".join(parts)
+
+
+def _slide_count_fact(facts: dict[str, Any]) -> str:
+    """The slide count against expected_slides, stated only when they differ."""
+    slides, expected = facts.get("slide_count"), facts.get("expected_slides")
+    if expected is None or expected == slides:
+        return ""
+    return (
+        f"It has {slides} slides; expected_slides was {expected}. "
+        "The renderer gives the cover (eyebrow and h1) a slide of its own, then one slide to each kpi_row, insight_card, "
+        "chart and recommendations section, in that order. A render_deck call with revises set to this artifact_id "
+        "records its next version."
+    )
+
+
+def _receipt_message(facts: dict[str, Any]) -> str:
+    count = _slide_count_fact(facts)
+    if not count:
+        return "The editable PPTX is registered and readable. Call subagent_return with a concise Chat summary now; do not render again."
+    return f"The editable PPTX is registered and readable. {count}"
 
 
 _DECK_VERSION_HINTS = {

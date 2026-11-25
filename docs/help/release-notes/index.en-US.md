@@ -2,6 +2,7 @@
 
 Community source snapshots have independent history. Application versions do not imply that images or a hosted service have been published.
 
+- [v1.7.73](releases/v1.7.73.en-US.md) — Pin results to the sidebar and improve charts, reports and long conversations.
 - [v1.7.64](releases/v1.7.64.en-US.md) — Keep draft files out of selected results and improve credit feedback, charts and Skill scripts.
 - [v1.7.63](releases/v1.7.63.en-US.md) — Follow code as agents write it, edit Skill package files and save generated presentations more reliably.
 - [v1.7.61](releases/v1.7.61.en-US.md) — Share interactive HTML results, download reports as Word, and continue after interrupted tasks.

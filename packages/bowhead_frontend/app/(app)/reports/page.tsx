@@ -45,6 +45,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { ActiveFilterChips } from "@/components/ui/active-filter-chips";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
+import { useResultPinActions } from "@/lib/use-result-pin-actions";
 import { FilterMenuButton } from "@/components/ui/filter-menu-button";
 import { ListTime as SharedListTime } from "@/components/ui/list-time";
 import { useEntitlement } from "@/lib/entitlement-store";
@@ -68,6 +69,7 @@ function loadFailedKey(error: unknown): "load_failed_detail" | "load_failed_offl
 
 export default function ReportsPage() {
   const t = useTranslations("reports_page");
+  const pinActions = useResultPinActions("reports");
   const exportT = useTranslations("export_ui");
   const tStatus = useTranslations("report_status");
   const copyDiagnosticsAction = useCopyDiagnosticsToastAction();
@@ -439,6 +441,13 @@ export default function ReportsPage() {
               onSelect: () => { setDeleteSessionToo(false); setDeleteTarget(r); },
             };
             const copyAction = { id: "copy-link", label: t("copy_perm_link"), onSelect: () => void copyReportLink(r) };
+            // A report without sections has nothing to open yet, so it offers no Pin.
+            const pinActionList = r.sections_count > 0 ? [{
+              id: "pin",
+              label: pinActions.label("report", r.id),
+              disabled: pinActions.isBusy("report", r.id),
+              onSelect: () => void pinActions.toggle("report", r.id),
+            }] : [];
             // The default state (active) carries no chip; its transitions (mark reviewed, archive) live in the row ⋯.
             const effectiveStatus = r.effective_status ?? r.status;
             const showStatus = effectiveStatus !== "active";
@@ -521,7 +530,7 @@ export default function ReportsPage() {
                     label={moreLabel}
                     busy={deletingId === r.id}
                     busyLabel={t("deleting")}
-                    actions={[...statusActions, ...(hideShareForReadOnly ? [copyAction] : []), deleteAction]}
+                    actions={[...pinActionList, ...statusActions, ...(hideShareForReadOnly ? [copyAction] : []), deleteAction]}
                   />
                 </div>
                 {/* Phones: every row action in one ⋯ (44px, always shown); opening is the title link. */}
@@ -538,6 +547,7 @@ export default function ReportsPage() {
                       disabled: downloadDisabled,
                       onSelect: () => void exportReport(r, fmt),
                     })),
+                    ...pinActionList,
                     ...statusActions,
                     ...(hideShareForReadOnly ? [copyAction] : []),
                     deleteAction,

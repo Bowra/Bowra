@@ -176,6 +176,8 @@ async def test_a_turn_stopped_while_its_answer_streams_keeps_what_it_had_written
         monkeypatch.setattr(session_store.SessionStore, "publish_stopped_turn_context", unavailable)
     # A line break and a space arrive as chunks of their own, as DeepSeek streams them.
     written = ["Region A earned 7.", "\n\n", "Region B earned", " ", "9, and"]
+    # The session's earlier answer holds the same text: asked to continue, a model often rewrites what it had shown.
+    earlier = "".join(written) + " Region C earned 4."
     answer_streaming = asyncio.Event()
     lead_calls = []
 
@@ -193,19 +195,20 @@ async def test_a_turn_stopped_while_its_answer_streams_keeps_what_it_had_written
         if review_round(body):
             return response(body, {"role": "assistant", "content": body["messages"][-2]["content"]}, "stop")
         lead_calls.append(body)
-        if len(lead_calls) == 2:
+        asked = json.dumps(body["messages"])
+        if "Write that report again." in asked and "Continue from there." not in asked:
             assert body.get("stream")
             return httpx2.Response(200, content=answer_then_hang(), headers={"content-type": "text/event-stream"})
-        return response(body, {"role": "assistant", "content": "Noted."}, "stop")
+        return response(body, {"role": "assistant", "content": earlier}, "stop")
 
     with respx.mock(assert_all_called=False) as mock:
         mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
-        first = await case.client.post("/api/v1/chat/send", json={"workspace_id": scope.workspace_id, "message": "Remember this session."})
+        first = await case.client.post("/api/v1/chat/send", json={"workspace_id": scope.workspace_id, "message": "Report every region."})
         assert first.status_code == 200, first.text
         await settled(first.json()["turn_id"])
         session_id = first.json()["session_id"]
         second = await case.client.post(
-            "/api/v1/chat/send", json={"session_id": session_id, "workspace_id": scope.workspace_id, "message": "Report every region."}
+            "/api/v1/chat/send", json={"session_id": session_id, "workspace_id": scope.workspace_id, "message": "Write that report again."}
         )
         assert second.status_code == 200, second.text
         turn_id = second.json()["turn_id"]

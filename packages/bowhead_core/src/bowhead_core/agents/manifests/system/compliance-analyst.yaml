@@ -28,6 +28,8 @@ tools:
     - bi_concept_resolve
     - skill_read
     - skill_invoke
+    # Flat sandbox entry: code stays a top-level argument instead of a string nested in skill_invoke's input.
+    - python_exec
     - skill_list
     - add_chart
     - read_chart
@@ -35,6 +37,8 @@ tools:
     # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
     # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
     - write_report
+    # Removes sections this writer wrote in the current Turn (e.g. the old copy of a renamed chapter).
+    - remove_report_section
     - read_report
     - subagent_return
 
@@ -71,6 +75,10 @@ examples:
 # Lead routing prose renders assignee names by role, resolving assignees from this declaration;
 # an agent with a declared contract is not used as a fallback assignee for another role.
 primary_capability: cap_analysis
+
+# Append the capability protocol blocks matching this Agent's tools (Datarc query
+# protocol, sandbox I/O, delivery and report authoring), like the other analysts.
+capability_protocol_block: true
 
 # Product listing (marketplace and @ list). The English name and summary are the
 # source of the agents_marketplace system_<name>_name/_summary messages; the four

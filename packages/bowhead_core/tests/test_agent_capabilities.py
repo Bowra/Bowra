@@ -43,15 +43,17 @@ _BI_ONLY = [
     "read_chart",
     "subagent_return",
 ]
-# delivery-surface M-C: guarded pen (M-B bake+owner+CAS).
-_PEN = ["write_report", "read_report"]
+# delivery-surface M-C: guarded pen (M-B bake+owner+CAS); a writer also removes its own sections of the Turn.
+_PEN = ["write_report", "remove_report_section", "read_report"]
+# The specialists that compute run code through the flat sandbox entry (builtin-agent-tool-drift-2026-11-23).
+_FLAT_SANDBOX = ["python_exec"]
 # Full-edition inference fixtures; the Community consultant composition is checked separately.
 PROD_ALLOW = {
-    "kb-analyst": [*_BI_ONLY, *_PEN, "kb_list_sources", "kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"],
-    "consultant": [*_BI_ONLY, "render_deck"],
-    "financial-analyst": [*_BI_ONLY, *_PEN],
-    "business-analyst": [*_BI_ONLY, *_PEN],
-    "compliance-analyst": [*_BI_ONLY, *_PEN],
+    "kb-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX, "kb_list_sources", "kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"],
+    "consultant": [*_BI_ONLY, *_FLAT_SANDBOX, "render_deck"],
+    "financial-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
+    "business-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
+    "compliance-analyst": [*_BI_ONLY, *_PEN, *_FLAT_SANDBOX],
     # ⚠ Manually copied. Batch 5ⓑ adds flat `python_exec` to compute (top-level code/inputs/timeout); follow here.
     # (`_PEN` already includes write_report/read_report; do not duplicate.)
     # compute-agent-optimize batch 1 originally removed bi_fetch_rows here; 2026-09-05 removed it from
@@ -96,6 +98,7 @@ PROD_ALLOW = {
         "web_crawl",
         "web_deep_research",
         "write_report",
+        "remove_report_section",
     ],
 }
 PROD_CAPS = {name: derive_capabilities(allow) for name, allow in PROD_ALLOW.items()}

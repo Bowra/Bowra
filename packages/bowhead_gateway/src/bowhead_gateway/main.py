@@ -1242,6 +1242,15 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
                         log.warning("artifact_gc.file_version_prune_failed", error=str(_e))
                     stats = await artifact_store.hard_delete_old_soft_deleted(days=30)
                     log.info("artifact_gc.done", **stats)
+                    # Result pins of purged files and deleted reports (result pins tech design §4.5).
+                    try:
+                        from bowhead_gateway.result_pin_resolver import remove_gone_result_pins
+
+                        removed = await remove_gone_result_pins(app.state)
+                        if any(removed.values()):
+                            log.info("result_pins.gone_removed", **removed)
+                    except Exception as _e:  # noqa: BLE001 - pin cleanup failures must not break GC.
+                        log.warning("result_pins.gone_removal_failed", error=str(_e))
                 await asyncio.sleep(86400)  # 24h
             except asyncio.CancelledError:
                 raise
@@ -3967,6 +3976,9 @@ def create_app() -> FastAPI:
         tags=["clarifications"],
     )
     app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
+    from bowhead_gateway.routes import result_pins as result_pins_routes
+
+    app.include_router(result_pins_routes.router, prefix="/api/v1/result-pins", tags=["result-pins"])
     from bowhead_gateway.routes import documents
 
     app.include_router(documents.router, prefix="/api/v1", tags=["documents"])

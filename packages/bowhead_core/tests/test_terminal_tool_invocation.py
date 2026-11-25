@@ -994,6 +994,13 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "FIND_RESULTS",
             "TOOL_EFFECT_READ_ONLY",
         ),
+        # Visual self-check (796147bd0): view_file renders a file the run can read and stores nothing.
+        (
+            "visual_self_check.py",
+            "view_file_spec",
+            "VIEW_FILE_TOOL",
+            "TOOL_EFFECT_READ_ONLY",
+        ),
         (
             "agents/report_tools.py",
             "register_report_tools",

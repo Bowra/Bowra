@@ -24,6 +24,7 @@ ResultCapability = Literal[
     "open_outputs",
     "view_run_details",
     "feedback_unsupported",
+    "edit_presentation",
 ]
 ResultRelationRole = Literal[
     "report_chart_data",

@@ -29,6 +29,7 @@ MAX_REVISE_FILES = 8
 CANVAS_WRITE_TOOLS: frozenset[str] = frozenset(
     {
         "write_report",
+        "remove_report_section",
         "add_chart",
         "edit_chart",
         "remove_chart",
@@ -66,6 +67,12 @@ async def count_delivered_files(store: ArtifactStore, *, session_id: str, user_i
     if not session_id or not user_id:
         return 0
     return await store.count_session_deliverables(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id)
+
+
+def _user_edit_producer() -> str:
+    from bowhead_core.artifact_store import PRESENTATION_USER_EDIT_PRODUCER
+
+    return PRESENTATION_USER_EDIT_PRODUCER
 
 
 def file_type(artifact: Artifact) -> str:
@@ -120,11 +127,16 @@ def render_delivered_files_block(
         "numbers) means that file, even if a Canvas report was made too: use revise_files, not canvas_mode. If the user asked for "
         "both and it is unclear which one they mean, ask.",
         "For a lookup or analysis using an existing file as evidence, omit revise_files and name the source in the task.",
+        # pptx-inline-edit design §6.6: a person can save a version by editing the file in Results.
+        "edited_by=user marks a file whose latest version the user saved by editing it in place; a revision starts from that "
+        "version and the user's edits are part of the file.",
     ]
     for artifact in files:
         line = f'- artifact_id={artifact.id} name="{quoted(artifact.filename)}" type={file_type(artifact)} {_age(artifact.created_at, current)}'
         if (artifact.version_no or 1) > 1:
             line += f" version={artifact.version_no}"
+        if (artifact.producer_kind or "") == _user_edit_producer():
+            line += " edited_by=user"
         producers = by_turn.get(artifact.created_by_turn or "", [])
         if len(producers) == 1:
             line += f" checkpoint_id={producers[0]}"

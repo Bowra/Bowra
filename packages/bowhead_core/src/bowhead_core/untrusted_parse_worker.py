@@ -98,6 +98,20 @@ def _run_pptx_render_copy(control: dict[str, Any]) -> dict[str, Any]:
     return {} if copy is None else {"copy_base64": base64.b64encode(copy).decode("ascii")}
 
 
+def _run_pptx_edit_apply(control: dict[str, Any]) -> dict[str, Any]:
+    """Apply a person's edits; refusals are ordinary results so the gateway can name them."""
+    from bowhead_core.presentation_edit import EditRefused, PresentationUnreadable, apply_edits
+
+    try:
+        output, meta = apply_edits(Path(control["data_path"]).read_bytes(), control.get("edits"))
+    except EditRefused as exc:
+        return {"refused": exc.refusals}
+    except PresentationUnreadable as exc:
+        return {"unreadable": exc.code}
+    Path(control["result_data_path"]).write_bytes(output)
+    return meta
+
+
 def _run_template(control: dict[str, Any]) -> dict[str, Any]:
     from bowhead_core.template_clone import parse_template
 
@@ -133,6 +147,15 @@ def main() -> int:
 
             extra = {name[: -len("_path")]: Path(control[name]).read_bytes() for name in control if name.endswith("_path") and name != "data_path"}
             result = visual_worker_entry(control, Path(control["data_path"]).read_bytes(), extra)
+        elif kind == "pptx_edit_inventory":
+            from bowhead_core.presentation_edit import PresentationUnreadable, build_inventory
+
+            try:
+                result = build_inventory(Path(control["data_path"]).read_bytes())
+            except PresentationUnreadable as exc:
+                result = {"unreadable": exc.code}
+        elif kind == "pptx_edit_apply":
+            result = _run_pptx_edit_apply(control)
         elif kind == "pptx_structure":
             from bowhead_core.pptx_result_view import deck_structure
 

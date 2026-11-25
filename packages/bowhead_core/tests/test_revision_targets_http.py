@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 import respx
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+from bowhead_core.canvas_store import CanvasStore
 from test_ordinary_lead_question_http import call, response
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
@@ -111,9 +112,9 @@ async def test_a_file_revision_answer_does_not_point_to_the_unchanged_canvas(htt
 
     The helper records version 2 in this Turn and Lead's answer names it, then adds "完整报告见画布" although the
     Canvas did not change. The answer keeps the version sentence, drops the pointer, and live, persisted and replayed
-    answers agree. This fixture has no canvas store, so the delivery ledger cannot verify Canvas sections and its
-    guard also removes an unverifiable pointer; the §9 branch itself (a ledger that counts this Turn's code_block
-    sections, as on 116) is covered by test_m2_canvas_pointer_reconcile, where removing it fails.
+    answers agree. The fixture has a Canvas store, so the terminal read can state that this Turn changed no report
+    section; without that evidence the §9 branch keeps the pointer. Its other inputs (a ledger that counts this
+    Turn's code_block sections, as on 116) are covered by test_m2_canvas_pointer_reconcile.
     """
     case = http_start
     monkeypatch.setenv("FEATURE_REVISION_TARGETS", "1")
@@ -122,6 +123,10 @@ async def test_a_file_revision_answer_does_not_point_to_the_unchanged_canvas(htt
     artifacts = ArtifactStore(str(case.path), LocalBackend(case.path.parent / "revision-target-pointer-files"))
     await artifacts.initialize()
     case.app.state.artifact_store = orchestrator.artifact_store = artifacts
+    canvas_store = CanvasStore(str(case.path))
+    await canvas_store.initialize()
+    monkeypatch.setattr(orchestrator, "canvas_store", canvas_store)
+    case.app.state.canvas_store = canvas_store
 
     def first_turn(request):
         return response(json.loads(request.content), {"role": "assistant", "content": "The RBU HTML report is ready."}, "stop")
@@ -167,6 +172,7 @@ async def test_a_file_revision_answer_does_not_point_to_the_unchanged_canvas(htt
     events = [row for row in rows(case, "turn_events") if row["turn_id"] == second.turn_id]
     finals = [json.loads(row["payload_json"]) for row in events if row["event_type"] == "final_answer"]
     assert finals and finals[-1]["text"] == persisted, "Live and replayed answers end on the persisted one"
-    assert all("见画布" not in final.get("text", "") for final in finals), "No emitted answer carries the pointer"
+    # The pointer is retracted by a corrective final_answer that replaces Lead's streamed one (M2/2a).
+    assert finals[-1].get("reason_code") == "canvas_pointer_reconciled", finals[-1]
     done = [json.loads(row["payload_json"]) for row in events if row["event_type"] == "done"]
     assert len(done) == 1 and "见画布" not in json.dumps(done[0], ensure_ascii=False)

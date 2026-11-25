@@ -26,6 +26,7 @@ import {
   type KbScope,
 } from "@/components/files/file-dialogs";
 import { FileDrawer } from "@/components/files/file-drawer";
+import { useResultPinActions } from "@/lib/use-result-pin-actions";
 import { KbColumn, kbFileHref } from "@/components/files/kb-column";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { Tab, TabList, Tabs } from "@/components/ui/tabs";
@@ -113,6 +114,7 @@ function CheckIcon() {
 
 export default function FilesPage() {
   const t = useTranslations("files_page");
+  const pinActions = useResultPinActions("files");
 
   const [tab, setTab] = useState<FilesTab>("assets");
   const [items, setItems] = useState<FileDTO[]>([]);
@@ -771,6 +773,12 @@ export default function FilesPage() {
                         : [
                             { id: "download", label: t("ops.download"), href: appPath(`/api/v1/files/${encodeURIComponent(f.file_id)}`), newTab: true },
                             { id: "use-in-chat", label: t("use_in_chat"), onSelect: () => useInNewChat(f) },
+                            {
+                              id: "pin",
+                              label: pinActions.label("file", f.file_id),
+                              disabled: pinActions.isBusy("file", f.file_id),
+                              onSelect: () => void pinActions.toggle("file", f.file_id),
+                            },
                             // D2: knowledge-base files have no delete action on this page
                             ...(f.in_kb ? [] : [{ id: "delete", label: t("ops.delete"), danger: true, confirms: f.has_canvas_ref, onSelect: () => askDelete(f) }]),
                           ]
@@ -931,6 +939,11 @@ export default function FilesPage() {
             else gotoKb();
           }}
           onUseInChat={() => useInNewChat(openRow)}
+          pin={tab === "trash" ? undefined : {
+            label: pinActions.label("file", openRow.file_id),
+            busy: pinActions.isBusy("file", openRow.file_id),
+            onToggle: () => void pinActions.toggle("file", openRow.file_id),
+          }}
           onAddToKb={() => askAddToKb(openRow)}
           onRemoveFromKb={() => askRemoveFromKb(openRow)}
           onFileUpdated={(u) => setItems((l) => l.map((x) => (x.file_id === u.file_id ? u : x)))}

@@ -5,7 +5,13 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-from bowhead_core.clarification_rounds import CONTEXT_KEY, QUESTIONS_KEY, question_hashes, validate_answer_questions
+from bowhead_core.clarification_rounds import (
+    CONTEXT_KEY,
+    QUESTIONS_KEY,
+    complete_skipped_questions,
+    question_hashes,
+    validate_answer_questions,
+)
 from bowhead_core.clarification_store import ClarificationStore
 from bowhead_core.context_assembly import build_turn_history
 from test_coach_operation_history import history_db as history_db
@@ -47,6 +53,19 @@ def test_answer_grouping_retains_original_question_constraints(change):
     context = {CONTEXT_KEY: {"question_hashes": question_hashes(questions, None)}, QUESTIONS_KEY: questions}
     with pytest.raises(ValueError, match="clarification_answer_changed"):
         validate_answer_questions(answers, context)
+
+
+@pytest.mark.unit
+def test_unanswered_optional_questions_become_skips_in_card_order():
+    context = {CONTEXT_KEY: {"question_hashes": question_hashes(QUESTIONS, None)}, QUESTIONS_KEY: QUESTIONS}
+    sections = [answer for answer in ANSWERS if answer["question"] == "Which sections?"]
+    completed = complete_skipped_questions(sections, context)
+    assert completed == [{"question": "Which city?", "source": "skip", "skipped": True}, *sections]
+    validate_answer_questions(completed, context)
+    assert complete_skipped_questions(ANSWERS, context) == [ANSWERS[1], ANSWERS[0], ANSWERS[2]]
+    foreign = {"question": "Unrelated question", "source": "custom", "answer": "x", "skipped": False}
+    with pytest.raises(ValueError, match="clarification_answer_changed"):
+        validate_answer_questions(complete_skipped_questions([*sections, foreign], context), context)
 
 
 @pytest.mark.integration

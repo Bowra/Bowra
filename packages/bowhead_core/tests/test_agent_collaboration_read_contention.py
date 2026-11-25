@@ -11,6 +11,7 @@ from bowhead_cli.migrate import upgrade
 from bowhead_core._db import close_pooled_readers, open_shared_ctx
 from bowhead_core.agent_collaboration import CollaborationStore, CollaborationUnavailable
 from bowhead_core.agent_collaboration_runtime import CollaborationRuntime
+from bowhead_core.sqlite_domains import domain_database_path
 from test_agent_collaboration import CollaborationFixture
 from test_agent_collaboration import collab as collab
 
@@ -120,10 +121,10 @@ async def test_cancelled_inbox_read_preserves_delivery_cursor_and_write_fence(sp
 
 
 async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the_worker_fence(split_collab: CollaborationFixture) -> None:
-    """116 1.7.49 the regression case: a helper's completion check failed at once with "SQLite authority
+    """an observed deployment the regression case: a helper's completion check failed at once with "SQLite authority
     lease is busy" while a Space metadata save held the exclusive core lease, and the Auto plan ended
-    blocked. Checking for expired questions and reading obligations writes nothing, so neither may
-    need a writer transaction or the shared core lease."""
+    blocked. Checking for expired questions, reading obligations and reading the next deadline write
+    nothing, so none may need a writer transaction or the shared core lease."""
     fixture = split_collab
     question = await fixture.ask()
     async with open_shared_ctx(str(fixture.path)) as writer:
@@ -137,6 +138,7 @@ async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the
             assert await asyncio.wait_for(fixture.store.expire(fixture.worker), timeout=2) == []
             obligations = await asyncio.wait_for(fixture.store.obligations(fixture.worker, execution_id=fixture.requester), timeout=2)
             assert [item["question_id"] for item in obligations] == [question["operation_id"]]
+            assert await asyncio.wait_for(fixture.store.next_deadline(fixture.worker, execution_id=fixture.requester), timeout=2) > 0
         finally:
             await writer.rollback()
     # A due question still closes in its write transaction.
@@ -149,9 +151,27 @@ async def test_completion_checks_run_beside_a_core_authority_writer_and_keep_the
             ("2026-11-17T00:00:00+00:00", fixture.worker.turn_id),
         )
         await writer.commit()
-    for check in (fixture.store.expire(fixture.worker), fixture.store.obligations(fixture.worker, execution_id=fixture.requester)):
+    for check in (
+        fixture.store.expire(fixture.worker),
+        fixture.store.obligations(fixture.worker, execution_id=fixture.requester),
+        fixture.store.next_deadline(fixture.worker, execution_id=fixture.requester),
+    ):
         with pytest.raises(CollaborationUnavailable, match="collaboration_worker_unavailable"):
             await check
+
+
+async def test_a_waiting_helper_reads_its_next_deadline_beside_an_execution_writer(split_collab: CollaborationFixture) -> None:
+    """116 (1.7.65, 2026-11-23): next_deadline, asked again and again by a waiting helper, opened a write
+    transaction for a read and held execution's writer lock and core's shared lease for up to 0.97 s."""
+    fixture = split_collab
+    await fixture.ask()
+    expected = await fixture.store.next_deadline(fixture.worker, execution_id=fixture.requester)
+    async with open_shared_ctx(str(domain_database_path(fixture.path, "execution"))) as writer:
+        await writer.execute("BEGIN IMMEDIATE")
+        try:
+            assert await asyncio.wait_for(fixture.store.next_deadline(fixture.worker, execution_id=fixture.requester), timeout=2) == expected
+        finally:
+            await writer.rollback()
 
 
 async def _hold_exclusive_core_lease(fixture: CollaborationFixture, released: asyncio.Event, seconds: float) -> None:
@@ -172,7 +192,7 @@ async def _hold_exclusive_core_lease(fixture: CollaborationFixture, released: as
 
 
 async def test_collaboration_writes_repeat_until_an_authority_writer_lets_go(split_collab: CollaborationFixture) -> None:
-    """116 1.7.49: a collaboration write pinned the shared core lease at its first scope read and failed
+    """an observed deployment: a collaboration write pinned the shared core lease at its first scope read and failed
     at once beside an authority writer. Writes now repeat their whole transaction and land once the lease is free."""
     fixture = split_collab
     holding = asyncio.Event()

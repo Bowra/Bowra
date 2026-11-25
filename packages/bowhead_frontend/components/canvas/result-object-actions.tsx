@@ -3,7 +3,7 @@
 import { useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
-import { Chat, FileDown, Folder, MoreH, RefreshCw } from "@/components/icons";
+import { Chat, Edit, FileDown, Folder, MoreH, Pin, RefreshCw } from "@/components/icons";
 import { FileShareAction } from "@/components/share/file-share-action";
 import { MenuFloating, MenuItemReason, useMenu, useMenuItem } from "@/components/ui/menu";
 import { appPath } from "@/lib/base-path";
@@ -12,6 +12,7 @@ import type {
   ResultCapability,
 } from "@/lib/results-workspace-model";
 import type { ResultsViewerMode } from "@/lib/results-workspace-route";
+import { useResultPinActions } from "@/lib/use-result-pin-actions";
 import type { HtmlPreviewMode } from "./html-preview-mode";
 
 export type ResultReturnAction = {
@@ -52,6 +53,7 @@ export function ResultObjectActions({
   onModeChange,
   onOpenHistory,
   onFeedbackUnsupported,
+  onEditPresentation,
 }: {
   artifactId: string;
   capabilities: ReadonlySet<ResultCapability>;
@@ -67,6 +69,8 @@ export function ResultObjectActions({
   onModeChange?: (mode: ResultsViewerMode) => void;
   onOpenHistory?: (trigger?: HTMLElement) => void;
   onFeedbackUnsupported?: () => void;
+  /** Open the deck editor (pptx-inline-edit design §7.1); on phones an icon button beside More actions. */
+  onEditPresentation?: (trigger?: HTMLElement) => void;
 }) {
   const t = useTranslations("artifact_viewer");
   const shareT = useTranslations("share");
@@ -82,6 +86,9 @@ export function ResultObjectActions({
   const canViewDetails = capabilities.has("view_details") && Boolean(onModeChange);
   const canViewHistory = capabilities.has("view_history") && Boolean(onOpenHistory);
   const canSendFeedback = capabilities.has("feedback_unsupported") && Boolean(onFeedbackUnsupported);
+  const canEditPresentation = capabilities.has("edit_presentation") && Boolean(onEditPresentation);
+  const canPin = capabilities.has("pin_result");
+  const pinActions = useResultPinActions("results", { enabled: canPin });
   const showRawAction = !compact && canViewRaw && mode !== "raw";
   const showDetailsAction = !compact && canViewDetails && mode !== "details";
   const [menuOpen, setMenuOpen] = useState(false);
@@ -108,10 +115,23 @@ export function ResultObjectActions({
   const download = downloadLabel ?? t("download");
 
   const renderActions = (openShare?: () => void) => {
-    const hasFileActions = downloadInMenu || canManage || canViewHistory || canSendFeedback || Boolean(openShare);
+    const hasFileActions = downloadInMenu || canManage || canPin || canViewHistory || canSendFeedback || Boolean(openShare);
     const hasMenuActions = hasFileActions || modes.length > 0 || returns.length > 0 || html || showRawAction || showDetailsAction;
     return (
       <>
+        {canEditPresentation && compact ? (
+          <button type="button" className="result-object-actions-trigger" aria-label={t("edit_presentation")} title={t("edit_presentation")}
+            onClick={(event) => onEditPresentation?.(event.currentTarget)}>
+            <Edit size={15} aria-hidden="true" />
+          </button>
+        ) : null}
+        {canEditPresentation && !compact ? (
+          <button type="button" className="result-object-action-primary"
+            onClick={(event) => onEditPresentation?.(event.currentTarget)}>
+            <Edit size={13} aria-hidden="true" />
+            {t("edit_presentation")}
+          </button>
+        ) : null}
         {canReference && !compact ? (
           <button type="button" className="result-object-action-primary" onClick={onReference}>
             <Chat size={13} aria-hidden="true" />
@@ -182,6 +202,15 @@ export function ResultObjectActions({
                     <Folder size={13} aria-hidden="true" />
                     {t("manage_in_files")}
                   </ResultMenuLink>
+                ) : null}
+                {canPin ? (
+                  <ResultMenuButton
+                    disabled={pinActions.isBusy("file", artifactId)}
+                    onSelect={() => void pinActions.toggle("file", artifactId)}
+                  >
+                    <Pin size={13} aria-hidden="true" fill={pinActions.isPinned("file", artifactId) ? "currentColor" : "none"} />
+                    {pinActions.label("file", artifactId)}
+                  </ResultMenuButton>
                 ) : null}
                 {showRawAction ? (
                   <ResultMenuButton onSelect={() => onModeChange?.("raw")}>{t("view_raw")}</ResultMenuButton>

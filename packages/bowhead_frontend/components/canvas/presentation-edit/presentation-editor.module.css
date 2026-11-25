@@ -1,0 +1,278 @@
+/* In-place editing of a deck in the full view (pptx-inline-edit design §7). Tokens only; the page
+   rail, the stage and the inspector rail follow the design canvas "PPT 就地修改 · 交互设计". */
+
+.editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--c-surface);
+}
+
+.head {
+  flex: none;
+  border-bottom: var(--hairline, 1px) solid var(--c-separator);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-2, 6px);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+.closeButton:hover { background: var(--c-fill-1); }
+.closeButton:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+
+.body {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 132px minmax(0, 1fr) 340px;
+}
+
+/* Page rail */
+.rail {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px;
+  overflow-y: auto;
+  border-right: var(--hairline, 1px) solid var(--c-separator);
+  background: var(--c-surface-2);
+}
+.railCount { color: var(--c-ink-3); font-size: 0.75rem; }
+.railList { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.railPage {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 3px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2, 6px);
+  background: var(--c-surface);
+  cursor: pointer;
+}
+.railPage[aria-current="page"] { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent); }
+.railPage:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.railCanvas { display: block; width: 100%; height: auto; border-radius: 3px; background: var(--c-fill-1); }
+.railNumber { position: absolute; left: 6px; bottom: 5px; padding: 0 4px; border-radius: 3px; background: var(--c-surface); color: var(--c-ink-2); font-size: 0.6875rem; }
+.railDot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--c-warn); }
+
+/* Stage */
+.stageColumn { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.pageSwitcher { display: none; align-items: center; justify-content: center; gap: 8px; padding: 8px; color: var(--c-ink-2); font-size: 0.8125rem; }
+.stage { position: relative; display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: hidden; background: var(--c-bg); }
+.stageState { width: min(420px, 90%); }
+.page { position: relative; flex: none; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 8px 24px rgb(0 0 0 / 0.08); background: #fff; }
+.pageCanvas { display: block; width: 100%; height: 100%; }
+.overlay { position: absolute; inset: 0; }
+
+.hit {
+  position: absolute;
+  padding: 0;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.page[data-editing] .hit[data-editable] { border-color: color-mix(in srgb, var(--c-accent) 35%, transparent); }
+.hit:hover, .hit:focus-visible { border-color: var(--c-accent); background: color-mix(in srgb, var(--c-accent) 6%, transparent); outline: none; }
+.hit:not([data-editable]):hover, .hit:not([data-editable]):focus-visible { border-color: var(--c-ink-3); background: color-mix(in srgb, var(--c-ink-3) 6%, transparent); }
+/* Doubled so a selected read-only element keeps its outline under the hover rules. */
+.hit.hit[data-selected] { border: 2px solid var(--c-accent); }
+.hit[data-pending] { border: 2px solid var(--c-warn); background: color-mix(in srgb, var(--c-warn) 8%, transparent); }
+.hit[data-pending][data-selected] { box-shadow: 0 0 0 2px var(--c-accent); }
+@media (hover: none) {
+  .page[data-editing] .hit[data-editable] { border-color: color-mix(in srgb, var(--c-accent) 55%, transparent); }
+}
+
+.callout {
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 4px);
+  max-width: 260px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+  border: 1px solid var(--c-warn);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.updating {
+  position: absolute;
+  border: 2px solid var(--c-accent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
+}
+.updating[data-ready] { background: transparent; border-style: dashed; }
+.updatingBadge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  color: var(--c-accent-text, #fff);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.updatingStatus {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  padding: 4px 10px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.16);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Inspector */
+.inspector {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  overflow-y: auto;
+  border-left: var(--hairline, 1px) solid var(--c-separator);
+}
+.panel { display: flex; flex-direction: column; gap: 12px; }
+.panelHead { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.panelTitle { margin: 0; color: var(--c-ink); font-size: 0.875rem; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.panelHint { margin: 0; color: var(--c-ink-3); font-size: 0.75rem; line-height: 1.5; }
+.panelNote { margin: 0; padding: 8px 10px; border-radius: var(--r-2, 6px); background: var(--c-fill-1); color: var(--c-ink-2); font-size: 0.75rem; line-height: 1.5; }
+.panelKind { display: inline-flex; }
+.panelHeadActions { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; margin-left: -8px; }
+.backButton { align-self: flex-start; }
+.panel > .backButton { margin-left: -8px; }
+.keyboardHint { margin: 4px 0 0; color: var(--c-ink-4); font-size: 0.6875rem; }
+
+.elementList { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: var(--hairline, 1px) solid var(--c-separator); }
+.elementRow {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: var(--hairline, 1px) solid var(--c-separator);
+  background: transparent;
+  color: var(--c-ink);
+  text-align: left;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.elementRow:not([data-editable]) { color: var(--c-ink-3); }
+.elementRow:hover { background: var(--c-fill-1); }
+.elementRow:focus-visible { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.elementName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.elementBadges { display: inline-flex; flex: none; gap: 4px; }
+
+.fields { display: flex; flex-direction: column; gap: 12px; }
+.textArea { width: 100%; min-height: 56px; resize: vertical; font: inherit; font-size: 0.875rem; line-height: 1.5; }
+
+.changes { display: flex; flex-direction: column; gap: 8px; }
+.changesTitle { margin: 4px 0 0; color: var(--c-ink-2); font-size: 0.75rem; font-weight: 600; }
+
+.gridFrame { max-width: 100%; overflow-x: auto; border: 1px solid var(--c-line); border-radius: var(--r-2, 6px); }
+.grid { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.grid th, .grid td { min-width: 72px; padding: 0; border: 1px solid var(--c-line); text-align: left; vertical-align: top; }
+.grid th { padding: 6px 8px; background: var(--c-surface-2); color: var(--c-ink-2); font-weight: 600; white-space: nowrap; }
+.grid td[data-pending] { background: var(--c-warn-soft); }
+.cellInput {
+  width: 100%;
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--c-ink);
+  font: inherit;
+}
+.cellInput:focus { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.cellInput[aria-invalid="true"] { outline: 2px solid var(--c-err); outline-offset: -2px; }
+.lockedCell { padding: 6px 8px !important; background: var(--c-fill-1); color: var(--c-ink-3); }
+.lockedCell > span { display: inline-flex; align-items: center; gap: 4px; }
+
+.plainList { margin: 0; padding-left: 18px; color: var(--c-ink-2); font-size: 0.75rem; line-height: 1.7; }
+
+.guide {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-2, 6px);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.manualList { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.savedActions, .conflictActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.conflictActions .panelHint { flex-basis: 100%; }
+
+/* The inline save bar spans the editor; the full view has no page gutter, so set the bar's own. */
+.footer { flex: none; --page-gutter: 16px; }
+/* Out-ranks the shared `:root:root .ui-savebar.is-inline` margin (0,4,0), whose negative gutter assumes a padded page;
+   the production stylesheet loads after this module, so an equal weight loses. */
+.editor.editor .footer :global(.ui-savebar.is-inline) { margin: 0; }
+.inspector :global(.settings-notice) { margin-bottom: 0; }
+
+/* Below 1200 px the page rail becomes a page switcher; below 1024 px the inspector moves under the stage. */
+@media (max-width: 1199px) {
+  .body { grid-template-columns: minmax(0, 1fr) 320px; }
+  .rail { display: none; }
+  .pageSwitcher { display: flex; }
+}
+@media (max-width: 1023px) {
+  .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(240px, 45%) minmax(0, 1fr); }
+  .inspector { border-left: 0; border-top: var(--hairline, 1px) solid var(--c-separator); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hit { transition: border-color 120ms ease, background-color 120ms ease; }
+}
+
+/* Phones (design §7.3): slides as a list, element list and editors in sheets. */
+.phoneBody { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 16px; padding: 12px 16px 24px; overflow-y: auto; }
+.phonePage { display: flex; flex-direction: column; gap: 8px; }
+.phoneEditPage { width: 100%; min-height: 44px; }
+.phonePending { margin: 0; color: var(--c-warn-ink); font-size: 0.8125rem; }
+.phoneSheet { display: flex; flex-direction: column; gap: 12px; }
+/* 16 px keeps iOS from zooming into a focused field. The shared control size rule
+   `:root:root :is(.settings-input, …, .f-tools .sel:not(.quiet), …)` weighs (0,5,0), so this needs (0,5,1). */
+:global(:root:root) .phoneSheet.phoneSheet.phoneSheet :is(textarea, input) { font-size: 16px; }
+/* The sheet's title already names the element. */
+.phoneSheet .panelTitle { display: none; }
+.phoneSheet .elementRow { min-height: 44px; }
+.phoneSheet .cellInput { min-height: 44px; }
+.phoneSheetFooter { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; }
+.phoneSheetFooter > :global(button) { min-height: 44px; }

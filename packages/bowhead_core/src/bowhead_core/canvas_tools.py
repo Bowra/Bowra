@@ -151,7 +151,7 @@ def register_canvas_tools(registry: ToolRegistry) -> None:
 def _add_chart_schema() -> ToolSchema:
     schema = ToolSchema(
         name="add_chart",
-        description="Present an authorized CSV as a native Table or an explicitly bound plot. Tables default to every original column; exact columns preserve constants and order. Plots require force_kind, exact axes and group_by ([] for no split). Never infer, prune, aggregate, rank or sample content. Check the saved display_receipt before claiming completion.",
+        description="Present an authorized CSV as a native Table or an explicitly bound plot. Tables default to every original column; exact columns preserve constants and order. Plots require force_kind, exact axes and group_by ([] for no split). Never infer, prune, aggregate, rank or sample content. A plot draws every CSV row in its order and has no Top N: save only the rows to show first. Plot limits: bar, hbar, stacked_bar, waterfall, dual_axis and combo 100 categories; pie 12 slices; line and area_stacked 3000 points. Check the saved display_receipt before claiming completion.",
         input_schema={
             "type": "object",
             "required": ["data_artifact_id", "title"],
@@ -577,7 +577,7 @@ async def _draw_chart(
                 )
             else:
                 hint += ' 如果你想引用 <available_refs> 里的 data id, 它必须出现在 <data kind="data" ...> 条目中; 否则请重新调用 `bi_query` 取数.'
-        # ★★ Merely saying the ID is wrong leaves models guessing: 116 t_17e216c2316b guessed **52 times**
+        # ★★ Merely saying the ID is wrong leaves models guessing: an observed execution guessed **52 times**
         # and produced no charts. List this turn's **available data IDs immediately** so it can fix the call in one step;
         # if none exist, explicitly require fetching data first, or it assumes a typo and repeatedly retries.
         hint += _available_data_hint(ctx)
@@ -975,7 +975,7 @@ async def _draw_chart(
     # and **zero** shared titles. Two cases coexist and machines cannot distinguish them (judging title wording is forbidden):
     #   · Redrawing with a different title wastes space;
     #   · A title promising **another cut** while data stays unchanged makes the chart dishonest.
-    # t_650f92d9bbb6 demonstrated the latter: category-revenue month-over-month decline TOP20 and growth TOP20
+    # an observed task demonstrated the latter: category-revenue month-over-month decline TOP20 and growth TOP20
     # used the same artifact/rows, both led by renovation accessories +1308%;
     # the decline ranking plotted growth. Its last-30-day month-over-month change trend also used absolute revenue.
     #
@@ -2973,7 +2973,7 @@ def _parse_csv_with_types(
             except (ValueError, TypeError):
                 out[k] = v
                 continue
-            # 116 1.3.51 t_6acd16abddee: month-over-month change from a zero baseline is inf in pandas and CSV.
+            # 116 1.3.51 an observed task: month-over-month change from a zero baseline is inf in pandas and CSV.
             # int(inf) below raises uncaught OverflowError, failing the entire chart and forcing model filtering/redrawing.
             # Charts cannot plot infinity; treat as missing while retaining numeric column type.
             if not math.isfinite(f_):

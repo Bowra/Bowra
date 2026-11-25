@@ -21,6 +21,8 @@ const api = vi.hoisted(() => ({
   uploadFile: vi.fn(),
 }));
 const handoff = vi.hoisted(() => ({ handoffAttachmentsToNewChat: vi.fn() }));
+const pins = vi.hoisted(() => ({ pinResult: vi.fn() }));
+vi.mock("@/lib/result-pins", async (orig) => ({ ...(await orig<Record<string, unknown>>()), ...pins }));
 
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<Record<string, unknown>>()), ...api }));
 vi.mock("@/lib/composer-handoff", () => handoff);
@@ -74,15 +76,24 @@ describe("文件页行尾「⋯」", () => {
     expect(await screen.findByText(/团队尚未配置并启用知识库嵌入模型/)).toBeTruthy();
   });
 
-  it("row menu lists download, use in new chat | delete; knowledge-base files have no delete", async () => {
+  it("row menu lists download, use in new chat, pin | delete; knowledge-base files have no delete", async () => {
     renderIntl(<FilesPage />);
     const menu = await openRowMenu("九月销售.pdf 的更多操作");
     // Behavior batch B (user decision 2026-09-28): deletion is undoable, without confirmation or “…”.
-    expect(menuItemNames(menu)).toEqual(["下载", "在新会话中使用", "删除"]);
+    expect(menuItemNames(menu)).toEqual(["下载", "在新会话中使用", "置顶", "删除"]);
     expect(within(menu).getByRole("menuitem", { name: "删除" }).className).toContain("is-danger");
     fireEvent.keyDown(menu, { key: "Escape" });
     const kbMenu = await openRowMenu("经营手册.pdf 的更多操作");
-    expect(menuItemNames(kbMenu)).toEqual(["下载", "在新会话中使用"]);
+    expect(menuItemNames(kbMenu)).toEqual(["下载", "在新会话中使用", "置顶"]);
+  });
+
+  it("pin sends the file to the sidebar's pinned group", async () => {
+    pins.pinResult.mockResolvedValue({ kind: "file", pin_id: "f_plain" });
+    renderIntl(<FilesPage />);
+    const menu = await openRowMenu("九月销售.pdf 的更多操作");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "置顶" }));
+    await waitFor(() => expect(pins.pinResult).toHaveBeenCalledWith("file", "f_plain"));
+    expect(api.deleteFile).not.toHaveBeenCalled();
   });
 
   it("use in new chat hands the file to a new chat without deleting it", async () => {

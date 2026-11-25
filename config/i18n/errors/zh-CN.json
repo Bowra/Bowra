@@ -109,6 +109,7 @@
   "client_chunk_load_failed": "页面所需资源未能加载，请刷新页面。",
   "client_refresh_required": "当前页面版本无法安全发起新的发送。请保留草稿并刷新页面。",
   "chart_selection_unavailable": "图表选择已变更或不可用。重新打开图表并选择范围后，再发送保留的草稿。",
+  "presentation_selection_unavailable": "引用的演示文稿元素已变更或不可用。重新打开文件、在编辑里选中这个元素后，再发送保留的草稿。",
   "subagent_draft_unsaved_changes": "右侧有未保存修改。先保存或放弃修改，再发送这条消息；输入内容已保留。",
   "subagent_draft_store_unavailable": "草稿功能暂时不可用（服务可能正在升级），请稍后再试；你的智能体不受影响。",
   "clock_tamper": "服务器时间异常，当前操作暂不可用，请联系系统管理员检查系统时钟。",

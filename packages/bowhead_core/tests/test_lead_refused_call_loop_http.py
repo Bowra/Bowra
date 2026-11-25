@@ -14,7 +14,7 @@ import pytest
 import respx
 from bowhead_core.subagent import PROFILES
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
-from bowhead_router.runtime_notes import RUNTIME_CORRECTION_PREFIX
+from bowhead_router.runtime_notes import RUNTIME_CORRECTION_PREFIX, WITHDRAWN_ANSWER_FACT
 from bowhead_router.types import ToolSchema
 from test_ordinary_lead_question_http import call, response
 from test_reference_http_start import enable_lead_writer, rows, settled
@@ -91,6 +91,8 @@ async def test_lead_answers_without_tools_after_repeated_refusals(http_start: Si
     # Providers may merge adjacent user-role turns; the note keeps its runtime frame.
     notes = [m["content"] for m in final_request["messages"] if m["role"] == "user" and "Do not call any Tool" in (m["content"] or "")]
     assert len(notes) == 1 and RUNTIME_CORRECTION_PREFIX in notes[0], final_request["messages"][-3:]
+    # No answer was rejected here: the Lead's earlier text stays visible, so the note claims no withdrawal.
+    assert WITHDRAWN_ANSWER_FACT not in notes[0]
     assert executed == []
     assert sent.turn.status == "completed", sent.turn.error
     assert sent.turn.final_answer.startswith(ANSWER)

@@ -93,6 +93,7 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "read_report": "lookup",
     "find_results": "lookup",
     "write_report": "write",
+    "remove_report_section": "write",
     # Web
     "web_search": "lookup",
     "web_extract": "lookup",
@@ -184,7 +185,7 @@ def is_canvas_add_tool(tool_name: str) -> bool:
 #: Canvas write tools without `canvas_` prefix that do not add a physical item (canvas-update-turn batch B2-2).
 #: Missing these has the same consequence: revision turns only removing charts keep `_drew_canvas` False ⇒ judged as no deliverable content,
 #: contradicting `canvas_changes.removed_charts` in the same result.
-_UNPREFIXED_CANVAS_EDIT_TOOLS: Final[frozenset[str]] = frozenset({"remove_chart", "edit_chart"})
+_UNPREFIXED_CANVAS_EDIT_TOOLS: Final[frozenset[str]] = frozenset({"remove_chart", "edit_chart", "remove_report_section"})
 
 
 def is_canvas_tool(tool_name: str) -> bool:

@@ -457,21 +457,33 @@ def _position_artifacts(
         # File versions: the store's grouped key and sort tuple are authoritative (key = the file, route = the shown version).
         number = entry.artifact.version_no or 1
         lineage = (number, max(entry.lineage_count, number)) if number > 1 or entry.lineage_count > 1 else None
+        capabilities = projected.capabilities
+        # The owner can list and download the file's versions; a shared report shows only its version.
+        if lineage and lineage[1] > 1 and not report_only and "view_history" not in capabilities:
+            capabilities = (*capabilities, "view_history")
+        if writable and not report_only and _presentation_editable(entry.artifact):
+            capabilities = (*capabilities, "edit_presentation")
         projected = replace(
             projected,
             key=str(entry.sort_tuple[-1]),
             sort_tuple=entry.sort_tuple,
             lineage=lineage,
-            # The owner can list and download the file's versions; a shared report shows only its version.
-            capabilities=(
-                (*projected.capabilities, "view_history")
-                if lineage and lineage[1] > 1 and not report_only and "view_history" not in projected.capabilities
-                else projected.capabilities
-            ),
+            capabilities=capabilities,
         )
         synthetic_before = sum(compare_sort_tuples(item.sort_tuple, projected.sort_tuple) < 0 for item in synthetics)
         out.append(replace(projected, position=entry.position + synthetic_before))
     return out
+
+
+def _presentation_editable(artifact: object) -> bool:
+    """A deck the owner may edit in place (pptx-inline-edit design §6.1); the edit routes re-check it."""
+    from bowhead_core.presentation_edit import feature_enabled, is_presentation
+    from bowhead_core.results_read_model import artifact_kind
+
+    if not feature_enabled() or not is_presentation(getattr(artifact, "mime", None), getattr(artifact, "filename", None)):
+        return False
+    producer = getattr(artifact, "producer_kind", None) or ""
+    return artifact_kind(artifact) in {"deliverable", "user_upload"} and producer not in {"template_document_v1", "template_document_internal_v1"}
 
 
 def _synthetics_after_boundary(

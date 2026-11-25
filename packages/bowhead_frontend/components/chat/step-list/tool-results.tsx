@@ -13,7 +13,7 @@
  * All class/token-driven (consume `.ag-*` / `--c-*`); the v2 replacement for
  * the legacy inline-styled StepContentToolRun + CodeBlock path.
  */
-import { type ReactNode, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import { HighlightedCode } from "@/components/highlighted-code";
 import { Chevron, StatusGlyph, type StepStatus } from "./block-primitives";
@@ -25,6 +25,9 @@ export interface CodeProps {
   lang?: string;
   /** show the streaming caret at the end. */
   caret?: boolean;
+  /** Keep the box exactly this many lines tall, without wrapping long lines: code that is still being written
+   *  then grows inside one height instead of resizing the trace with every new or long line. */
+  fixedLines?: number;
 }
 
 /** chat-ux-2026-08 batch A — collapse beyond this many lines. On 116, one python_sandbox
@@ -32,16 +35,19 @@ export interface CodeProps {
  *  — one major cause of the left column growing to 6664px in a single turn. */
 const CODE_COLLAPSE_LINES = 8;
 
-export function Code({ code, lang, caret }: CodeProps) {
+export function Code({ code, lang, caret, fixedLines }: CodeProps) {
   const tStep = useTranslations("step_list");
   const [showAll, setShowAll] = useState(false);
   // Count string lines instead of measuring DOM: deterministic, testable, independent of fonts/width.
   // Do not collapse while streaming (caret): users are watching output arrive, and truncation is most disruptive then.
-  const collapsible = !caret && code.split("\n").length > CODE_COLLAPSE_LINES;
+  const collapsible = !caret && !fixedLines && code.split("\n").length > CODE_COLLAPSE_LINES;
   const clipped = collapsible && !showAll;
 
   return (
-    <div className={`codewrap${clipped ? " is-clipped" : ""}`}>
+    <div
+      className={`codewrap${clipped ? " is-clipped" : ""}${fixedLines ? " is-fixed" : ""}`}
+      style={fixedLines ? ({ "--code-lines": fixedLines } as CSSProperties) : undefined}
+    >
       <pre className="code">
         {lang ? <span className="lang">{lang}</span> : null}
         <HighlightedCode code={code} lang={lang} />

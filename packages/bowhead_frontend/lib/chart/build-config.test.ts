@@ -179,7 +179,7 @@ describe("source values and readable display magnitudes", () => {
   });
 
   test("an area fills from zero while a line keeps its data range", () => {
-    // 116 1.7.25: a bar switched to an area drew 25–46 on a 20–50 axis, so the fill overstated every difference.
+    // an observed deployment: a bar switched to an area drew 25–46 on a 20–50 axis, so the fill overstated every difference.
     const bins: ChartSpec = { kind: "area_stacked", title: "Primes per bin", row_count: 3,
       columns: [{ key: "bin", header: "Bin", type: "categorical" }, { key: "count", header: "Primes", type: "numeric" }],
       rows: [{ bin: "1-200", count: 46 }, { bin: "201-400", count: 32 }, { bin: "1801-2000", count: 25 }],
@@ -933,6 +933,34 @@ describe("批1 2.2 resolveDataLabels 策略表", () => {
 
   test("默认：单系列 >12 类 → 关（soft guideline）", () => {
     expect(dl(buildChartJSConfig(_oneSeries(20), STUB_THEME as any)).display).toBe(false);
+  });
+
+  // 116 chat: hbars with 13–40 bars showed no values and zero-value hospitals looked like missing data.
+  test.each(["compact", "regular", "wide"] as const)("single-series hbar labels every bar at any count (%s width)", (widthClass) => {
+    const width = { compact: 360, regular: 800, wide: 1200 }[widthClass];
+    const spec = _oneSeries(40, { kind: "hbar" });
+    const renderContext: ChartRenderContext = {
+      ...COMPACT_CONTEXT,
+      bounds: { widthPx: width, heightPx: 600, devicePixelRatio: 2 },
+      input: { hover: true, pointer: "fine", keyboard: true },
+    };
+    const config = buildChartJSConfig(spec, STUB_THEME as any, { renderContext });
+    expect(shown(dl(config).display)).toBe(true);
+  });
+
+  test("hbar keeps the explicit choice and the series rule", () => {
+    expect(dl(buildChartJSConfig(_oneSeries(40, { kind: "hbar", show_data_labels: false }), STUB_THEME as any)).display).toBe(false);
+    const grouped: ChartSpec = {
+      kind: "hbar", title: "grouped",
+      columns: [
+        { key: "cat", header: "品类", type: "categorical" },
+        { key: "a", header: "今年", type: "numeric" },
+        { key: "b", header: "去年", type: "numeric" },
+      ],
+      rows: Array.from({ length: 20 }, (_, i) => ({ cat: `类${i}`, a: i, b: i + 1 })),
+      row_count: 20,
+    };
+    expect(dl(buildChartJSConfig(grouped, STUB_THEME as any)).display).toBe(false);
   });
 
   test("P1-5：spec.show_data_labels 显式值胜出（20 类也开 / 5 类也关）", () => {

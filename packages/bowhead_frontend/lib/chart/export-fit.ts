@@ -1,4 +1,5 @@
 import { pivotLongSpec } from "./pivot-long";
+import { orderedCategories, rowsOfCategories } from "./segments";
 import type { ChartSpec } from "./types";
 
 /** Smallest category pitch at which a horizontal bar's name (11px tick font) and its bar stay legible. */
@@ -24,6 +25,11 @@ export const EXPORT_HBAR_CHROME_PX = 180;
  * persisted chart are not necessarily its top N. Capacity depends on the series count (32 rows for one measure,
  * 19 for three in the current frame).
  *
+ * An explicit chart shows prepared data in its prepared order, so nothing ranks it: the frame keeps its first categories
+ * that fit and marks the spec (`_export_first`) so the subcaption says "the first N of M" (chart display range D5,
+ * 2026-11-23). Before that a 1,082-bar explicit chart was squeezed whole into the frame. The full data stays in the
+ * CSV download.
+ *
  * Returns the spec unchanged when it already fits or is not a horizontal bar.
  */
 export function fitHbarRowsForExport(
@@ -31,13 +37,33 @@ export function fitHbarRowsForExport(
   frameContentHeightPx: number,
   hiddenSeries: readonly string[] = [],
 ): ChartSpec {
-  if (spec.kind !== "hbar" || spec.explicit_presentation) return spec;
+  if (spec.kind !== "hbar") return spec;
   const rows = spec.rows ?? [];
   const hidden = new Set(hiddenSeries);
   const capacityFor = (series: number) => {
     const pitch = EXPORT_HBAR_MIN_ROW_PX + EXPORT_HBAR_EXTRA_SERIES_PX * (Math.max(1, series) - 1);
     return Math.max(1, Math.floor((frameContentHeightPx - EXPORT_HBAR_CHROME_PX) / pitch));
   };
+
+  const binding = spec.explicit_presentation;
+  if (binding) {
+    // As on screen (`hbarSegment`): a presentation plan or analytical profile addresses observations by row.
+    if (spec.presentation_plan !== undefined || spec._export_analytical) return spec;
+    const ordered = orderedCategories(spec);
+    if (!ordered) return spec;
+    // Grouped bars share a category's band: one bar per declared measure and group.
+    const groups = binding.group_by ?? [];
+    const combos = groups.length ? new Set(rows.map((row) => groups.map((key) => String(row[key] ?? "")).join("\u0001"))).size : 1;
+    const capacity = capacityFor((binding.axes?.y?.length ?? 1) * combos);
+    if (ordered.categories.length <= capacity) return spec;
+    const kept = ordered.categories.slice(0, capacity);
+    return {
+      ...spec,
+      rows: rowsOfCategories(spec, ordered.key, new Set(kept)),
+      row_count: Math.max(spec.row_count ?? rows.length, rows.length),
+      _export_first: { shown: kept.length, total: ordered.categories.length },
+    };
+  }
   const magnitude = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.abs(v) : 0);
 
   // Long format (category × series × one value): the renderer pivots it into one bar per category with one segment

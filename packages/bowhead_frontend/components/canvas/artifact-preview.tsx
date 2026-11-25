@@ -50,6 +50,28 @@ import { HtmlPreviewModeControl, useHtmlPreviewMode, type HtmlPreviewMode } from
 import { InPlaceFullView } from "./in-place-full-view";
 import type { HtmlPreviewIssue, InteractiveHtmlDocument } from "@/lib/html-preview-contract";
 import { ResultObjectActions, type CompactResultToolbar } from "./result-object-actions";
+import {
+  clearPresentationHandoff,
+  markPresentationEditing,
+  readPresentationHandoff,
+  stashPresentationHandoff,
+} from "./presentation-edit/handoff";
+import {
+  PresentationEditor,
+  type PresentationEditorExit,
+  type PresentationEditorHandle,
+} from "./presentation-edit/presentation-editor";
+
+/** What the Results viewer gives a deck preview so it can be edited in place (pptx-inline-edit design §7). */
+export interface PresentationEditHost {
+  sessionId: string;
+  /** A Turn of this conversation is running and may save a newer version. */
+  agentRunning?: boolean;
+  /** A save or a move to another version: show `artifactId` next (the viewer reloads its list first), then run `then`. */
+  onOpenVersion: (artifactId: string, then?: () => void) => void;
+  /** Add a reference to one deck element to the Composer (design §6.9). */
+  onReferenceElement?: (reference: import("@/lib/types").AttachmentRef) => void;
+}
 
 export function ArtifactPreview({
   fileId,
@@ -81,6 +103,7 @@ export function ArtifactPreview({
   onContentVersionChanged,
   onOpenFailed,
   onClose,
+  presentationEdit,
 }: {
   fileId: string;
   filename: string;
@@ -111,17 +134,23 @@ export function ArtifactPreview({
   onContentVersionChanged?: () => void;
   onOpenFailed?: (errorClass: ResultsWorkspaceErrorClass) => void;
   onClose?: () => void;
+  presentationEdit?: PresentationEditHost;
 }) {
   const t = useTranslations("artifact_viewer");
   const href = downloadHref ?? appPath(`/api/v1/files/${encodeURIComponent(fileId)}`);
   const rendererHref = contentHref ?? href;
   const profile = profileProp ?? deriveArtifactViewerProfile(mime, filename);
-  const [expanded, setExpanded] = useState(false);
+  // A viewer opened right after a deck edit takes the editor's render and full view (handoff.ts).
+  const [handoff] = useState(() => readPresentationHandoff(fileId));
+  const [expanded, setExpanded] = useState(Boolean(handoff?.expanded));
+  const [editing, setEditing] = useState(Boolean(handoff?.edit));
+  const editorRef = useRef<PresentationEditorHandle>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [imageView, setImageView] = useState<ImageViewState>(DEFAULT_IMAGE_VIEW_STATE);
   const [textView, setTextView] = useState<TextViewState>(DEFAULT_TEXT_VIEW_STATE);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const documentPreviewCacheRef = useRef<DocumentPreviewCache>({});
+  const documentPreviewCacheRef = useRef<DocumentPreviewCache>(handoff?.pdfData ? { pdfData: handoff.pdfData } : {});
+  const mountedFileRef = useRef(fileId);
   const videoPlaybackRef = useRef<VideoPlaybackState>({
     currentTime: 0,
     volume: 1,
@@ -157,6 +186,10 @@ export function ArtifactPreview({
   }, [onOpenFailed, safeHtml.error, safeHtmlActive]);
 
   useEffect(() => {
+    clearPresentationHandoff(fileId);
+    if (mountedFileRef.current === fileId) return;
+    mountedFileRef.current = fileId;
+    setEditing(false);
     setImageView(DEFAULT_IMAGE_VIEW_STATE);
     setTextView(DEFAULT_TEXT_VIEW_STATE);
     documentPreviewCacheRef.current = {};
@@ -246,18 +279,77 @@ export function ArtifactPreview({
       onReload: safeHtmlBody.onReload,
     },
   };
+  // The host stays the one editing started with: a list refresh can drop it (or the capability) for a moment.
+  const editHostRef = useRef(presentationEdit);
+  if (presentationEdit) editHostRef.current = presentationEdit;
+  const editHost = presentationEdit ?? editHostRef.current;
+  const canEditPresentation = pptxPreview && !loading && !error
+    && Boolean(presentationEdit) && Boolean(capabilities?.has("edit_presentation"));
+  // The capability only decides whether Edit is offered; once open, the editor stays until it is left
+  // (the server checks every save again).
+  const editingPresentation = pptxPreview && Boolean(editHost) && editing && expanded;
+  const startEditing = (trigger?: HTMLElement) => {
+    if (!expanded && trigger) returnFocusRef.current = trigger;
+    setExpanded(true);
+    setEditing(true);
+  };
+  const finishEditing = (exit: PresentationEditorExit | null) => {
+    if (!exit) {
+      setEditing(false);
+      return;
+    }
+    if (exit.artifactId === fileId) {
+      setEditing(false);
+      if (exit.close) setExpanded(false);
+      exit.then?.();
+      return;
+    }
+    // The next file opens in a fresh viewer (Results keys viewers by file): hand it the render and the view.
+    // Staying in edit mode until then keeps this file's full view from showing in between.
+    stashPresentationHandoff(exit.artifactId, { pdfData: exit.pdfData, expanded: !exit.close, edit: exit.edit });
+    if (exit.close) {
+      setEditing(false);
+      setExpanded(false);
+    }
+    editHost?.onOpenVersion(exit.artifactId, exit.then);
+  };
+  useEffect(() => {
+    if (!editingPresentation) return;
+    markPresentationEditing(fileId, true);
+    return () => markPresentationEditing(fileId, false);
+  }, [editingPresentation, fileId]);
   const sharedHeaderProps = {
     artifactId: fileId, filename, meta, href, onDownload, capabilities, resultRole, mode,
     downloadLabel, feedbackRecorded, onFeedbackUnsupported,
     compactActions,
+    onEditPresentation: canEditPresentation ? startEditing : undefined,
     onReference: onReference && leaveFullViewThen(onReference),
     onViewerModeChange: compactToolbar && onViewerModeChange ? leaveFullViewThen(onViewerModeChange) : onViewerModeChange,
     onOpenHistory: compactToolbar && onOpenHistory ? leaveFullViewThen(onOpenHistory) : onOpenHistory,
   };
   return (
     <>
-      <InPlaceFullView active={inPlaceFullView && expanded} label={filename}
-        onClose={() => setExpanded(false)} returnFocusRef={returnFocusRef}>
+      <InPlaceFullView active={inPlaceFullView && expanded} label={filename} closeOnEscape={!editingPresentation}
+        onClose={() => {
+          if (editingPresentation) editorRef.current?.requestExit(true);
+          else setExpanded(false);
+        }} returnFocusRef={returnFocusRef}>
+        {editingPresentation && editHost ? (
+          <PresentationEditor
+            ref={editorRef}
+            sessionId={editHost.sessionId}
+            artifactId={fileId}
+            filename={filename}
+            downloadHref={href}
+            initialPdfData={documentPreviewCacheRef.current.pdfData}
+            agentRunning={editHost.agentRunning}
+            onReference={onReference && capabilities?.has("reference_in_chat") ? onReference : undefined}
+            onReferenceElement={editHost.onReferenceElement && capabilities?.has("reference_in_chat")
+              ? editHost.onReferenceElement
+              : undefined}
+            onExit={finishEditing}
+          />
+        ) : <>
         <ArtifactPreviewHeader
           {...sharedHeaderProps}
           compactTitle={inPlaceFullView && expanded ? undefined : compactToolbar?.title}
@@ -271,6 +363,7 @@ export function ArtifactPreview({
           showTitle={showHeaderTitle}
         />
         {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} expanded={inPlaceFullView && expanded} /> : null}
+        </>}
       </InPlaceFullView>
       {expanded && !inPlaceFullView ? (
         <DialogShell
@@ -328,6 +421,7 @@ function ArtifactPreviewHeader({
   fullViewActive = false,
   compactTitle,
   compactActions,
+  onEditPresentation,
 }: {
   artifactId: string;
   filename: string;
@@ -351,6 +445,7 @@ function ArtifactPreviewHeader({
   fullViewActive?: boolean;
   compactTitle?: React.ReactNode;
   compactActions?: React.ComponentProps<typeof ResultObjectActions>["compact"];
+  onEditPresentation?: (trigger?: HTMLElement) => void;
 }) {
   const t = useTranslations("artifact_viewer");
   const expandLabel = t(fullViewActive ? "close" : "open_full");
@@ -399,6 +494,7 @@ function ArtifactPreviewHeader({
               onModeChange={onViewerModeChange}
               onOpenHistory={onOpenHistory}
               onFeedbackUnsupported={onFeedbackUnsupported}
+              onEditPresentation={onEditPresentation}
             />
           ) : (
             <>

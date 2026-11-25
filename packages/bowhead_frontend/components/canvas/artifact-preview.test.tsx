@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import enMessages from "@/messages/en-US.json";
 import zhMessages from "@/messages/zh-CN.json";
 import { ArtifactPreview } from "./artifact-preview";
+import { readPresentationHandoff } from "./presentation-edit/handoff";
 
 const { pdfGetDocument } = vi.hoisted(() => ({
   pdfGetDocument: vi.fn(),
@@ -19,6 +20,26 @@ vi.mock("pdfjs-dist", () => ({
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({
   default: "mock-pdf-worker.js",
 }));
+
+vi.mock("./presentation-edit/presentation-editor", async () => {
+  const { forwardRef } = await import("react");
+  return {
+    PresentationEditor: forwardRef(function EditorStub(props: {
+      artifactId: string;
+      initialPdfData?: ArrayBuffer;
+      onExit: (exit: { artifactId: string; pdfData?: ArrayBuffer; close: boolean } | null) => void;
+    }, _ref) {
+      return (
+        <div data-testid="presentation-editor-stub">
+          {props.artifactId}
+          <button type="button" onClick={() => props.onExit({ artifactId: "art_deck_v2", pdfData: new ArrayBuffer(3), close: false })}>
+            saved
+          </button>
+        </div>
+      );
+    }),
+  };
+});
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
@@ -520,6 +541,40 @@ describe("ArtifactPreview", () => {
       "href",
       "/api/v1/files/art_pdf",
     );
+  });
+
+  it("offers Edit on a deck only to an owner Results viewer with the capability, and opens the saved version", async () => {
+    pdfGetDocument.mockImplementation(() => ({ promise: new Promise(() => undefined), destroy: vi.fn().mockResolvedValue(undefined) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 })));
+    const onOpenVersion = vi.fn();
+    const deck = {
+      fileId: "art_deck",
+      filename: "deck.pptx",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      profile: "pptx" as const,
+      preview: null,
+      resultRole: "deliverable" as const,
+      downloadHref: "/api/v1/files/art_deck",
+    };
+    const { rerender } = render(
+      <ArtifactPreview {...deck} capabilities={new Set(["download"])} presentationEdit={{ sessionId: "s_1", onOpenVersion }} />,
+    );
+    expect(screen.queryByRole("button", { name: "edit_presentation" })).not.toBeInTheDocument();
+
+    rerender(<ArtifactPreview {...deck} capabilities={new Set(["download", "edit_presentation"])} presentationEdit={{ sessionId: "s_1", onOpenVersion }} />);
+    fireEvent.click(screen.getByRole("button", { name: "edit_presentation" }));
+    const editor = await screen.findByTestId("presentation-editor-stub");
+    expect(editor).toHaveTextContent("art_deck");
+    expect(screen.getByRole("dialog", { name: "deck.pptx" })).toContainElement(editor);
+
+    // A Results refresh can drop the capability while the list is located again; the editor stays open.
+    rerender(<ArtifactPreview {...deck} capabilities={new Set(["download"])} presentationEdit={undefined} />);
+    expect(screen.getByTestId("presentation-editor-stub")).toBe(editor);
+
+    fireEvent.click(within(editor).getByRole("button", { name: "saved" }));
+    expect(onOpenVersion).toHaveBeenCalledWith("art_deck_v2", undefined);
+    expect(readPresentationHandoff("art_deck_v2")).toMatchObject({ expanded: true });
+    expect(readPresentationHandoff("art_deck_v2")?.pdfData?.byteLength).toBe(3);
   });
 
   it("reports an unavailable PDF response without misclassifying it as corrupt", async () => {

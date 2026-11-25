@@ -99,7 +99,12 @@ def read_schema() -> ToolSchema:
 def edit_schema() -> ToolSchema:
     return ToolSchema(
         name="edit_chart",
-        description="Edit an existing native chart in place using its current revision and a sparse presentation change. Read the chart first; never supply rows or source bindings. The display receipt reports the saved dimension types, date patterns and known axis scale.",
+        description=(
+            "Edit an existing native chart in place using its current revision and a sparse presentation change. Read the chart first; never supply rows or source bindings. "
+            "Request only changes read_chart lists in allowed_changes, and a kind only from its supported_kinds. area_stacked is the area chart: one measure draws a plain area; only several series stack. "
+            "If a requested change is not offered, do not retry it: say this chart cannot make that change in place, name the changes it offers and leave a new chart to the user's decision; do not add a copy, draw an image or fold the original. "
+            "Changed data, metrics, periods or scope need a new chart from add_chart. The display receipt reports the saved dimension types, date patterns and known axis scale."
+        ),
         input_schema={
             "type": "object",
             "additionalProperties": False,

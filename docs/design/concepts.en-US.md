@@ -20,6 +20,8 @@ A Datarc workspace resolves from the session override, then the user's default, 
 
 A User joins a Team and can access its Spaces through membership and resource grants. A Session contains Turns, events, tool calls, approvals, and references. An Agent declares behavior and resource scope; a Tool performs an operation; a Skill packages methods, references, templates, and scripts. Selecting a resource does not grant permission to use it.
 
+A pin is a personal sidebar shortcut. Pinned conversations, files and reports share the Pinned group. A file pin opens its latest live version and grants no access. Files retained for later turns are shown as Kept in context; a sidebar pin does not add a file to a later request.
+
 An Artifact is the common identity for uploads, tool outputs, deliverables, exports, and captured pages. File management presents these records. A Canvas contains sections and revisions. Sharing grants access to authenticated Team members and does not publish anonymously.
 
 ## Registered ID prefixes

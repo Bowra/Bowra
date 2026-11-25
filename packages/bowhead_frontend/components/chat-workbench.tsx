@@ -49,7 +49,8 @@ import { ComposerRecoveryNotice } from "./chat/composer-recovery-notice";
 import { ToolConfirmationNoticeSlot } from "./chat/tool-confirmation/ToolConfirmationNotice";
 import { PinnedAttachmentsStrip } from "./pinned-attachments";
 import { SplitPane } from "./shell/SplitPane";
-import { FileDown, Maximize, Minimize, MoreH, Trash, X, Caret, Chat, Doc } from "./icons";
+import { FileDown, Maximize, Minimize, MoreH, Pin, Trash, X, Caret, Chat, Doc } from "./icons";
+import { useResultPinActions } from "@/lib/use-result-pin-actions";
 import { useSteerAcks } from "@/lib/use-steer-acks";
 import { useTurnAwaitingPlanApproval } from "@/lib/use-proposed-plan-gate";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -153,6 +154,7 @@ import {
   projectResultsDTO,
   resolveSelectedResult,
   type ArtifactResultRole,
+  type ResultCapability,
   type ResultItem,
 } from "@/lib/results-workspace-model";
 import { useResultsExportVersions } from "@/lib/use-results-export-versions";
@@ -571,6 +573,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // Same pattern: previously, inline `selectVisibleSections(canvas)` in JSX created a new array on every render.
   const exportVisibleSections = useVisibleSections(canvas);
   const hasCanvas = reportSections.length > 0;
+  // Result pins: the report can be pinned wherever Results shows it (owned or shared; reading is enough).
+  const reportPinActions = useResultPinActions("results", { enabled: hasCanvas && Boolean(canvas.canvasId) });
   const reportSessionId = runner.sessionId ?? canvas.sessionId ?? null;
   const [resultsNavigatorQuery, setResultsNavigatorQuery] = useState("");
   const [resultsQuickQuery, setResultsQuickQuery] = useState("");
@@ -1885,6 +1889,14 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     resultsCapabilities.scaleNav,
     resultsSurface,
   ]);
+  // A saved deck edit (or a move to its newer version) opens that version once Results lists it.
+  const openEditedPresentation = useCallback((artifactId: string, then?: () => void) => {
+    void refreshWorkspaceArtifacts("presentation-edited").finally(() => {
+      navigateToResult({ type: "artifact", artifactId, mode: "preview" }, "replace");
+      // After the navigation, so a reference's Composer reveal is not undone by opening the result.
+      then?.();
+    });
+  }, [navigateToResult, refreshWorkspaceArtifacts]);
   const refreshedDocumentReceipt = useRef<string | null>(null);
   useEffect(() => {
     if (!documentResultsRefresh || !resultsWorkspaceEnabled || reportOnly) return;
@@ -2097,6 +2109,15 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && dataFocusArtifactId
     && selectedResult.route.artifactId !== dataFocusArtifactId,
   );
+  // A deck element referenced from the editor: one reference per file, carrying the element (design §6.9).
+  const referencePresentationElement = useCallback((reference: AttachmentRef) => {
+    if (readOnly || reportOnly || !runner.sessionId) return;
+    setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId)
+      ? current.map((ref) => (ref.fileId === reference.fileId ? reference : ref))
+      : [...current, reference]);
+    setChartFollowupReveal((count) => count + 1);
+    toast({ kind: "info", text: resultsT("referenced_in_chat") });
+  }, [readOnly, reportOnly, resultsT, runner.sessionId]);
   const referenceArtifactInChat = useCallback((artifact: ArtifactItem) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
     setResultReferencePrefills((current) => [
@@ -3287,6 +3308,22 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               {t("hdr_copy_perm_link")}
             </WorkbenchMenuItem>
           ) : null}
+          {hasCanvas && canvas.canvasId && !reportEditing ? (
+            <WorkbenchMenuItem
+              onSelect={() => {
+                if (canvas.canvasId && !reportPinActions.isBusy("report", canvas.canvasId)) {
+                  void reportPinActions.toggle("report", canvas.canvasId);
+                }
+              }}
+            >
+              <Pin
+                size={15}
+                className="ws-menu-icon"
+                fill={reportPinActions.isPinned("report", canvas.canvasId) ? "currentColor" : "none"}
+              />
+              {reportPinActions.label("report", canvas.canvasId)}
+            </WorkbenchMenuItem>
+          ) : null}
           {/* The default (active) status shows no toolbar chip, so Mark as Reviewed / Archive live here, as on the
               reports list row "⋯". A non-default status keeps its chip and menu. */}
           {canvas.canvasId && !readOnly && !reportOnly && !reportEditing ? (
@@ -3695,7 +3732,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       }
       onDownloadArtifact={recordResultDownload}
       resultCapabilities={selectedResult?.objectType === "artifact"
-        ? selectedResult.capabilities
+        ? reportOnly ? withoutPin(selectedResult.capabilities) : selectedResult.capabilities
         : undefined}
       resultRole={selectedArtifactRole}
       downloadLabel={selectedResult?.version
@@ -3712,6 +3749,11 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             }
           : undefined}
       onOpenFailed={recordResultOpenFailure}
+      presentationEdit={!readOnly && !reportOnly && runner.sessionId && resultsWorkspaceEnabled ? {
+        agentRunning: Boolean(runner.running),
+        onOpenVersion: openEditedPresentation,
+        onReferenceElement: referencePresentationElement,
+      } : undefined}
     />
   );
   const codeSurface = (
@@ -4196,6 +4238,14 @@ function DisabledMenuItem({ label, reason }: { label: string; reason: string | n
       {reason ? <MenuItemReason id={reasonId}>{reason}</MenuItemReason> : null}
     </>
   );
+}
+
+/** A shared report's files belong to its owner, so its viewer gets no Pin for them (result pins). */
+function withoutPin(capabilities: ReadonlySet<ResultCapability>): ReadonlySet<ResultCapability> {
+  if (!capabilities.has("pin_result")) return capabilities;
+  const next = new Set(capabilities);
+  next.delete("pin_result");
+  return next;
 }
 
 function WorkbenchMenuItem({

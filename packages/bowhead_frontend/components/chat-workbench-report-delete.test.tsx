@@ -15,6 +15,11 @@ const api = vi.hoisted(() => ({
   deleteCanvas: vi.fn(),
   clearCanvas: vi.fn(),
 }));
+const pins = vi.hoisted(() => ({ pinResult: vi.fn() }));
+vi.mock("@/lib/result-pins", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  pinResult: pins.pinResult,
+}));
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -222,5 +227,16 @@ describe("ChatWorkbench report deletion menu items", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(api.clearCanvas).not.toHaveBeenCalled();
+  });
+});
+
+// Result pins (PRD §4.1): the report's own menu pins it to the sidebar by its canvas ID.
+describe("ChatWorkbench report pin", () => {
+  it("pins the open report from the report menu", async () => {
+    pins.pinResult.mockResolvedValue({ kind: "report", pin_id: "cv_1" });
+    renderWorkbench();
+    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "置顶" }));
+    await waitFor(() => expect(pins.pinResult).toHaveBeenCalledWith("report", "cv_1"));
   });
 });

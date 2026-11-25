@@ -263,7 +263,7 @@ async def test_delegated_review_origin_never_bypasses_current_source_access(nati
 
 
 async def test_history_cited_sources_are_checked_once_in_one_batch():
-    """116 1.7.53: a 19-Turn conversation spent 7.4 s before the Lead's first step re-checking each
+    """an observed deployment: a 19-Turn conversation spent 7.4 s before the Lead's first step re-checking each
     cited file per Tool message, each check on a new connection with a rebuilt access context.
     Every distinct file is now read with one get_many and authorized with one batch, and each file
     must still pass the same checks: current access, generation and team."""
@@ -316,3 +316,45 @@ async def test_history_cited_sources_are_checked_once_in_one_batch():
     files["kbf_a"].team_id = "team_other"
     with pytest.raises(KnowledgeAccessError, match="source_changed"):
         await validate_source_messages(ctx, history)
+
+
+@pytest.mark.parametrize("check", ["retained", "cited"])
+async def test_undecided_authorization_is_reported_as_unavailable_not_as_a_changed_source(check):
+    """The gateway authorizer answers None when its own lookup fails. That proved nothing about the
+    file, yet it was reported as knowledge_source_changed, which the history load treats as a
+    definite change. A file that is deleted or re-versioned is still a change either way."""
+    import json
+
+    from bowhead_core.knowledge_source_runtime import validate_source_messages
+    from bowhead_router.types import Message
+
+    file = SimpleNamespace(file_id="kbf_a", team_id="team_5", scope="space", scope_id="ws_42", soft_deleted_at=None, active_generation_id="gen_1")
+
+    async def get_many(ids, **_options):
+        return [file] if "kbf_a" in ids else []
+
+    authorizer = AsyncMock(return_value=True)
+    authorizer.batch = AsyncMock(return_value=None)
+    ctx = _make_ctx(kb_files_store=SimpleNamespace(get_many=get_many), kb_file_authorizer=authorizer)
+    ctx.knowledge_scope = None
+    ctx.knowledge_source_uses = {}
+
+    async def check_sources():
+        if check == "retained":
+            await validate_retained_sources(ctx, {"kbf_a": "gen_1"})
+        else:
+            evidence = {"schema_version": 1, "sources": {"kbf_a": "gen_1"}}
+            await validate_source_messages(ctx, [Message(role="tool", tool_call_id="c", content=json.dumps({"knowledge_provenance": evidence}))])
+
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_authorization_unavailable"):
+        await check_sources()
+    file.active_generation_id = "gen_2"
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_changed"):
+        await check_sources()
+    file.active_generation_id, file.soft_deleted_at = "gen_1", "2026-11-23T04:03:04+00:00"
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_changed"):
+        await check_sources()
+    file.soft_deleted_at = None
+    authorizer.batch.return_value = {"kbf_a": False}
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_changed"):
+        await check_sources()

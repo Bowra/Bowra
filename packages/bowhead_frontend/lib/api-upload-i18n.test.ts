@@ -27,6 +27,17 @@ describe("validateUpload", () => {
     expect(validateUpload(file("a.csv", "text/csv"))).toBeNull();
   });
 
+  it("tells the user which format to save a legacy Office file as", () => {
+    document.documentElement.lang = "zh-CN";
+    expect(validateUpload(file("计划.ppt", "application/vnd.ms-powerpoint"))).toEqual({
+      kind: "unsupported",
+      message: "无法读取旧版 Office 格式（.ppt）。请在 PowerPoint、Word 或 WPS 中另存为 .pptx 后重新上传。",
+    });
+    expect(validateUpload(file("Memo.DOC", ""))?.message).toContain(".docx");
+    expect(validateUpload(file("deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"))).toBeNull();
+    expect(validateUpload(file("sheet.xls", "application/vnd.ms-excel"))).toBeNull();
+  });
+
   it.each(["en-US", "de-DE", "fr-FR"] as const)("does not fall back to Chinese in %s", (locale) => {
     document.documentElement.lang = locale;
     const issues = [
@@ -34,11 +45,13 @@ describe("validateUpload", () => {
       validateUpload(file("a.exe", "application/x-msdownload")),
       validateUpload(file("a.exe", "")),
       validateUpload(file("README", "")),
+      validateUpload(file("deck.ppt", "application/vnd.ms-powerpoint")),
     ];
-    expect(issues.map((issue) => issue?.kind)).toEqual(["size", "unsupported", "unsupported", "unsupported"]);
+    expect(issues.map((issue) => issue?.kind)).toEqual(["size", "unsupported", "unsupported", "unsupported", "unsupported"]);
     for (const issue of issues) expect(issue?.message).not.toMatch(/\p{Script=Han}/u);
     expect(issues[0]?.message).toContain("2.0GB");
     expect(issues[1]?.message).toContain("application/x-msdownload");
+    expect(issues[4]?.message).toContain(".pptx");
   });
 });
 

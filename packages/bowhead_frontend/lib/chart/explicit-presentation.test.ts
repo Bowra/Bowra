@@ -66,13 +66,36 @@ describe("saved explicit presentation", () => {
     expect(normalizeChartForRenderingV1(spec).spec.rows).toEqual(spec.rows);
   });
 
-  it("exports every explicit horizontal bar instead of selecting by magnitude", () => {
+  it("exports the first explicit horizontal bars that fit, in prepared order, never by magnitude", () => {
+    const spec = plot();
+    spec.kind = "hbar";
+    // Values grow with the index: a magnitude ranking would keep the last bars.
+    spec.rows = Array.from({ length: 45 }, (_, index) => ({ decile: String(index), region: "South", count: index }));
+    spec.row_count = 45;
+    // (400 − 180 chrome) / 18 px per bar = 12 bars fit.
+    const fitted = fitHbarRowsForExport(spec, 400);
+    expect(fitted.rows!.map((row) => row.decile)).toEqual(Array.from({ length: 12 }, (_, index) => String(index)));
+    expect(fitted.row_count).toBe(45);
+    expect(fitted._export_first).toEqual({ shown: 12, total: 45 });
+    expect(fitted._export_top).toBeUndefined();
+    expect(buildChartJSConfig(fitted, resolveChartTheme()).data.labels).toHaveLength(12);
+  });
+
+  it("exports an explicit horizontal bar that fits unchanged", () => {
+    const spec = plot();
+    spec.kind = "hbar";
+    spec.rows = Array.from({ length: 12 }, (_, index) => ({ decile: String(index), region: "South", count: index }));
+    spec.row_count = 12;
+    expect(fitHbarRowsForExport(spec, 400)).toBe(spec);
+  });
+
+  it("exports an explicit horizontal bar with a presentation plan whole, as its notes address rows", () => {
     const spec = plot();
     spec.kind = "hbar";
     spec.rows = Array.from({ length: 45 }, (_, index) => ({ decile: String(index), region: "South", count: index }));
     spec.row_count = 45;
+    spec.presentation_plan = {} as ChartSpec["presentation_plan"];
     expect(fitHbarRowsForExport(spec, 400)).toBe(spec);
-    expect(buildChartJSConfig(spec, resolveChartTheme()).data.labels).toHaveLength(45);
   });
 });
 

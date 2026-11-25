@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { scrollToArtifact } from "@/lib/artifact-chip";
@@ -329,20 +329,26 @@ export interface LeadNarrativeProps {
 // the complete tag regardless of how it streamed — mirrors the backend's
 // `_POST_HOC_SANITIZE_RE` (response_kind_scanner.py:130). See
 // [[feedback_llm_internal_syntax_unreliable]].
+// Misspelled headline tags keep the `line` ending (healine, hedline, handline,
+// headerline, ...): one to six letters before `line` count, as in the backend's
+// `_HEADLINE_NAME`.
 const _INTERNAL_MARKER_RE =
-  /(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*<\/\s*response_kind\s*>|<\s*(?:headline|healine)\s*>[^\n]{0,200}?<\/\s*(?:headline|healine)\s*>/gi;
+  /(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*<\/\s*response_kind\s*>|<\s*[a-z]{1,6}line\s*>[^\n]{0,200}?<\/\s*[a-z]{1,6}line\s*>/gi;
 // Mid-stream: an opened-but-not-yet-closed marker at the tail (e.g. `<headline>导`).
-const _DANGLING_MARKER_RE = /<\s*(?:response_kind|headline|healine)\s*>[^<\n]{0,200}$/i;
+const _DANGLING_MARKER_RE = /<\s*(?:response_kind|[a-z]{1,6}line)\s*>[^<\n]{0,200}$/i;
 
 /** Exported so narrative/answer dedup compares the same prose the user sees. */
 export function stripInternalMarkers(text: string): string {
-  if (!text || (!text.includes(">") && !text.toLowerCase().includes("headline"))) {
+  if (!text || !text.includes(">")) {
     return text;
   }
   return text.replace(_INTERNAL_MARKER_RE, "").replace(_DANGLING_MARKER_RE, "");
 }
 
-export function LeadNarrative({
+// Memoized: while a reply streams, every text delta renders the whole conversation again, and rendering a block
+// parses its Markdown from the start. A block whose props did not change (an earlier Turn's text, the reply a
+// review sent back, the lead-in) is skipped, so one delta costs the growing block and not every block on the page.
+export const LeadNarrative = memo(function LeadNarrative({
   text,
   isStreaming = false,
   size = 15,
@@ -364,7 +370,7 @@ export function LeadNarrative({
     return renderStreaming(clean, size, lang);
   }
   return renderFinalized(clean, size, renderFigureSlot, lang);
-}
+});
 
 // Streaming and completion **share one** `<Markdown>` renderer (live == persist == replay).
 //

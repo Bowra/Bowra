@@ -431,7 +431,7 @@ async def test_summary_succeeded_with_warnings_on_caveats() -> None:
 def _empty_payload_result() -> SubagentResult:
     """peer 走完了但什么也没取到：如实写了 exec_summary，三个计数全 0。
 
-    这是 `t_30eb9e8320d6` 的真实形状（三条 bi_query 全失败：1 次 60s 超时 + 2 次
+    这是 `an observed task` 的真实形状（三条 bi_query 全失败：1 次 60s 超时 + 2 次
     tool_exception），照抄下来当 fixture。
     """
     return SubagentResult(
@@ -466,7 +466,7 @@ async def _spawn(result: SubagentResult) -> dict:
 
 @pytest.mark.unit
 async def test_empty_payload_never_claims_a_report_was_delivered() -> None:
-    """★★116 生产实测（2026-08-25 `t_30eb9e8320d6`）：接口对 Lead 说了假话。
+    """★★116 生产实测（2026-08-25 `an observed task`）：接口对 Lead 说了假话。
 
     peer 三条取数全失败、如实把 exec_summary 写成「数据查询超时」，canvas 也如实渲了；
     可给 Lead 的工具结果照样说「已通过 subagent_return 交了结构化报告 payload，
@@ -663,7 +663,7 @@ async def test_empty_payload_facts_do_not_say_success() -> None:
 async def test_empty_payload_does_not_echo_an_assertive_title() -> None:
     """★ `payload_summary.title` 是 peer 写的**意图**标题，不是已达成的事实。
 
-    `t_f81fec522d27` 实测回的是「各品牌退款率排名（前 20）」——而那个排名根本不存在，
+    `an observed task` 实测回的是「各品牌退款率排名（前 20）」——而那个排名根本不存在，
     标题本身就是一句交付断言，摆在 `insights_count: 0` 旁边只会盖过它。
     """
     res = await _spawn(
@@ -795,7 +795,7 @@ _REAL_BAIL_MESSAGE = (
 
 
 def _bail_result(kind: str = "domain_mismatch", message: str = _REAL_BAIL_MESSAGE) -> SubagentResult:
-    """t_1ee75cbfb876 里 peer 真发出去的那份 payload（照抄形状）。"""
+    """an observed task 里 peer 真发出去的那份 payload（照抄形状）。"""
     return SubagentResult(
         profile="compute",
         subagent_id="x",
@@ -819,7 +819,7 @@ async def test_bail_envelope_reaches_the_lead_in_loop() -> None:
 @pytest.mark.unit
 async def test_bail_reason_fills_the_field_the_directive_points_at() -> None:
     """★ directive 写着「原因照抄 payload_summary.exec_summary」——bail 时那个字段
-    必须真有东西，否则这句指令指向一个空字段（原样复现了 t_1ee75cbfb876）。"""
+    必须真有东西，否则这句指令指向一个空字段（原样复现了 an observed task）。"""
     res = await _spawn(_bail_result())
     assert res["payload_summary"]["exec_summary"] == _REAL_BAIL_MESSAGE
     assert "原因照抄" in res["directive"]

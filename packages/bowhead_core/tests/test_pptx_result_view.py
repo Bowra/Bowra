@@ -307,6 +307,48 @@ def test_without_a_template_layout_facts_are_absolute_and_sizes_are_not_compared
     assert all("template" not in fact["detail"] for fact in view["layout"]["facts"])
 
 
+def test_text_drawn_in_the_colour_behind_it_is_stated_relative_to_the_template():
+    """an observed execution: a cover title was set to the cover's own purple and could not be seen."""
+    view = inspect_pptx(
+        _layout("contrast-filled.pptx"), _layout("contrast-template.pptx"), _layout("contrast-filled.pdf"), _layout("contrast-template.pdf")
+    )
+    faint = [fact["detail"] for fact in view["layout"]["facts"] if fact["kind"] == "low_contrast_text"]
+    assert faint == [
+        "slide 1: text of 'Cover title' is drawn in #503391 on #503291 behind it (contrast 1.0:1), so it barely shows; "
+        "in the template it is readable."
+    ]
+    # Readable text (white on the same purple, black on white) and the template's own render state nothing.
+    template = inspect_pptx(_layout("contrast-template.pptx"), None, _layout("contrast-template.pdf"), None)
+    assert template["layout"]["facts"] == []
+    alone = inspect_pptx(_layout("contrast-filled.pptx"), None, _layout("contrast-filled.pdf"), None)
+    assert [fact["kind"] for fact in alone["layout"]["facts"]] == ["low_contrast_text"]
+    assert "template" not in alone["layout"]["facts"][0]["detail"]
+
+
+def test_slides_whose_master_the_presentation_does_not_list_are_stated():
+    """an observed execution: a merge copied another deck's master into the package without listing it."""
+    import re
+    import zipfile
+
+    source = io.BytesIO(_layout("contrast-filled.pptx"))
+    out = io.BytesIO()
+    with zipfile.ZipFile(source) as before, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as after:
+        for item in before.infolist():
+            data = before.read(item.filename)
+            if item.filename == "ppt/presentation.xml":
+                data = re.sub(rb"<p:sldMasterIdLst>.*?</p:sldMasterIdLst>", b"<p:sldMasterIdLst/>", data, flags=re.S)
+            after.writestr(item, data)
+    facts = inspect_pptx(out.getvalue(), None, None, None)["facts"]
+    assert {
+        "kind": "unlisted_master",
+        "detail": (
+            "slides 1, 2 use a layout of the slide master ppt/slideMasters/slideMaster1.xml, which ppt/presentation.xml does not list "
+            "among its slide masters (p:sldMasterIdLst)."
+        ),
+    } in facts
+    assert not [fact for fact in inspect_pptx(_layout("contrast-filled.pptx"), None, None, None)["facts"] if fact["kind"] == "unlisted_master"]
+
+
 def test_layout_facts_are_capped_and_an_unreadable_render_keeps_the_file_facts(monkeypatch):
     monkeypatch.setattr(pptx_result_view, "_MAX_LAYOUT_FACTS", 2)
     capped = inspect_pptx(_layout("filled.pptx"), None, _layout("filled.pdf"), None)["layout"]
@@ -358,6 +400,99 @@ async def test_a_template_is_rendered_once_for_the_files_written_from_it(monkeyp
     template = _layout("template.pptx")
     assert await pptx_result_view._template_render(template) == await pptx_result_view._template_render(template)
     assert calls == [len(template)]
+
+
+def _filled(slide, name, left, top, width, height, color, *, shape_type=None, alpha=None):
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.oxml.ns import qn
+
+    shape = slide.shapes.add_shape(shape_type or MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+    shape.name = name
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = RGBColor.from_string(color)
+    if alpha is not None:
+        from lxml import etree
+
+        etree.SubElement(shape._element.spPr.find(qn("a:solidFill"))[0], qn("a:alpha"), val=str(alpha))
+    return shape
+
+
+def _covered(view) -> list[str]:
+    return [fact["detail"] for fact in view["facts"] if fact["kind"] == "covered"]
+
+
+def test_shapes_under_an_opaque_rectangle_drawn_after_them_are_stated():
+    """an observed execution: two colour bands inserted below a full-slide cream rectangle on a cover."""
+    from pptx.enum.shapes import MSO_SHAPE
+
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    _filled(slide, "Band", 0, 7.0, 10, 0.4, "E08A4E")
+    _filled(slide, "Bar", 0, 0, 0.5, 7.5, "C8622F")
+    _filled(slide, "Cream", 0, 0, 10, 7.5, "FBF3E4")
+    label = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(3), Inches(1))
+    label.text_frame.text = "Title"
+    # Neither an oval nor a translucent rectangle hides what lies inside its box.
+    hint = slide.shapes.add_textbox(Inches(6), Inches(3), Inches(1), Inches(0.4))
+    hint.text_frame.text = "Note"
+    _filled(slide, "Circle", 5.5, 2.5, 2, 1.5, "FFAA00", shape_type=MSO_SHAPE.OVAL)
+    _filled(slide, "Glass", 5.5, 2.5, 2, 1.5, "FFFFFF", alpha=40000)
+    assert _covered(inspect_pptx(_saved(presentation))) == [
+        "slide 1: 'Band' (id 2) and 'Bar' (id 3) lie entirely under 'Cream' (id 4), which is drawn after them with an opaque fill, "
+        "so they cannot be seen."
+    ]
+    # Moving the cream rectangle to the back leaves nothing covered.
+    tree = slide.shapes._spTree
+    cream = next(shape._element for shape in slide.shapes if shape.name == "Cream")
+    tree.remove(cream)
+    tree.insert(2, cream)
+    assert _covered(inspect_pptx(_saved(presentation))) == []
+
+
+def test_with_a_template_only_cover_pairs_it_does_not_have_are_stated():
+    template_deck = Presentation()
+    slide = template_deck.slides.add_slide(template_deck.slide_layouts[6])
+    _filled(slide, "Track", 1, 1, 4, 0.3, "E4E8EF")
+    _filled(slide, "Progress", 1, 1, 4, 0.3, "2A9D8F")
+    template = _saved(template_deck)
+    assert _covered(inspect_pptx(template)) == [
+        "slide 1: 'Track' (id 2) lies entirely under 'Progress' (id 3), which is drawn after it with an opaque fill, so it cannot be seen."
+    ]
+    edited = Presentation(io.BytesIO(template))
+    slide = edited.slides[0]
+    _filled(slide, "Accent", 6, 1, 3, 0.1, "1F4E79")
+    _filled(slide, "Card", 6, 1, 3, 4, "F4F6F8")
+    assert _covered(inspect_pptx(_saved(edited), template)) == [
+        "slide 1: 'Accent' (id 4, added) lies entirely under 'Card' (id 5, added), which is drawn after it with an opaque fill, so it cannot be seen."
+    ]
+
+
+def test_a_rectangle_over_the_whole_slide_names_the_layout_pictures_it_hides():
+    from PIL import Image
+    from pptx.opc.constants import RELATIONSHIP_TYPE
+    from pptx.oxml.ns import qn
+
+    presentation = Presentation()
+    layout = presentation.slide_layouts[6]
+    slide = presentation.slides.add_slide(layout)
+    png = io.BytesIO()
+    Image.new("RGB", (4, 4), "purple").save(png, format="PNG")
+    picture = slide.shapes.add_picture(png, Inches(0.2), Inches(6.5), Inches(1), Inches(0.5))
+    picture.name = "Logo"
+    # Move the picture onto the layout, as a brand mark of the template.
+    image_part = slide.part.related_part(picture._element.blip_rId)
+    element = picture._element
+    element.getparent().remove(element)
+    element.blipFill.find(qn("a:blip")).set(qn("r:embed"), layout.part.relate_to(image_part, RELATIONSHIP_TYPE.IMAGE))
+    layout.shapes._spTree.append(element)
+    _filled(slide, "Cream", 0, 0, 10, 7.5, "FBF3E4")
+    assert _covered(inspect_pptx(_saved(presentation))) == [
+        "slide 1: 'Cream' (id 2) covers the whole slide with an opaque fill, so the picture of its layout and slide master ('Logo') "
+        "does not show on this slide."
+    ]
+    slide._element.set("showMasterSp", "0")
+    assert _covered(inspect_pptx(_saved(presentation))) == []
 
 
 def test_a_chart_cache_with_points_past_its_declared_count_is_stated():

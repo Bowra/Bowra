@@ -13,8 +13,8 @@ type Kind = ChartSpec["kind"];
 /** Category-axis kinds that read one binding and its prepared rows the same way (`_EXPLICIT_SWITCH_KINDS`). */
 const SWITCH_KINDS: readonly Kind[] = ["line", "bar", "hbar", "area_stacked", "stacked_bar"];
 
-/** Native drawing limits from `bowhead_core/chart/validation.py`; a horizontal bar has no axis-slot limit. */
-const MAX_AXIS_SLOTS: Partial<Record<Kind, number>> = { line: 3000, area_stacked: 3000, bar: 1000, stacked_bar: 1000 };
+/** Native drawing limits from `bowhead_core/chart/validation.py`: every bar kind 100 categories, lines 3,000 points. */
+const MAX_AXIS_SLOTS: Partial<Record<Kind, number>> = { line: 3000, area_stacked: 3000, bar: 100, hbar: 100, stacked_bar: 100 };
 const MAX_DRAWN_SERIES = 100;
 const MAX_DRAWN_SHAPE_BYTES = 30_000;
 

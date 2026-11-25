@@ -292,8 +292,14 @@ export function onSectionPatched(p: {
   });
 }
 
-// chat-solidify 2026-07-03: removed onSectionRemoved — sole caller was dead event
-// canvas.section_removed canvas-sse handler (backend emits zero).
+/** A section deleted on the server (remove_report_section): drop it from the Canvas. */
+export function onSectionRemoved(p: { section_id: string }): void {
+  if (!p.section_id) return;
+  setState((s) => ({
+    ...s,
+    sections: s.sections.filter((sec) => (sec as unknown as { id: string }).id !== p.section_id),
+  }));
+}
 
 /**
  * D6 (canvas-empty bug 2026-05-25): backend marked these sections hidden

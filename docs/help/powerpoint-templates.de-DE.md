@@ -6,7 +6,7 @@ Verwende eine vorhandene PPTX, wenn du die Folienstruktur beibehalten und bestim
 
 ## Anfrage senden
 
-1. Hänge die PPTX im Chat an oder benenne eine PPTX, die in der Unterhaltung bereits verfügbar ist. Bei mehreren Dateien benenne Vorlage und Datenquelle getrennt.
+1. Hänge die PPTX im Chat an oder benenne eine PPTX, die in der Unterhaltung bereits verfügbar ist. Bei mehreren Dateien benenne Vorlage und Datenquelle getrennt. Alte .ppt-Dateien können nicht gelesen werden; speichere sie zuerst in PowerPoint oder WPS als .pptx.
 2. Gib an, welche Folien, Texte, Tabellen oder Diagramme geändert werden sollen und welche Teile erhalten bleiben sollen. Gib die neuen Werte an oder nenne die verbundene Datenquelle und den Berichtszeitraum. Beispiel „Aktualisiere Folien 3–5 in Quartalsbericht.pptx mit den Oktoberumsätzen aus Umsatz.xlsx. Behalte Reihenfolge, Layout und übrige Folien bei.“
 3. Beantworte Rückfragen von Bowra auf der jeweiligen Fragekarte. Wenn Beispielzahlen zulässig sind, sage das ausdrücklich und prüfe anschließend, welche Werte die Antwort als Beispiele kennzeichnet.
 

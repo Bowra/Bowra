@@ -35,7 +35,15 @@ from bowhead_core.agent_dependency_compiler import ExactSkillGrant, _revision_to
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef, _bounded_json
 from bowhead_core.skill_instance_store import SkillInstanceStore
-from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadResolutionError, SkillReadSourceProof, SkillReadSourceResolver
+from bowhead_core.skill_package_material import SkillPackageMaterialError
+from bowhead_core.skill_read_resolution import (
+    SOURCE_CHANGED,
+    ResolvedSkillPackage,
+    SkillReadResolutionError,
+    SkillReadSourceProof,
+    SkillReadSourceResolver,
+    repeat_once_if_source_changed,
+)
 from bowhead_core.skill_reference_metadata import BuiltinSkillMetadata, BuiltinSkillMetadataIndex, _package_revision
 from bowhead_core.user_store import UserStore
 from bowhead_skill.catalog import SkillCatalog, builtin_catalog_dir
@@ -162,7 +170,9 @@ class _Material:
             try:
                 await self.sources.revalidate(self.proof)
             except SkillReadResolutionError as exc:
-                raise SkillUnavailableError(_resolution_denial(exc, self.proof.name, tool_name)) from None
+                if str(exc) != SOURCE_CHANGED:
+                    raise SkillUnavailableError(_resolution_denial(exc, self.proof.name, tool_name)) from None
+                await self._check_again(tool_name)
             if getattr(ctx, "reference_helper_skill_scope", None) is not None:
                 await ctx.ensure_reference_skill_context()
         else:
@@ -179,6 +189,31 @@ class _Material:
             denial := skill_script_runtime_denial(self.proof.name, uploaded=self.source_kind != "builtin", command=bool(arguments.get("command")))
         ):
             raise SkillUnavailableError(denial)
+
+    async def _check_again(self, tool_name: str) -> None:
+        """Check this exact source once more under the state that replaced the proof's.
+
+        A proof records the Team policy epoch and the caller's access as they were
+        read at capture. Any group or role edit in the Team moves the epoch, so
+        every later comparison fails although this Skill and the caller's use of
+        it may be unchanged: on 116 (2026-11-23) an Agent's python_sandbox call
+        was refused in the second another session added and removed a group
+        member. The full resolution runs again for the same resource and version:
+        status, approval, visibility and use are read now, and the package must
+        still match the captured revision, so the bytes that run are the ones
+        checked. Only a passing check replaces the proof; a lasting change fails
+        with its own reason.
+        """
+        try:
+            package = await self.sources.prepare_runtime_package(self.proof.resource, scope=self.proof.scope)
+        except SkillReadResolutionError as exc:
+            raise SkillUnavailableError(_resolution_denial(exc, self.proof.name, tool_name)) from None
+        except SkillPackageMaterialError:
+            raise SkillUnavailableError(_denied(self.proof.name, tool_name)) from None
+        current = package.proof
+        if (current.name, current.resource, current.scope) != (self.proof.name, self.proof.resource, self.proof.scope):
+            raise SkillUnavailableError(_denied(self.proof.name, tool_name))
+        self.proof = current
 
 
 async def execute_assigned_skill(handler: Callable[..., Awaitable[Any]], arguments: dict, ctx: Any, *, catalog: SkillCatalog, tool_name: str) -> Any:
@@ -250,7 +285,7 @@ async def execute_assigned_skill(handler: Callable[..., Awaitable[Any]], argumen
             db_path, access_factory=access_factory, builtin_index=lambda: index, builtin_root=root, honor_member_preference=False
         )
         resource = SkillResourceRef(kind="skill", source_kind=grant.kind, id=grant.id, version=revision)
-        package = await sources.prepare_runtime_package(resource, scope=scope)
+        package = await repeat_once_if_source_changed(lambda: sources.prepare_runtime_package(resource, scope=scope))
         if package.proof.name != name:
             return _denied(name, tool_name)
         files = package.material.files()

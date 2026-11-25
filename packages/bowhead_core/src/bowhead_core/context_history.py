@@ -117,6 +117,25 @@ async def run_context_lead(ctx, binding, operation):
             logging.getLogger(__name__).exception("context.lead_execution_settlement_failed execution=%s", binding.execution_id)
 
 
+def _snapshot_retained_proofs(ctx) -> list[tuple[dict, dict]]:
+    """Copy every map that history validation can add retained source proofs to."""
+    maps = [
+        getattr(ctx, "knowledge_source_uses", None),
+        getattr(ctx, "knowledge_navigation_uses", None),
+        *(getattr(ctx, "knowledge_source_ancestors", None) or ()),
+        *(getattr(ctx, "knowledge_navigation_ancestors", None) or ()),
+        getattr(getattr(ctx, "ordinary_lead_state", None), "knowledge_sources", None),
+    ]
+    return [(values, dict(values)) for values in maps if isinstance(values, dict)]
+
+
+def _restore_retained_proofs(snapshot: list[tuple[dict, dict]]) -> None:
+    # In place: ancestors and helper contexts hold references to the same maps.
+    for values, saved in snapshot:
+        values.clear()
+        values.update(saved)
+
+
 async def load_conversation_context(ctx) -> ConversationContext:
     """Use the original worker and current source readers; no Agent is admitted here."""
     worker = context_owner(ctx)
@@ -159,8 +178,10 @@ async def load_conversation_context(ctx) -> ConversationContext:
             generation, through = head
             if through >= before:
                 raise ContextStoreError("context_history_cursor_changed")
+            from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
             from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
 
+            retained_before = _snapshot_retained_proofs(ctx)
             try:
                 graph = await read_context_graph_in_tx(
                     db,
@@ -172,18 +193,25 @@ async def load_conversation_context(ctx) -> ConversationContext:
                     validate_sources=authorize,
                     projection_only=True,
                 )
-            except OrdinaryContinuationUnavailable as exc:
+            except (OrdinaryContinuationUnavailable, KnowledgeAccessError) as exc:
+                # An authorization outage or malformed provenance proves nothing about
+                # the source; it fails this Turn and leaves the head for a retry.
+                if isinstance(exc, KnowledgeAccessError) and exc.code != "knowledge_source_changed":
+                    raise
                 # A source an earlier Turn used is deleted, changed or no longer
                 # authorized. Its content must not reach the model, but the
                 # conversation continues: rebuild history from Turn summaries and
                 # let this Turn's publication replace the head without inheriting it.
+                # Proofs that earlier generations of the discarded head recorded on
+                # this Turn's context are dropped with it.
                 from bowhead_core.ordinary_lead_runtime import capture_failure_site
 
+                _restore_retained_proofs(retained_before)
                 logging.getLogger(__name__).info(
                     "context_history.head_unavailable session=%s turn=%s condition=%s failure_site=%s",
                     worker.session_id,
                     worker.turn_id,
-                    exc.condition,
+                    exc.code if isinstance(exc, KnowledgeAccessError) else exc.condition,
                     capture_failure_site(exc),
                 )
                 replaced, generation, through = generation, None, 0

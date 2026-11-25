@@ -37,7 +37,7 @@ ChromaDB has unresolved upstream dependency advisories. See the [current assessm
 
 ## Current source snapshot
 
-**Bowra 1.7.64** refines selected results, credit feedback, chart inputs, and Skill script execution. [Release notes](docs/help/release-notes/releases/v1.7.64.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
+**Bowra 1.7.73** adds personal sidebar pins for files and reports, faster long conversations, chart pagination, and more reliable report revisions. [Release notes](docs/help/release-notes/releases/v1.7.73.en-US.md) · [Upgrade instructions](deploy/README.md#upgrade-an-existing-installation)
 
 SQLite upgrades coordinate twelve database files. Stop every writer and preserve instance keys, databases and objects before upgrading. Automatic migration backups cover registered SQLite files and layout metadata; keep complete recovery snapshots separately. Restoring a snapshot from before account deletion can restore that account. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

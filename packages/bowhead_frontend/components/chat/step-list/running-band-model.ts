@@ -65,6 +65,9 @@ const INTERNAL_TOKENS: readonly RegExp[] = [
   //     the **existing** `tool-catalog` copy `整理结果 / Collect results` (via i18n).
   //   ★ Another specified-but-unimplemented case: human-readable catalog copy existed but backend headings shadowed it.
   /子\s*agent\s*交付/,
+  // The same heading after the 2026-09-20 rename (tool_aliases `subagent_return.display_zh`): the band read
+  // "正在智能体完成" on an observed deployment. Only the bare heading; "智能体完成（3 次工具 / …）" is a summary and stays.
+  /^\s*智能体完成\s*$/,
   /\bprofile\s*[:=]/i,
 ];
 
@@ -81,7 +84,11 @@ const INTERNAL_TOKENS: readonly RegExp[] = [
  * see `humanLabel`. The blacklist filters internal strings, not shapes.
  */
 export function stripInternal(raw: string | null | undefined): string {
-  const s = stripToolSlugSuffix((raw ?? "").trim());
+  return rejectInternal(stripToolSlugSuffix((raw ?? "").trim()));
+}
+
+/** The token and raw-JSON checks of `stripInternal`, without removing a trailing parenthesized identifier. */
+function rejectInternal(s: string): string {
   if (!s) return "";
   if (s.startsWith("{") || s.startsWith("[")) return "";
   for (const re of INTERNAL_TOKENS) {
@@ -306,7 +313,10 @@ function skeletonRow(i: number): BandRow {
 function metaOf(s: StepView): string {
   // Prefer summary (`7 查询 · 7 成功 · 7 行` is far more informative than `4.3s`),
   // falling back to duration only when absent. Filter both; summaries can contain internal strings too.
-  return stripInternal(s.summary) || stripInternal(s.durationText);
+  // A summary keeps a trailing parenthesized word: it names the saved file type ("运行成功 · 1 输出（CSV）"),
+  // not a tool slug. Turn visibility, an observed deployment check: the band read "运行成功 · 1 输出" while the trace
+  // read "运行成功 · 1 输出（CSV）".
+  return rejectInternal((s.summary ?? "").trim()) || stripInternal(s.durationText);
 }
 
 /**

@@ -129,6 +129,14 @@ async def validate_chat_attachment_access_in_connection(
                 raise ChatAttachmentAccessError("attachment bundle changed")
 
     from bowhead_core.chart.selected_context import selected_facts_in_connection
+    from bowhead_core.presentation_selection import presentation_selection
+
+    for ref in refs:
+        # The element itself is checked against the deck outside the transaction (presentation_selection.py).
+        try:
+            presentation_selection(ref)
+        except (ValueError, TypeError) as exc:
+            raise ChatAttachmentAccessError("presentation_selection_unavailable") from exc
 
     for ref in refs:
         if ref.get("selectedContext") is not None:

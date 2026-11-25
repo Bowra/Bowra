@@ -567,6 +567,10 @@ class ScheduledJobStore:
         """
 
         async with diagnostic_connect(self._db_path) as db:
+            # Take execution's writer lock before the Space check reads core. In an implicit transaction
+            # the core lease came first and stayed held while the UPDATE queued for the writer lock
+            # (1.24 s on 116, beside a Space archive).
+            await db.execute("BEGIN IMMEDIATE")
             cur = await db.execute(
                 "UPDATE scheduled_jobs SET status='paused',pause_reason=?,updated_at=? "
                 "WHERE workspace_id=? AND status='active' "

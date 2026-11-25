@@ -22,6 +22,8 @@ export function useFullscreenMarker(active: boolean) {
 type FullViewProps = {
   active: boolean; label: string; onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>; children: ReactNode;
+  /** False while a hosted editor owns Escape (it clears a selection before it leaves). */
+  closeOnEscape?: boolean;
 };
 
 /** Keep the same iframe node and browsing context while expanding it. */
@@ -30,11 +32,11 @@ export function InPlaceFullView(props: FullViewProps) {
   return tree ? <FullViewNode {...props} /> : <FloatingTree><FullViewNode {...props} /></FloatingTree>;
 }
 
-function FullViewNode({ active, label, onClose, returnFocusRef, children }: FullViewProps) {
+function FullViewNode({ active, label, onClose, returnFocusRef, children, closeOnEscape = true }: FullViewProps) {
   const nodeId = useFloatingNodeId();
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const { refs, context } = useFloating({ nodeId, open: active, onOpenChange: (open) => { if (!open) onClose(); } });
-  const dismiss = useDismiss(context, { enabled: active, outsidePress: false, bubbles: { escapeKey: false } });
+  const dismiss = useDismiss(context, { enabled: active, escapeKey: closeOnEscape, outsidePress: false, bubbles: { escapeKey: false } });
   const { getFloatingProps } = useInteractions([dismiss]);
   const setRef = useCallback((node: HTMLDivElement | null) => {
     refs.setFloating(node); setElement(node);

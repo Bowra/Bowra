@@ -210,7 +210,10 @@ async def _require_sources(ctx, source_maps: list[dict]) -> None:
         ):
             raise KnowledgeAccessError("knowledge_source_changed")
     decisions = await authorizer.batch(list(files.values()), ctx.user_id, ctx.team_id, ctx.workspace_id)
-    if decisions is None or not all(decisions.get(file_id) for file_id in required):
+    if decisions is None:
+        # The authorizer answers None when it could not decide; that is not a changed source.
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    if not all(decisions.get(file_id) for file_id in required):
         raise KnowledgeAccessError("knowledge_source_changed")
 
 
@@ -256,18 +259,19 @@ async def validate_retained_sources(ctx: Any, sources: dict, *, knowledge_connec
             ids = list(sources)[offset : offset + 256]
             files = await ctx.kb_files_store.get_many(ids, **({"connection": knowledge_connection} if knowledge_connection is not None else {}))
             decisions = await ctx.kb_file_authorizer.batch(files, ctx.user_id, ctx.team_id, ctx.workspace_id)
-            if (
-                decisions is None
-                or len(files) != len(ids)
-                or any(
-                    not decisions.get(file.file_id)
-                    or file.soft_deleted_at
-                    or file.team_id != ctx.team_id
-                    or file.active_generation_id != sources[file.file_id]
-                    or (scope is not None and not scope.permits(file.file_id))
-                    for file in files
-                )
+            # A missing, deleted, moved or re-versioned file is a change whatever the authorizer says.
+            if len(files) != len(ids) or any(
+                file.soft_deleted_at
+                or file.team_id != ctx.team_id
+                or file.active_generation_id != sources[file.file_id]
+                or (scope is not None and not scope.permits(file.file_id))
+                for file in files
             ):
+                raise KnowledgeAccessError("knowledge_source_changed")
+            if decisions is None:
+                # The authorizer answers None when it could not decide; that is not a changed source.
+                raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+            if any(not decisions.get(file.file_id) for file in files):
                 raise KnowledgeAccessError("knowledge_source_changed")
     else:
         await require_evidence(ctx, {"schema_version": 1, "sources": sources})

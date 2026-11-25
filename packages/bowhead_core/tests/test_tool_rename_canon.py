@@ -345,6 +345,10 @@ class TestChokepointDriftGuard:
         # so names are canonical, and none of the Tools it names has an old name. A result under a
         # name it does not know is shortened as an ordinary operation; nothing is executed from here.
         "context_hygiene.py": "classes results of the C1-checked history for publication; executes nothing, unknown names take the default",
+        # 2026-11-20 aac480474: an unfinished Turn's transcript gives every call without a result one,
+        # matched by call id; the call's name is copied onto that result and never selects behavior.
+        # The messages come from the C1-checked subagent.py loop; nothing is executed from here.
+        "unfinished_turn_context.py": "pairs unanswered calls with results by call id; the name is copied, not used to decide",
     }
     #: 2026-10-13 7f2a04a53: the team daily usage report reads and upserts a `tool_calls` count
     #: column in SQL (`o.tool_calls`, `excluded.tool_calls`). These exact SQL qualifiers name a number,

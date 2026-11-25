@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -16,14 +17,27 @@ import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
 
+import type { ResultPin } from "@/lib/result-pins";
 import type { SessionItem } from "@/lib/types";
 
 export const RECOVERY_VIRTUALIZATION_THRESHOLD = 50;
+
+/** One row of a mixed group: a conversation or a pinned result (result-pins tech design §5.2). */
+export type RecoveryGroupEntry =
+  | { kind: "session"; item: SessionItem }
+  | { kind: "result"; pin: ResultPin };
 
 export interface RecoveryRenderGroup {
   id: string;
   label: string;
   items: SessionItem[];
+  /**
+   * The pinned group: conversations and pinned results in display order. When present it replaces `items`, and every
+   * row carries a leading icon so the kinds can be told apart.
+   */
+  entries?: RecoveryGroupEntry[];
+  /** A status line under the heading (e.g. pinned results failed to load). */
+  notice?: ReactNode;
 }
 
 type RecoveryVirtualRow =
@@ -35,9 +49,22 @@ type RecoveryVirtualRow =
     }
   | {
       key: string;
+      kind: "notice";
+      groupId: string;
+      notice: ReactNode;
+    }
+  | {
+      key: string;
       kind: "session";
       groupId: string;
       item: SessionItem;
+      withIcon: boolean;
+    }
+  | {
+      key: string;
+      kind: "result";
+      groupId: string;
+      pin: ResultPin;
     };
 
 /** Move focus to a session row; a new `token` repeats the request for the same id. */
@@ -48,6 +75,8 @@ export interface RecoveryFocusRequest {
 
 interface RecoveryRenderItemOptions {
   onActionMenuOpenChange?: (open: boolean) => void;
+  /** The row sits in a mixed group and shows its kind's icon. */
+  withIcon?: boolean;
 }
 
 interface RecoveryGroupsProps {
@@ -55,6 +84,11 @@ interface RecoveryGroupsProps {
   scrollRef: RefObject<HTMLDivElement | null>;
   renderItem: (
     item: SessionItem,
+    options?: RecoveryRenderItemOptions,
+  ) => ReactNode;
+  /** Renders a pinned result row; groups without `entries` never call it. */
+  renderResult?: (
+    pin: ResultPin,
     options?: RecoveryRenderItemOptions,
   ) => ReactNode;
   /** Focus this session's row once it is rendered, scrolling a virtualized list to it first. */
@@ -70,28 +104,39 @@ export function RecoveryGroups({
   groups,
   scrollRef,
   renderItem,
+  renderResult,
   focusRequest = null,
   onFocusRequestSettled,
 }: RecoveryGroupsProps) {
   const rows = useMemo<RecoveryVirtualRow[]>(
     () =>
-      groups.flatMap((group) => [
+      groups.flatMap((group): RecoveryVirtualRow[] => [
         {
           key: `heading:${group.id}`,
-          kind: "heading" as const,
+          kind: "heading",
           groupId: group.id,
           label: group.label,
         },
-        ...group.items.map((item) => ({
-          key: `session:${item.id}`,
-          kind: "session" as const,
-          groupId: group.id,
-          item,
-        })),
+        ...(group.notice
+          ? [{ key: `notice:${group.id}`, kind: "notice" as const, groupId: group.id, notice: group.notice }]
+          : []),
+        ...(group.entries
+          ? group.entries.map((entry): RecoveryVirtualRow =>
+              entry.kind === "session"
+                ? { key: `session:${entry.item.id}`, kind: "session", groupId: group.id, item: entry.item, withIcon: true }
+                : { key: `result:${entry.pin.kind}:${entry.pin.pin_id}`, kind: "result", groupId: group.id, pin: entry.pin },
+            )
+          : group.items.map((item): RecoveryVirtualRow => ({
+              key: `session:${item.id}`,
+              kind: "session",
+              groupId: group.id,
+              item,
+              withIcon: false,
+            }))),
       ]),
     [groups],
   );
-  const sessionCount = rows.length - groups.length;
+  const sessionCount = rows.filter((row) => row.kind === "session" || row.kind === "result").length;
   const virtualized =
     sessionCount > RECOVERY_VIRTUALIZATION_THRESHOLD;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -199,11 +244,24 @@ export function RecoveryGroups({
     };
   }, [rowVirtualizer, scrollRef, virtualized]);
 
+  const renderRow = (
+    row: Exclude<RecoveryVirtualRow, { kind: "heading" }>,
+    options: RecoveryRenderItemOptions = {},
+  ): ReactNode => {
+    if (row.kind === "notice") return row.notice;
+    if (row.kind === "result") return renderResult?.(row.pin, { ...options, withIcon: true }) ?? null;
+    return renderItem(row.item, row.withIcon ? { ...options, withIcon: true } : options);
+  };
+
   if (!virtualized) {
     return groups.map((group) => (
       <div className="unified-work-group" key={group.id}>
         <h3>{group.label}</h3>
-        {group.items.map((item) => renderItem(item))}
+        {rows
+          .filter((row) => row.groupId === group.id && row.kind !== "heading")
+          .map((row) =>
+            row.kind === "heading" ? null : <Fragment key={row.key}>{renderRow(row)}</Fragment>,
+          )}
       </div>
     ));
   }
@@ -254,7 +312,7 @@ export function RecoveryGroups({
                 <h3>{row.label}</h3>
               </div>
             ) : (
-              renderItem(row.item, {
+              renderRow(row, {
                 onActionMenuOpenChange: (open) =>
                   setOpenMenuIndex((current) =>
                     open

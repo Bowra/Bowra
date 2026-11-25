@@ -162,6 +162,67 @@ async def test_plot_keeps_more_than_thirty_categories_without_top_n_or_reorderin
     assert spec["explicit_presentation"]["group_by"] == []
 
 
+def _ranking(count: int) -> bytes:
+    return b"brand,revenue,share\n" + b"".join(f"B{i},{1000 - i},{(i % 7) + 1}\n".encode() for i in range(count))
+
+
+_BAR_REQUESTS = {
+    "bar": {"force_kind": "bar", "axes": {"x": "brand", "y": ["revenue"], "x_scale": "category"}},
+    "hbar": {"force_kind": "hbar", "axes": {"x": "brand", "y": ["revenue"], "x_scale": "category"}},
+    "stacked_bar": {"force_kind": "stacked_bar", "axes": {"x": "brand", "y": ["revenue", "share"], "x_scale": "category"}},
+    "dual_axis": {"force_kind": "dual_axis", "axes": {"x": "brand", "y": ["revenue"], "y_right": ["share"], "x_scale": "category"}},
+    "combo": {"force_kind": "combo", "axes": {"x": "brand", "y": ["revenue", "share"], "x_scale": "category"}},
+    "waterfall": {"force_kind": "waterfall", "axes": {"x": "brand", "y": ["revenue"], "x_scale": "category"}},
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_BAR_REQUESTS))
+async def test_bar_kinds_draw_up_to_one_hundred_categories(kind: str) -> None:
+    ctx, canvas = context(_ranking(100))
+    result = await _add_chart(args(**copy.deepcopy(_BAR_REQUESTS[kind]), group_by=[]), ctx)
+    assert "error" not in result, result
+    assert len(canvas.appended_payload["spec"]["rows"]) == 100
+
+
+@pytest.mark.parametrize("kind", sorted(_BAR_REQUESTS))
+async def test_a_bar_kind_over_one_hundred_categories_is_refused_with_both_counts(kind: str) -> None:
+    """116: 1,082 bars under a "TOP10" title rendered blank; the model has to prepare what it shows."""
+    ctx, canvas = context(_ranking(101))
+    result = await _add_chart(args(**copy.deepcopy(_BAR_REQUESTS[kind]), group_by=[]), ctx)
+    assert f"{kind} draws at most 100 categories and this result has 101" in result["error"]
+    assert "Top N" in result["error"]
+    assert canvas.appended_payload is None
+
+
+async def test_a_pie_draws_up_to_twelve_slices_and_names_the_alternatives_past_them() -> None:
+    pie = {"force_kind": "pie", "axes": {"x": "brand", "y": ["revenue"], "x_scale": "category"}, "group_by": []}
+    ctx, canvas = context(_ranking(12))
+    assert "error" not in await _add_chart(args(**copy.deepcopy(pie)), ctx)
+    assert len(canvas.appended_payload["spec"]["rows"]) == 12
+
+    # Every slice is a series of its own: past 100 the slice limit is still the reason given.
+    for count in (13, 150):
+        ctx, canvas = context(_ranking(count))
+        result = await _add_chart(args(**copy.deepcopy(pie)), ctx)
+        assert f"pie draws at most 12 slices and this result has {count}" in result["error"]
+        assert "hbar" in result["error"]
+        assert canvas.appended_payload is None
+
+
+async def test_lines_keep_their_point_limit_far_above_the_bar_limit() -> None:
+    ctx, canvas = context(_ranking(1000))
+    request = {"force_kind": "line", "axes": {"x": "brand", "y": ["revenue"], "x_scale": "category"}, "group_by": []}
+    result = await _add_chart(args(**request), ctx)
+    assert "error" not in result, result
+    assert len(canvas.appended_payload["spec"]["rows"]) == 1000
+
+
+def test_the_tool_description_states_that_plots_draw_every_row_and_their_limits() -> None:
+    description = _add_chart_schema().description
+    assert "draws every CSV row" in description and "no Top N" in description
+    assert "100 categories" in description and "12 slices" in description and "3000 points" in description
+
+
 async def test_composed_views_share_one_source_read_and_invalid_view_is_atomic() -> None:
     ctx, canvas = context()
     views = [{"id": "all", "title": "All"}, {"id": "detail", "title": "Details", "columns": ["region", "decile", "hospitals"]}]

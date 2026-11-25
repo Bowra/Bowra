@@ -61,7 +61,6 @@ def test_french_output_language_is_wired_like_german() -> None:
     from bowhead_core.analysis_payload import _humanize_fabrication_loc
     from bowhead_core.language_context import LanguageContext
     from bowhead_core.language_directive import _LANGUAGE_LABELS
-    from bowhead_core.overclaim_guard import caveat_for
     from bowhead_core.report_chrome_text import _CHROME, chrome_lang, chrome_text
     from bowhead_core.team_language_policy import normalize_team_language_policy
 
@@ -69,7 +68,6 @@ def test_french_output_language_is_wired_like_german() -> None:
     assert chrome_text("sources_label", "fr-FR") == "Sources de données"
     assert chrome_text("updated_on", "fr-FR", date="2026-09-30") == "Mis à jour le 2026-09-30"
     assert chrome_lang(LanguageContext(ui_language="fr-FR", output_language="fr-FR")) == "fr-FR"
-    assert "Aucun fichier téléchargeable" in caveat_for(("file",), "fr-FR")
     assert _humanize_fabrication_loc("kpis#0.value", "12", "fr-FR") == "12 dans le KPI 1"
     assert _LANGUAGE_LABELS["fr-FR"]["en"] == "French"
     assert '"fr-FR"' in normalize_team_language_policy('{"defaults":{"output_language":"fr-FR"}}')

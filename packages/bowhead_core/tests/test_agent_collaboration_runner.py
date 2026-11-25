@@ -25,6 +25,7 @@ from bowhead_core.subagent import PROFILES, UNRETURNED_WORK_NOTE, SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_core.user_store import UserStore
 from bowhead_router.invocation import begin_physical_invocation
+from bowhead_router.runtime_notes import WITHDRAWN_ANSWER_FACT
 from bowhead_router.types import LLMChunk, ToolSchema
 from test_agent_collaboration import collab as collaboration_fixture
 
@@ -245,7 +246,7 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
                 )
             if step == 6:
                 # A helper that worked and answered in prose gets one unreturned-work note; the same answer is accepted.
-                assert any(message.content == UNRETURNED_WORK_NOTE for message in request.messages)
+                assert any(message.content == WITHDRAWN_ANSWER_FACT + UNRETURNED_WORK_NOTE for message in request.messages)
                 return LLMResponse(content="Verified refund analysis.")
             assert step == 5
             assert len([item for item in inbox(request) if item.get("action") == "reply"]) == 1
@@ -255,7 +256,7 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
             question = next(item for item in inbox(request) if item.get("action") == "ask")
             return tool("reply", question_id=question["operation_id"], body="Shipping is excluded.")
         if step == 2:
-            assert any(message.content == UNRETURNED_WORK_NOTE for message in request.messages)
+            assert any(message.content == WITHDRAWN_ANSWER_FACT + UNRETURNED_WORK_NOTE for message in request.messages)
             return LLMResponse(content="Refund definition verified.")
         assert step == 1
         return LLMResponse(content="Refund definition verified.")
@@ -289,7 +290,7 @@ async def test_peer_question_independent_work_wait_and_verified_completion_with_
 
 @pytest.mark.parametrize("first_response", ["ask", "prose"])
 async def test_owner_question_left_unanswered_closes_as_a_limitation_and_the_child_completes(collab, first_response):
-    """116 t_649dfe4abb48: Lead asked/waited (reply-only rejection) or answered in prose, the
+    """an observed execution: Lead asked/waited (reply-only rejection) or answered in prose, the
     consultant's required question stayed open, and every return was refused until the cap."""
     child_returned = asyncio.Event()
     child_round = 0

@@ -491,10 +491,10 @@ _GROUPED = [{"region": r, "channel": c, "sales": 1} for r in ("East", "West") fo
         ),
         # A line needs two observations; one prepared row still switches between bar directions.
         (_explicit_spec("bar", _CATEGORY, [], _TWO_ROWS[:1]), ["bar", "hbar"]),
-        # Vertical bars have a slot limit that lines and horizontal bars do not share.
+        # Every bar kind stops at 100 categories; lines go on to 3,000 points.
         (
-            _explicit_spec("line", _CATEGORY, [], [{"region": f"R{index}", "sales": index} for index in range(1001)]),
-            ["line", "hbar", "area_stacked"],
+            _explicit_spec("line", _CATEGORY, [], [{"region": f"R{index}", "sales": index} for index in range(101)]),
+            ["line", "area_stacked"],
         ),
         # Kinds that bind fields differently keep their encoding.
         (_explicit_spec("pie", _CATEGORY, [], _TWO_ROWS), []),

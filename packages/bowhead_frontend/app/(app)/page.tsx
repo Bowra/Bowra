@@ -669,6 +669,7 @@ function _toArchivedTurn(
       size: attachment.size,
       mime: attachment.mime,
       ...(attachment.selected_context ? { selectedContext: attachment.selected_context } : {}),
+      ...(attachment.presentation_selection ? { presentationSelection: attachment.presentation_selection } : {}),
       ...(attachment.reference_kind === "result"
         ? { referenceKind: "result" as const }
         : {}),
@@ -713,6 +714,7 @@ function _toAttachmentRef(
     size: attachment.size,
     mime: attachment.mime,
     ...(attachment.selected_context ? { selectedContext: attachment.selected_context } : {}),
+    ...(attachment.presentation_selection ? { presentationSelection: attachment.presentation_selection } : {}),
     ...(attachment.reference_kind === "result"
       ? { referenceKind: "result" as const }
       : {}),

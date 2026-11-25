@@ -127,6 +127,9 @@ export interface ChartSpec {
    *  data, rows otherwise) with the largest absolute value of `measure` (header), not the first rows. The truncation
    *  subcaption reports exactly these counts. Never persisted. */
   _export_top?: { measure: string; shown: number; total: number };
+  /** Export of an explicit horizontal bar cut to its first categories that fit the frame (`fitHbarRowsForExport`): counts of
+   *  categories, not rows, so long data with one row per category and series is counted the way it is drawn. */
+  _export_first?: { shown: number; total: number };
 
   /** P3.6: chart top source row (opens P3.3 popover style). Backend spec.source_meta supports #66 followup */
   source_meta?: import("../canvas-pm-adapter/citation-types").SourceRef;

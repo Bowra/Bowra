@@ -38,29 +38,15 @@ _MAX_FILE_NAMES = 10
 # Delivered files named with their identifiers (docs/sprints/result-lookup-2026-11-15, FR20). A shortened
 # result keeps lists of up to 30 items, so this many survive history hygiene.
 _MAX_DELIVERED = 30
-# Earlier files of the session read for the delivery check (116 dogfood N13): enough to cover the files an
-# answer names; files beyond this are not recognized, which leaves the check as it was.
-_MAX_SESSION_FILES = 50
 _DELIVERED_KINDS = frozenset({"deliverable", "deck_preview"})
-_EXTENSION_ALIASES = {
-    ".htm": ".html",
-    ".xhtml": ".html",
-    ".jpeg": ".jpg",
-    ".xls": ".xlsx",
-    ".doc": ".docx",
-    ".markdown": ".md",
-}
-
-
-def _canonical_extension(ext: str) -> str:
-    return _EXTENSION_ALIASES.get(ext.lower(), ext.lower())
-
 
 __all__ = [
     "DeliverableLedger",
     "build_deliverable_ledger",
     "collect_ok_tools",
     "count_memory_receipts",
+    "produced_facts",
+    "produced_files_note",
 ]
 
 
@@ -69,15 +55,7 @@ class DeliverableLedger:
     """本轮在我们自己的库里留下了什么；计数须与 verified 标记一起解释。"""
 
     files: int = 0
-    """本 turn 的用户可见稳定结果文件总数（交付物 + sandbox/data 输出）。
-
-    ⚠ 只回答"有几个"，回答不了"有没有你要的那种"。判「用户点名要的格式产出没有」
-    必须走 `count_for_ext()`（真机 t_1c11f59a7ba3：用户要 .docx、peer 拿 PDF 兜底，
-    `files == 1` 让双条件失效，谎报直接漏网）。
-    """
-
-    file_exts: frozenset[str] = frozenset()
-    """本轮产出交付物的扩展名集合（小写含点，如 `.pdf`）。"""
+    """本 turn 的用户可见稳定结果文件总数（交付物 + sandbox/data 输出）。"""
 
     file_names: tuple[str, ...] = ()
     """本轮产出交付物的文件名（上限 `_MAX_FILE_NAMES`）——喂给 Lead 的「事实」那一半。
@@ -95,31 +73,7 @@ class DeliverableLedger:
 
     reused_files: int = 0
     reused_file_names: tuple[str, ...] = ()
-    reused_file_exts: frozenset[str] = frozenset()
     reused_files_verified: bool = True
-
-    session_files: tuple[tuple[str, int], ...] = ()
-    """Name and newest version number of each file earlier Turns of this session delivered.
-
-    Read only when the answer claims a file (116 dogfood N13): "第4版……文件本身已生成" described
-    a version an earlier Turn wrote, and the check took it for a file this Turn failed to produce.
-    Empty when unread, which keeps the check unchanged.
-    """
-
-    @property
-    def session_file_exts(self) -> frozenset[str]:
-        """Canonical extensions of ``session_files`` (``.htm`` counts as ``.html``)."""
-        return frozenset(_canonical_extension("." + name.rsplit(".", 1)[-1]) for name, _ in self.session_files if "." in name)
-
-    def count_available_for_ext(self, ext: str) -> int:
-        """Availability includes scoped reused files; generation still does not."""
-        produced = self.count_for_ext(ext)
-        if produced < 0 or not self.reused_files_verified:
-            return -1
-        return produced + sum(1 for value in self.reused_file_exts if _canonical_extension(value) == _canonical_extension(ext))
-
-    def count_available_files(self) -> int:
-        return self.files + self.reused_files if self.files_verified and self.reused_files_verified else -1
 
     sections: int = 0
     """本轮落到画布上的报告段数：append 的段数；一个都没 append 时取本轮就地 patch 过的段数（续轮修订）。"""
@@ -161,33 +115,6 @@ class DeliverableLedger:
             and not self.produced_anything
         )
 
-    def count_for_ext(self, ext: str) -> int:
-        """本轮产出了几个该扩展名（小写含点，如 `.docx`）的交付物。
-
-        **`-1` = 无法对账 ⇒ 调用方必须放行**，与 `count_for()` 同一约定。
-        触发条件：账单里有文件、却一个文件名都没读到（取数降级 / store 不返 filename）。
-
-        ⚠ 这里**绝不能返回 0**：那会把"读不到名字"误判成"没有该格式"，
-        给真出了文件的轮次扣上"没出"的帽子。误判比漏判更伤用户，是本模块的第一原则。
-        """
-        if not self.files_verified or (self.files > 0 and not self.file_exts):
-            return -1
-        wanted = _canonical_extension(ext)
-        return sum(1 for value in self.file_exts if _canonical_extension(value) == wanted)
-
-    def count_for(self, claim_kind: str) -> int:
-        """按"声明类型"取对应的账单项。未知类型返回 -1（= 无法对账，调用方须放行）。
-
-        -1 而不是 0 是刻意的：0 会被判成"没产出"从而误触发闸，而未知声明类型的正确
-        行为是**不判**。误判（给真出了文件的轮次扣"没出"的帽子）比漏判更伤用户。
-        """
-        values = {
-            "file": self.files if self.files_verified else -1,
-            "report": self.sections if self.sections_verified else -1,
-            "memory": self.memories if self.memories_verified else -1,
-        }
-        return values.get(claim_kind, -1)
-
 
 def count_memory_receipts(invocations: Any) -> int:
     """本轮 `remember` 工具**拿到存储回执**的次数（纯函数）。
@@ -197,7 +124,7 @@ def count_memory_receipts(invocations: Any) -> int:
     —— 写入侧早就搬家了，对账侧还留在旧表。后果是**每一次成功的 remember
     都被判成谎报**，防谎报守卫给用户追加一句「这条信息没有被写入长期记忆」，
     而同一轮的工具回执写着「已存为长期记忆」。116（1.2.59）真机复现：
-    turn t_6a73a7a107dd 的 `tool_result` 与 `final_answer` 自相矛盾。
+    an observed task 的 `tool_result` 与 `final_answer` 自相矛盾。
 
     ★ 判据取**存储自己回的 id**，不是「工具跑过」：`ok_tools` 把非 dict 结果
     保守算成功（对「有没有动过手」是对的），但这个守卫的误报方向相反 ——
@@ -255,12 +182,8 @@ async def build_deliverable_ledger(
     canvas_store: Any | None = None,
     memory_notes_store: Any | None = None,
     invocations: Any = None,
-    include_session_files: bool = False,
 ) -> DeliverableLedger:
-    """把本轮的产出实况读成一份账单；单项失败标记为未验证。
-
-    ``include_session_files`` also reads the session's earlier delivered files (``session_files``).
-    """
+    """把本轮的产出实况读成一份账单；单项失败标记为未验证。"""
     ok_tools = collect_ok_tools(invocations)
     if not turn_id:
         return DeliverableLedger(
@@ -271,12 +194,10 @@ async def build_deliverable_ledger(
         )
 
     files = 0
-    file_exts: frozenset[str] = frozenset()
     file_names: tuple[str, ...] = ()
     delivered: tuple[tuple[str, str], ...] = ()
     reused_names: list[str] = []
     reused_verified = True
-    session_files: tuple[tuple[str, int], ...] = ()
     files_verified = artifact_store is not None
     if artifact_store is not None:
         try:
@@ -296,7 +217,6 @@ async def build_deliverable_ledger(
                 for a in delivs
                 if getattr(a, "kind", None) in _DELIVERED_KINDS and getattr(a, "id", None) and str(getattr(a, "filename", "") or "").strip()
             )[:_MAX_DELIVERED]
-            file_exts = frozenset("." + n.rsplit(".", 1)[-1].lower() for n in names if "." in n)
         except Exception as e:  # noqa: BLE001 — best-effort
             files_verified = False
             logger.debug("deliverable_ledger.files degraded turn=%s err=%s", turn_id, e)
@@ -319,17 +239,6 @@ async def build_deliverable_ledger(
                 reused_names = []
                 reused_verified = False
                 logger.debug("deliverable_ledger.reused_files degraded turn=%s error_type=%s", turn_id, type(e).__name__)
-        list_session = getattr(artifact_store, "list_session_deliverables", None)
-        if include_session_files and session_id and user_id and callable(list_session):
-            try:
-                earlier = await list_session(session_id=session_id, user_id=user_id, exclude_turn_id=turn_id, limit=_MAX_SESSION_FILES)
-                session_files = tuple(
-                    (str(a.filename).strip(), int(getattr(a, "version_no", None) or 1))
-                    for a in earlier
-                    if str(getattr(a, "filename", "") or "").strip()
-                )
-            except Exception as e:  # noqa: BLE001 — best-effort: unread leaves the check unchanged
-                logger.debug("deliverable_ledger.session_files degraded turn=%s error_type=%s", turn_id, type(e).__name__)
 
     sections = 0
     sections_verified = canvas_store is not None
@@ -337,9 +246,9 @@ async def build_deliverable_ledger(
         try:
             sections = int(await canvas_store.count_sections_for_turn(turn_id) or 0)
             if sections == 0 and hasattr(canvas_store, "section_ids_touched_by_turn"):
-                # canvas-update-turn batch B1 (116 dogfood R11 `t_bf8659b468c0`): continuation patches previous sections in place
-                # without appending new ones; append-only counting yields 0 and adds "本轮没有内容落到画布上" despite actual changes.
-                # In-place patches are this turn's canvas output too (`section_ids_touched_by_turn` = append ∪ patch).
+                # canvas-update-turn batch B1 (116 dogfood R11 `an observed task`): continuation patches previous sections in place
+                # without appending new ones. In-place patches are this turn's canvas output too
+                # (`section_ids_touched_by_turn` = append ∪ patch).
                 sections = len(await canvas_store.section_ids_touched_by_turn(turn_id) or ())
         except Exception as e:  # noqa: BLE001
             sections_verified = False
@@ -363,14 +272,11 @@ async def build_deliverable_ledger(
 
     return DeliverableLedger(
         files=files,
-        file_exts=file_exts,
         file_names=file_names,
         delivered=delivered,
         reused_files=len(reused_names),
         reused_file_names=tuple(reused_names[:_MAX_FILE_NAMES]),
-        reused_file_exts=frozenset("." + name.rsplit(".", 1)[-1].lower() for name in reused_names if "." in name),
         reused_files_verified=reused_verified,
-        session_files=session_files,
         sections=sections,
         memories=memories,
         ok_tools=ok_tools,
@@ -378,6 +284,81 @@ async def build_deliverable_ledger(
         sections_verified=sections_verified,
         memories_verified=memories_verified,
     )
+
+
+def produced_facts(ledger: DeliverableLedger) -> dict[str, Any]:
+    """What this Turn saved, as the ``produced`` facts of a helper result for Lead.
+
+    Unread items are null and named in ``verified``; an unknown count is never reported as 0.
+    """
+    facts: dict[str, Any] = {
+        "files": ledger.files if ledger.files_verified else None,
+        # Names, not only a count: with "files: 1" Lead took the requested format for granted (an observed task).
+        "file_names": list(ledger.file_names) if ledger.files_verified else [],
+        "reused_files": ledger.reused_files if ledger.reused_files_verified else None,
+        "reused_file_names": list(ledger.reused_file_names) if ledger.reused_files_verified else [],
+        "canvas_sections": ledger.sections if ledger.sections_verified else None,
+        "memories": ledger.memories if ledger.memories_verified else None,
+        "verified": {
+            "files": ledger.files_verified,
+            "reused_files": ledger.reused_files_verified,
+            "canvas_sections": ledger.sections_verified,
+            "memories": ledger.memories_verified,
+        },
+    }
+    if ledger.files_verified and ledger.delivered:
+        # Names alone cannot be revised later. The pair survives when history hygiene shortens this result,
+        # where a bare identifier list did not say which file an identifier was.
+        facts["delivered_files"] = [{"artifact_id": identity, "name": name} for identity, name in ledger.delivered]
+    return facts
+
+
+# How files reach the user, stated with every helper result in the Turn's answer language. The note does not
+# read the helper's text. Replayed on an observed execution with a false "PPTX 也已生成，可直接下载" added to the
+# helper's answer, Lead repeated the false file in 5 of 8 calls with the ledger facts alone, in 0 of 20 with the
+# Chinese note and in 1 of 12 with the English one (docs/sprints/delivery-check-without-patterns-2026-11-24).
+_FILES_NOTE = {
+    "en-US": (
+        "produced.file_names lists the files registered in this Turn; only these reach the user. A file that the helper's "
+        "answer above mentions but that is not in produced.file_names was not delivered, and the user cannot get it."
+    ),
+    "zh-CN": (
+        "本轮登记成功、用户能下载的文件只有 produced.file_names 里的这些。"
+        "上面 subagent 的话里提到、但不在 produced.file_names 里的文件，没有交付，用户拿不到。"
+    ),
+    "de-DE": (
+        "produced.file_names listet die in diesem Durchgang registrierten Dateien; nur diese erreichen den Nutzer. "
+        "Eine Datei, die die Antwort des Helfers oben erwähnt, die aber nicht in produced.file_names steht, "
+        "wurde nicht geliefert, und der Nutzer kann sie nicht erhalten."
+    ),
+    "fr-FR": (
+        "produced.file_names liste les fichiers enregistrés pendant ce tour ; seuls ceux-ci parviennent à l’utilisateur. "
+        "Un fichier que la réponse de l’assistant ci-dessus mentionne mais qui ne figure pas dans produced.file_names "
+        "n’a pas été livré, et l’utilisateur ne peut pas l’obtenir."
+    ),
+}
+_REUSED_FILES_NOTE = {
+    "en-US": "produced.reused_file_names lists existing files this Turn reused; they remain available and were not generated in this Turn.",
+    "zh-CN": "produced.reused_file_names 里是本轮沿用的已有文件，它们仍可下载，不是本轮新生成的。",
+    "de-DE": (
+        "produced.reused_file_names listet vorhandene Dateien, die dieser Durchgang wiederverwendet hat; "
+        "sie bleiben verfügbar und wurden nicht in diesem Durchgang erzeugt."
+    ),
+    "fr-FR": (
+        "produced.reused_file_names liste les fichiers existants réutilisés pendant ce tour ; "
+        "ils restent disponibles et n’ont pas été générés pendant ce tour."
+    ),
+}
+
+
+def produced_files_note(ledger: DeliverableLedger, language: str) -> str:
+    """The fixed note on how files reach the user, or "" when the file ledger could not be read."""
+    if not ledger.files_verified:
+        return ""
+    note = _FILES_NOTE.get(language, _FILES_NOTE["en-US"])
+    if ledger.reused_files_verified and ledger.reused_files:
+        note += " " + _REUSED_FILES_NOTE.get(language, _REUSED_FILES_NOTE["en-US"])
+    return note
 
 
 def _reused_sandbox_inputs(invocations: Any) -> tuple[str, ...]:

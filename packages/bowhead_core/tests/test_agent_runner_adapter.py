@@ -25,7 +25,7 @@ from bowhead_core.agents.agent_runner_adapter import (
     register_manifest_as_profile,
 )
 from bowhead_core.agents.manifest import ToolsSpec
-from bowhead_core.agents.task_spec import BusRef, PlanStepModelError, TaskSpec
+from bowhead_core.agents.task_spec import BusRef, PlanStepDeliveryError, PlanStepModelError, TaskSpec
 from bowhead_core.agents.turn_context import (
     RuntimeTurnContext,
     SerializableTurnContext,
@@ -615,6 +615,30 @@ async def test_runner_fn_keeps_the_model_failure_of_an_exhausted_step(llm_reason
 
 
 @pytest.mark.asyncio
+async def test_runner_fn_names_a_missing_deck_as_the_step_kind() -> None:
+    """an observed execution: a Consultant step returned analysis but no deck. The step stored the raw
+    `deck_delivery_missing` with kind `RuntimeError`, and the plan card showed both."""
+    registry = AgentRegistry.bootstrap()
+    register_all_system_manifests(registry)
+    manifest = registry.get("consultant")
+    stub_runner = _StubRunner(
+        next_result=SubagentResult(profile="consultant", subagent_id="sub_x", ok=False, final_answer="", error="deck_delivery_missing"),
+    )
+    runner_fn = make_legacy_agent_runner_fn(
+        subagent_runner=stub_runner,  # type: ignore[arg-type]
+        parent_turn_id="t_test",
+        parent_bus=_StubBus(),  # type: ignore[arg-type]
+        parent_ctx=_StubCtx(),  # type: ignore[arg-type]
+        team_sourced_names=frozenset(),
+    )
+    with pytest.raises(PlanStepDeliveryError) as raised:
+        await runner_fn(manifest, TaskSpec(agent_name="consultant", user_question="q"), _mk_runtime_ctx())
+    # The task runner records error_kind as the step's kind and the text as its reason.
+    assert raised.value.error_kind == "deck_delivery_missing"
+    assert "PowerPoint" in str(raised.value) and "deck_delivery_missing" not in str(raised.value)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("reported", [True, False], ids=["wrap-up-report", "count-only"])
 async def test_runner_fn_keeps_a_reported_partial_step(reported: bool) -> None:
     """116 the regression case: three helpers stopped at a run limit with their done and remaining work,
@@ -927,7 +951,7 @@ async def test_runner_fn_without_criteria_is_unchanged() -> None:
 async def test_runner_fn_tells_the_agent_it_is_writing_one_chapter() -> None:
     """★plan-report-assembly 批 3-b：腿得知道自己写的是一份文档里的**一章**。
 
-    批 0/1/2 已把装订修好(8 份报告 → 1 份 8 章, 116 真机 t_c9853b490565 验过),
+    批 0/1/2 已把装订修好(8 份报告 → 1 份 8 章, 116 真机 an observed task 验过),
     但装订能降级**结构**、降级不了**措辞**: 腿仍按「整篇报告」的骨架写 —— 自指
     「本报告」、重铺一遍全局背景、末尾再来一段全局结论。这是同一条缝的第三例
     (第一例 success_criteria 见 task_spec.py:57, 第二例 deliverable 见 3-a)。
@@ -1013,7 +1037,7 @@ async def test_runner_fn_without_deliverable_grows_no_chapter_block() -> None:
 async def test_chapter_block_never_uses_the_deliverable_as_the_chapter_title() -> None:
     """planner 约定里步级 `deliverable` 是「期望产出形态 (insight/表/章节)」——它不是章名。
 
-    此前按词表猜哪些是形态词、其余当章名下发：116 先后出现 `## insight`（t_40869341f322）、
+    此前按词表猜哪些是形态词、其余当章名下发：116 先后出现 `## insight`（an observed task）、
     `## 表+图+insight`（1.3.47）、`## 章节(表+图+关键指标)`（1.3.51 `s_bb8f798ebe34`），planner 换个写法就漏。
     2026-09-25 用户拍板：章名由写手按本章内容起；deliverable 一律只当形态下发。
     """

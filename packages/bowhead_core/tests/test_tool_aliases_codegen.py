@@ -286,7 +286,7 @@ def test_python_tool_display_uses_native_copy_and_english_fallback(suffix, displ
 USER_VISIBLE = {
     "present_artifacts",
     "bi_schema", "bi_query", "bi_concept_resolve", "tool_list_workspaces",
-    "write_report", "read_report", "add_chart", "read_chart", "edit_chart", "remove_chart", "add_image", "canvas_add_insight",
+    "write_report", "remove_report_section", "read_report", "add_chart", "read_chart", "edit_chart", "remove_chart", "add_image", "canvas_add_insight",
     "canvas_add_spec_block", "canvas_add_html_artifact", "canvas_add_external_iframe",
     "canvas_create_design", "canvas_update_design_text", "canvas_flatten_design",
     "kb_search", "kb_list_sources", "kb_query_records", "kb_get_record", "kb_list_tables", "kb_add_file", "kb_remove_file", "kb_operation_status", "attachment_read",
@@ -304,7 +304,7 @@ def test_user_visible_tools_match_the_product_list() -> None:
 
     assert set(TOOL_KINDS) == ALL_TOOL_NAMES
     assert USER_VISIBLE_TOOLS == USER_VISIBLE
-    assert len(USER_VISIBLE_TOOLS) == 43
+    assert len(USER_VISIBLE_TOOLS) == 44
     assert set(TOOL_RISKS) >= USER_VISIBLE_TOOLS
     parts = ALL_TOOL_NAMES - USER_VISIBLE_TOOLS
     assert {"subagent_spawn", "subagent_return", "skill_read", "skill_invoke", "skill_list", "python_exec", "tool_switch_context"} <= parts

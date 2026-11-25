@@ -13,6 +13,7 @@ import {
   onOutlineReady,
   onSectionAdded,
   onSectionPatched,
+  onSectionRemoved,
   onSectionsHidden,
   onSectionsSuperseded,
   onTurnStreaming,
@@ -117,8 +118,13 @@ export function attachCanvasSSE(es: EventSource, gate?: CanvasSeqGate): () => vo
         hiddenForChatMode: p.hidden_for_chat_mode === true,
       });
     }],
-    // chat-solidify 2026-07-03: remove canvas.section_removed handler — backend has 0 emit
-    // sites (section deletion uses REST + rehydration); dead name removed from EventType.
+    ["canvas.section_removed", (e) => {
+      // 2026-11-24: a report writer removed a section it wrote in this Turn (remove_report_section).
+      // The row is deleted on the server, so the Canvas drops it as reload and replay do.
+      const p = parseJson(e.data);
+      if (!p || typeof p.section_id !== "string" || !p.section_id) return;
+      onSectionRemoved({ section_id: p.section_id });
+    }],
     ["canvas.reordered", (e) => {
       const p = parseJson(e.data);
       if (!p) return;

@@ -45,7 +45,7 @@ _ALLOWED_DIRECT_COMPARISONS = Counter(
         # As above: compute is a document authoring operation, not an Agent name.
         (
             "documents/authoring_protocol.py",
-            "operation not in {'inspect', 'material', 'compute', 'execute', 'render', 'view'}",
+            "operation not in {'inspect', 'material', 'compute', 'execute', 'render', 'view', 'html_view'}",
         ): 1,
         ("documents/authoring_protocol.py", "operation in {'compute', 'execute'}"): 1,
         ("documents/authoring_protocol.py", "operation in {'inspect', 'material', 'compute', 'execute'}"): 1,

@@ -511,6 +511,8 @@ function archiveAndFreshTurn(
     clarificationPending: null,
     cancelled: false,
     aborted: false,
+    // Progress of the agents that ran the earlier turn; the new turn's own frames replace it.
+    agentProgress: null,
     headline: undefined,
     hasDispatched: false,
     subagentSummaries: {},
@@ -2479,7 +2481,7 @@ function attachStream(
     if (name === "turn_started" && typeof payload.turn_id !== "string" && streamTurnId) {
       payload.turn_id = streamTurnId;
     }
-    dispatchToTurnStore(name, payload, "live", streamTurnId);
+    dispatchToTurnStore(name, payload, "live", streamTurnId, { frameBatchedText: true });
     terminalCanvasEffects(name, payload, streamTurnId);
     // UX-3 G2 (chat-solidify 2026-07-03): attach to steer continuation. turn.follow_up arriving
     // means backend spawned a continuation turn from steer buffer (old turn already done+archived). Previously
@@ -2529,6 +2531,16 @@ function attachStream(
           terminalProtocolVersion ?? undefined,
         );
       }
+      return;
+    }
+    // A streamed text delta lives in the turn store only: Lead's `narrative.delta`, and a helper's
+    // `partial_answer` (the one with `parent_agent_id`; Lead's own still feeds `answer` in the reducer below).
+    // The runner state records nothing of them. Returning the same state object keeps React from rendering the
+    // page again for every delta, hundreds of times per second while text streams. The reconnect banner is
+    // still cleared, as for every other event below.
+    const helperText = name === "partial_answer" && typeof payload.parent_agent_id === "string" && payload.parent_agent_id !== "";
+    if (name === "narrative.delta" || helperText) {
+      setState((s) => (s.streamingState === "error" ? { ...s, streamingState: "active" } : s));
       return;
     }
     setState((s) => {

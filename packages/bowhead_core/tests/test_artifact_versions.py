@@ -199,6 +199,40 @@ async def test_the_files_library_lists_a_file_once_and_deletes_and_restores_it_w
     assert set(await store.lineage_member_ids(second.id, user_id="u")) == {first.id, second.id}
 
 
+async def test_files_page_queries_find_versions_through_the_lineage_index(store: ArtifactStore, monkeypatch) -> None:
+    """116 (1.7.69): the shared account owns 24,660 artifacts. `COALESCE(lineage_id, id) = …` cannot use an index,
+    so each version lookup read every artifact of the owner: 0.5 s for the version counts of a 50-row page, 0.6 s
+    for its warnings, and 7 s for the trash count. Every per-row version lookup must use the lineage index or the
+    primary key, never the owner index or a scan."""
+    import sqlite3
+
+    first = await _put(store)
+    await _put(store, turn="t2", target=first.id)
+    other = await _put(store, filename="other.html")
+    recorded: list[tuple[str, tuple]] = []
+    execute = aiosqlite.Connection.execute
+
+    def recording(self, sql, parameters=None):
+        recorded.append((sql, tuple(parameters or ())))
+        return execute(self, sql, parameters)
+
+    monkeypatch.setattr(aiosqlite.Connection, "execute", recording)
+    await store.list_for_user(user_id="u")
+    await store.lineage_overview([first.id, other.id], user_id="u")
+    assert await store.soft_delete(first.id, user_id="u")
+    await store.list_for_user(user_id="u", include_deleted=True, limit=1)
+    assert await store.restore(first.id, user_id="u")
+    monkeypatch.undo()
+
+    lookups = [(sql, params) for sql, params in recorded if any(f"artifacts {alias} " in sql for alias in ("m", "l", "a"))]
+    assert len(lookups) >= 5, [sql for sql, _ in lookups]
+    with sqlite3.connect(store.db_path) as db:
+        for sql, params in lookups:
+            plan = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {sql}", params)]
+            for alias in ("m", "l", "a"):
+                assert not any(line.startswith((f"SCAN {alias}", f"SEARCH {alias} USING INDEX idx_artifacts_user")) for line in plan), (sql, plan)
+
+
 async def test_a_document_reference_to_any_version_refuses_deleting_the_file(store: ArtifactStore) -> None:
     from bowhead_core.documents.retention import DocumentArtifactInUse
 

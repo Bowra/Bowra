@@ -46,8 +46,8 @@ EventType = Literal[
     "canvas.outline_ready",  # payload: {sections: [{id, kind}], meta_intent}
     "canvas.section_added",  # payload: {section, seq}  (section = full ReportSection)
     "canvas.section_patched",  # payload: {section_id, patch, rev, ok}
-    # canvas.section_removed removed: zero emit sites (canvas-sse handler also removed;
-    # harmless im/turn_render elif retained).
+    # 2026-11-24: emitted by remove_report_section, one event per deleted section (cascade children included).
+    "canvas.section_removed",  # payload: {turn_id, canvas_id, section_id}
     "canvas.reordered",  # payload: {order: [section_id, ...], ok, direction?}
     "canvas.done",  # payload: {canvas_id, section_count}
     # D6 (canvas-empty bug 2026-05-25): emitted after turn finalize when sections
@@ -81,7 +81,7 @@ EventType = Literal[
     # dingsiyan #11 (2026-07-07): resume start placeholder, spawn_resume_turn emits on fresh bus
     # before worker create_task. Two duties: ①immediate selection feedback (fills silence before first LLM token);
     # ②once persisted, later-than-paused-done event enables _replay_rows_for_stream to
-    # remove stale done(clarification_pending) (t_f2f6a88ad3cc leftover window). Frontend tombstones
+    # remove stale done(clarification_pending) (an observed task leftover window). Frontend tombstones
     # clarification immediately, preventing replay resurrection.
     "turn.resumed",  # payload: {request_id, chosen_values[], turn_id}
     # plan_preview removed: zero emit sites (workflow_distill reads historical rows only);
@@ -1319,7 +1319,7 @@ class EventBusRegistry:
         """HTTP 端点等「bus 生命周期之外」的发射唯一入口（dingsiyan #11 根治）.
 
         pause 后（done(clarification_pending) 已 emit）再往 turn 上补事件有两个坑，
-        裸 ``get_or_create`` + ``emit`` 两个都踩（prod 实证 t_1ccf9e0aec11）：
+        裸 ``get_or_create`` + ``emit`` 两个都踩（prod 实证 an observed task）：
 
         - **<5s 窗口**：旧 bus ``_closed=True`` 但 worker 的延迟 close 还没把它 pop，
           ``get_or_create`` 返回死 bus → ``emit`` 早退 → 事件既不投递也不落库；

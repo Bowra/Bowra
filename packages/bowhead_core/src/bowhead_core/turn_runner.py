@@ -889,7 +889,7 @@ def _should_skip_payload_missing_guard(final_answer: str | None) -> bool:
     """W12 #91 fix helper: Lead 写出 substantive final_answer 时跳过 guard fallback.
 
     阈值 500 字符: thin answer rewrite 后 ≥500 视为真有内容输出 (常见 fallback / 错误
-    summary 通常 <300 字). 真 prod 案例 (t_aa9ccddc529f): final_answer=4565 字完整
+    summary 通常 <300 字). 真 prod 案例 (an observed task): final_answer=4565 字完整
     report, 但 subagent 没 return.payload → guard 误触加 'eyebrow + 我跑了一些数据查询'
     fallback 把视觉盖了. fix: caller 用此函数早返跳过 guard.
     """
@@ -2779,7 +2779,7 @@ class TurnRunner:
             # 0.40.2 Bug 3: kb_retriever wire was missing from _peer_ctx (only
             # _build_tool_ctx at line ~605 had it). Lead's inline kb_search call
             # → ctx.kb_retriever=None → tool early-return "KB 未配置". Surfaced
-            # by Phase 4 dogfood (turn t_f45600c577fc / t_fdc572467516 on prod
+            # by Phase 4 dogfood (an observed task / an observed task on prod
             # 0.40.1) — corpus retrievable via /api/v1/kb/search HTTP but not via
             # agent loop. Same retrofit pattern as kb_doc_type_store above.
             kb_retriever=_eff_kb_retriever,  # byo-no-clone: team KB retriever wins
@@ -2832,6 +2832,22 @@ class TurnRunner:
                     workspace_id=request.workspace_id,
                     session_id=request.session_id,
                 )
+            if _chart_source is not None and any(ref.get("presentationSelection") is not None for ref in _chart_source.attachment_refs):
+                from bowhead_core.presentation_selection import resolve_presentation_selections
+
+                if _chart_source.session_id != request.session_id or list(_chart_source.attachment_ids) != request.attachments:
+                    raise ValueError("presentation_selection_unavailable")
+                # Element facts ride with chart facts: every reference-block renderer reads this one list.
+                _peer_ctx._chart_selected_facts = [
+                    *(getattr(_peer_ctx, "_chart_selected_facts", None) or []),
+                    *await resolve_presentation_selections(
+                        getattr(orch, "artifact_store", None),
+                        _chart_source.attachment_refs,
+                        user_id=request.user_id,
+                        workspace_id=request.workspace_id,
+                        session_id=request.session_id,
+                    ),
+                ]
         if getattr(request, "resume_turn_id", None):
             logger.info(
                 "turn_runner.resume_signal turn=%s glossary_keys=%d",

@@ -12,6 +12,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { markPresentationEditing } from "./presentation-edit/handoff";
 import {
   DataTabFiles,
   type ArtifactItem,
@@ -258,6 +259,41 @@ describe("DataTabFiles runtime path prefix", () => {
     expect(screen.getByText("focused_missing")).toBeInTheDocument();
     expect(screen.queryByText("first version")).not.toBeInTheDocument();
     expect(document.querySelector(`a[href*="${first.id}"]`)).toBeNull();
+  });
+
+  it("keeps the viewer of a deck being edited while the list drops that version for a moment", async () => {
+    const deck: ArtifactItem = {
+      id: "art_deck_v1",
+      filename: "report.html",
+      mime: "text/plain",
+      size: 24,
+      source: "python_sandbox",
+      created_at: "2026-11-24T00:00:00Z",
+      preview_available: true,
+      kind: "deliverable",
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/representations/details")) return detailsResponse(url.split("/").at(-3)!);
+      return new Response(JSON.stringify({
+        family: "text", representation: "preview", revision: "preview-1", mode: "text", text: "deck body",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const view = render(<DataTabFiles sessionId="s_deck" focusArtifactId={deck.id} viewerOnly artifactItems={[deck]} />);
+    const body = await screen.findByText("deck body");
+
+    markPresentationEditing(deck.id, true);
+    try {
+      // A newer version arrived: the list is located again (no items) and then lacks this version.
+      view.rerender(<DataTabFiles sessionId="s_deck" focusArtifactId={deck.id} viewerOnly artifactItems={null} />);
+      expect(screen.getByText("deck body")).toBe(body);
+      view.rerender(<DataTabFiles sessionId="s_deck" focusArtifactId={deck.id} viewerOnly artifactItems={[]} />);
+      expect(screen.getByText("deck body")).toBe(body);
+    } finally {
+      markPresentationEditing(deck.id, false);
+    }
+    view.rerender(<DataTabFiles sessionId="s_deck" focusArtifactId={deck.id} viewerOnly artifactItems={[]} />);
+    expect(screen.getByText("focused_missing")).toBeInTheDocument();
   });
 
   it("offers exact-list retry when a deep focused artifact is not in the catalog", () => {

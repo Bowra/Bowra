@@ -2219,7 +2219,7 @@ async def _restore_bounded_question_inputs(orchestrator: Any, turn_req: Any) -> 
     import json
 
     from bowhead_core._db import open_shared_ctx
-    from bowhead_core.clarification_rounds import history_contexts, read_history, validate_answer_questions
+    from bowhead_core.clarification_rounds import complete_skipped_questions, history_contexts, read_history, validate_answer_questions
     from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
     from bowhead_gateway.routes.clarifications import ClarificationAnswerDTO, _is_skip_value, _render_legacy_values_for_resume
@@ -2256,6 +2256,7 @@ async def _restore_bounded_question_inputs(orchestrator: Any, turn_req: Any) -> 
             if answers != [{key: value for key, value in answer.items() if value is not None} for answer in raw_answers]:
                 raise ValueError("clarification_answer_changed")
             if answers:
+                answers = complete_skipped_questions(answers, context)
                 validate_answer_questions(answers, context)
             skipped = _is_skip_value(row["chosen_value"])
             values = json.loads(row["chosen_values_json"] or "[]") or ([row["chosen_value"]] if row["chosen_value"] else [])

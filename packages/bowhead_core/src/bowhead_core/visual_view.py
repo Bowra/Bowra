@@ -112,18 +112,19 @@ def tile(images: Sequence[Any], labels: Sequence[str]) -> Any:
     return sheet
 
 
-def encode(image: Any) -> dict[str, str]:
-    """PNG keeps text sharp; a sheet above 1.5 MB falls back to JPEG quality 85."""
+def encode(image: Any) -> dict[str, Any]:
+    """PNG keeps text sharp; a sheet above 1.5 MB falls back to JPEG quality 85. ``px`` is the image size."""
     buffer = io.BytesIO()
     image.save(buffer, "PNG", optimize=True)
+    px = [image.width, image.height]
     if buffer.tell() > _PNG_SIZE_LIMIT:
         buffer = io.BytesIO()
         image.convert("RGB").save(buffer, "JPEG", quality=85)
-        return {"mime": "image/jpeg", "base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
-    return {"mime": "image/png", "base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        return {"mime": "image/jpeg", "base64": base64.b64encode(buffer.getvalue()).decode("ascii"), "px": px}
+    return {"mime": "image/png", "base64": base64.b64encode(buffer.getvalue()).decode("ascii"), "px": px}
 
 
-def _ranges(numbers: Sequence[int]) -> str:
+def page_ranges(numbers: Sequence[int]) -> str:
     """1-based page numbers as ``1-3, 5``."""
     parts: list[str] = []
     start = previous = None
@@ -167,10 +168,12 @@ def render_pdf_view(
         return {
             "status": "shown",
             "pages": total,
-            "shown": f"{noun}s {_ranges([i + 1 for i in shown])}, each at {images[0].width}x{images[0].height} px",
-            "not_shown": f"{noun}{'s' if len(rest) > 1 else ''} {_ranges([i + 1 for i in rest])}" if rest else None,
+            "shown": f"{noun}s {page_ranges([i + 1 for i in shown])}, each at {images[0].width}x{images[0].height} px",
+            "not_shown": f"{noun}{'s' if len(rest) > 1 else ''} {page_ranges([i + 1 for i in rest])}" if rest else None,
             "page_px": [images[0].width, images[0].height],
-            "images": [{**encode(image), "label": f"{noun.capitalize()} {index + 1}"} for image, index in zip(images, shown, strict=True)],
+            "images": [
+                {**encode(image), "label": f"{noun.capitalize()} {index + 1}", "page": index + 1} for image, index in zip(images, shown, strict=True)
+            ],
         }
     if len(wanted) == 1:
         images = _pdf_page_images(pdf, wanted, SINGLE_PAGE_WIDTH)
@@ -182,7 +185,7 @@ def render_pdf_view(
             "shown": f"{noun} {wanted[0] + 1}, at {images[0].width}x{images[0].height} px",
             "not_shown": None,
             "page_px": [images[0].width, images[0].height],
-            "images": [{**encode(images[0]), "label": f"{noun.capitalize()} {wanted[0] + 1}"}],
+            "images": [{**encode(images[0]), "label": f"{noun.capitalize()} {wanted[0] + 1}", "page": wanted[0] + 1}],
         }
     capacity = MAX_PAGES_PER_SHEET * MAX_SHEETS_PER_FILE
     shown, rest = wanted[:capacity], wanted[capacity:]
@@ -193,13 +196,13 @@ def render_pdf_view(
     for start in range(0, len(shown), MAX_PAGES_PER_SHEET):
         chunk = shown[start : start + MAX_PAGES_PER_SHEET]
         sheet = tile(images[start : start + len(chunk)], [f"{noun.capitalize()} {index + 1}" for index in chunk])
-        sheets.append({**encode(sheet), "label": f"{noun}s {_ranges([i + 1 for i in chunk])}"})
+        sheets.append({**encode(sheet), "label": f"{noun}s {page_ranges([i + 1 for i in chunk])}", "pages": [i + 1 for i in chunk]})
     tile_px = [images[0].width, images[0].height]
     return {
         "status": "shown",
         "pages": total,
-        "shown": f"{noun}s {_ranges([i + 1 for i in shown])} in {len(sheets)} sheet{'s' if len(sheets) > 1 else ''}, each {noun} at {tile_px[0]}x{tile_px[1]} px",
-        "not_shown": f"{noun}s {_ranges([i + 1 for i in rest])}" if rest else None,
+        "shown": f"{noun}s {page_ranges([i + 1 for i in shown])} in {len(sheets)} sheet{'s' if len(sheets) > 1 else ''}, each {noun} at {tile_px[0]}x{tile_px[1]} px",
+        "not_shown": f"{noun}s {page_ranges([i + 1 for i in rest])}" if rest else None,
         "page_px": tile_px,
         "images": sheets,
     }
@@ -228,7 +231,7 @@ def render_image_view(data: bytes) -> dict[str, Any]:
         + (f" (stored {original[0]}x{original[1]})" if original != (image.width, image.height) else ""),
         "not_shown": None,
         "page_px": [image.width, image.height],
-        "images": [{**encode(image), "label": "Image"}],
+        "images": [{**encode(image), "label": "Image", "page": 1}],
     }
 
 
@@ -277,7 +280,7 @@ def render_screens_view(
             "shown": f"the SVG at {image.width}x{image.height} px{resized}",
             "not_shown": None,
             "page_px": [image.width, image.height],
-            "images": [{**encode(image), "label": "SVG"}],
+            "images": [{**encode(image), "label": "SVG", "page": 1}],
         }
     screens = _screens(image)
     total = len(screens)
@@ -293,10 +296,10 @@ def render_screens_view(
         return {
             "status": "shown",
             "pages": total,
-            "shown": f"{noun} {_ranges([i + 1 for i in shown])}, each at {width}x{height} px",
-            "not_shown": f"screens {_ranges([i + 1 for i in rest])}" if rest else None,
+            "shown": f"{noun} {page_ranges([i + 1 for i in shown])}, each at {width}x{height} px",
+            "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
             "page_px": [width, height],
-            "images": [{**encode(screens[index]), "label": f"Screen {index + 1}"} for index in shown],
+            "images": [{**encode(screens[index]), "label": f"Screen {index + 1}", "page": index + 1} for index in shown],
         }
     in_sheet, rest = wanted[:MAX_PAGES_PER_SHEET], wanted[MAX_PAGES_PER_SHEET:]
     sheet = tile([screens[index] for index in in_sheet], [f"Screen {index + 1}" for index in in_sheet])
@@ -305,14 +308,14 @@ def render_screens_view(
         "status": "shown",
         "pages": total,
         "shown": (
-            f"screen {wanted[0] + 1} at {width}x{height} px, then screens {_ranges([i + 1 for i in in_sheet])} in 1 sheet, "
+            f"screen {wanted[0] + 1} at {width}x{height} px, then screens {page_ranges([i + 1 for i in in_sheet])} in 1 sheet, "
             f"each screen at {SHEET_TILE_WIDTH}x{tile_height} px"
         ),
-        "not_shown": f"screens {_ranges([i + 1 for i in rest])}" if rest else None,
+        "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
         "page_px": [SHEET_TILE_WIDTH, tile_height],
         "images": [
-            {**encode(screens[wanted[0]]), "label": f"Screen {wanted[0] + 1}"},
-            {**encode(sheet), "label": f"screens {_ranges([i + 1 for i in in_sheet])}"},
+            {**encode(screens[wanted[0]]), "label": f"Screen {wanted[0] + 1}", "page": wanted[0] + 1},
+            {**encode(sheet), "label": f"screens {page_ranges([i + 1 for i in in_sheet])}", "pages": [i + 1 for i in in_sheet]},
         ],
     }
 

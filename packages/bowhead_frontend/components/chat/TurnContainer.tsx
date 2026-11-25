@@ -3675,6 +3675,7 @@ function UserAttachmentStrip({ refs }: { refs: AttachmentRef[] }) {
           size: r.size || 0,
           mime: r.mime || "",
           ...(r.selectedContext ? { selectedContext: r.selectedContext } : {}),
+          ...(r.presentationSelection ? { presentationSelection: r.presentationSelection } : {}),
           status: "done",
           downloadUrl: appPath(`/api/v1/files/${r.fileId}`),
         };

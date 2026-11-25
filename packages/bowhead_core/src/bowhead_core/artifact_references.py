@@ -16,6 +16,7 @@
 | 报告/画布引用  | `turn_citations.artifact_id`            |
 | 画布正文引用   | `canvas_sections.payload` 里出现的 id    |
 | 用户显式 pin   | `session_attachments` 且 inject='full'  |
+| Sidebar result pin | `user_result_pins` file pins: the newest live version of the pinned lineage |
 | 模板任务输入   | `document_artifact_refs`（documents 模块自有） |
 | 知识库原文     | `kb_files`（**另一个数据库**，见下）      |
 
@@ -73,6 +74,12 @@ async def _table_exists(db: aiosqlite.Connection, name: str) -> bool:
     return await readable_table_exists(db, name)
 
 
+async def _artifacts_have_lineage(db: aiosqlite.Connection) -> bool:
+    """Whether ``artifacts`` carries the 0228 version columns (the frozen legacy layout does not)."""
+    async with db.execute("SELECT 1 FROM pragma_table_info('artifacts') WHERE name = 'lineage_id'") as cur:
+        return await cur.fetchone() is not None
+
+
 async def active_reference_sql(db: aiosqlite.Connection, *, alias: str = "artifacts") -> str:
     """Build the active-reference expression across readable managed databases.
 
@@ -94,6 +101,19 @@ async def active_reference_sql(db: aiosqlite.Connection, *, alias: str = "artifa
             f"WHERE sa.artifact_id = {alias}.id AND sa.detached_at IS NULL "
             f"AND {USER_INTENT_PIN_SQL.format(alias='pinned')})"
         )
+    # A person's sidebar pin keeps the version it opens: the newest live version of the pinned file
+    # (result pins tech design §4.4). Older versions stay prunable, so pinning never stops pruning.
+    if await _table_exists(db, "user_result_pins"):
+        if await _artifacts_have_lineage(db):
+            root = f"COALESCE({alias}.lineage_id, {alias}.id)"
+            terms.append(
+                "EXISTS(SELECT 1 FROM user_result_pins rp WHERE rp.target_kind = 'file' "
+                f"AND rp.target_id = {root} AND NOT EXISTS(SELECT 1 FROM artifacts newer "
+                f"WHERE (newer.id = {root} OR newer.lineage_id = {root}) AND newer.deleted_at IS NULL "
+                f"AND newer.status = 'ready' AND COALESCE(newer.version_no, 1) > COALESCE({alias}.version_no, 1)))"
+            )
+        else:
+            terms.append(f"EXISTS(SELECT 1 FROM user_result_pins rp WHERE rp.target_kind = 'file' AND rp.target_id = {alias}.id)")
     return "(" + " OR ".join(terms) + ")"
 
 
