@@ -494,3 +494,42 @@ async def test_without_requester_confirmation_team_mcp_writes_stay_locked(monkey
     assert tools["create_note"].locked_reason == "risk_metadata_unknown"
     assert tools["delete_note"].approval_required is True
     assert tools["delete_note"].locked_reason == "approval_executor_unavailable"
+
+
+async def test_team_turned_off_tool_is_hidden_from_new_selections_but_still_compiles(monkeypatch) -> None:
+    from bowhead_core.agent_dependency_compiler import AgentDependencyCompiler, AgentDependencyContext
+    from bowhead_core.team_subagent_validation import TeamSubagentValidationError, validate_tool_refs
+
+    from bowhead_core import resource_disable
+
+    async def no_team_tools(_team_id, _store):
+        return [], {}
+
+    monkeypatch.setattr("bowhead_core.subagent_authoring_catalog.load_team_tool_entries", no_team_tools)
+
+    async def build(turned_off: frozenset[str]):
+        async def state(_db_path, _team_id, _user_id):
+            return resource_disable.DisableState(team_tools=turned_off)
+
+        monkeypatch.setattr(resource_disable, "load_disable_state", state)
+        return await SubagentAuthoringCatalogService().build(
+            store=SimpleNamespace(db_path="core.db"), team_id="team_a", actor_user_id="user_a", actor_active=True, mcp_entitled=True
+        )
+
+    open_catalog = await build(frozenset())
+    catalog = await build(frozenset({"web_search"}))
+    tool = catalog.tools_by_ref["web_search"]
+    # Hidden from pickers, but the raw catalog still selects it so saved Agents compile and publish.
+    assert (tool.discoverable, tool.team_disabled, tool.selectable) == (False, True, True)
+    assert catalog.team_disabled_refs == ("web_search",)
+    assert "team_disabled" not in tool.to_public_dict()
+    assert open_catalog.tools_by_ref["web_search"].discoverable is True
+    # Turning a Tool on or off does not invalidate open drafts.
+    assert catalog.fingerprint == open_catalog.fingerprint
+    context = AgentDependencyContext(agent_id="agent", team_id="team_a", owner_user_id="user_a", audience_mode="private")
+    compiled = await AgentDependencyCompiler().compile({"tool_refs": ["web_search"]}, context=context, tool_catalog=catalog)
+    assert compiled.status == "ready"
+    validate_tool_refs(["web_search"], catalog=catalog, require_selectable=True, existing_tool_refs=["web_search"])
+    with pytest.raises(TeamSubagentValidationError) as refused:
+        validate_tool_refs(["web_search"], catalog=catalog, require_selectable=True)
+    assert (refused.value.code, refused.value.tool_ref) == ("tool_disabled_by_team", "web_search")

@@ -105,3 +105,28 @@ export function quoteLines(body: string, context: string, maxLines = 8): QuoteLi
   if (picked.length && picked[picked.length - 1] < lines.length - 1) out.push({ before: "…", match: "", after: "" });
   return out;
 }
+
+const FENCE_LINE = /^\s*```[\w-]*\s*$/;
+const BLOCK_TAG_END = /<\s*(?:br\s*\/?|\/\s*(?:p|div|li|tr|h[1-6]|table|ul|ol))\s*>/gi;
+const HTML_TAG = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>/g;
+const ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
+
+/**
+ * Chunk text for display. Some parsers keep HTML paragraph tags or wrap a page in a Markdown code fence
+ * (seen on 116: `<p>…</p>` and a ```markdown fence around a whole page). Show the words only; the stored
+ * chunk, search and citations are unchanged.
+ */
+export function readableChunkText(content: string): string {
+  const withoutFences = content
+    .split("\n")
+    .filter((line) => !FENCE_LINE.test(line))
+    .join("\n");
+  return withoutFences
+    .replace(BLOCK_TAG_END, "\n")
+    .replace(HTML_TAG, "")
+    .replace(/&(?:amp|lt|gt|quot|#39|nbsp);/g, (e) => ENTITIES[e] ?? e)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+

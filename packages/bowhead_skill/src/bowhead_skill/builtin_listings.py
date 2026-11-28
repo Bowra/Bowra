@@ -231,6 +231,18 @@ BUILTIN_LISTING_DESCRIPTIONS: dict[str, dict[str, str]] = {
         "de-DE": "Hilft Entwicklern, einen Konnektor-Server zu bauen, über den KI-Assistenten die API eines externen Dienstes nutzen können. Wählen Sie ihn, wenn Sie einen neuen MCP-Server entwickeln.",
         "fr-FR": "Aide les développeurs à créer un serveur de connexion permettant aux assistants IA d’utiliser l’API d’un service externe. Choisissez-le pour développer un nouveau serveur MCP.",
     },
+    "n8n-workflows": {
+        "en-US": "Runs the team’s approved n8n workflows and reports their results with links to the executions in n8n. Pick it with an n8n workflows Plugin.",
+        "zh-CN": "运行团队已批准的 n8n 工作流，并附 n8n 执行链接报告结果。与 n8n 工作流插件一起选用。",
+        "de-DE": "Führt die freigegebenen n8n-Workflows des Teams aus und berichtet die Ergebnisse mit Links zu den Ausführungen in n8n. Wählen Sie ihn zusammen mit einem n8n-Workflows-Plugin.",
+        "fr-FR": "Exécute les workflows n8n approuvés par l’équipe et rapporte leurs résultats avec les liens vers les exécutions dans n8n. Choisissez-le avec un Plugin Workflows n8n.",
+    },
+    "notion-research-documentation": {
+        "en-US": "Searches and reads the connected Notion workspace and answers with links to the pages it used, without changing anything. Pick it with a Notion Team Knowledge Plugin.",
+        "zh-CN": "搜索并读取已连接的 Notion 工作区，回答附上所依据页面的链接，只读不改。与 Notion 团队知识插件一起选用。",
+        "de-DE": "Durchsucht und liest den verbundenen Notion-Arbeitsbereich und antwortet mit Links zu den verwendeten Seiten, ohne etwas zu ändern. Wählen Sie ihn zusammen mit einem Notion-Teamwissen-Plugin.",
+        "fr-FR": "Recherche et lit l’espace Notion connecté et répond avec les liens vers les pages utilisées, sans rien modifier. Choisissez-le avec un Plugin Connaissances d’équipe Notion.",
+    },
     "pdf": {
         "en-US": "Guidance for extracting text and tables, merging, splitting and other PDF operations. Actual operations depend on the available execution environment; this does not export the current report or convert a presentation.",
         "zh-CN": "提供 PDF 文字与表格提取、合并拆分等处理方法，实际操作取决于可用执行环境；不等于导出当前报告或转换演示文稿。",

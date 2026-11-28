@@ -10,6 +10,7 @@ import {
   cancelAgentVersionComparison,
   completeAgentVersionRelease,
   dismissAgentChangeProposal,
+  getAgentChangeProposal,
   getAgentComparisonEstimate,
   getAgentEvalManager,
   getAgentEvalRun,
@@ -29,6 +30,7 @@ import { toast } from "@/lib/use-toast";
 import { AgentVersionWorkbenchPanel, deferDismissal } from "./agent-version-workbench";
 import { pendingProposals } from "@/lib/agent-draft-changes";
 import { resetCiMerges } from "@/lib/agent-ci-merges";
+import { resetAiOptimizedProposalsForTest } from "@/lib/use-ai-optimized-proposals";
 
 vi.mock("@/lib/use-space", () => ({
   useSpaceSelection: () => ({ activeId: "ws_1", items: [{ id: "ws_1", name: "华东经营分析" }], loading: false, error: null, setActiveId: vi.fn(), refresh: vi.fn() }),
@@ -53,6 +55,7 @@ vi.mock("@/lib/agents-api", () => ({
   createAgentVersionOverride: vi.fn(),
   dismissAgentChangeProposal: vi.fn(),
   dismissAgentProposalSuggestedCases: vi.fn(),
+  getAgentChangeProposal: vi.fn(),
   getAgentComparisonEstimate: vi.fn(),
   getAgentEvalManager: vi.fn(),
   getAgentEvalRun: vi.fn(),
@@ -1312,6 +1315,21 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
     expect(applyAgentChangeProposal).not.toHaveBeenCalled();
   });
 
+  it("says what to change when a suggested case has nothing to score", async () => {
+    const suggested: AgentChangeProposal = {
+      ...proposal, status: "accepted", row_version: 2,
+      suggested_cases: [{ id: "two", task: "Explain missing evidence.", failure_mode: "Invented evidence", decision_status: "pending", covers_group_ids: [] }],
+    };
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [suggested] });
+    vi.mocked(acceptAgentProposalSuggestedCases).mockRejectedValue(new ApiError(422, "x", { code: "agent_eval_scoring_contract_invalid" }));
+    renderPanel({ view: "proposals" }, "en-US");
+    const add = await screen.findByRole("button", { name: /Add/ });
+    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(add);
+    await waitFor(() => expect(document.body.textContent).toContain("has no point that can be scored"));
+    expect(screen.queryByText(/Refresh and try again/)).toBeNull();
+  });
+
   it("retains selective case adoption and rejects an invalid edited expectation", async () => {
     const suggested: AgentChangeProposal = {
       ...proposal, status: "accepted", row_version: 2,
@@ -1525,6 +1543,112 @@ describe("AgentVersionWorkbenchPanel · canvas", () => {
     expect(screen.queryByRole("heading", { name: /^本次改动/ })).toBeNull();
     expect(container.querySelector(".am-ci-card")).toBeTruthy();
     slot.remove();
+  });
+});
+
+describe("AgentVersionWorkbenchPanel · redesigned Configure (layout v2)", () => {
+  const coachRow = {
+    path: "/definition/system_prompt", live: "Old.", draft: "Coach.", source: "coach" as const,
+    coach: { state: "applied" as const, proposal_id: "acp_ai", group_ids: ["g0"], before: "Old.", value: "Coach.", conflict: false },
+  };
+  const open = (overrides: Partial<AgentChangeProposal>): AgentChangeProposal => ({
+    kind: "agent_change_proposal", schema_version: 1, proposal_id: "acp_x", agent_id: "osa_1", source_type: "feedback", source_ref: "fb:1",
+    rationale: "Field change", status: "open", row_version: 1, created_at: "2026-11-25T08:00:00Z", decided_at: null,
+    operations: [{ op: "replace", path: "/listing/description", value: "x" }], atomic_groups: [{ id: "g", operation_indexes: [0], depends_on: [] }],
+    suggested_cases: [], base: { release_id: "arl_1", working_copy_id: "awc_1", working_copy_row_version: 3 }, ...overrides,
+  });
+
+  beforeEach(() => {
+    vi.mocked(getAgentComparisonEstimate).mockRejectedValue(new ApiError(404, "disabled"));
+    vi.mocked(getAgentVersionCaseChanges).mockRejectedValue(new ApiError(404, "disabled"));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    resetAiOptimizedProposalsForTest();
+  });
+
+  it("heads the full page's Configure with Coach's changes, labels AI 优化 rows and compares them", async () => {
+    vi.mocked(getAgentChangeProposal).mockResolvedValue(open({ proposal_id: "acp_ai", source_type: "coach", source_ref: "ai_optimize:system_prompt:u1", status: "accepted" }));
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, draft_changes: [coachRow] });
+    const slot = document.createElement("div");
+    document.body.appendChild(slot);
+    renderPanel({ view: "proposals", layout: "v2", coachSlot: slot });
+    expect(await within(slot).findByRole("heading", { name: "AI 优化" })).toBeTruthy();
+    expect(within(slot).getByText("改写了工作说明")).toBeTruthy();
+    expect(within(slot).getByRole("button", { name: "撤销" })).toBeTruthy();
+    fireEvent.click(within(slot).getByRole("button", { name: "对比工作说明的修改" }));
+    const dialog = await screen.findByRole("dialog", { name: "对比：工作说明" });
+    expect(dialog.querySelector("del")?.textContent).toBe("Old.");
+    expect(dialog.querySelector("ins")?.textContent).toBe("Coach.");
+    slot.remove();
+  });
+
+  it("puts field proposals in 更多设置 and leaves AI 优化's own result out of the list and the count", async () => {
+    const ai = open({ proposal_id: "acp_ai", source_type: "coach", source_ref: "ai_optimize:system_prompt:u1", rationale: "保留：都在" });
+    const field = open({ proposal_id: "acp_field" });
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [ai, field] });
+    const slot = document.createElement("div");
+    document.body.appendChild(slot);
+    const onPendingCount = vi.fn();
+    const { container } = renderPanel({ view: "proposals", layout: "v2", proposalsSlot: slot, onPendingCount });
+    expect(await within(slot).findByText("Field change")).toBeTruthy();
+    expect(within(slot).queryByText("保留：都在")).toBeNull();
+    expect(within(container).queryByText("Field change")).toBeNull();
+    await waitFor(() => expect(onPendingCount).toHaveBeenLastCalledWith(1));
+    slot.remove();
+  });
+
+  it("lists suggested cases on 测试用例, not on Configure, and adopts them only while the suite is saved", async () => {
+    const cases = open({
+      proposal_id: "acp_cases", source_type: "coach", source_ref: "owner:k", rationale: "建议补的用例", operations: [], atomic_groups: [],
+      base: { release_id: "arl_1", working_copy_id: null, working_copy_row_version: null, suite_revision_id: "aev_1" },
+      suggested_cases: [{ id: "one", task: "看一下静安店本周的销售情况", failure_mode: "没按门店统计", decision_status: "pending", covers_group_ids: [] }],
+    });
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [cases] });
+    vi.mocked(getAgentEvalManager).mockResolvedValue({
+      kind: "agent_eval_manager", schema_version: 1, agent_id: "osa_1", target: { kind: "live" },
+      suites: [{ suite_id: "aes_1", suite_kind: "owner_quality", name: "质量用例", visibility: "owner", state: "active", row_version: 1, platform_managed: false,
+        revision: { suite_revision_id: "aev_1", sequence: 1, case_count: 1, created_at: "2026-11-25T08:00:00Z", cases: [] },
+        evidence: { state: "missing", stale_reason: null, updated_at: null, run: null } }],
+      runs: [], trigger_policy: null, release_gate: { required: false, ready: false, reason: "missing" },
+    });
+    vi.mocked(acceptAgentProposalSuggestedCases).mockResolvedValue({ decision_id: "d1", suite_revision_id: "aev_2" });
+    const slot = document.createElement("div");
+    document.body.appendChild(slot);
+    const configure = renderPanel({ view: "proposals", layout: "v2", proposalsSlot: slot });
+    await waitFor(() => expect(getAgentVersionWorkbench).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+    expect(within(slot).queryByText("看一下静安店本周的销售情况")).toBeNull();
+    configure.unmount();
+    slot.remove();
+
+    const onCasesAccepted = vi.fn();
+    const view = renderPanel({ view: "evaluate", layout: "v2", casesDirtyCount: 1, onCasesAccepted });
+    const section = await screen.findByRole("region", { name: "待采纳的建议" });
+    expect(within(section).getByRole("heading", { name: "待采纳的建议：1 条用例" })).toBeTruthy();
+    const accept = await within(section).findByRole("button", { name: "加入这 1 条用例" });
+    expect(accept).toHaveProperty("disabled", true);
+    expect(within(section).getByText("用例有没保存的修改：先保存或放弃用例修改，再采纳建议。")).toBeTruthy();
+    view.unmount();
+
+    renderPanel({ view: "evaluate", layout: "v2", casesDirtyCount: 0, onCasesAccepted });
+    const ready = await screen.findByRole("region", { name: "待采纳的建议" });
+    const adopt = await within(ready).findByRole("button", { name: "加入这 1 条用例" });
+    await waitFor(() => expect(adopt).toHaveProperty("disabled", false));
+    fireEvent.click(adopt);
+    await waitFor(() => expect(acceptAgentProposalSuggestedCases).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onCasesAccepted).toHaveBeenCalledOnce());
+  });
+
+  it("keeps an AI 优化 result an ordinary Coach proposal with the switch off", async () => {
+    const ai = open({ proposal_id: "acp_ai", source_type: "coach", source_ref: "ai_optimize:system_prompt:u1", rationale: "保留：都在" });
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [ai] });
+    const onPendingCount = vi.fn();
+    renderPanel({ view: "proposals", onPendingCount });
+    expect(await screen.findByText("保留：都在")).toBeTruthy();
+    await waitFor(() => expect(onPendingCount).toHaveBeenLastCalledWith(1));
   });
 });
 

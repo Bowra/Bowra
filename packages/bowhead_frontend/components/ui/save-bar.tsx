@@ -23,6 +23,16 @@ import { useCanvasObjectFooter, useReportCanvasSave } from "@/components/canvas/
  */
 export const SaveBarSlotContext = createContext<HTMLElement | null>(null);
 
+/** Heights of visible save bars; the tallest is published as `--ui-savebar-occupied` on the document root. */
+const occupiedHeights = new Map<symbol, number>();
+
+function publishOccupiedHeight(): void {
+  const tallest = Math.max(0, ...occupiedHeights.values());
+  const root = document.documentElement;
+  if (tallest > 0) root.style.setProperty("--ui-savebar-occupied", `${tallest}px`);
+  else root.style.removeProperty("--ui-savebar-occupied");
+}
+
 export function SaveBar({
   dirty,
   saving = false,
@@ -35,6 +45,7 @@ export function SaveBar({
   message,
   failed = false,
   actions,
+  saveVariant = "primary",
 }: {
   dirty: boolean;
   saving?: boolean;
@@ -51,6 +62,8 @@ export function SaveBar({
   failed?: boolean;
   /** Related actions shown beside Save, such as verifying a connection draft. */
   actions?: ReactNode;
+  /** "secondary" where another control is the screen's one primary action (an Agent editor beside a trial chat). */
+  saveVariant?: "primary" | "secondary";
 }) {
   const messageId = useId();
   const slot = useContext(SaveBarSlotContext);
@@ -77,6 +90,19 @@ export function SaveBar({
     observer.observe(bar);
     return () => observer.disconnect();
   }, [bar]);
+
+  // Fixed bottom-corner notices (for example pending tool confirmations) read this height and sit above the bar
+  // instead of covering Save (2026-11-25 settings walk).
+  useEffect(() => {
+    if (!visible || !bar || canvasFooter) return;
+    const key = Symbol("save-bar");
+    occupiedHeights.set(key, barHeight);
+    publishOccupiedHeight();
+    return () => {
+      occupiedHeights.delete(key);
+      publishOccupiedHeight();
+    };
+  }, [visible, bar, barHeight, canvasFooter]);
 
   // Keep edited field clear of bar: on focus/visual-area change (keyboard opening), scroll up if field bottom is below bar top.
   useEffect(() => {
@@ -124,6 +150,7 @@ export function SaveBar({
           onClick: onSave,
           disabled: saveDisabled,
           busy: saving,
+          variant: saveVariant,
         }}
       />,
       canvasFooter.slot,
@@ -149,7 +176,7 @@ export function SaveBar({
         </Button>
         <Button
           type="button"
-          variant="primary"
+          variant={saveVariant}
           aria-describedby={messageId}
           onClick={onSave}
           disabled={saveDisabled || saving}

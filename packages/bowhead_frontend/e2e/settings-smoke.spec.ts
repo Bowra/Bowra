@@ -320,7 +320,7 @@ test("settings → tools reveals operation matches and keeps the create dialog a
   await page.goto("/team/settings/tools/", { waitUntil: "domcontentloaded" });
   const manager = page.getByTestId("tools-manager");
   await expect(
-    manager.getByRole("heading", { name: /工具|Tools/i, level: 1 }),
+    manager.getByRole("heading", { name: /管理工具源|Manage tool sources/i, level: 1 }),
   ).toBeVisible();
   await manager.getByRole("searchbox").fill("upload");
   await expect(
@@ -456,6 +456,12 @@ test("skills shared count follows approval, team status, and personal enablement
 test("mobile OAuth tool actions stay readable and share one row with availability", async ({
   page,
 }) => {
+  await page.route("**/api/v1/team-tool-sources/source_github/oauth/authorize", async (route) => {
+    await route.fulfill({
+      status: 422,
+      json: { detail: { error: { code: "team_mcp_oauth_callback_rejected" } } },
+    });
+  });
   await page.route("**/api/v1/team-tool-sources", async (route) => {
     await route.fulfill({
       status: 200,
@@ -513,4 +519,81 @@ test("mobile OAuth tool actions stay readable and share one row with availabilit
   );
   expect(availabilityBox!.y).toBeLessThan(managementBox!.y + managementBox!.height);
   expect(managementBox!.y).toBeLessThan(availabilityBox!.y + availabilityBox!.height);
+
+  await authorize.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(/所连接账号的权限|connected account’s permissions/i);
+  await dialog.getByRole("button", { name: /^(授权|Authorize)$/i }).click();
+  await expect(dialog.getByRole("link", { name: /公开入口设置|Public Entry Settings/i })).toHaveAttribute(
+    "href",
+    "/team/settings/public-entries/",
+  );
+});
+
+test("after Notion authorization, an admin can choose read tools and then enable the source", async ({ page }) => {
+  const source = {
+    id: "source_notion",
+    team_id: "team_test",
+    name: "Notion",
+    base_url: "https://mcp.notion.com/mcp",
+    kind: "mcp",
+    selected_op_ids: [] as string[],
+    auth_type: "oauth",
+    has_auth: true,
+    oauth_authorized: true,
+    visibility: "team_wide",
+    status: "disabled",
+    tools_count: 2,
+    op_count: 0,
+    created_at: "2026-09-06T00:00:00Z",
+    updated_at: "2026-09-06T00:00:00Z",
+  };
+  await page.route("**/api/v1/team-tool-sources", async (route) => {
+    await route.fulfill({ json: { items: [source] } });
+  });
+  await page.route("**/api/v1/team-tool-sources/source_notion/tools", async (route) => {
+    await route.fulfill({
+      json: {
+        kind: "mcp",
+        imports_all: false,
+        items: [
+          { operation_id: "notion-search", category: "read", imported: false },
+          { operation_id: "notion-delete", category: "destructive", imported: false },
+        ],
+        updated_at: source.updated_at,
+      },
+    });
+  });
+  await page.route("**/api/v1/team-tool-sources/source_notion", async (route) => {
+    const patch = route.request().postDataJSON();
+    if (patch.selected_op_ids) {
+      expect(patch.selected_op_ids).toEqual(["notion-search"]);
+      source.selected_op_ids = patch.selected_op_ids;
+      source.op_count = source.selected_op_ids.length;
+    }
+    if (patch.status) {
+      expect(source.selected_op_ids).toEqual(["notion-search"]);
+      source.status = patch.status;
+    }
+    await route.fulfill({ json: source });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/team/settings/tools/?oauth=success&source=source_notion");
+  const manager = page.getByTestId("tools-manager");
+  const toggle = manager.getByRole("switch", { name: /Notion/ });
+  await expect(toggle).toBeDisabled();
+  const notice = manager.getByRole("status").filter({ hasText: /Notion/ });
+  await notice.getByRole("button", { name: /选择工具|Choose Tools/i }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: /使用推荐的 Notion 工具|Use Recommended Notion Tools/i }).click();
+  await expect(dialog.getByRole("checkbox", { name: /notion-delete/ })).not.toBeChecked();
+  await page.addScriptTag({ content: axe.source });
+  expect(await getBlockingAxeViolations(page, '[role="dialog"]')).toEqual([]);
+  await dialog.getByRole("button", { name: /^(保存|Save)$/ }).click();
+
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  await expect(toggle).toBeChecked();
 });

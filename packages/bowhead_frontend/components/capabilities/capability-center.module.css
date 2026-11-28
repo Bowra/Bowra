@@ -262,3 +262,61 @@
   font-size: 0.75rem;
   cursor: pointer;
 }
+
+/* Tools page (product logic: docs/sprints/tools-page-2026-11-27/product-logic.md §5.1). */
+.catalogSection {
+  margin-top: 32px;
+}
+.catalogSection:first-child {
+  margin-top: 8px;
+}
+.list h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Server descriptions of external Tools can run to several hundred characters; the full text stays in the title. */
+.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.lockedReason {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+/* State column of a Tool row: Details beside the switch or the state text. */
+.rowState {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.rowOff h4,
+.rowOff p {
+  color: var(--c-ink-3);
+}
+.riskList {
+  margin: 0;
+  padding-left: 18px;
+}
+.sourcesNote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+}
+@media (max-width: 639px) {
+  .rowState {
+    justify-content: flex-start;
+  }
+}

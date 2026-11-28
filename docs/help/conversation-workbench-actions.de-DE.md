@@ -10,6 +10,7 @@ Dieser Artikel beschreibt Ziehen und Ablegen, Tastenkürzel und Hinweise auf der
 
 ## Dateien in die Unterhaltung ziehen
 
+- Um ein kopiertes Bild oder einen Screenshot anzuhängen, klicken Sie in das Nachrichtenfeld und drücken Sie **⌘V** auf dem Mac oder **Strg+V** unter Windows oder Linux. Warten Sie vor dem Senden, bis das Bild hochgeladen ist.
 - Ziehen Sie Dateien von Ihrem Computer in den Unterhaltungsbereich, also in die Spalte mit Nachrichten und Composer. Ein gestrichelter Rahmen erscheint. Sobald **Zum Hinzufügen zu dieser Nachricht hier ablegen** angezeigt wird, lassen Sie die Maustaste los. Die Dateien werden wie bei der Auswahl von **+** unten links im Composer als Anhänge hinzugefügt und hochgeladen.
 - Können die Dateien nicht hinzugefügt werden, wird der Rahmen rot und zeigt den Grund an. Beispielsweise sind alle gezogenen Dateien Videos, Audiodateien oder andere nicht unterstützte Formate, die Nachricht enthält bereits zu viele Anhänge oder Anhänge können derzeit nicht hinzugefügt werden. Beim Loslassen wird dann nichts hinzugefügt.
 - Wenn Sie mehrere Dateien gleichzeitig ziehen, können Sie sie ablegen, sofern wenigstens einige hinzugefügt werden können. Diese werden wie gewohnt hochgeladen. Nicht unterstützte Dateien erscheinen mit dem Grund als Anhänge im Composer und können dort entfernt werden.
@@ -34,10 +35,11 @@ Dieser Artikel beschreibt Ziehen und Ablegen, Tastenkürzel und Hinweise auf der
 - Das Tastenkürzel funktioniert nicht, solange ein Menü, eine Liste, ein Dialog oder ein Popover geöffnet ist. Schließen Sie es zuerst.
 - Das Tastenkürzel funktioniert auf breiten Computerbildschirmen mit Ergebnissen. Safari verwendet ⌘⇧\ für **Alle Tabs anzeigen**. Öffnet diese Kombination in Safari die Tab-Übersicht, verwenden Sie stattdessen die Vergrößerungsschaltfläche.
 
-## Punkt am Ergebnisbereich
+## Neue Inhalte im Ergebnisbereich
 
-- Während Sie in der Unterhaltung bleiben und im Ergebnisbereich ein neuer Berichtsabschnitt, eine Datentabelle oder eine Datei erscheint, wird ein kleiner Punkt auf **Ergebnisse** oben auf Smartphones angezeigt. Am Computer erscheint er auf dem eingeklappten **Ergebnisse**-Streifen rechts. Screenreader lesen „neuer Inhalt“ vor.
-- Der Punkt verschwindet, sobald Sie die Ergebnisse öffnen. Aktualisieren Sie die Seite, bevor Sie sie angesehen haben, bleibt der Punkt sichtbar.
+- Während Sie in der Unterhaltung bleiben und im Ergebnisbereich ein neuer Berichtsabschnitt, eine Datentabelle oder eine Datei erscheint, zeigt der eingeklappte **Ergebnisse**-Streifen rechts am Computer die Zahl der neuen Einträge; Screenreader lesen „N neue Einträge“ vor. Auf Smartphones erscheint oben auf **Ergebnisse** ein kleiner Punkt, vorgelesen als „neuer Inhalt“.
+- Endet eine Antwort und ist der Ergebnisbereich geschlossen, erscheint am Computer einmal neben dem Streifen ein Hinweis, was die Runde hinzugefügt hat, zum Beispiel „Neu in dieser Runde: 1 Präsentation · Bericht: 4 Abschnitte geändert · 2 Arbeitsdateien“. Wählen Sie **Ansehen**, um den Ergebnisbereich zu öffnen. Der Hinweis verschwindet nach einigen Sekunden oder sobald Sie etwas anderes tun.
+- Zahl und Punkt verschwinden, sobald Sie die Ergebnisse öffnen. Aktualisieren Sie die Seite, bevor Sie sie angesehen haben, bleiben sie sichtbar.
 
 ## Eine Runde als Testfall mit der Eigentümerin oder dem Eigentümer eines Agents teilen
 

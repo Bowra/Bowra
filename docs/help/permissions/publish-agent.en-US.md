@@ -16,19 +16,26 @@ Having no custom cases does not prevent release and does not require an acceptan
 2. Choose the intended audience and save the sharing settings. If the Agent has personal tools bound, the audience section reminds you that colleagues cannot use them. Check that the other tools available to colleagues are enough for their tasks.
 3. Use the release action offered by the page. Some flows show **Run security checks**; others show **Test this change**, which tests your latest saved draft against the released version in one step. An Agent only you use can be released at any time with **Release as v2** (with an optional release note): the test is information, so a failed, inconclusive or missing test doesn't stop it, and the dialog says in one line what the test showed. Once the test passes, shared Agents use **Submit for review (as v2)**, which also takes an optional release note that reviewers and version history show.
 4. Review warnings, complete required changes, and submit the version.
-5. If approval is required, a team owner or administrator reviews the candidate in the team workflow and approves or rejects it. The review page highlights the changes, audience and check results, with risks and actions together on the right. Expand **View runtime configuration** for details. To reject, select **Decline this release…**, choose the main reason in the dialog, then select **Confirm decline**. **Continue reviewing** cancels without submitting a decision.
+5. If approval is required, a team owner or administrator opens **My Agents → Team approvals**, selects **Start review** on the request and approves or declines it:
+   - The page title is "Review: _Agent name_", with the submission time and the version that approval releases.
+   - On a **first share** (until now only the Owner used the Agent), a note asks for a review of the whole configuration, and **Full configuration** is open: approval covers the whole Agent, not only this change. Later shared releases open only **What changed**.
+   - **What changed** shows the submission note, then one line per item: who can use it (for example "Only me → 1 member", marked **Wider scope** when it grows), name, one-line description, instructions, model, main responsibility, what it can use, knowledge sources and structured output. Changed items say **Changed**; the rest share one line, "Same as vN". Added and removed Plugins, Tools and Skills are listed separately. The review page does not show the instructions text or a line diff.
+   - **Your decision** lists, most important first: what to look at, answer quality, risk and the automatic semantic review. Select **Approve and release vN**, or **Decline…**, choose the main reason in the dialog, then select **Confirm decline**. **Continue reviewing** cancels without submitting a decision. A reviewer who is also the Owner also sees **Withdraw this submission**.
+   - The result appears under the buttons, for example "Approved. v3 is now visible to 1 member". People already using the Agent get an update notice; people who haven't hired it get no notice and need to hire it under **Shared with me**. **Copy link** copies the Agent's link to send them.
 
 Version evaluation is enabled by default. Choose a Space you can access for the comparison, wait for the results, and resolve any blocking issues. Releasing an Agent only you use is your decision, whatever the test says; publishing for other members requires a passing test and team review. Your administrator can explicitly disable version evaluation.
 
-When reviewing, the evaluation card says **The owner provided no cases** if only the basic safety check ran. That check shows the Agent stays within limits, not how well it answers; if you need more, reject with **Safety or quality evidence is insufficient**.
+When reviewing, answer quality says **Not tested (no cases)** if only the basic safety check ran. That check shows the Agent stays within limits, not how well it answers; if you need more, reject with **Safety or quality evidence is insufficient**.
 
 If a required case fails in both the released version and this change, the test result names the evaluation suite and case and shows how many attempts of this change passed. Open **View case** to compare the answers, then review the case's evaluation requirements, update the draft and test again; an unchanged failure still blocks a shared release, while an Agent only you use can still be released.
+
+On the new Agent page the only test button is **Test this change** on the release bar, and **Latest test** at the top of **Test cases** summarizes it. **Test on released vN** in the suite's "⋯" runs your cases on the released version alone and doesn't count as a test of this change. With unsaved case changes, **Test this change** first asks whether to save and test or to test with the saved cases only.
 
 After a test finishes, the **Evaluate** tab shows the same result. Missing tests or an infrastructure failure do not mean its evidence is ready; resolve the issue and test again.
 
 ## Confirm colleagues can use it
 
-The colleague should find the published Agent from a space and account included in its audience, hire it, and run a permitted task. Confirm the availability state and the result. Hiring or approval does not override team membership, space access, dependency readiness, or the colleague's data identity.
+Colleagues newly added to the audience get no notice; they hire the Agent under **Shared with me**. After the release, **Copy link for members** in the release bar's menu copies a link you can send them. The colleague should find the published Agent from a space and account included in its audience, hire it, and run a permitted task. Confirm the availability state and the result. Hiring or approval does not override team membership, space access, dependency readiness, or the colleague's data identity.
 
 ## Update or withdraw
 

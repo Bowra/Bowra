@@ -3083,9 +3083,6 @@
   opacity: 1;
   transition: opacity 160ms;
 }
-.legacy-ai-tools-card.is-failed {
-  border-color: var(--c-err);
-}
 .legacy-ai-tools-card.is-off {
   opacity: 0.55;
 }
@@ -4487,6 +4484,15 @@
   font-size: 0.75rem;
   color: var(--c-ink-3);
 }
+.legacy-tools-choose-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-tools-choose-controls select {
+  max-width: 100%;
+}
 .legacy-tools-choose-list {
   display: flex;
   flex-direction: column;
@@ -4537,6 +4543,12 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+.legacy-tools-choose-desc summary {
+  cursor: pointer;
+}
+.legacy-tools-choose-desc p {
+  margin: 4px 0 0;
+}
 /* Confirm Tool Categories (source-tool-category-dialog.tsx): the select keeps a fixed width so the
    tool name and description keep the remaining space, and moves below them on narrow screens. */
 .legacy-tools-category-row {
@@ -4548,6 +4560,12 @@
 .legacy-tools-category-select {
   flex: 0 0 11rem;
   width: 11rem;
+}
+/* n8n Workflows (source-n8n-workflows-dialog.tsx): the input schema is JSON, edited in a monospace box. */
+.legacy-tools-n8n-schema {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78125rem;
+  white-space: pre;
 }
 .legacy-tools-choose-badge {
   padding: 1px 6px;
@@ -6555,3 +6573,59 @@
 .configuration-field-label { display: inline-flex; align-items: center; gap: 6px; }
 .ui-help-popover__body p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .ui-help-popover__body p:last-child { margin-bottom: 0; }
+
+/* Team settings · tools: the two task tabs (External tool sources / Built-in services). */
+.legacy-tools-tabs {
+  display: flex;
+  margin-bottom: 16px;
+}
+.legacy-tools-tab-count {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+  font-weight: 400;
+}
+.legacy-tools-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.legacy-tools-panel-desc {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.legacy-tools-desc-link {
+  color: var(--c-accent-text, var(--c-accent));
+  text-decoration: none;
+}
+.legacy-tools-desc-link:hover {
+  text-decoration: underline;
+}
+
+.library-browser { display: flex; flex-direction: column; min-height: 0; gap: 1rem; overflow: auto; flex: 1; }
+.library-nav { overflow-x: auto; flex-shrink: 0; }
+.library-tools, .library-pager, .library-storage dl { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.library-tools { align-items: flex-start; }
+.library-tools summary, .library-pager button, .library-tools button { cursor: pointer; }
+.library-filter-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(9rem,1fr)); gap: .75rem; padding-block: .75rem; }
+.library-filter-fields label { display: grid; gap: .25rem; }
+.library-split { display: grid; grid-template-columns: minmax(15rem,1fr) minmax(0,1.4fr); align-items: start; min-height: 0; flex: 1; }
+.library-list, .library-reader { min-width: 0; max-height: 100%; overflow: auto; }
+.library-row { display: flex; align-items: flex-start; gap: .75rem; padding: .8rem .5rem; border-bottom: 1px solid var(--c-line-2); }
+.library-row[data-selected="true"] { background: var(--c-surface-2); }
+.library-row > div { min-width: 0; }
+.library-name { font: inherit; font-weight: 600; text-align: start; overflow-wrap: anywhere; }
+.library-row small { display: block; color: var(--c-ink-3); }
+.library-reader .dr { position: static; inset: auto; width: 100%; max-width: none; height: auto; box-shadow: none; }
+.library-pager, .file-policy section { margin-block: 1rem; }
+.file-policy label, .file-policy button { margin-inline-end: .75rem; }
+.file-policy dl > div { display: flex; gap: 1rem; padding-block: .35rem; }
+.library-storage, .file-policy section { padding: 1rem; background: var(--c-surface-2); }
+.library-storage dd { font-variant-numeric: tabular-nums; }
+@media (max-width: 767px) {
+  .library-split { display: block; }
+  .library-reader { position: fixed; inset: calc(58px + env(safe-area-inset-top)) 0 0; z-index: 40; background: var(--c-surface); }
+  .library-reader .dr { min-height: 100%; overflow: auto; }
+}

@@ -13,7 +13,7 @@ import { useKbChunkContent } from "@/lib/canvas-pm-adapter/kb-chunk-cache";
 import type { MatrixCellVM, MatrixColumnVM, MatrixRowVM, MatrixSnapshot } from "@/lib/kb-matrix/types";
 import { cellChoiceList } from "@/lib/kb-matrix/types";
 
-import { locateExcerpt } from "./cite-popover";
+import { locateExcerpt, sourcePlaceLabel } from "./cite-popover";
 import { IcCheck, IcChevR, IcClock, IcDoc, IcPencil, IcQuote, IcWarn } from "./matrix-icons";
 import { KbSourceDrawer } from "../kb-source-drawer";
 
@@ -110,6 +110,7 @@ function SheetBody({ ctx }: { ctx: SheetCtx }) {
   const t = useTranslations("kbMatrix");
   const chunk = useKbChunkContent(ctx.row.fileId, ctx.cell.chunkId, undefined, { single: true });
   const located = chunk.status === "ready" ? locateExcerpt(chunk.content, ctx.cell.sourceExcerpt) : null;
+  const place = sourcePlaceLabel(t, ctx.cell.page, ctx.cell.chunkIndex);
   const [viewingSource, setViewingSource] = useState(false);
   return (
     <>
@@ -136,7 +137,7 @@ function SheetBody({ ctx }: { ctx: SheetCtx }) {
         <IcDoc s={13} />
         <span>
           {ctx.row.missing ? t("file_missing") : ctx.row.fileName}
-          {ctx.cell.page != null ? ` · ${t("page_n", { n: ctx.cell.page })}` : ""}
+          {place ? ` · ${place}` : ""}
         </span>
       </div>
       {!ctx.row.missing && (

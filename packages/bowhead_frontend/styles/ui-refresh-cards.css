@@ -800,6 +800,66 @@
 :root:root .chat-deliverable {
   margin: 12px 0 4px;
 }
+/* Chat running state R2.2: the report card's "打开到这一节" (the whole card opens it) and its one-line section titles. */
+:root:root .chat-report-card__go {
+  flex: none;
+  align-self: center;
+  font: var(--card-meta);
+  color: var(--c-accent);
+  white-space: nowrap;
+  cursor: pointer;
+}
+:root:root .chat-report-card__go:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+:root:root .chat-report-card__sections {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .ui-card.chat-report-card {
+  container: chat-report-card / inline-size;
+}
+/* Chat running state R2.3: the quiet work-file line under a Turn's outputs. */
+:root:root .chat-work-files {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .chat-work-files__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+:root:root .chat-work-files__open:hover {
+  color: var(--c-ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+:root:root .chat-work-files__open:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: var(--r-1, 2px);
+}
+/* In a narrow chat column the whole card still opens the report; its words give the summary the room. */
+@container chat-report-card (max-width: 379.98px) {
+  :root:root .chat-report-card__go {
+    display: none;
+  }
+}
 :root:root .ui-card-dl {
   box-sizing: border-box;
   display: grid;

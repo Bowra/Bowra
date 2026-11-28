@@ -13,6 +13,7 @@ import {
   spillsFurther,
   toWireEdits,
   upsertPendingEdit,
+  isNumberText,
   type InventoryChart,
   type PendingEdit,
   type PresentationInventory,
@@ -117,6 +118,9 @@ describe("pending edits", () => {
       [true, null],
       [false, null],
     ]);
+    // 「用我的」: the changed cell can take my text over the newer version's; a removed element cannot.
+    expect(rows[1].rebased).toMatchObject({ kind: "cell", expect: "产品线 B（含新品）", text: "产品线 B（华东）" });
+    expect(rows[3].rebased).toBeNull();
   });
 });
 
@@ -167,14 +171,21 @@ describe("requests", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ...inventory({ edit_mode: "new_file" }),
       new_filename: "客户模板（已修改）.pptx",
-      edited_copies: [{ artifact_id: "art_copy", filename: "客户模板（已修改）.pptx", version_no: 2 }],
+      edited_copies: [
+        { artifact_id: "art_copy", filename: "客户模板（已修改）.pptx", version_no: 2, made_by: "ai" },
+        // A server from before the field names no maker: the person's own copy, as the editor made them all.
+        { artifact_id: "art_old", filename: "客户模板（已修改）.pptx", version_no: 1 },
+      ],
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const value = await fetchPresentationInventory({ sessionId: "s 1", artifactId: "art_up" });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/sessions/s%201/results/presentation-edit/inventory");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ artifact_id: "art_up" });
     expect(value.new_filename).toBe("客户模板（已修改）.pptx");
-    expect(value.edited_copies).toEqual([{ artifact_id: "art_copy", filename: "客户模板（已修改）.pptx", version_no: 2 }]);
+    expect(value.edited_copies).toEqual([
+      { artifact_id: "art_copy", filename: "客户模板（已修改）.pptx", version_no: 2, made_by: "ai" },
+      { artifact_id: "art_old", filename: "客户模板（已修改）.pptx", version_no: 1, made_by: "you" },
+    ]);
   });
 
   it("turns a refused save into the facts the editor shows", async () => {
@@ -205,6 +216,15 @@ describe("change order", () => {
     expect(again[0]).toMatchObject({ text: "甲2" });
     // Back to the original text, the change goes.
     expect(upsertPendingEdit(again, { ...a, text: "甲" }).map((edit) => edit.key)).toEqual(["256:3"]);
+  });
+});
+
+describe("number cells", () => {
+  it.each(["2,905", "1 250", "-3.5", "12%", "$1,200", "¥ 300", "0.75", "+4"])("%s is a number", (text) => {
+    expect(isNumberText(text)).toBe(true);
+  });
+  it.each(["产品线 B", "Q1", "", "—", "1 月", "3x"])("%s is text", (text) => {
+    expect(isNumberText(text)).toBe(false);
   });
 });
 

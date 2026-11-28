@@ -182,8 +182,68 @@ async def test_pptx_visual_representation_reads_exact_bytes_and_rechecks_visibil
     assert reply.headers["cache-control"] == "no-store"
     assert reply.content == b"%PDF-1.7\npreview only"
     assert inputs == [source]
-    revoke = True
+    # The version is kept rendered (docx inline edit design §5.2): no second render, and once access is
+    # gone the kept render is not served either.
+    assert client.get(path).content == b"%PDF-1.7\npreview only"
+    assert inputs == [source]
+    await store.soft_delete(art.id, user_id="owner")
     assert client.get(path).status_code == 404
+    # Access lost while a render runs is still rechecked after it.
+    other = await store.put_bytes(
+        content=b"other source bytes",
+        filename="other.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        source="sandbox_output",
+        created_by="owner",
+    )
+    art = other
+    revoke = True
+    assert client.get(f"/api/v1/files/{other.id}/representations/pptx-pdf").status_code == 404
+
+
+async def test_word_pages_render_once_per_version(stored, monkeypatch):
+    """docx inline edit design §5.1-§5.2: Word files get page renders, kept like slides."""
+    store, _ = stored
+    art = await store.put_bytes(
+        content=b"word source bytes",
+        filename="review.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        source="sandbox_output",
+        created_by="owner",
+    )
+    deck = await store.put_bytes(
+        content=b"deck bytes",
+        filename="deck.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        source="sandbox_output",
+        created_by="owner",
+    )
+    inputs = []
+
+    async def render(self, content):
+        inputs.append((self.profile, content))
+        return b"%PDF-1.7\nword pages"
+
+    monkeypatch.setattr(AuthoringExecutor, "view_document", render)
+    app = FastAPI()
+    app.include_router(files.router, prefix="/api/v1/files")
+    app.state.artifact_store = store
+    app.state.settings = SimpleNamespace(dev_default_user="owner", auth_mode="dev")
+    app.state.document_service = SimpleNamespace(executor=lambda: SimpleNamespace(root=store.backend.root_dir, url="http://executor", token="test"))
+    app.state.presentation_previews = PresentationPreviewCoordinator()
+    client = TestClient(app)
+    path = f"/api/v1/files/{art.id}/representations/docx-pdf"
+    monkeypatch.delenv("FEATURE_DOCX_INLINE_EDIT", raising=False)
+    assert client.get(path).status_code == 503, "Word pages stay off with the switch"
+    monkeypatch.setenv("FEATURE_DOCX_INLINE_EDIT", "1")
+    assert client.get(path, headers={"X-Bowhead-User-Id": "other"}).status_code == 404
+    reply = client.get(path)
+    assert reply.status_code == 200 and reply.content == b"%PDF-1.7\nword pages"
+    assert reply.headers["cache-control"] == "no-store"
+    assert client.get(path).content == b"%PDF-1.7\nword pages"
+    assert inputs == [("docx-script-worker-v1", b"word source bytes")], "Rendered once, by the Word profile"
+    assert client.get(f"/api/v1/files/{deck.id}/representations/docx-pdf").status_code == 415
+    assert client.get(f"/api/v1/files/{art.id}/representations/pptx-pdf").status_code == 415
 
 
 async def test_raw_s3_uses_range_and_closes_body(stored):

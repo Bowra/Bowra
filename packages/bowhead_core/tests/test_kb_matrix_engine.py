@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 import pytest
+from bowhead_core.kb import matrix_engine
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.kb.matrix_engine import (
     KbMatrixEngine,
@@ -24,10 +25,12 @@ from bowhead_core.kb.matrix_engine import (
     build_cache_key,
     call_timeout_s,
     column_fingerprint,
+    is_auto_retryable,
     normalize_prompt_text,
     zombie_threshold_s,
 )
 from bowhead_core.kb.matrix_store import KbMatrixStore, new_run_id
+from bowhead_core.kb.source_location import SourceChunk, SourceIndex
 from bowhead_core.kb.structured_extractor import StructuredExtractor
 from bowhead_core.kb.workspace_quotas_store import KbWorkspaceQuotasStore
 from bowhead_core.user_store import UserStore, _now
@@ -106,11 +109,13 @@ class FakeRouter:
 
 
 class FakeKbStore:
-    def __init__(self, chunks_by_file: dict[str, list[tuple[str, str, int]]]) -> None:
+    """chunks_by_file: file_id → [(chunk_id, content, chunk_index[, metadata page])]."""
+
+    def __init__(self, chunks_by_file: dict[str, list[tuple[Any, ...]]]) -> None:
         self.chunks_by_file = chunks_by_file
 
-    async def get_ordered_chunks_for_file(self, file: Any) -> list[tuple[str, str, int]]:
-        return self.chunks_by_file.get(file.file_id, [])
+    async def get_ordered_source_chunks(self, file: Any) -> list[SourceChunk]:
+        return [SourceChunk(*c) for c in self.chunks_by_file.get(file.file_id, [])]
 
 
 # ─── harness ────────────────────────────────────────────────
@@ -155,7 +160,7 @@ async def _mk_env(
     tmp_path: Path,
     *,
     handler: Any = None,
-    chunks_by_file: dict[str, list[tuple[str, str, int]]] | None = None,
+    chunks_by_file: dict[str, list[tuple[Any, ...]]] | None = None,
     user_balance: int = 100_000,
     team_balance: int = 100_000,
 ) -> Env:
@@ -178,6 +183,7 @@ async def _mk_env(
         router=router,
         user_store=user_store,
         quotas_store=quotas,
+        auto_retry_delay_s=lambda: 0.0,  # The automatic retry pass starts at once in tests.
     )
     return Env(engine=engine, store=store, files_store=files_store, user_store=user_store, quotas=quotas, router=router, kb=kb)
 
@@ -691,6 +697,89 @@ async def test_cache_hit_across_matrices_regrounds_handles(tmp_path: Path) -> No
     assert cell.variants[0].get("page") is None
 
 
+# ─── Pages (document matrix step 1, S7) ─────────────────
+
+# A three-page PDF in two chunks, as the PDF loader and paragraph splitter leave it.
+_PDF_CHUNKS = [
+    "## Page 1\n\n甲方：北京某科技有限公司\n\n## Page 2\n\n第一条 合同总金额为人民币伍佰万元。",
+    "第二条 付款方式为分三期支付。\n\n## Page 3\n\n第三条 违约金为合同总额的百分之五。",
+]
+_PDF_QUOTES = {
+    "金额": "合同总金额为人民币伍佰万元",  # chunk 1, page 2
+    "付款": "付款方式为分三期支付",  # chunk 2, page 2 carried from chunk 1
+    "违约": "违约金为合同总额的百分之五",  # chunk 2, page 3
+    "保密": "双方应对本合同内容保密",  # not in the file: grounding rejects it
+}
+
+
+async def _register_pdf(env: Env, file_id_hint: str, chunks: list[str]) -> str:
+    real_id = await env.files_store.create(
+        artifact_id="dummy",
+        filename=f"{file_id_hint}.pdf",
+        mime_type="application/pdf",
+        size_bytes=sum(len(c) for c in chunks),
+        scope="workspace",
+        scope_id=WS,
+        workspace_id=WS,
+        team_id=TEAM,
+        uploaded_by=USER,
+    )
+    env.kb.chunks_by_file[real_id] = [(f"chk_{real_id}_{i}", content, i) for i, content in enumerate(chunks, start=1)]
+    return real_id
+
+
+def _quoting(quotes: dict[str, str]) -> Any:
+    def handler(i: int, req: Any, user_pref: Any) -> _Resp:
+        # _content_for answers source_page 1 for every field: the model's guess, never kept.
+        return _Resp(content=_content_for(_parse_requested_fields(req), snippet_map=quotes))
+
+    return handler
+
+
+def _source(cell: Any) -> tuple[Any, Any, Any]:
+    v = cell.variants[0]
+    return v["chunk_id"], v.get("chunk_index"), v["page"]
+
+
+async def test_grounded_pdf_cell_stores_the_page_from_markers(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path, handler=_quoting(_PDF_QUOTES))
+    fid = await _register_pdf(env, "contract", _PDF_CHUNKS)
+    md = await _register_file(env, "notes", "## Page 3\n\n合同总金额为人民币伍佰万元")  # Markdown: the heading is text
+    m = await _mk_matrix(env, [fid, md], [{"name": name, "type": "question", "question": f"{name}?"} for name in _PDF_QUOTES])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+
+    cells = {c["name"]: await env.store.get_cell(m.matrix_id, fid, c["column_id"]) for c in m.columns}
+    assert _source(cells["金额"]) == (f"chk_{fid}_1", 1, 2)
+    assert _source(cells["付款"]) == (f"chk_{fid}_2", 2, 2)
+    assert _source(cells["违约"]) == (f"chk_{fid}_2", 2, 3)
+    assert _source(cells["保密"]) == (None, None, None)  # Unverified quote: no chunk and no page.
+    amount_md = await env.store.get_cell(m.matrix_id, md, m.columns[0]["column_id"])
+    assert _source(amount_md) == (f"chk_{md}_1", 1, None)  # Paragraph 1, no page.
+
+
+async def test_cached_copy_re_derives_the_page_from_its_own_chunks(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path, handler=_quoting(_PDF_QUOTES))
+    f1 = await _register_pdf(env, "two_chunks", _PDF_CHUNKS)
+    # The same text in one chunk: the same content hash, so the second matrix hits the cache.
+    f2 = await _register_pdf(env, "one_chunk", ["\n\n".join(_PDF_CHUNKS)])
+    col_def = {"name": "违约", "type": "question", "question": "违约金?"}
+    m1 = await _mk_matrix(env, [f1], [dict(col_def)])
+    await _wait_run(env, (await env.engine.start_run(m1, {"kind": "all_pending"}, initiated_by=USER)).run_id)
+    m2 = await _mk_matrix(env, [f2], [dict(col_def)])
+    run2 = await env.engine.start_run(m2, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run2.run_id)
+
+    assert len(env.router.calls) == 1
+    got2 = await env.store.get_run(run2.run_id)
+    assert got2 is not None and got2.cells_cached == 1
+    source = await env.store.get_cell(m1.matrix_id, f1, m1.columns[0]["column_id"])
+    copy = await env.store.get_cell(m2.matrix_id, f2, m2.columns[0]["column_id"])
+    assert source is not None and copy is not None and copy.cached
+    assert _source(source) == (f"chk_{f1}_2", 2, 3)
+    assert _source(copy) == (f"chk_{f2}_1", 1, 3)
+
+
 def test_cache_key_normalization() -> None:
     col_a = {"question": "合同金额？  ", "type": "question", "extraction_hint": ""}
     col_b = {"question": "合同金额？", "type": "question", "extraction_hint": ""}
@@ -844,10 +933,10 @@ async def test_call_crash_lands_failed_not_stuck(tmp_path: Path) -> None:
     env = await _mk_env(tmp_path)
     fid = await _register_file(env, "f1", "文本")
 
-    async def boom(file: Any) -> list[tuple[str, str, int]]:
+    async def boom(file: Any) -> list[SourceChunk]:
         raise RuntimeError("chroma down")
 
-    env.kb.get_ordered_chunks_for_file = boom  # type: ignore[method-assign]
+    env.kb.get_ordered_source_chunks = boom  # type: ignore[method-assign]
     m = await _mk_matrix(env, [fid], [{"name": "A", "type": "question", "question": "a?"}])
     run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
     await _wait_run(env, run.run_id)
@@ -1143,7 +1232,7 @@ async def test_reground_filters_user_origin_variants(tmp_path: Path) -> None:
             "page": None,
         },
     ]
-    out = env.engine._reground_cached_variants(source, [])
+    out = env.engine._reground_cached_variants(source, SourceIndex([], "text/markdown"))
     assert len(out) == 1
     assert out[0]["extracted_by"] == "tier1"
 
@@ -1174,7 +1263,7 @@ async def test_reground_filters_by_variant_edited_flag(tmp_path: Path) -> None:
             "page": None,
         },
     ]
-    out = env.engine._reground_cached_variants(source, [])
+    out = env.engine._reground_cached_variants(source, SourceIndex([], "text/markdown"))
     assert len(out) == 1
     assert out[0]["extracted_by"] == "tier1"
     assert not out[0].get("edited_by_user")
@@ -1185,3 +1274,394 @@ def test_call_timeout_cv_multiplier_and_zombie_threshold() -> None:
     base = call_timeout_s(10)
     assert call_timeout_s(10, cross_verify=True) == base * 2
     assert zombie_threshold_s() > call_timeout_s(10, cross_verify=True)
+
+
+# ─── Document matrix step 1, S1: structure changes during a run ─────
+
+
+class _GatedRouter(FakeRouter):
+    """Holds every call until ``release`` is set, so a test can change the matrix mid-call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_call = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def invoke(self, agent_type: str, req: Any, profile: Any = None, user_pref: Any = None) -> _Resp:
+        resp = await super().invoke(agent_type, req, profile=profile, user_pref=user_pref)
+        self.first_call.set()
+        await self.release.wait()
+        return resp
+
+
+async def _gated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n_files: int) -> tuple[Env, _GatedRouter, list[str]]:
+    monkeypatch.setenv("BOWHEAD_KB_MATRIX_CELL_CONCURRENCY", "1")
+    env = await _mk_env(tmp_path)
+    router = _GatedRouter()
+    env.engine._router = router
+    env.engine._extractor = StructuredExtractor(router=router)
+    env.router = router
+    fids = [await _register_file(env, f"f{i}", f"正文-{i}-结束") for i in range(n_files)]
+    return env, router, fids
+
+
+async def _charged(env: Env, run_id: str) -> int:
+    async with (
+        aiosqlite.connect(env.user_store.db_path) as db,
+        db.execute("SELECT COALESCE(SUM(-delta),0) FROM credit_ledger WHERE turn_id=? AND reason='kb_matrix_run'", (run_id,)) as cur,
+    ):
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+@pytest.mark.parametrize("cancel_first", [True, False], ids=["route_order", "delete_only"])
+async def test_matrix_deleted_mid_run_stops_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_first: bool) -> None:
+    """Spike bug B: a run on a deleted matrix used to make every call and charge for each.
+
+    ``route_order`` cancels and then deletes, as the delete route does; ``delete_only`` skips
+    the cancel, so the engine's own per-call matrix check must stop the run.
+    """
+    env, router, fids = await _gated_env(tmp_path, monkeypatch, n_files=4)
+    m = await _mk_matrix(env, fids, [{"name": "金额", "type": "question", "question": "金额?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await asyncio.wait_for(router.first_call.wait(), 10)
+
+    if cancel_first:
+        assert await env.engine.cancel_run(run.run_id)
+    assert await env.store.soft_delete_matrix(m.matrix_id, workspace_id=WS)
+    router.release.set()
+    await _wait_run(env, run.run_id)
+
+    got = await env.store.get_run(run.run_id)
+    assert got is not None and got.status == "cancelled"
+    assert len(router.calls) == 1  # Only the call already in flight.
+    assert got.cells_done == 0  # Its write hit the soft-delete guard.
+    assert await _charged(env, run.run_id) == got.credits_charged == 5  # Only the completed call is charged.
+
+
+async def test_files_removed_mid_run_skip_their_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spike bug C: removed rows used to be called and charged, leaving the run at 50% after success."""
+    env, router, fids = await _gated_env(tmp_path, monkeypatch, n_files=6)
+    m = await _mk_matrix(env, fids, [{"name": "金额", "type": "question", "question": "金额?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await asyncio.wait_for(router.first_call.wait(), 10)
+
+    assert await env.store.replace_files(m.matrix_id, [{"file_id": f, "char_count": 10} for f in fids[:3]], workspace_id=WS)
+    router.release.set()
+    await _wait_run(env, run.run_id)
+
+    got = await env.store.get_run(run.run_id)
+    assert got is not None and got.status == "succeeded"
+    assert len(router.calls) in (3, 4)  # The in-flight call may belong to a removed row.
+    later_texts = [call["req"].messages[0].content for call in router.calls[1:]]
+    assert not [t for t in later_texts for i in range(3, 6) if f"正文-{i}-结束" in t]
+    assert (got.cells_total, got.cells_done, got.cells_failed) == (3, 3, 0)  # 100% of what is still owed.
+    assert await _charged(env, run.run_id) == 5 * len(router.calls)
+
+
+# ─── Document matrix step 1 (S3): scopes, estimate breakdown, automatic retry ───
+
+
+async def _done(env: Env, matrix_id: str, file_id: str, col: str, *, verified: bool = False, edited: bool = False) -> None:
+    """Put a cell in done (optionally verified or edited) without running the engine."""
+    await env.store.enqueue_cells(
+        matrix_id, [(file_id, col)], run_id="mxrun_seed", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+    await env.store.finalize_cell(
+        matrix_id,
+        file_id,
+        col,
+        status="done",
+        variants=[{"is_primary": True, "normalized": {"value": f"旧值{file_id}"}}],
+        prompt_version=1,
+        file_version=1,
+    )
+    if verified:
+        await env.store.set_cell_verified(matrix_id, file_id, col, workspace_id=WS, verified=True)
+    if edited:
+        await env.store.edit_cell_value(
+            matrix_id, file_id, col, value="人工", column={"type": "question", "prompt_version": 1}, workspace_id=WS, team_id=TEAM
+        )
+
+
+async def _failed(env: Env, matrix_id: str, file_id: str, col: str, *, reason: str = "timeout") -> None:
+    await env.store.enqueue_cells(
+        matrix_id, [(file_id, col)], run_id="mxrun_seed", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+    await env.store.finalize_cell(matrix_id, file_id, col, status="failed", fail_reason=reason)
+
+
+async def test_failed_scope_targets_failed_cells_only(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    m = await _mk_matrix(env, ["f1", "f2", "f3", "f4"], [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    await _failed(env, m.matrix_id, "f2", col)
+    await _done(env, m.matrix_id, "f3", col, edited=True)
+    await _failed(env, m.matrix_id, "f3", col)  # failed + edited: kept
+    await _done(env, m.matrix_id, "f4", col)
+    cells = await env.store.list_cells(m.matrix_id)
+    selection = KbMatrixEngine.select_targets(m, cells, {"kind": "failed"})
+    assert selection.targets == [("f2", col)]  # f1 is empty, f4 done
+    assert (selection.skipped_edited, selection.skipped_verified) == (1, 0)
+
+
+async def test_file_ids_limit_rows_in_matrix_order(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    m = await _mk_matrix(
+        env, ["f1", "f2", "f3"], [{"name": "A", "type": "question", "question": "a?"}, {"name": "B", "type": "question", "question": "b?"}]
+    )
+    a, b = (c["column_id"] for c in m.columns)
+    selection = KbMatrixEngine.select_targets(m, [], {"kind": "all_pending", "file_ids": ["f3", "f1", "f3"]})
+    assert selection.targets == [("f1", a), ("f1", b), ("f3", a), ("f3", b)]
+    selection = KbMatrixEngine.select_targets(m, [], {"kind": "column", "column_id": b, "file_ids": ["f2"]})
+    assert selection.targets == [("f2", b)]
+    for bad in ([], ["f1", "nope"], [f"f{i}" for i in range(51)]):
+        with pytest.raises(ValueError, match="file_ids"):
+            KbMatrixEngine.select_targets(m, [], {"kind": "all_pending", "file_ids": bad})
+
+
+@pytest.mark.parametrize("kind", ["force_all", "force_column"])
+async def test_force_scopes_keep_verified_unless_told_otherwise(tmp_path: Path, kind: str) -> None:
+    """Approved change (discovery §3.2): rerun all keeps verified and edited cells."""
+    env = await _mk_env(tmp_path)
+    m = await _mk_matrix(env, ["f1", "f2", "f3", "f4"], [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    await _done(env, m.matrix_id, "f1", col, verified=True)
+    await _done(env, m.matrix_id, "f2", col)
+    await _done(env, m.matrix_id, "f3", col, verified=True)
+    await _failed(env, m.matrix_id, "f3", col)  # failed after a verified value: still a target
+    await _done(env, m.matrix_id, "f4", col, verified=True)
+    await env.store.edit_cell_value(
+        m.matrix_id, "f4", col, value="人工", column={"type": "question", "prompt_version": 1}, workspace_id=WS, team_id=TEAM
+    )
+    cells = await env.store.list_cells(m.matrix_id)
+    scope: dict[str, Any] = {"kind": kind, "column_id": col}
+
+    for keep in ({}, {"keep_verified": True}, {"keep_verified": None}):
+        selection = KbMatrixEngine.select_targets(m, cells, {**scope, **keep})
+        assert selection.targets == [("f2", col), ("f3", col)]
+        assert (selection.skipped_edited, selection.skipped_verified) == (1, 1)
+    selection = KbMatrixEngine.select_targets(m, cells, {**scope, "keep_verified": False})
+    assert selection.targets == [("f1", col), ("f2", col), ("f3", col)]
+    assert (selection.skipped_edited, selection.skipped_verified) == (1, 0)  # Edited cells stay skipped by every batch scope.
+
+
+async def test_force_run_leaves_verified_cell_untouched(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    f1 = await _register_file(env, "f1", "正文一")
+    f2 = await _register_file(env, "f2", "正文二")
+    m = await _mk_matrix(env, [f1, f2], [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    await _done(env, m.matrix_id, f1, col, verified=True)
+    await _done(env, m.matrix_id, f2, col)
+    est = await env.engine.estimate_run(m, {"kind": "force_all"}, user_id=USER)
+    assert (est["cells_pending"], est["skipped_verified"], est["skipped_edited"]) == (1, 1, 0)
+    run = await env.engine.start_run(m, {"kind": "force_all"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    kept = await env.store.get_cell(m.matrix_id, f1, col)
+    assert kept is not None and kept.verified and kept.variants[0]["normalized"] == {"value": f"旧值{f1}"}
+    rerun = await env.store.get_cell(m.matrix_id, f2, col)
+    assert rerun is not None and rerun.variants[0]["normalized"] == {"value": "A的值"}
+    assert len(env.router.calls) == 1
+
+
+async def test_single_cell_rerun_overwrites_verified_cell(tmp_path: Path) -> None:
+    """single_cell stays an explicit per-cell action: it reruns a verified cell and the new value is unverified."""
+    env = await _mk_env(tmp_path)
+    fid = await _register_file(env, "f1", "正文")
+    m = await _mk_matrix(env, [fid], [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    await _done(env, m.matrix_id, fid, col, verified=True)
+    run = await env.engine.start_run(m, {"kind": "single_cell", "file_id": fid, "column_id": col, "keep_verified": True}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    cell = await env.store.get_cell(m.matrix_id, fid, col)
+    assert cell is not None
+    assert cell.variants[0]["normalized"] == {"value": "A的值"}
+    assert not cell.verified
+
+
+async def test_estimate_breakdown_sums_to_total_and_charges_cross_check_reading(tmp_path: Path) -> None:
+    """Spike §6: the cross-checked column's extra reading is attributed to it and can dominate."""
+    env = await _mk_env(tmp_path)
+    m = await env.store.create_matrix(
+        name="est",
+        workspace_id=WS,
+        team_id=TEAM,
+        created_by=USER,
+        files=[{"file_id": "fa", "char_count": 1000}, {"file_id": "fb", "char_count": 30_000}],
+        columns=[
+            {"name": "A", "type": "question", "question": "a?"},
+            {"name": "B", "type": "question", "question": "b?"},
+            {"name": "C", "type": "string", "question": "c?", "cross_verify": True},
+        ],
+    )
+    a, b, c = (col["column_id"] for col in m.columns)
+    est = env.engine.estimate_targets(m, [(f, col) for f in ("fa", "fb") for col in (a, b, c)])
+    # Calls: fa plain 1000+2×1502=4004 → 5, fa cv 2×(1000+1502)=5004 → 6, fb plain 30000+2×2×1502=36008 → 37,
+    # fb cv 2×(30000+2×1502)=66016 → 67. Reading = plain calls' document share; C gets both cv readings.
+    assert est["credits_estimated"] == 115
+    assert est["reading_credits"] == 32
+    assert est["columns"] == [
+        {"column_id": a, "cells": 2, "credits": 5, "cross_verify": False},
+        {"column_id": b, "cells": 2, "credits": 5, "cross_verify": False},
+        {"column_id": c, "cells": 2, "credits": 73, "cross_verify": True},
+    ]
+    assert est["reading_credits"] + sum(col["credits"] for col in est["columns"]) == est["credits_estimated"]
+    assert est["files"] == 2
+    assert est["longest_file"] == {"file_id": "fb", "chars": 30_000, "credits": 104}
+
+    # Only the cross-checked column pending: each document's first reading is shared, the second is the column's.
+    only_c = env.engine.estimate_targets(m, [("fa", c), ("fb", c)])
+    assert (only_c["credits_estimated"], only_c["reading_credits"], only_c["columns"][0]["credits"]) == (73, 32, 41)
+
+    # Uneven splits still add up (largest remainder rounding).
+    for targets in ([("fa", a)], [("fa", a), ("fb", c)], [("fb", a), ("fb", b), ("fa", c)]):
+        part = env.engine.estimate_targets(m, targets)
+        assert part["reading_credits"] + sum(col["credits"] for col in part["columns"]) == part["credits_estimated"]
+
+
+async def test_estimate_run_single_cell_and_trial_rows(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    fids = [await _register_file(env, f"f{i}", f"正文{i}") for i in range(5)]
+    m = await _mk_matrix(env, fids, [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    await _done(env, m.matrix_id, fids[0], col)
+    full = await env.engine.estimate_run(m, {"kind": "all_pending"}, user_id=USER)
+    assert full["trial_file_ids"] == fids[1:4]  # First three rows that still have pending cells.
+    trial = await env.engine.estimate_run(m, {"kind": "all_pending", "file_ids": full["trial_file_ids"]}, user_id=USER)
+    assert (trial["cells_pending"], trial["files"]) == (3, 3)
+    assert trial["credits_estimated"] < full["credits_estimated"]
+
+    one = await env.engine.estimate_run(m, {"kind": "single_cell", "file_id": fids[0], "column_id": col}, user_id=USER)
+    assert (one["cells_pending"], one["files"], one["trial_file_ids"]) == (1, 1, [])
+    assert one["columns"] == [{"column_id": col, "cells": 1, "credits": one["credits_estimated"] - one["reading_credits"], "cross_verify": False}]
+    assert one["credits_estimated"] > 0
+
+
+async def test_trial_run_echoes_its_rows(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    fids = [await _register_file(env, f"f{i}", f"正文{i}") for i in range(4)]
+    m = await _mk_matrix(env, fids, [{"name": "A", "type": "question", "question": "a?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending", "file_ids": [fids[2], fids[0], fids[2]]}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    got = await env.store.get_run(run.run_id)
+    assert got is not None
+    assert (got.status, got.cells_total, got.cells_done) == ("succeeded", 2, 2)
+    assert got.scope["file_ids"] == [fids[2], fids[0]]
+    assert len(env.router.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("reason", "hint", "retryable"),
+    [
+        ("timeout", None, True),
+        ("llm_invoke_failed", None, True),
+        ("llm_invoke_failed", "file_has_no_chunks", False),
+        ("system_interrupted", "call_crashed", True),
+        ("system_interrupted", "call_leaked", False),
+        ("system_interrupted", "zombie_no_heartbeat", False),
+        ("llm_parse_failed", None, False),
+        ("insufficient_credits", None, False),
+        ("quota_exceeded", None, False),
+        ("source_unavailable", "generation_changed", False),
+    ],
+)
+def test_auto_retryable_reasons(reason: str, hint: str | None, retryable: bool) -> None:
+    assert is_auto_retryable(reason, hint) is retryable
+
+
+async def test_transient_failure_retried_once_and_charged_once(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    f1 = await _register_file(env, "f1", "正文一")
+    f2 = await _register_file(env, "f2", "正文二")
+    m = await _mk_matrix(env, [f1, f2], [{"name": "A", "type": "question", "question": "a?"}])
+    col = m.columns[0]["column_id"]
+    failures = {"left": 1}
+
+    def handler(i: int, req: Any, user_pref: Any) -> Any:
+        if "正文一" in req.messages[0].content and failures["left"]:
+            failures["left"] -= 1
+            return RuntimeError("provider chain exhausted")
+        return None
+
+    env.router.handler = handler
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    got = await env.store.get_run(run.run_id)
+    assert got is not None
+    assert (got.status, got.error_code) == ("succeeded", None)
+    assert (got.cells_total, got.cells_done, got.cells_failed) == (2, 2, 0)
+    cell = await env.store.get_cell(m.matrix_id, f1, col)
+    assert cell is not None and cell.status == "done" and cell.run_id == run.run_id
+    assert len(env.router.calls) == 3  # Two first-pass calls and one retry.
+    assert await _charged(env, run.run_id) == got.credits_charged == 10  # The failed attempt was never charged.
+
+
+async def test_retry_failing_again_stays_failed(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    fid = await _register_file(env, "f1", "文本")
+    calls = {"n": 0}
+
+    async def boom(file: Any) -> list[SourceChunk]:
+        calls["n"] += 1
+        raise RuntimeError("chroma down")
+
+    env.kb.get_ordered_source_chunks = boom  # type: ignore[method-assign]
+    m = await _mk_matrix(env, [fid], [{"name": "A", "type": "question", "question": "a?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    got = await env.store.get_run(run.run_id)
+    assert got is not None and (got.status, got.cells_failed) == ("succeeded", 1)
+    cell = await env.store.get_cell(m.matrix_id, fid, m.columns[0]["column_id"])
+    assert cell is not None and (cell.fail_reason, cell.fail_hint) == ("system_interrupted", "call_crashed")
+    assert calls["n"] == 2  # call_crashed retried once, then left for a manual rerun.
+
+
+async def test_parse_failure_is_not_retried(tmp_path: Path) -> None:
+    env = await _mk_env(tmp_path)
+    fid = await _register_file(env, "f1", "文本")
+    env.router.handler = lambda i, req, p: _Resp(content="{}")
+    m = await _mk_matrix(env, [fid], [{"name": "A", "type": "question", "question": "a?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    got = await env.store.get_run(run.run_id)
+    assert got is not None and (got.status, got.cells_failed, got.error_code) == ("succeeded", 1, None)
+    assert len(env.router.calls) == 1  # Billed failure: manual rerun only.
+
+
+async def test_outage_guard_skips_retry_and_says_so(tmp_path: Path) -> None:
+    """More than half of the model calls exhausted the provider chain: no retry pass, provider_outage summary."""
+    env = await _mk_env(tmp_path)
+    fids = [await _register_file(env, f"f{i}", f"正文{i}") for i in range(3)]
+    env.router.handler = lambda i, req, p: RuntimeError("all providers down") if "正文2" not in req.messages[0].content else None
+    m = await _mk_matrix(env, fids, [{"name": "A", "type": "question", "question": "a?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await _wait_run(env, run.run_id)
+    got = await env.store.get_run(run.run_id)
+    assert got is not None
+    assert (got.status, got.error_code, got.cells_done, got.cells_failed) == ("succeeded", "provider_outage", 1, 2)
+    assert len(env.router.calls) == 3  # 2 of 3 calls failed: no retry.
+
+
+async def test_cancel_during_retry_wait_restores_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(matrix_engine, "AUTO_RETRY_POLL_S", 0.01)
+    env = await _mk_env(tmp_path)
+    fids = [await _register_file(env, f"f{i}", f"正文{i}") for i in range(3)]
+    env.router.handler = lambda i, req, p: RuntimeError("flaky") if i == 0 else None
+    waiting = asyncio.Event()
+
+    def delay() -> float:
+        waiting.set()
+        return 30.0
+
+    env.engine._auto_retry_delay_s = delay
+    m = await _mk_matrix(env, fids, [{"name": "A", "type": "question", "question": "a?"}])
+    run = await env.engine.start_run(m, {"kind": "all_pending"}, initiated_by=USER)
+    await asyncio.wait_for(waiting.wait(), 10)
+    assert await env.engine.cancel_run(run.run_id)
+    await _wait_run(env, run.run_id)  # The wait re-reads the run status every AUTO_RETRY_POLL_S.
+    got = await env.store.get_run(run.run_id)
+    assert got is not None and got.status == "cancelled"
+    assert len(env.router.calls) == 3  # No retry after the cancel.
+    failed = [c for c in await env.store.list_cells(m.matrix_id) if c.status == "failed"]
+    assert len(failed) == 1 and failed[0].fail_reason == "llm_invoke_failed"

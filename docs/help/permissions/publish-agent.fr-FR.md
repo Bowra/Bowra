@@ -12,7 +12,9 @@ Vérifiez que l’Agent vous appartient et que ses instructions, Skills, modèle
 2. Choisissez le public et enregistrez les paramètres de partage.
 3. Utilisez l’action proposée : **Lancer les contrôles de sécurité** ou **Préparer une version candidate** selon le parcours.
 4. Vérifiez les avertissements, effectuez les changements requis et soumettez la version.
-5. Si une approbation est nécessaire, le propriétaire ou un administrateur examine la version candidate et l’approuve ou la refuse.
+5. Si une approbation est nécessaire, le propriétaire ou un administrateur examine la version candidate et l’approuve ou la refuse. Il ouvre **Mes agents → Approbations de l’équipe** et choisit **Commencer l’examen** sur la demande. Lors d’un premier partage (jusqu’ici seul le propriétaire utilisait l’Agent), la configuration complète est dépliée, car l’approbation porte sur l’Agent entier. **Ce qui a changé** indique pour chaque élément seulement « Modifié » ou « Identique à la vN » ; la page d’approbation n’affiche pas le texte des consignes. Le résultat s’affiche sous les boutons ; **Copier le lien** permet d’envoyer le lien aux nouveaux membres, qui ne reçoivent pas de notification.
+
+Sur la nouvelle page d’Agent, le seul bouton de test est **Tester cette modification** dans la barre de publication ; **Dernier test**, en haut de **Cas de test**, le résume. **Tester sur la vN publiée**, dans le « ⋯ » du groupe, exécute vos cas sur la seule version publiée et ne compte pas comme un test de cette modification. Avec des cas non enregistrés, **Tester cette modification** demande d’abord s’il faut enregistrer puis tester, ou tester avec les cas enregistrés uniquement.
 
 Après **Préparer une version candidate**, la vérification des éléments de test concerne cette version préparée. Des tests manquants ou une panne d’infrastructure ne constituent pas des preuves prêtes : corrigez et réessayez. Après retrait de la candidate, les tests par défaut concernent de nouveau la version en service ; les anciens enregistrements restent consultables.
 

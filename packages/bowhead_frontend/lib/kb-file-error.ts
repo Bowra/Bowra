@@ -65,7 +65,26 @@ export type KbFileErrorKey =
   | "errors.bind_operation_failed"
   | "errors.reparse_failed"
   | "errors.extract_failed"
-  | "errors.upload_operation_failed";
+  | "errors.upload_operation_failed"
+  | "errors.knowledge_base_not_found"
+  | "errors.knowledge_base_level_required"
+  | "errors.knowledge_base_access_unavailable"
+  | "errors.knowledge_base_create_forbidden"
+  | "errors.knowledge_base_audience_invalid"
+  | "errors.knowledge_base_name_required"
+  | "errors.knowledge_base_revision_conflict"
+  | "errors.knowledge_base_default_fixed"
+  | "errors.knowledge_base_default_not_deletable"
+  | "errors.knowledge_base_files_changed"
+  | "errors.knowledge_base_files_remaining"
+  | "errors.knowledge_base_member_invalid"
+  | "errors.knowledge_base_member_limit"
+  | "errors.knowledge_base_not_shareable"
+  | "errors.knowledge_base_not_transferable"
+  | "errors.knowledge_base_transfer_target_invalid"
+  | "errors.knowledge_base_move_conflict"
+  | "errors.knowledge_base_scope_mismatch"
+  | "errors.source_in_trash";
 
 export const KB_FILE_ERROR_KEY: Readonly<Record<string, KbFileErrorKey>> = {
   auth_required: "errors.sign_in_again",
@@ -131,6 +150,26 @@ export const KB_FILE_ERROR_KEY: Readonly<Record<string, KbFileErrorKey>> = {
   kb_backfill_failed: "errors.service_unavailable",
   rate_limited: "errors.rate_limited",
   rate_limit: "errors.rate_limited",
+  // Knowledge bases (FEATURE_KNOWLEDGE_BASES): the API's finite codes; the pages come with slice 4.
+  knowledge_base_not_found: "errors.knowledge_base_not_found",
+  knowledge_base_level_required: "errors.knowledge_base_level_required",
+  knowledge_base_access_unavailable: "errors.knowledge_base_access_unavailable",
+  knowledge_base_create_forbidden: "errors.knowledge_base_create_forbidden",
+  knowledge_base_audience_invalid: "errors.knowledge_base_audience_invalid",
+  knowledge_base_name_required: "errors.knowledge_base_name_required",
+  knowledge_base_revision_conflict: "errors.knowledge_base_revision_conflict",
+  knowledge_base_default_fixed: "errors.knowledge_base_default_fixed",
+  knowledge_base_default_not_deletable: "errors.knowledge_base_default_not_deletable",
+  knowledge_base_files_changed: "errors.knowledge_base_files_changed",
+  knowledge_base_files_remaining: "errors.knowledge_base_files_remaining",
+  knowledge_base_member_invalid: "errors.knowledge_base_member_invalid",
+  knowledge_base_member_limit: "errors.knowledge_base_member_limit",
+  knowledge_base_not_shareable: "errors.knowledge_base_not_shareable",
+  knowledge_base_not_transferable: "errors.knowledge_base_not_transferable",
+  knowledge_base_transfer_target_invalid: "errors.knowledge_base_transfer_target_invalid",
+  knowledge_base_move_conflict: "errors.knowledge_base_move_conflict",
+  knowledge_base_scope_mismatch: "errors.knowledge_base_scope_mismatch",
+  knowledge_source_in_trash: "errors.source_in_trash",
 };
 
 const OPERATION_FALLBACK: Readonly<

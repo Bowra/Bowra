@@ -1359,6 +1359,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "🌐",
         "category": "web",
     },
+    "wecom_notify": {
+        "display_zh": "发送企业微信通知",
+        "display_en": "Send WeCom notification",
+        "blurb_zh": "在网页对话中向当前用户已关联的企业微信发送通知。",
+        "blurb_en": "Send a notification to the current user's linked WeCom account during a web chat.",
+        "display_de": "WeCom-Benachrichtigung senden",
+        "blurb_de": "Im Web-Chat eine Benachrichtigung an das verknüpfte WeCom-Konto der aktuellen Person senden.",
+        "display_fr": "Envoyer une notification WeCom",
+        "blurb_fr": "Envoyer une notification au compte WeCom lié de l’utilisateur pendant une conversation sur le Web.",
+        "sigil": "🔔",
+        "category": "orchestrate",
+    },
     "write_report": {
         "display_zh": "写入报告",
         "display_en": "Write Report",

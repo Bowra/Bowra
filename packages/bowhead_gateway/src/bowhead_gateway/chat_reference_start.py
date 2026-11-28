@@ -15,9 +15,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from bowhead_core.agent_owner_trial import trial_reference, trial_refusal_code
 from bowhead_core.chat_reference_admission import ReferenceStartAdmission
 from bowhead_core.chat_reference_catalog import EntryMode, initial_reference_authoring_supported, initial_reference_entry_supported
-from bowhead_core.chat_reference_preparation import prepare_reference_system_start_admission, prepare_reference_team_start_admission
+from bowhead_core.chat_reference_preparation import (
+    prepare_reference_system_start_admission,
+    prepare_reference_team_start_admission,
+    prepare_reference_trial_start_admission,
+)
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_reference_storage import ReferenceCipher, supports_lead_reference_receiver
 from bowhead_core.chat_references import (
@@ -344,11 +349,15 @@ async def prepare_reference_http_start(
         agents = [node.resource for node in document.nodes if isinstance(node, ReferenceNode) and isinstance(node.resource, AgentResourceRef)]
         if agents:
             agent = agents[0]
-            prepared = (
-                await prepare_reference_system_start_admission(store.db_path, runner=orchestrator.subagent_runner, **kwargs)
-                if agent.source_kind == "system"
-                else await prepare_reference_team_start_admission(store.db_path, **kwargs)
-            )
+            if agent.source_kind == "team" and agent.trial_candidate_id is not None:
+                # An Owner draft trial: the frozen candidate, never the live projection or the catalog (§4.2).
+                prepared = await prepare_reference_trial_start_admission(
+                    store.db_path, input_document=document, scope=scope, sources=sources, has_attachments=has_attachments
+                )
+            elif agent.source_kind == "system":
+                prepared = await prepare_reference_system_start_admission(store.db_path, runner=orchestrator.subagent_runner, **kwargs)
+            else:
+                prepared = await prepare_reference_team_start_admission(store.db_path, **kwargs)
         else:
             from bowhead_core.reference_receiver_candidates import (
                 prepare_reference_receiver_choice,
@@ -454,6 +463,11 @@ async def prepare_reference_http_start(
         )
         raise HTTPException(409, detail={"error": {"code": "reference_receiver_selection_failed", "admission": "not_started"}}) from None
     except Exception as exc:
+        # A trial refusal names its condition (not the Owner, candidate not in review, ...).
+        trial_code = trial_refusal_code(exc) if trial_reference(document) is not None else None
+        if trial_code is not None:
+            logger.warning("reference_start.rejected code=%s entry_mode=%s team_id=%s", trial_code, entry_mode, team_id)
+            raise HTTPException(409, detail={"error": {"code": trial_code}}) from None
         # One opaque code for the caller, but never a silent one for the operator: every distinct
         # preparation failure used to look identical here and left no trace server-side.
         logger.warning(

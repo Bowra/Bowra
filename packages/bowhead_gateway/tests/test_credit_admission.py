@@ -122,6 +122,10 @@ async def test_teams_turn_blocked_when_credit_exhausted(monkeypatch, team_balanc
     monkeypatch.setattr(teams_routes, "_send_activity", _send_activity)
     monkeypatch.setattr(turn_service, "resolve_team_model_runtime", _reached_runtime)
     kwargs = {
+        "session_id": "teams:test",
+        "turn_id": "t_test",
+        "activity_key": "act_test",
+        "access_context": {},
         "request": request,
         "activity": {},
         "connection": SimpleNamespace(id="tc_1", entra_tenant_id="tenant_a"),

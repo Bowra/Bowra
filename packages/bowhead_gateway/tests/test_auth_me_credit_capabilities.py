@@ -320,6 +320,66 @@ async def test_auth_me_reports_the_agent_release_bar_from_its_switch(app_ctx, mo
 
 
 @pytest.mark.parametrize("flag", [None, "0", "1"])
+async def test_auth_me_reports_the_owner_draft_trial_from_its_switch(app_ctx, monkeypatch, flag) -> None:
+    if flag is None:
+        monkeypatch.delenv("FEATURE_AGENT_DRAFT_TRIAL_V1", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_AGENT_DRAFT_TRIAL_V1", flag)
+    app, store = app_ctx
+    await _seed_team_and_user(store)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 200, response.text
+    assert response.json()["capabilities"]["agent_draft_trial"] is (flag == "1")
+
+
+@pytest.mark.parametrize("flag", [None, "0", "1"])
+async def test_auth_me_reports_word_inline_edit_from_its_switch(app_ctx, monkeypatch, flag) -> None:
+    if flag is None:
+        monkeypatch.delenv("FEATURE_DOCX_INLINE_EDIT", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_DOCX_INLINE_EDIT", flag)
+    app, store = app_ctx
+    await _seed_team_and_user(store)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 200, response.text
+    assert response.json()["capabilities"]["docx_inline_edit"] is (flag == "1")
+
+
+@pytest.mark.parametrize("flag", [None, "0", "1"])
+async def test_auth_me_reports_knowledge_bases_from_their_switch(app_ctx, monkeypatch, flag) -> None:
+    if flag is None:
+        monkeypatch.delenv("FEATURE_KNOWLEDGE_BASES", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", flag)
+    app, store = app_ctx
+    await _seed_team_and_user(store)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 200, response.text
+    assert response.json()["capabilities"]["knowledge_bases"] is (flag == "1")
+
+
+@pytest.mark.parametrize("flag", [None, "0", "1"])
+async def test_auth_me_reports_only_me_matrices_from_their_switch(app_ctx, monkeypatch, flag) -> None:
+    if flag is None:
+        monkeypatch.delenv("FEATURE_KB_MATRIX_PRIVATE", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_KB_MATRIX_PRIVATE", flag)
+    app, store = app_ctx
+    await _seed_team_and_user(store)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        client.cookies.set("bowhead_jwt", _jwt("u_credit_admin"))
+        response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 200, response.text
+    assert response.json()["capabilities"]["kb_matrix_private"] is (flag == "1")
+
+
+@pytest.mark.parametrize("flag", [None, "0", "1"])
 async def test_auth_me_reports_team_tool_confirmations_from_its_switch(app_ctx, monkeypatch, flag) -> None:
     if flag is None:
         monkeypatch.delenv("FEATURE_TEAM_TOOL_CONFIRMATION", raising=False)

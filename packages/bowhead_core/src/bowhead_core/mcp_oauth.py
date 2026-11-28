@@ -27,8 +27,10 @@ import asyncio
 import base64
 import contextlib
 import logging
+import secrets
 import sqlite3
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote, urlencode, urljoin, urlparse
 
@@ -443,7 +445,22 @@ async def exchange_mcp_oauth_code(
             await resp.aread()
             raise ValueError(f"token exchange failed: HTTP {resp.status_code}")
         token = await handle_token_response_scopes(resp)
-    await storage.set_grant(token, {"token_endpoint": token_endpoint, "resource": resource})
+        meta = {"token_endpoint": token_endpoint, "resource": resource}
+        if token_endpoint == "https://mcp.notion.com/token" and resource == "https://mcp.notion.com/mcp":
+            payload = resp.json()
+            name = payload.get("workspace_name")
+            if isinstance(name, str):
+                meta["workspace_name"] = " ".join(name.split())[:160]
+            workspace = payload.get("workspace_id")
+            owner = payload.get("owner")
+            user = owner.get("user") if isinstance(owner, dict) and owner.get("type") == "user" else None
+            account = user.get("id") if isinstance(user, dict) else None
+            # Keep existing references only when the provider identifies the same workspace and account.
+            if isinstance(workspace, str) and workspace and isinstance(account, str) and account:
+                meta["notion_knowledge_binding"] = sha256(f"{workspace}\0{account}".encode()).hexdigest()[:16]
+            else:
+                meta["notion_knowledge_binding"] = secrets.token_hex(8)
+    await storage.set_grant(token, meta)
     return token
 
 
@@ -712,13 +729,23 @@ async def team_oauth_headers(
 
 
 def team_oauth_header_source(
-    store: _VersionedAuthStore, team_id: str, source_id: str, server_url: str
+    store: _VersionedAuthStore, team_id: str, source_id: str, server_url: str, *, notion_binding: str | None = None
 ) -> Callable[[str | None], Awaitable[dict[str, str]]]:
     """Header source for ``RemoteMcpToolClient``: called before each connection, and once more with the
     refused token when the server rejects it during ``initialize``."""
 
     async def headers(rejected_token: str | None) -> dict[str, str]:
-        return await team_oauth_headers(store, team_id, source_id, server_url, rejected_token=rejected_token)
+        if notion_binding is not None:
+            await _require_notion_binding()
+        result = await team_oauth_headers(store, team_id, source_id, server_url, rejected_token=rejected_token)
+        if notion_binding is not None:
+            await _require_notion_binding()
+        return result
+
+    async def _require_notion_binding() -> None:
+        grant = await store.get_team_tool_oauth_auth_versioned(team_id, source_id)
+        if grant is None or notion_knowledge_binding(grant[1]) != notion_binding:
+            raise OAuthGrantRejected("notion_connection_changed")
 
     return headers
 
@@ -726,6 +753,38 @@ def team_oauth_header_source(
 def prime_team_oauth(store: Any, team_id: str, source_id: str, token: OAuthToken) -> None:
     """Use the access token of a source that was just authorized instead of refreshing at once."""
     oauth_broker(store).prime(_grant_key(team_id, source_id), token.access_token, token.expires_in)
+
+
+def oauth_has_grant(auth: dict[str, Any] | None) -> bool:
+    tokens = (auth or {}).get(_TOKENS_KEY)
+    return isinstance(tokens, dict) and bool(tokens.get("access_token"))
+
+
+def notion_knowledge_binding(auth: dict[str, Any] | None) -> str | None:
+    if not oauth_has_grant(auth) or auth is None:
+        return None
+    metadata = auth.get(_META_KEY)
+    binding = metadata.get("notion_knowledge_binding") if isinstance(metadata, dict) else None
+    # Existing grants keep a stable binding through token refresh. Interactive reauthorization replaces it.
+    return binding if isinstance(binding, str) else "initial"
+
+
+def notion_knowledge_binding_from_ref(auth_ref: str | None, *, require_active: bool = False) -> str | None:
+    from bowhead_core.llm_config_crypto import decrypt_llm_config
+
+    try:
+        auth = decrypt_llm_config(auth_ref) if auth_ref else {}
+    except ValueError:
+        return None
+    if not isinstance(auth, dict) or require_active and oauth_sign_in_ended(auth):
+        return None
+    return notion_knowledge_binding(auth)
+
+
+def oauth_workspace_name(auth: dict[str, Any] | None) -> str | None:
+    metadata = (auth or {}).get(_META_KEY)
+    name = metadata.get("workspace_name") if isinstance(metadata, dict) else None
+    return name if isinstance(name, str) else None
 
 
 def oauth_sign_in_ended(auth: dict[str, Any] | None) -> bool:

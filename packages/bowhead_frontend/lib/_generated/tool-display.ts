@@ -832,6 +832,14 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     kind: "tool",
     risk: "read",
   },
+  wecom_notify: {
+    label: { "zh-CN": "发送企业微信通知", "en-US": "Send WeCom notification", "de-DE": "WeCom-Benachrichtigung senden", "fr-FR": "Envoyer une notification WeCom" },
+    blurb: { "zh-CN": "在网页对话中向当前用户已关联的企业微信发送通知。", "en-US": "Send a notification to the current user's linked WeCom account during a web chat.", "de-DE": "Im Web-Chat eine Benachrichtigung an das verknüpfte WeCom-Konto der aktuellen Person senden.", "fr-FR": "Envoyer une notification au compte WeCom lié de l’utilisateur pendant une conversation sur le Web." },
+    sigil: "🔔",
+    category: "orchestrate",
+    kind: "tool",
+    risk: "external_write",
+  },
   write_report: {
     label: { "zh-CN": "写入报告", "en-US": "Write Report", "de-DE": "Bericht schreiben", "fr-FR": "Rédiger un rapport" },
     blurb: { "zh-CN": "把报告正文写进画布：新增一段，或就地改自己写过的那段。", "en-US": "Write report prose onto the canvas: append a section, or update one you wrote.", "de-DE": "Berichtstext auf die Arbeitsfläche schreiben: einen Abschnitt hinzufügen oder einen eigenen Abschnitt aktualisieren.", "fr-FR": "Rédiger du texte sur le canevas : ajouter une section ou mettre à jour une section que vous avez rédigée." },

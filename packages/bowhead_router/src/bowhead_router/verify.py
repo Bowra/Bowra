@@ -1003,6 +1003,10 @@ async def _probe_web_search(
             },
             "parameters": {
                 "enable_search": True,
+                # Same as the runtime request (bowhead_core.web_search): without the message format DashScope
+                # returns only {finish_reason, text} and drops `search_info`, so a working search read as
+                # web_search_output_missing (116, 1.7.79).
+                "result_format": "message",
                 "search_options": {
                     "enable_source": True,
                     "enable_citation": True,

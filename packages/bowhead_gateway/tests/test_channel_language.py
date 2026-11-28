@@ -162,7 +162,7 @@ class _UserStore:
         return {"workspace_id": workspace_id, "datarc_workspace_id": "datarc_ws_1"}
 
     async def get_user(self, user_id: str) -> Any:
-        return SimpleNamespace(id=user_id, email="alice@example.com", display_name="Alice")
+        return SimpleNamespace(id=user_id, email="alice@example.com", email_verified=True, display_name="Alice")
 
 
 class _MemberResolver:
@@ -171,11 +171,13 @@ class _MemberResolver:
 
 
 def _patch_turn_admission(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
-    import bowhead_gateway._turn_runtime as turn_runtime
     import bowhead_gateway.credit_admission as credit_admission
+    import bowhead_gateway.datarc_context as datarc_context
     import bowhead_gateway.turn_service as turn_service
+    from bowhead_core.datarc_selection import DatarcConnectionBinding
 
     admitted: list[Any] = []
+    binding = DatarcConnectionBinding("team1", "conn_sales", "rev_sales", object())
 
     async def _no_denial(*_args: Any, **_kwargs: Any) -> None:
         return None
@@ -183,8 +185,13 @@ def _patch_turn_admission(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     async def _runtime(*_args: Any, **_kwargs: Any) -> Any:
         return SimpleNamespace(available=True, router=object())
 
-    async def _datarc(*_args: Any, **_kwargs: Any) -> tuple[Any, bool, Any]:
-        return object(), False, None
+    async def _datarc_context(*_args: Any, **_kwargs: Any) -> datarc_context.DatarcTurnContext:
+        return datarc_context.DatarcTurnContext(
+            connection_binding=binding,
+            datarc_client=binding.client,
+            active_datarc_project="datarc_ws_1",
+            datarc_project_for_calls="datarc_ws_1",
+        )
 
     async def _admit(_orchestrator: Any, turn: Any) -> object:
         admitted.append(turn)
@@ -197,7 +204,7 @@ def _patch_turn_admission(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     monkeypatch.setattr(turn_service, "resolve_team_model_runtime", _runtime)
     monkeypatch.setattr(turn_service, "admit_legacy_chat_execution", _admit)
     monkeypatch.setattr(turn_service, "spawn_turn", _spawn)
-    monkeypatch.setattr(turn_runtime, "_resolve_turn_datarc_runtime", _datarc)
+    monkeypatch.setattr(datarc_context, "resolve_datarc_turn_context", _datarc_context)
     return admitted
 
 
@@ -231,6 +238,8 @@ async def test_slack_turn_uses_the_shared_channel_language(monkeypatch: pytest.M
     await slack._start_turn(_channel_app(settings), connection, user, "ws1", "C1", "1.0", "上个月各省的销售额是多少？")
     assert len(admitted) == 1
     assert admitted[0].language_context.output_language == expected
+    assert admitted[0].datarc_binding.client is admitted[0].datarc_client
+    assert admitted[0].datarc_source_evidence["connection_revision"] == admitted[0].datarc_binding.revision
 
 
 @pytest.mark.asyncio
@@ -249,10 +258,14 @@ async def test_teams_turn_uses_the_shared_channel_language(monkeypatch: pytest.M
         return None
 
     monkeypatch.setattr(teams, "_send_activity", _send)
-    monkeypatch.setattr(teams, "_mirror_turn", _mirror)
+    monkeypatch.setattr("bowhead_gateway.teams.delivery.track_delivery", _mirror)
     request = SimpleNamespace(app=_channel_app(settings))
     connection = SimpleNamespace(entra_tenant_id="tenant1")
     await teams._start_turn(
+        session_id="teams:test-session",
+        turn_id="t_test",
+        activity_key="test-activity",
+        access_context={},
         request=request,
         activity={"conversation": {"id": "conv1"}},
         connection=connection,
@@ -264,6 +277,8 @@ async def test_teams_turn_uses_the_shared_channel_language(monkeypatch: pytest.M
     await asyncio.sleep(0)
     assert len(admitted) == 1
     assert admitted[0].language_context.output_language == expected
+    assert admitted[0].datarc_binding.client is admitted[0].datarc_client
+    assert admitted[0].datarc_source_evidence["connection_revision"] == admitted[0].datarc_binding.revision
 
 
 @pytest.mark.asyncio
@@ -294,6 +309,10 @@ async def test_credit_denial_uses_the_turn_interface_language(monkeypatch: pytes
         await slack._start_turn(_channel_app(), SimpleNamespace(id="conn1", team_id="team1"), user, "ws1", "C1", "1.0", question)
     else:
         await teams._start_turn(
+            session_id="teams:test-session",
+            turn_id="t_test",
+            activity_key="test-activity",
+            access_context={},
             request=SimpleNamespace(app=_channel_app()),
             activity={"conversation": {"id": "conv1"}},
             connection=SimpleNamespace(entra_tenant_id="tenant1"),

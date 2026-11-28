@@ -8,9 +8,12 @@
  */
 import { useTranslations } from "next-intl";
 
+import { useKnowledgeBaseDirectory, useKnowledgeBaseNamer, useKnowledgeBasesEnabled } from "@/components/knowledge/bases/use-knowledge-bases";
 import type { FileDTO, FileKbStatus } from "@/lib/api";
 import { appPath } from "@/lib/base-path";
 import { kbFileState, type KbFileState } from "@/lib/kb-file-status";
+import { knowledgeBaseFileHref } from "@/lib/knowledge-base-display";
+import { KNOWLEDGE_BASE_HOMES } from "@/lib/knowledge-bases-api";
 
 export type KbColumnView =
   | { kind: "added"; state: KbFileState; pct: number | null; href: string; outdated?: boolean }
@@ -29,14 +32,30 @@ export function kbFileHref(kb: Pick<FileKbStatus, "file_id" | "scope"> & { works
   return appPath(`/knowledge/?${q.toString()}`);
 }
 
-export function kbColumnView(f: Pick<FileDTO, "in_kb" | "kb" | "kb_promotable" | "kind" | "kb_outdated">): KbColumnView {
+/**
+ * Where "View in knowledge base" (and its progress / retry variants) goes. Knowledge bases on: the knowledge base page,
+ * which resolves the file's knowledge base and selects the file; Space files carry their Space. Off: today's address.
+ */
+export function kbStatusHref(
+  kb: Pick<FileKbStatus, "file_id" | "scope"> & { workspace_id?: string | null },
+  knowledgeBases: boolean,
+): string {
+  if (!knowledgeBases) return kbFileHref(kb);
+  const href = knowledgeBaseFileHref(kb.file_id);
+  return appPath(kb.scope === "space" && kb.workspace_id ? `${href}&space=${encodeURIComponent(kb.workspace_id)}` : href);
+}
+
+export function kbColumnView(
+  f: Pick<FileDTO, "in_kb" | "kb" | "kb_promotable" | "kind" | "kb_outdated">,
+  knowledgeBases = false,
+): KbColumnView {
   if (f.kb) {
     const state = kbFileState(f.kb);
     return {
       kind: "added",
       state,
       pct: state === "processing" ? (f.kb.parse_progress_pct ?? null) : null,
-      href: kbFileHref(f.kb),
+      href: kbStatusHref(f.kb, knowledgeBases),
       // File versions: the entry indexes an older version; the user adds this one to update it.
       ...(f.kb_outdated ? { outdated: true } : {}),
     };
@@ -63,17 +82,36 @@ const LINK_KEY: Record<KbFileState, string> = {
   failed: "kb_col.retry_in_kb",
 };
 
+/**
+ * Knowledge bases on: "Added to <knowledge base> · status", named from the current Space's directory (My, this
+ * Space, Team). A knowledge base the directory does not list (another Space's) keeps today's "Added · status".
+ */
+function AddedToKnowledgeBase({ knowledgeBaseId, className, status }: { knowledgeBaseId: string; className: string; status: string }) {
+  const t = useTranslations("files_page");
+  const { directory } = useKnowledgeBaseDirectory();
+  const name = useKnowledgeBaseNamer();
+  const kb = directory ? KNOWLEDGE_BASE_HOMES.flatMap((home) => directory.sections[home] ?? []).find((item) => item.id === knowledgeBaseId) : undefined;
+  return <span className={className}>{kb ? t("kb_col.added_to", { name: name(kb), status }) : t("kb_col.added", { status })}</span>;
+}
+
 export function KbColumn({ file, onAdd }: { file: FileDTO; onAdd: () => void }) {
   const t = useTranslations("files_page");
   const tk = useTranslations("knowledge_base");
-  const view = kbColumnView(file);
+  const knowledgeBases = useKnowledgeBasesEnabled();
+  const view = kbColumnView(file, knowledgeBases);
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
   if (view.kind === "added") {
     const status = `${tk(`file_state.${view.state}`)}${view.pct != null ? ` ${view.pct}%` : ""}`;
+    const badgeClass = `kbbadge ${BADGE_CLASS[view.state]}`;
+    const knowledgeBaseId = knowledgeBases ? file.kb?.knowledge_base_id : null;
     return (
       <div className="kbcol" data-testid="kb-col">
-        <span className={`kbbadge ${BADGE_CLASS[view.state]}`}>{t("kb_col.added", { status })}</span>
+        {knowledgeBaseId ? (
+          <AddedToKnowledgeBase knowledgeBaseId={knowledgeBaseId} className={badgeClass} status={status} />
+        ) : (
+          <span className={badgeClass}>{t("kb_col.added", { status })}</span>
+        )}
         <a href={view.href} onClick={stop}>{t(LINK_KEY[view.state])}</a>
         {view.outdated ? (
           <>

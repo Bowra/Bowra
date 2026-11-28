@@ -12,6 +12,14 @@ L’Agent utilise le contenu le plus récent à sa prochaine exécution. Une ex�
 
 Un plugin facilite la sélection des ressources. L’exécution d’un Tool ou d’un Skill dépend toujours de leur disponibilité et des autorisations de l’utilisateur actuel, de l’Agent et de la ressource.
 
+Lorsque Coach est disponible, demandez dans le chat « Ajoute Connaissances d’équipe Notion à mon agent de recherche. » Coach ajoute le plugin d’équipe activé au brouillon de votre agent. Publiez le brouillon depuis l’onglet **Publication** pour utiliser la modification. Si la connexion doit être autorisée ou le plugin configuré, un administrateur d’équipe s’en charge au préalable.
+
+## Répondre à partir des pages Notion de l’équipe
+
+Les responsables et administrateurs d’équipe peuvent choisir **Connaissances d’équipe Notion** dans **Commencer à partir d’un modèle** lors de la création d’un plugin d’équipe. Sélectionnez une source Notion de l’équipe. Dans les sources d’outils, autorisez et activez la source, puis importez les outils de recherche et de lecture de pages. Vous pouvez aussi importer la requête de base de données si elle est disponible. Vérifiez la source et les outils avant d’enregistrer. Utilisez un compte Notion dont le contenu accessible peut être partagé avec les membres concernés.
+
+Ajoutez le plugin à votre agent, puis posez une question sur une décision de projet ou collez un lien de page Notion. L’agent fournit des liens vers les pages qui étayent sa réponse. Pour ouvrir un lien, votre compte Notion doit disposer de l’accès. Si la connexion prend fin ou si le compte ou l’espace de travail change, demandez à un administrateur de vérifier la connexion et les outils sélectionnés dans le plugin.
+
 ## Désactiver des plugins et des outils intégrés
 
 - **Plugins** : chaque plugin a un interrupteur **Moi** qui ne s’applique qu’à vous ; la notification en bas permet d’annuler. Les responsables et administrateurs d’équipe voient aussi un interrupteur **Équipe**. Avant un changement pour toute l’équipe, Bowra liste les agents concernés (y compris les agents intégrés) et les tâches planifiées ; le changement s’applique dès leur prochaine exécution. Quand l’équipe désactive un plugin, les membres ne peuvent pas le réactiver pour eux-mêmes.

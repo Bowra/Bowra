@@ -12,7 +12,7 @@ from bowhead_core.agent_dependency_compiler import (
 )
 from bowhead_core.resource_access import resource_grant_targets_for_tool
 from bowhead_core.skill_instance_store import SkillInstanceStore
-from bowhead_core.subagent_authoring_catalog import COMPILER_DERIVED_SKILL_TOOLS, SubagentAuthoringCatalogService
+from bowhead_core.subagent_authoring_catalog import COMPILER_DERIVED_SKILL_TOOLS, TOOL_DISABLED_BY_TEAM, SubagentAuthoringCatalogService
 from bowhead_core.subagent_draft_store import SubagentDraft
 from bowhead_core.user_store import User
 from fastapi import Request
@@ -106,7 +106,10 @@ async def compile_authoring_resources(
         if tool.stable_ref in COMPILER_DERIVED_SKILL_TOOLS:
             if not await resource._allowed(actor, resource_grant_targets_for_tool(tool.stable_ref, include_argument_targets=False)):
                 denied = True
-        elif not visible_tools.get(tool.stable_ref, {}).get("can_select"):
+        elif not visible_tools.get(tool.stable_ref, {}).get("can_select") and (
+            visible_tools.get(tool.stable_ref, {}).get("restriction") != TOOL_DISABLED_BY_TEAM
+        ):
+            # A Tool the team turned off stays where it is (the Turn drops it); new picks are refused when saved.
             denied = True
     return {
         "status": "blocked" if denied else compilation.status,

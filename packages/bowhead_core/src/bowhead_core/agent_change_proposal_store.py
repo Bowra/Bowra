@@ -1488,6 +1488,15 @@ class _CoachFieldWrite:
     coach: Any
     state: Literal["applied", "undone"]
     undo_batch_id: str | None
+    # Who asked for the write: a Coach conversation or the Agent page's AI 优化 (`ai_optimize:` source refs).
+    origin: Literal["coach", "ai_optimize"] = "coach"
+
+
+AI_OPTIMIZE_SOURCE_PREFIX = "ai_optimize:"
+
+
+def _write_origin(source_ref: str) -> Literal["coach", "ai_optimize"]:
+    return "ai_optimize" if source_ref.startswith(AI_OPTIMIZE_SOURCE_PREFIX) else "coach"
 
 
 def _field_of(path: str) -> str:
@@ -1549,7 +1558,9 @@ async def _coach_field_history_conn(
             state, batch_id = states.get(field, ("applied", None))
             if state == "kept":
                 continue
-            history.setdefault(field, []).append(_CoachFieldWrite(proposal.id, tuple(sorted(group_ids)), before, coach, state, batch_id))
+            history.setdefault(field, []).append(
+                _CoachFieldWrite(proposal.id, tuple(sorted(group_ids)), before, coach, state, batch_id, _write_origin(proposal.source_ref))
+            )
     return {field: tuple(entries) for field, entries in history.items()}
 
 
@@ -1567,13 +1578,17 @@ def _current_run(entries: Sequence[_CoachFieldWrite]) -> Sequence[_CoachFieldWri
 
 
 def _undo_chain(entries: Sequence[_CoachFieldWrite]) -> tuple[_CoachFieldWrite, ...]:
-    """The latest applied write and the consecutive applied writes it built on."""
+    """The latest applied write and the consecutive applied writes from the same origin it built on.
+
+    A Coach conversation's writes to one field undo together. An AI 优化 rewrite on top of a Coach write is
+    its own step: the page labels the row "AI 优化", so undoing it restores the Coach text, not the release.
+    """
     applied = [entry for entry in _current_run(entries) if entry.state == "applied"]
     if not applied:
         return ()
     chain = [applied[-1]]
     for entry in reversed(applied[:-1]):
-        if entry.coach != chain[0].before:
+        if entry.coach != chain[0].before or entry.origin != chain[0].origin:
             break
         chain.insert(0, entry)
     return tuple(chain)

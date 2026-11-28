@@ -7,6 +7,7 @@
  * progress, failed/stuck reason+retry, ready “在对话中使用”. Content-deep-search entry pins/highlights matching chunk.
  */
 
+import { readableChunkText } from "@/lib/kb-snippet";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { KbSourceNavigation } from "./kb-source-navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -27,11 +28,19 @@ import {
 import { useMediaQuery } from "@/lib/use-media-query";
 import { appPath } from "@/lib/base-path";
 import { formatShortDateTime } from "@/lib/locale";
+import { audienceLabelKey, knowledgeBaseHref } from "@/lib/knowledge-base-display";
+import {
+  getKnowledgeBase,
+  getKnowledgeBaseMembers,
+  knowledgeBaseOfFile,
+  type KnowledgeBaseDTO,
+} from "@/lib/knowledge-bases-api";
 
 import { IconChat, IconChevL, IconDownload, IconEye, IconTrash, IconX } from "./kb-icons";
 import { KbPreview } from "./kb-preview";
 import { KbFileHealth } from "./kb-file-health";
 import { KbStatusPill, type ExtractionState } from "./kb-status-pill";
+import { useKnowledgeBaseDirectory, useKnowledgeBaseNamer, useKnowledgeBasesEnabled } from "./bases/use-knowledge-bases";
 
 type Translator = (key: string, values?: Record<string, string | number>) => string;
 
@@ -93,8 +102,13 @@ interface Props {
   onUseInChat?: () => void;
   /** Opened with a pointer: focus the panel instead of the close button, so no focus ring shows until the keyboard is used. */
   openedWithPointer?: boolean;
-  /** Change visible scope; omitted (no permission) hides entry. */
+  /** Change visible scope; omitted (no permission) hides entry. Replaced by `onMove` while knowledge bases are on. */
   onChangeScope?: () => void;
+  /**
+   * Knowledge bases (FEATURE_KNOWLEDGE_BASES): "Move to another knowledge base…" (the caller opens `KbMoveDialog`);
+   * omitted hides the entry. Disabled with the reason while the file may not be moved (`can_change_scope`).
+   */
+  onMove?: () => void;
   /** Bind template; omitted hides entry. */
   onBindTemplate?: () => void;
 }
@@ -110,10 +124,13 @@ export function KbFileDrawer({
   hitSource = "search",
   onUseInChat,
   onChangeScope,
+  onMove,
   onBindTemplate,
   openedWithPointer = false,
 }: Props) {
   const t = useTranslations("knowledge_base.drawer");
+  const tBases = useTranslations("knowledge_bases.drawer");
+  const knowledgeBases = useKnowledgeBasesEnabled();
   const [navigationBusy, setNavigationBusy] = useState(false);
   const [navigationDirty, setNavigationDirty] = useState(false);
   const discard = useConfirmDialog();
@@ -380,8 +397,14 @@ export function KbFileDrawer({
           )}
 
           <dl className="meta">
-            <dt>{t("meta_scope")}</dt>
-            <dd>{scopeText}</dd>
+            {knowledgeBases ? (
+              <KnowledgeBaseRows file={file} fallback={scopeText} />
+            ) : (
+              <>
+                <dt>{t("meta_scope")}</dt>
+                <dd>{scopeText}</dd>
+              </>
+            )}
             <dt>{t("meta_uploaded_by")}</dt>
             <dd>{file.uploaded_by_name ?? "—"}</dd>
             <dt>{t("meta_uploaded_at")}</dt>
@@ -423,7 +446,8 @@ export function KbFileDrawer({
                   {shownChunks.map(({ c, hit }) => {
                     const loc = kbChunkLocation(tKb, c);
                     const locText = hit ? [loc, t(hitSource === "citation" ? "cited_hit" : hitSource === "matrix" ? "matrix_hit" : "search_hit")].filter(Boolean).join(" · ") : loc;
-                    const body = c.content.length > 300 ? `${c.content.slice(0, 300)}…` : c.content;
+                    const text = readableChunkText(c.content);
+                    const body = text.length > 300 ? `${text.slice(0, 300)}…` : text;
                     return (
                       <div
                         key={c.chunk_id}
@@ -442,9 +466,22 @@ export function KbFileDrawer({
             </section>
           )}
 
-          {ready && (onChangeScope || onBindTemplate || canDelete) && (
+          {ready && ((knowledgeBases ? onMove : onChangeScope) || onBindTemplate || canDelete) && (
             <div className="dr-acts">
-              {onChangeScope && (
+              {knowledgeBases ? (
+                onMove && (
+                  <button
+                    type="button"
+                    className="kb-btn kb-btn-ghost kb-btn-sm"
+                    onClick={onMove}
+                    disabled={!file.can_change_scope}
+                    aria-describedby={file.can_change_scope ? undefined : "kb-drawer-move-reason"}
+                    data-testid="kb-drawer-move"
+                  >
+                    {tBases("move")}
+                  </button>
+                )
+              ) : onChangeScope && (
                 <button type="button" className="kb-btn kb-btn-ghost kb-btn-sm" onClick={onChangeScope}>
                   {t("change_scope")}
                 </button>
@@ -457,6 +494,9 @@ export function KbFileDrawer({
               {deleteBtn(true)}
             </div>
           )}
+          {ready && knowledgeBases && onMove && !file.can_change_scope ? (
+            <div className="why" id="kb-drawer-move-reason" data-testid="kb-drawer-move-reason">{tBases("move_reason")}</div>
+          ) : null}
 
           {confirmingDelete && (
             <div className="confirm" data-testid="kb-delete-confirm">
@@ -492,5 +532,78 @@ export function KbFileDrawer({
       {discard.dialog}
       {showPreview && <KbPreview file={file} onClose={() => setShowPreview(false)} />}
     </DialogShell>
+  );
+}
+
+/**
+ * Knowledge bases (FEATURE_KNOWLEDGE_BASES, PRD §4.5): "Knowledge base" (a link to its page) and "Who has access" (its
+ * audience and how many people can use and edit it, read lazily from its member summary, plus "View members").
+ * A knowledge base outside this Space's directory (opened from a citation) is read by its ID; a default one there
+ * falls back to today's visibility text.
+ */
+function KnowledgeBaseRows({ file, fallback }: { file: KbFileDTO; fallback: string }) {
+  const t = useTranslations("knowledge_bases.drawer");
+  const tCommon = useTranslations("knowledge_bases.common");
+  const nameOf = useKnowledgeBaseNamer();
+  const { directory, loading } = useKnowledgeBaseDirectory();
+  const listed = knowledgeBaseOfFile(file, directory);
+  const namedId = file.knowledge_base_id ?? null;
+  const [fetched, setFetched] = useState<KnowledgeBaseDTO | null>(null);
+  const lookUp = !loading && !listed && namedId !== null;
+  useEffect(() => {
+    if (!lookUp || !namedId) return;
+    let cancelled = false;
+    getKnowledgeBase(namedId)
+      .then((kb) => { if (!cancelled) setFetched(kb); })
+      .catch(() => { if (!cancelled) setFetched(null); });
+    return () => { cancelled = true; };
+  }, [lookUp, namedId]);
+  const kb = listed ?? (fetched && fetched.id === namedId ? fetched : null);
+
+  const kbId = kb?.id ?? null;
+  const shared = Boolean(kb && kb.home !== "personal");
+  const [summary, setSummary] = useState<{ id: string; people: number; editors: number } | null>(null);
+  useEffect(() => {
+    if (!kbId || !shared) return;
+    let cancelled = false;
+    getKnowledgeBaseMembers(kbId)
+      .then((members) => {
+        if (!cancelled) setSummary({ id: kbId, people: members.summary.people, editors: members.summary.edit + members.summary.manage });
+      })
+      .catch(() => { if (!cancelled) setSummary(null); });
+    return () => { cancelled = true; };
+  }, [kbId, shared]);
+
+  if (!kb) {
+    return (
+      <>
+        <dt>{t("knowledge_base")}</dt>
+        <dd data-testid="kb-drawer-knowledge-base">{loading ? <span className="kb-drawer-kb-loading">{tCommon("loading")}</span> : fallback}</dd>
+      </>
+    );
+  }
+  const audience = tCommon(audienceLabelKey(kb));
+  const counts = summary && summary.id === kb.id ? summary : null;
+  const line = !counts
+    ? audience
+    : counts.editors > 0 && counts.editors < counts.people
+      ? t("access_summary_editors", { audience, people: counts.people, editors: counts.editors })
+      : t("access_summary", { audience, people: counts.people });
+  return (
+    <>
+      <dt>{t("knowledge_base")}</dt>
+      <dd data-testid="kb-drawer-knowledge-base">
+        <a href={appPath(knowledgeBaseHref(kb.id))} className="kb-drawer-kb-link">{nameOf(kb)}</a>
+      </dd>
+      <dt>{t("access")}</dt>
+      <dd data-testid="kb-drawer-access">
+        <span>{line}</span>
+        {shared ? (
+          <a href={appPath(knowledgeBaseHref(kb.id, { tab: "members" }))} className="kb-drawer-members-link">
+            {t("view_members")}
+          </a>
+        ) : null}
+      </dd>
+    </>
   );
 }

@@ -19,6 +19,7 @@
  */
 
 import type { CoachCanvasBinding } from "./coach-canvas-target";
+import { serverTimeAsDate } from "./server-time";
 import type { ContextActivity } from "./context-activity";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
@@ -41,6 +42,7 @@ import type {
   ToolConfirmationOutcome,
 } from "./sse-events";
 import type { ThetaClarificationState } from "./types";
+import type { TrialAttribution } from "./agent-trial";
 import type { StepOutcome } from "./turn-feedback";
 
 // ───────────────────────────────────────────────────────────────
@@ -187,6 +189,8 @@ export interface PeerTerminal {
   resumeCheckpointId?: string;
   /** Why this run could not continue its saved work and started fresh (expired, tools_changed, …). */
   resumeRefused?: string;
+  /** The helper's own caveats on a `succeeded_with_warnings` return, as the Lead received them. */
+  caveats?: string[];
   /** Per-turn monotonic bus sequence; see `Step.evtSeq` (same ordering basis).
    *  ⚠ Preserve the **earliest** write: this terminal state is written twice (`agent_spawned` records state,
    *  `lead.subagent_summary` later adds reason/diagnostics). Using the later seq moves this
@@ -933,8 +937,8 @@ export function applyTurnStarted(input: ApplyTurnStartedInput): void {
   const prev = _states.get(input.turnId) ?? _emptyTurnState(input.turnId);
   if (prev.startedAt) return;
   if (!input.startedAt) return;
-  const d = new Date(input.startedAt);
-  if (Number.isNaN(d.getTime())) return;
+  const d = serverTimeAsDate(input.startedAt);
+  if (!d) return;
   _commit(input.turnId, { ...prev, startedAt: d, ...(input.operationKind ? { operationKind: input.operationKind } : {}) });
 }
 
@@ -1138,11 +1142,11 @@ export function applyStepStarted(input: ApplyStepStartedInput): void {
     codeLanguage: input.codeLanguage ?? null,
     error: null,
     subagentName: input.subagentName ?? null,
-    startedAt: input.startedAt
-      ? input.startedAt instanceof Date
-        ? input.startedAt
-        : new Date(input.startedAt)
-      : new Date(),
+    // Server step times carry a uniqueness suffix (`…+00:00#1382`) that `new Date` cannot read; an unreadable or
+    // missing time falls back to local receipt time.
+    startedAt: input.startedAt instanceof Date
+      ? input.startedAt
+      : (input.startedAt ? serverTimeAsDate(input.startedAt) : null) ?? new Date(),
     callId: input.callId ?? null,
     subagentId: input.subagentId ?? null,
     // ⚠ **Duplicate step_started must preserve the claimed peer key** (caught by independent review):
@@ -1398,11 +1402,22 @@ export interface PeerAgentAttribution {
   agentReleaseId?: string;
   agentExecutionId?: string;
   displayNameSnapshot?: string;
+  /** Owner draft trial: which frozen draft answered (live, persisted and replayed events carry the same member). */
+  trial?: TrialAttribution;
 }
 
 export interface ApplyPeerAgentAttributionInput extends PeerAgentAttribution {
   turnId: string;
   peerId: string;
+}
+
+/** The frozen draft that answered a trial Turn: its primary Agent's attribution; null outside a trial. */
+export function turnTrialAttribution(state: Pick<TurnState, "peerAgentAttribution"> | null | undefined): TrialAttribution | null {
+  if (!state) return null;
+  for (const attribution of Object.values(state.peerAgentAttribution)) {
+    if (attribution.trial) return attribution.trial;
+  }
+  return null;
 }
 
 /** Fold the additive M3 Agent identity fields without trusting event order.
@@ -1419,10 +1434,12 @@ export function applyPeerAgentAttribution(
     agentReleaseId: clean(input.agentReleaseId),
     agentExecutionId: clean(input.agentExecutionId),
     displayNameSnapshot: clean(input.displayNameSnapshot),
+    ...(input.trial ? { trial: input.trial } : {}),
   };
   if (!Object.values(incoming).some(Boolean)) return;
   const prev = _states.get(input.turnId) ?? _emptyTurnState(input.turnId);
   const prior = prev.peerAgentAttribution[input.peerId] ?? {};
+  const trial = prior.trial ?? incoming.trial;
   const next: PeerAgentAttribution = {
     agentId: prior.agentId ?? incoming.agentId,
     agentRevisionId: prior.agentRevisionId ?? incoming.agentRevisionId,
@@ -1430,13 +1447,15 @@ export function applyPeerAgentAttribution(
     agentExecutionId: prior.agentExecutionId ?? incoming.agentExecutionId,
     displayNameSnapshot:
       prior.displayNameSnapshot ?? incoming.displayNameSnapshot,
+    ...(trial ? { trial } : {}),
   };
   if (
     prior.agentId === next.agentId &&
     prior.agentRevisionId === next.agentRevisionId &&
     prior.agentReleaseId === next.agentReleaseId &&
     prior.agentExecutionId === next.agentExecutionId &&
-    prior.displayNameSnapshot === next.displayNameSnapshot
+    prior.displayNameSnapshot === next.displayNameSnapshot &&
+    prior.trial === next.trial
   ) {
     return;
   }
@@ -1522,6 +1541,7 @@ export function applyPeerTerminal(input: ApplyPeerTerminalInput): void {
     ...((input.resumeRefused ?? prior?.resumeRefused)
       ? { resumeRefused: input.resumeRefused ?? prior?.resumeRefused }
       : {}),
+    ...((input.caveats ?? prior?.caveats)?.length ? { caveats: input.caveats ?? prior?.caveats } : {}),
   };
   if (
     prior?.status === next.status &&
@@ -1534,6 +1554,7 @@ export function applyPeerTerminal(input: ApplyPeerTerminalInput): void {
     prior.stepUsage?.limit === next.stepUsage?.limit &&
     prior.resumeCheckpointId === next.resumeCheckpointId &&
     prior.resumeRefused === next.resumeRefused &&
+    (prior.caveats ?? []).join("\n") === (next.caveats ?? []).join("\n") &&
     prior.evtSeq === next.evtSeq &&
     prior.settledSeq === next.settledSeq &&
     prior.continuationFailureReason === next.continuationFailureReason

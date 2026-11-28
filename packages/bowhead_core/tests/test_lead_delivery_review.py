@@ -762,3 +762,116 @@ def test_the_final_reply_review_note_is_turn_local() -> None:
     assert MESSAGE_KIND_POLICY[FINAL_REPLY_REVIEW_NOTE_NAME] == "turn_local"
     projected = model_messages([Message(role="user", name=FINAL_REPLY_REVIEW_NOTE_NAME, content="Your final reply …")])
     assert projected[0].name is None and projected[0].content == "[Bowhead runtime note — not a message from the user.]\nYour final reply …"
+
+
+# ─── Chat running state slice 2 (R2.4): the file Lead names for the reader ───────────────────────────────
+
+
+def _deliverable(art_id, *, lineage=None, version=1, kind="deliverable"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=art_id, kind=kind, lineage_id=lineage, version_no=version)
+
+
+def _store_ctx(artifacts=None, *, error=False):
+    from types import SimpleNamespace
+
+    async def list_deliverables_for_turn(turn_id):
+        assert turn_id == "t_open"
+        if error:
+            raise RuntimeError("store unavailable")
+        return list(artifacts or [])
+
+    return SimpleNamespace(turn_id="t_open", artifact_store=SimpleNamespace(list_deliverables_for_turn=list_deliverables_for_turn))
+
+
+def test_only_the_leads_review_asks_which_file_to_open(monkeypatch):
+    from bowhead_core.tool_delivery_review import OPEN_FOR_READER_FIELD, LeadDeliveryReview, terminal_review_schema
+    from bowhead_core.tool_registry import ToolSchema
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    review = LeadDeliveryReview().tool_spec().schema.input_schema["properties"]["payload"]["properties"]["delivery_review"]
+    assert OPEN_FOR_READER_FIELD in review["properties"]
+    assert OPEN_FOR_READER_FIELD in review["required"]
+    helper = terminal_review_schema(
+        ToolSchema(
+            name="subagent_return",
+            description="",
+            input_schema={"type": "object", "properties": {"payload": {"type": "object", "properties": {}}}},
+        ),
+        "payload",
+    )
+    helper_review = helper.input_schema["properties"]["payload"]["properties"]["delivery_review"]
+    assert OPEN_FOR_READER_FIELD not in helper_review["properties"]
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 7])
+async def test_no_choice_opens_nothing_and_drops_nothing(value):
+    from bowhead_core.tool_delivery_review import normalized_open_for_reader
+
+    assert await normalized_open_for_reader(value, _store_ctx([_deliverable("art_deck")])) == ("", False)
+
+
+async def test_a_delivered_file_opens_at_its_newest_version_in_the_turn():
+    from bowhead_core.tool_delivery_review import normalized_open_for_reader
+
+    ctx = _store_ctx([_deliverable("art_v1", lineage="art_v1"), _deliverable("art_v2", lineage="art_v1", version=2)])
+    assert await normalized_open_for_reader("art_v2", ctx) == ("art_v2", False)
+    assert await normalized_open_for_reader(" art_v1 ", ctx) == ("art_v2", False)
+
+
+@pytest.mark.parametrize(
+    "artifacts, error",
+    [
+        ([_deliverable("art_other")], False),  # not a delivered file of this Turn
+        ([_deliverable("art_preview", kind="deck_preview")], False),  # a slide preview image, not a file to open
+        ([], True),  # the store failed: never blocks the review
+    ],
+)
+async def test_an_unusable_choice_is_dropped(artifacts, error):
+    from bowhead_core.tool_delivery_review import normalized_open_for_reader
+
+    chosen = "art_preview" if artifacts and artifacts[0].kind == "deck_preview" else "art_work_csv"
+    assert await normalized_open_for_reader(chosen, _store_ctx(artifacts, error=error)) == ("", True)
+
+
+async def test_the_review_keeps_the_choice_and_says_when_it_was_dropped_without_refusing(monkeypatch):
+    from bowhead_core.tool_delivery_review import OPEN_FOR_READER_DROPPED_FACT, LeadDeliveryReview
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    calls = [ToolInvocation("subagent_spawn", {"profile": "compute"}, call_id="spawn", result={"ok": True})]
+    monkeypatch.setattr("bowhead_core.agents._lead_context.run_invocations", lambda ctx: calls)
+    ctx = _store_ctx([_deliverable("art_page")])
+
+    def review(choice):
+        return {
+            "payload": {
+                "delivery_review": {
+                    "requirements": [{"requirement": "Deliver the page", "status": "fulfilled", "evidence_call_ids": ["spawn"]}],
+                    "issues": [],
+                    "open_for_reader": choice,
+                }
+            }
+        }
+
+    control = LeadDeliveryReview()
+    accepted = await control.tool_spec().handler(review("art_page"), ctx)
+    assert accepted["ok"] is True and "open_for_reader" not in accepted
+    assert (await control.current(calls, ctx))["open_for_reader"] == "art_page"
+
+    dropped = await control.tool_spec().handler(review("art_scratch.csv"), ctx)
+    assert dropped["ok"] is True
+    assert dropped["open_for_reader"] == OPEN_FOR_READER_DROPPED_FACT
+    assert "art_scratch.csv" not in json.dumps(dropped)
+    assert (await control.current(calls, ctx))["open_for_reader"] == ""
+
+
+def test_the_final_payload_keeps_the_choice_only_for_a_file_the_answer_shows():
+    from bowhead_core.agents.lead_orchestrator import open_for_reader_in
+
+    items = [{"kind": "chart", "id": "sec_1"}, {"kind": "file", "id": "art_page"}, {"kind": "image", "id": "art_png"}]
+    assert open_for_reader_in("art_page", items) == "art_page"
+    assert open_for_reader_in("art_png", items) == "art_png"
+    assert open_for_reader_in("sec_1", items) == ""
+    assert open_for_reader_in("art_draft", items) == ""
+    assert open_for_reader_in("art_page", None) == ""

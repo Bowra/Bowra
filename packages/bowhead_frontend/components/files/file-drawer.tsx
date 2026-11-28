@@ -12,8 +12,10 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ArtifactPreview } from "@/components/canvas/artifact-preview";
+import { KbColumn } from "@/components/files/kb-column";
+import { keepLibraryVersion, libraryRead, type LibraryFile } from "@/lib/file-library";
 import { CategoryBadge } from "@/components/files/category-badge";
-import { deriveArtifactViewerProfile } from "@/lib/artifact-viewer-profile";
+import { deriveArtifactViewerProfile, previewUsesTextDto } from "@/lib/artifact-viewer-profile";
 import { appPath } from "@/lib/base-path";
 import { formatDateTime, getCurrentLocale } from "@/lib/locale";
 import { assetClassOf, fmtSize, humanSource, type FilesTab } from "@/lib/files-taxonomy";
@@ -48,8 +50,10 @@ export function FileDrawer({
   onAddToKb,
   onRemoveFromKb,
   onFileUpdated,
-  pin,
+  pin, libraryFile, onRefresh,
 }: {
+  libraryFile?: LibraryFile;
+  onRefresh?: () => void;
   file: FileDTO;
   tab: FilesTab;
   onClose: () => void;
@@ -64,49 +68,66 @@ export function FileDrawer({
   onFileUpdated: (f: FileDTO) => void;
 }) {
   const t = useTranslations("files_page");
+  const lt = useTranslations("file_library");
+  const [details, setDetails] = useState(!libraryFile);
+  const [versions,setVersions] = useState<LibraryFile[]>([]);
   const td = useTranslations("files_page.drawer");
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [usages, setUsages] = useState<FileUsage[] | null>(null);
   const [usagesError, setUsagesError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [savingCat, setSavingCat] = useState(false);
-  const presentation = deriveArtifactViewerProfile(file.mime, file.filename) === "pptx";
+  const profile = deriveArtifactViewerProfile(file.mime, file.filename);
+  const rendererLoadsContent = libraryFile ? !previewUsesTextDto(profile) : profile === "pptx";
 
   useEffect(() => {
     setPreview(null);
-    if (presentation) return;
-    void (async () => {
+    if (rendererLoadsContent || file.deleted_at) return;
+    const controller = new AbortController();
+    // Start only for a committed selection, including React's development effect replay.
+    queueMicrotask(async () => {
+      if (controller.signal.aborted) return;
       try {
-        const next = await fetchFilePreview(file.file_id);
+        const next = await fetchFilePreview(file.file_id, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         setPreview({
           ...next,
-          error: next.error_code || next.error
-            ? t(fileErrorFromCode(next.error_code, "preview"))
-            : null,
+          error: next.error_code || next.error ? t(fileErrorFromCode(next.error_code, "preview")) : null,
         });
-      } catch (e) {
-        setPreview({
-          family: file.mime_family,
-          text: null,
-          error: t(fileError(e, "preview")),
-        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setPreview({ family: file.mime_family, text: null, error: t(fileError(error, "preview")) });
       }
-    })();
-  }, [file.file_id, file.mime_family, presentation, t]);
+    });
+    return () => controller.abort();
+  }, [file.file_id, file.mime_family, file.deleted_at, rendererLoadsContent, t]);
 
   useEffect(() => {
+    if (!details || file.deleted_at) return;
+    let current=true;
     setUsages(null);
     setUsagesError(null);
     void (async () => {
       try {
-        const r = await fetchFileUsages(file.file_id);
-        setUsages(r.usages);
+        const r = libraryFile
+          ? await libraryRead<{ usages: FileUsage[] }>("/items/" + encodeURIComponent(file.file_id) + "/usages")
+          : await fetchFileUsages(file.file_id);
+        if(current)setUsages(r.usages);
       } catch (e) {
+        if (!current) return;
         setUsages([]);
         setUsagesError(t(fileError(e, "usages")));
       }
     })();
-  }, [file.file_id, t]);
+    return () => {current=false;};
+  }, [details, file.deleted_at, file.file_id, libraryFile, t]);
+  useEffect(()=>{
+    if (!details || !libraryFile || (file.version_count ?? 1)<2) return;
+    const ctrl=new AbortController();
+    libraryRead<LibraryFile[]>("/items/"+encodeURIComponent(file.file_id)+"/versions",ctrl.signal)
+      .then(v=>{if(!ctrl.signal.aborted)setVersions(v);}).catch(()=>{if(!ctrl.signal.aborted)setActionError(lt("unavailable"));});
+    return ()=>ctrl.abort();
+  }, [details,libraryFile,file.file_id,file.version_count,lt]);
 
   const onChangeCat = async (cat: FileCategory) => {
     if (cat === file.category) return;
@@ -122,6 +143,20 @@ export function FileDrawer({
   };
 
   const cls = assetClassOf(file);
+  const previewSection = (<div className="dr-sec">
+          <h4>{td("preview")}</h4>
+          <ArtifactPreview
+            fileId={file.file_id}
+            filename={file.filename}
+            mime={file.mime}
+            sizeLabel={fmtSize(file.size)}
+            sizeBytes={file.size}
+            trust={file.trust}
+            preview={rendererLoadsContent ? null : preview}
+            loading={!rendererLoadsContent && preview === null}
+            error={rendererLoadsContent ? null : preview?.error ?? null}
+          />
+        </div>);
 
   return (
     <div className="dr" role="complementary">
@@ -131,6 +166,15 @@ export function FileDrawer({
       </div>
 
       <div className="dr-scroll">
+        {libraryFile && <>
+          {file.deleted_at ? <p>{libraryFile.recover_until && lt("recover",{date:fmtTime(libraryFile.recover_until)})}</p> : previewSection}
+          {!file.deleted_at && <div className="dr-sec">{libraryFile.kb_known === false ? <p>{lt("reason.unknown_reference")}</p> : <KbColumn file={file} onAdd={onAddToKb}/>}
+            {file.kb && <button type="button" onClick={onRemoveFromKb}>{t("kb.remove")}</button>}
+          </div>}
+          <button className="btn sec" aria-expanded={details} onClick={()=>setDetails(v=>!v)}>{lt("details")}</button>
+        </>}
+        {libraryFile && actionError && <p role="alert">{actionError}</p>}
+        {details && <>
         {file.trust.startsWith("export_copy_legacy_") ? (
           <div className="dr-sec" role="note">
             <p className="muted">{t(`export_state.${file.trust}`)}</p>
@@ -147,7 +191,7 @@ export function FileDrawer({
             <dd>{t(`family.${file.mime_family}`)}</dd>
             <dt>{td("size")}</dt>
             <dd className="mono">{fmtSize(file.size)}</dd>
-            {tab !== "run" && (
+            {!libraryFile && tab !== "run" && (
               <>
                 <dt>{t("filter.category")}</dt>
                 <dd>
@@ -189,23 +233,12 @@ export function FileDrawer({
             <dt>{td("id")}</dt>
             <dd className="mono">{file.file_id}</dd>
           </dl>
-          {actionError ? (
+          {!libraryFile && actionError ? (
             <p className="muted" role="alert">{actionError}</p>
           ) : null}
         </div>
 
-        <div className="dr-sec">
-          <h4>{td("preview")}</h4>
-          <ArtifactPreview
-            fileId={file.file_id}
-            filename={file.filename}
-            mime={file.mime}
-            sizeLabel={fmtSize(file.size)}
-            preview={presentation ? null : preview}
-            loading={!presentation && preview === null}
-            error={presentation ? null : preview?.error ?? null}
-          />
-        </div>
+        {!libraryFile && previewSection}
 
         <div className="dr-sec">
           <h4>{td("used_in")}</h4>
@@ -232,12 +265,14 @@ export function FileDrawer({
             </div>
           )}
         </div>
+        {versions.length>0 && <section className="dr-sec"><h4>{lt("versions")}</h4>{versions.map(v=><p key={v.file_id}><a href={appPath("/api/v1/files/"+encodeURIComponent(v.file_id))}>{lt("version",{n:v.version_no??1})} · {v.filename}</a></p>)}</section>}
+        </>}
       </div>
 
       <div className="dr-foot">
-        <a className="btn sec" href={appPath(`/api/v1/files/${encodeURIComponent(file.file_id)}`)} target="_blank" rel="noreferrer">
+        {!file.deleted_at && <a className="btn sec" href={appPath(`/api/v1/files/${encodeURIComponent(file.file_id)}`)} target="_blank" rel="noreferrer">
           {td("download_original")}
-        </a>
+        </a>}
         {tab === "trash" ? (
           <button type="button" className="btn pri" onClick={onRestore}>{t("ops.restore")}</button>
         ) : null}
@@ -247,7 +282,9 @@ export function FileDrawer({
         {pin ? (
           <button type="button" className="btn sec" disabled={pin.busy} onClick={pin.onToggle}>{pin.label}</button>
         ) : null}
-        {tab === "trash" ? null : file.in_kb ? (
+        {libraryFile && !file.deleted_at && libraryFile.views.includes("run") && <button className="btn sec"
+          onClick={()=>void keepLibraryVersion(libraryFile).then(()=>onRefresh?.()).catch(()=>setActionError(lt("unavailable")))}>{lt(libraryFile.kept?"release":"keep")}</button>}
+        {tab === "trash" ? null : libraryFile ? (libraryFile.kb_known !== false && !file.in_kb && <button className="btn ghost" onClick={onDelete}>{t("ops.delete")}</button>) : file.in_kb ? (
           <>
             <button type="button" className="btn pri" onClick={onGotoKb}>{t("kb.manage")} <CharIcon ch="→" /></button>
             <button type="button" className="btn ghost" onClick={onRemoveFromKb}>{t("kb.remove")}</button>

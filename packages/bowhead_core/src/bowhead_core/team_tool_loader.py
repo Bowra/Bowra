@@ -18,6 +18,7 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
+from bowhead_core.n8n_workflows import is_n8n_source, load_n8n_approvals, n8n_workflow_entry, n8n_workflow_tools_enabled
 from bowhead_core.openapi_tool_source import (
     SourceConfigResolver,
     TeamToolEntry,
@@ -64,10 +65,18 @@ async def load_team_tool_entries(
     db_path = getattr(store, "db_path", None)
     if db_path and team_tool_confirmation_enabled() and any(src.kind == "mcp" for src in sources):
         categories = await load_team_tool_categories(db_path, team_id)
+    # Approved n8n workflows become derived run tools on their (ordinary MCP) source.
+    n8n_approvals: dict[str, dict] = {}
+    if db_path and n8n_workflow_tools_enabled() and any(is_n8n_source(src.kind, src.base_url, src.tools_schema) for src in sources):
+        n8n_approvals = await load_n8n_approvals(db_path, team_id)
     entries: list[TeamToolEntry] = []
     by_id: dict[str, TeamToolSource] = {}
     for src in sources:
         if src.kind == "mcp":
+            from bowhead_core.mcp_oauth import notion_knowledge_binding_from_ref
+            from bowhead_core.notion_knowledge import is_notion_oauth_source, notion_knowledge_entry
+
+            binding = notion_knowledge_binding_from_ref(src.auth_ref) if is_notion_oauth_source(src.kind, src.auth_type, src.base_url) else None
             # WP2: build entries from the enumerate cache (no network). dispatch_name = the remote
             # server's own raw tool name; the description override (keyed by tool name) is overlaid.
             selected = set(src.selected_op_ids or [])
@@ -75,7 +84,7 @@ async def load_team_tool_entries(
             added = False
             for tm in src.tools_schema or []:
                 raw = str(tm.get("name") or "")
-                if not raw or (selected and raw not in selected):
+                if not raw or ((selected or src.auth_type == "oauth") and raw not in selected):
                     continue
                 meta = dict(tm)
                 desc_ovr = (ovr.get(raw) or {}).get("description")
@@ -87,7 +96,14 @@ async def load_team_tool_entries(
                 if confirmed:
                     entry = replace(entry, admin_category=confirmed)
                 entries.append(entry)
+                if binding and (knowledge_entry := notion_knowledge_entry(entry, binding)):
+                    entries.append(knowledge_entry)
                 added = True
+            if n8n_approvals.get(src.id) and is_n8n_source(src.kind, src.base_url, src.tools_schema):
+                # Derived tools call the raw n8n tools themselves, whatever the raw selection is.
+                for approval in n8n_approvals[src.id].values():
+                    entries.append(n8n_workflow_entry(src.id, approval))
+                    added = True
             if added:
                 by_id[src.id] = src
             continue

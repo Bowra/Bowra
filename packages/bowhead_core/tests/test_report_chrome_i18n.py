@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bowhead_core.agents.lead_orchestrator import (
+    _chat_text_with_report,
     _claims_canvas_pointer,
     _strip_canvas_pointer,
 )
@@ -75,6 +76,16 @@ def test_pointer_guards_zh_unchanged() -> None:
     text = "营收+3%，完整报告见画布。"
     assert _claims_canvas_pointer(text)
     assert _strip_canvas_pointer(text) == "营收+3%"
+
+
+def test_a_report_answer_in_chat_ends_without_the_pointer() -> None:
+    """Chat running state R2.2: the web shows a report card, so the chat answer drops pointer sentences the model
+    wrote and gets none appended; an answer that was only a pointer keeps the canonical one instead of going empty."""
+    assert _chat_text_with_report("营收+3%，完整报告见画布。", "zh-CN") == "营收+3%"
+    assert _chat_text_with_report(f"Revenue is up 3%.\n\n{_EN_POINTER}", "en-US") == "Revenue is up 3%."
+    assert _chat_text_with_report("华东下滑 8%，家电拖累最大。", "zh-CN") == "华东下滑 8%，家电拖累最大。"
+    assert _chat_text_with_report("完整报告见画布。", "zh-CN") == "完整报告见画布。"
+    assert _chat_text_with_report(_EN_POINTER, "de-DE") == chrome_text("canvas_pointer", "de-DE")
 
 
 def test_en_data_clauses_survive_strip() -> None:

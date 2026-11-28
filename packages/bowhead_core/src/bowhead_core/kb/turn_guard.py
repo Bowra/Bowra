@@ -57,6 +57,18 @@ async def recheck_turn_sources(ctx: Any, *, session_store: Any = None, turn_id: 
     async def authorize(file):
         return await authorizer(file, ctx.user_id, ctx.team_id, ctx.workspace_id)
 
+    # Files in named knowledge bases need the user's levels; one resolution serves every check.
+    resolved: list[Any] = []
+    resolving = anyio.Lock()
+
+    async def levels():
+        from bowhead_core.knowledge_source_runtime import knowledge_levels_of
+
+        async with resolving:
+            if not resolved:
+                resolved.append(await knowledge_levels_of(ctx))
+        return resolved[0]
+
     checks = []
     allowed, warning = True, False
     checker = KbUseEligibility(files, artifacts, retriever._store)
@@ -66,7 +78,9 @@ async def recheck_turn_sources(ctx: Any, *, session_store: Any = None, turn_id: 
 
     async def inspect(used):
         key = (used["file_id"], used["generation_id"])
-        decisions[key] = await checker.check(used["file_id"], scope, authorize, expected_generation=used["generation_id"] or "")
+        decisions[key] = await checker.check(
+            used["file_id"], scope, authorize, expected_generation=used["generation_id"] or "", resolve_levels=levels
+        )
 
     with anyio.move_on_after(30):
         async with anyio.create_task_group() as group:

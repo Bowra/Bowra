@@ -9,20 +9,30 @@ kb_records docstring 的 M2 警示落地）；mutation 另挂 `require_not_reado
 
 owner-or-admin 是显式 helper 不是散写（review P1）：member-rank 对「删矩阵/删列/
 取消他人 run」是必要非充分，漏掉 per-handler 判定 = 任意 member 越权。
+
+Only-me matrices (document matrix step 1, S8): a private matrix answers every route like a missing one
+unless the caller created it, whatever their role (``_get_matrix_checked`` and ``cancel_run``). It may
+hold its creator's personal files; the per-file and batched file checks accept them only there.
 """
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import logging
 import math
 import os
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote
 
 import aiosqlite
 import anyio
 from bowhead_core.access_control import workspace_role_satisfies
+from bowhead_core.kb import matrix_usage
 from bowhead_core.kb.doc_type_store import MAX_FIELDS_PER_SCHEMA, is_column_group_template
 from bowhead_core.kb.graduation import (
     GRADUATION_EXTRACTOR_MODEL,
@@ -32,8 +42,10 @@ from bowhead_core.kb.graduation import (
     compose_description,
     validate_graduation_columns,
 )
+from bowhead_core.kb.knowledge_base_access import named_knowledge_base_id
 from bowhead_core.kb.matrix_engine import (
     ETA_SECONDS_PER_CELL,
+    MAX_SCOPE_FILE_IDS,
     MatrixInsufficientCredits,
     MatrixQuotaExceeded,
     MatrixRateLimited,
@@ -43,10 +55,16 @@ from bowhead_core.kb.matrix_engine import (
     global_concurrency,
 )
 from bowhead_core.kb.matrix_store import (
+    CELL_EVENT_LIMIT,
     MATRIX_COLUMN_TYPES,
+    MatrixColumnBusyError,
+    MatrixColumnNameError,
+    MatrixFileLimitError,
+    MatrixVisibilityError,
     cell_is_stale,
     is_raw_string_sentinel,
     new_column_id,
+    private_matrices_enabled,
     validate_options,
 )
 from bowhead_core.kb.permission import KbPermission, ScopeContext
@@ -54,22 +72,25 @@ from bowhead_core.kb.telemetry import emit_audit
 from bowhead_core.secret_redaction import extract_secrets, wrap_untrusted
 from bowhead_core.space_governance import SpaceOperation
 from bowhead_router.usage import usage_context
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from bowhead_gateway._entitlement_gate import require_feature_licensed, require_not_readonly
 from bowhead_gateway.access_context import access_context_to_dict, build_access_context_from_request, has_workspace_access_source
+from bowhead_gateway.kb_authorization import kb_file_decisions, knowledge_levels_for
 from bowhead_gateway.routes.auth import _current_user
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from bowhead_core.access_control import AccessContext
     from bowhead_core.kb.doc_type_store import KbDocTypeStore
     from bowhead_core.kb.extracted_record_store import KbExtractedRecordStore
     from bowhead_core.kb.files_store import KbFilesStore
     from bowhead_core.kb.matrix_engine import KbMatrixEngine
-    from bowhead_core.kb.matrix_store import KbMatrixStore, MatrixCellDTO, MatrixDTO, MatrixRunDTO
+    from bowhead_core.kb.matrix_store import KbMatrixStore, MatrixCellDTO, MatrixCellEventDTO, MatrixDTO, MatrixRunDTO
     from bowhead_core.kb.schemas import KbFileDTO
     from bowhead_core.user_store import User
 
@@ -94,6 +115,8 @@ _COLUMN_VALIDATION_CODES = frozenset(
 
 def _column_validation_error(exc: ValueError, *, fallback: str = "invalid_matrix_request") -> HTTPException:
     """Map store validation failures to the finite matrix mutation contract."""
+    if isinstance(exc, MatrixColumnNameError):
+        return _matrix_error(422, exc.code, **exc.payload)
     code = str(exc)
     if code in _COLUMN_VALIDATION_CODES:
         return _matrix_error(422, code)
@@ -115,6 +138,38 @@ _RECORDS_PAGE = 1000
 _MAX_CELL_VALUE_JSON_LEN = 50_000
 
 
+def _env_cap(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+def _max_matrix_columns() -> int:
+    return _env_cap("BOWHEAD_KB_MATRIX_MAX_COLUMNS", 20)
+
+
+def _max_matrix_files() -> int:
+    return _env_cap("BOWHEAD_KB_MATRIX_MAX_FILES", 500)
+
+
+def _check_matrix_caps(*, columns: tuple[int, int] | None = None, files: tuple[int, int] | None = None) -> None:
+    """Size caps on writes that grow a matrix; each pair is (count now, count after the write).
+
+    A write is refused only when it grows the count past the cap, so matrices already larger
+    than the cap stay readable, runnable and shrinkable. ``count`` is 0 for a new matrix.
+    """
+    for code, pair, limit in (
+        ("matrix_column_limit", columns, _max_matrix_columns()),
+        ("matrix_file_limit", files, _max_matrix_files()),
+    ):
+        if pair is None:
+            continue
+        current, requested = pair
+        if requested > limit and requested > current:
+            raise _matrix_error(422, code, limit=limit, count=current, requested=requested)
+
+
 # ─── DTOs ───────────────────────────────────────────────────
 
 
@@ -134,6 +189,8 @@ class _MatrixCreateIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=_MAX_NAME_LEN)
     file_ids: list[str] = Field(default_factory=list)
     columns: list[_ColumnIn] = Field(default_factory=list)
+    # S8: who can see the matrix. Omitted or null = Space members; ignored (and reported) while the switch is off.
+    visibility: Literal["space", "private"] | None = None
 
 
 class _FromTemplateIn(BaseModel):
@@ -147,11 +204,22 @@ class _GraduateIn(BaseModel):
     mode: Literal["snapshot", "template"] = "snapshot"
 
 
-class _MatrixRenameIn(BaseModel):
-    name: str = Field(..., min_length=1, max_length=_MAX_NAME_LEN)
+class _MatrixPatchIn(BaseModel):
+    # Emptiness is checked after trimming in the route, so "" and "   " get the same localizable code.
+    name: str | None = Field(None, max_length=_MAX_NAME_LEN)
+    # S8: the creator changes who can see the matrix (switch on only).
+    visibility: Literal["space", "private"] | None = None
 
 
 class _FilesReplaceIn(BaseModel):
+    file_ids: list[str]
+
+
+# Rows added or removed per request (document matrix step 1, S2).
+_MAX_FILES_PER_CHANGE = 100
+
+
+class _FilesChangeIn(BaseModel):
     file_ids: list[str]
 
 
@@ -171,14 +239,26 @@ class _ColumnDraftIn(BaseModel):
 
 class _RunScopeIn(BaseModel):
     # stale/stale_column: M3 reruns stale cells (FR-12b rows; selection is a derived predicate, includes verified, excludes edited).
-    kind: Literal["all_pending", "column", "force_all", "force_column", "stale", "stale_column"]
+    # Step 1 §3.1: failed reruns failed cells only; single_cell prices or runs one cell (file_id + column_id).
+    kind: Literal["all_pending", "failed", "column", "force_all", "force_column", "stale", "stale_column", "single_cell"]
     column_id: str | None = None
+    file_id: str | None = None  # single_cell only.
+    file_ids: list[str] | None = None  # Trial or selection: at most MAX_SCOPE_FILE_IDS rows of this matrix.
+    keep_verified: bool | None = None  # Force scopes keep verified cells unless this is false (omitted or null = true).
 
 
 class _CellPatchIn(BaseModel):
     # revert_edited: M3 clears the edit flag (FR-9 r5); set_verified accepts false from M3 (FR-12 r5).
     op: Literal["edit_value", "keep_as_text", "set_verified", "revert_edited"]
     value: Any = None
+    verified: bool | None = None
+
+
+class _CellsVerifyIn(BaseModel):
+    # Step 1 §4.2 bulk verify: one column, some rows, or both; neither means every cell of the matrix.
+    column_id: str | None = None
+    file_ids: list[str] | None = None
+    # Required; checked in the route so a missing value gets the same code as the single-cell action.
     verified: bool | None = None
 
 
@@ -256,46 +336,86 @@ def _require_member_rank(ctx: AccessContext) -> None:
     raise _matrix_error(403, "workspace_member_role_required")
 
 
+def _is_owner_or_admin(owner_user_id: str, ctx: AccessContext) -> bool:
+    return owner_user_id == ctx.user_id or ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "ws_admin")
+
+
 def _require_owner_or_admin(owner_user_id: str, ctx: AccessContext) -> None:
     """删矩阵/删列/取消他人 run（FR-34）：member-rank 必要非充分（review P1）。"""
-    if owner_user_id == ctx.user_id or ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "ws_admin"):
+    if _is_owner_or_admin(owner_user_id, ctx):
         return
     raise _matrix_error(403, "owner_or_admin_required")
 
 
+def _visible_to(matrix: MatrixDTO, ctx: AccessContext) -> bool:
+    """Whether the caller may see this matrix at all: a private matrix only by its creator (S8). Roles grant
+    nothing here, as for personal files (``KbPermission.can_read``)."""
+    return matrix.visibility != "private" or matrix.created_by == ctx.user_id
+
+
+def _owner_personal(matrix: MatrixDTO, ctx: AccessContext) -> bool:
+    """Whether file checks accept the caller's own personal files: only in their own private matrix (S8)."""
+    return matrix.visibility == "private" and matrix.created_by == ctx.user_id
+
+
 async def _get_matrix_checked(request: Request, ctx: AccessContext, matrix_id: str) -> MatrixDTO:
-    """matrix_id 反查 + 跨空间 404（枚举防护——不 403 不暴露存在性）。"""
+    """matrix_id 反查 + 跨空间 404（枚举防护——不 403 不暴露存在性）。
+
+    A private matrix (S8) gets the same 404 unless the caller created it, whatever their role, with the
+    switch on or off.
+    """
     m = await _get_matrix_store(request).get_matrix(matrix_id)
-    if m is None or m.workspace_id != ctx.workspace_id or m.team_id != ctx.team_id:
+    if m is None or m.workspace_id != ctx.workspace_id or m.team_id != ctx.team_id or not _visible_to(m, ctx):
         raise _matrix_error(404, "matrix_not_found")
     return m
 
 
-async def _validate_file_refs(request: Request, ctx: AccessContext, file_ids: list[str]) -> list[KbFileDTO]:
+async def _validate_file_refs(request: Request, ctx: AccessContext, file_ids: list[str], *, personal_owner: bool = False) -> list[KbFileDTO]:
     """FR-32/FR-35 资源逐个校验（建矩阵/改文件集共用）：任一不存在 → 404 整单拒；
-    personal → 422；跨空间/跨 team 探测统一 404 不 403（枚举防护）。"""
+    personal → 422；跨空间/跨 team 探测统一 404 不 403（枚举防护）。
+
+    ``personal_owner`` (S8, private matrices only): the caller's own personal files pass the same scope and
+    grant checks as other files instead of the 422. Someone else's personal file is always a 404.
+    Graduation keeps the strict mode.
+    """
     files_store = _get_files_store(request)
     out: list[KbFileDTO] = []
+    # The caller's knowledge base levels, resolved once and only for files in named knowledge bases.
+    levels: list[Any] = []
     for file_id in dict.fromkeys(file_ids):
         f = await files_store.get(file_id)
         if f is None or f.soft_deleted_at or f.team_id != ctx.team_id:
             raise _matrix_error(404, "matrix_source_file_unavailable")
         if f.scope == "personal" and KbPermission.owner_of(f) != ctx.user_id:
             raise _matrix_error(404, "matrix_source_file_unavailable")
-        if f.scope == "personal":
+        if f.scope == "personal" and not personal_owner:
             raise _matrix_error(422, "personal_files_not_allowed")
-        if f.scope in ("space", "workspace"):
+        if not levels and named_knowledge_base_id(f):
+            levels.append(
+                await knowledge_levels_for(
+                    ctx,
+                    files_store=files_store,
+                    user_store=getattr(request.app.state, "user_store", None),
+                    access_store=getattr(request.app.state, "access_control_store", None),
+                )
+            )
+        knowledge_levels = levels[0] if levels else None
+        if f.scope == "personal":
+            pass  # The caller's own (checked above); the scope check below applies the owner rule and grants.
+        elif f.scope in ("space", "workspace"):
             if f.workspace_id != ctx.workspace_id:
                 raise _matrix_error(404, "matrix_source_file_unavailable")
         elif f.scope == "team":
-            scope_ctx = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id, role="user")
+            scope_ctx = ScopeContext(
+                user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id, role="user", knowledge_levels=knowledge_levels
+            )
             if f.team_id != ctx.team_id or not KbPermission.can_read(f, scope_ctx):
                 raise _matrix_error(404, "matrix_source_file_unavailable")
         else:
             raise _matrix_error(404, "matrix_source_file_unavailable")
         from bowhead_gateway.routes.kb import _kb_scope_check
 
-        scope_ctx = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id)
+        scope_ctx = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id, knowledge_levels=knowledge_levels)
         try:
             current = await _kb_scope_check(f.file_id, scope_ctx, files_store, request)
         except HTTPException as exc:
@@ -307,6 +427,50 @@ async def _validate_file_refs(request: Request, ctx: AccessContext, file_ids: li
             raise _matrix_error(404, "matrix_source_file_unavailable")
         out.append(current)
     return out
+
+
+def _source_in_matrix_context(file: KbFileDTO, ctx: AccessContext, *, personal_owner: bool = False) -> bool:
+    """The structural part of ``_validate_file_refs``: an active file of the caller's Team that is a Space
+    file of the current Space or a Team file. Personal files qualify only with ``personal_owner`` (the
+    caller's own private matrix, S8) and only the caller's own."""
+    if file.soft_deleted_at or file.team_id != ctx.team_id:
+        return False
+    if file.scope in ("space", "workspace"):
+        return file.workspace_id == ctx.workspace_id
+    if file.scope == "personal":
+        return personal_owner and KbPermission.owner_of(file) == ctx.user_id
+    return file.scope == "team"
+
+
+async def _readable_sources(request: Request, ctx: AccessContext, file_ids: list[str], *, personal_owner: bool = False) -> dict[str, KbFileDTO]:
+    """The files of these rows the caller may read now, by file ID: the batched form of ``_validate_file_refs``.
+
+    A file is returned exactly when ``_validate_file_refs`` would accept it: active, in the caller's Team, not
+    personal (or, with ``personal_owner``, the caller's own personal file), a Space file of the current Space
+    or a Team file, readable under the scope rule and the
+    caller's knowledge base levels, and allowed by its file and scope grants when grants are enforced. The
+    whole call reads the files in pages of 256 IDs, resolves the levels at most once and asks for the grant
+    decisions in one batch (``kb_file_decisions``, the check behind ``kb_file_authorizer(...).batch``) with
+    the request's access context. Two differences, as in the engine's check: a hidden row writes no audit
+    line, would-deny log or runtime-denied record (matrix pages poll every few seconds), and enforced grants
+    without an access-control store (never the case in a deployment) refuse every file.
+    """
+    files_store = _get_files_store(request)
+    ids = list(dict.fromkeys(file_id for file_id in file_ids if file_id))
+    found: dict[str, KbFileDTO] = {}
+    for offset in range(0, len(ids), 256):
+        found.update({f.file_id: f for f in await files_store.get_many(ids[offset : offset + 256])})
+    candidates = [f for f in found.values() if _source_in_matrix_context(f, ctx, personal_owner=personal_owner)]
+    if not candidates:
+        return {}
+    decisions = await kb_file_decisions(
+        candidates,
+        ctx,
+        getattr(request.app.state, "access_control_store", None),
+        files_store=files_store,
+        user_store=getattr(request.app.state, "user_store", None),
+    )
+    return {f.file_id: f for f in candidates if decisions.get(f.file_id)}
 
 
 async def _files_with_char_counts(request: Request, user: User, files: list[KbFileDTO]) -> list[dict[str, Any]]:
@@ -356,8 +520,11 @@ async def list_matrices(
         operation=SpaceOperation.READ_HISTORY,
     )
     store = _get_matrix_store(request)
+    # Space matrices and the caller's own private ones (S8); admins get no exception.
+    matrices = await store.list_matrices(ctx.workspace_id, viewer_id=ctx.user_id)
+    creator_names = await _member_labels(request, ctx.team_id, [m.created_by for m in matrices])
     items: list[dict[str, Any]] = []
-    for m in await store.list_matrices(ctx.workspace_id):
+    for m in matrices:
         summary = await store.status_summary_for_matrix(m.matrix_id)
         items.append(
             {
@@ -369,10 +536,29 @@ async def list_matrices(
                 "status_summary": summary,
                 "last_run_at": m.last_run_at,
                 "created_by": m.created_by,
+                "created_by_name": creator_names.get(m.created_by),
                 "created_at": m.created_at,
+                "visibility": m.visibility,
             }
         )
     return {"items": items, "workspace_id": ctx.workspace_id}
+
+
+async def _member_labels(request: Request, team_id: str, user_ids: list[str]) -> dict[str, str]:
+    """Display names of this Team's members (the list shows a name, never a user id).
+
+    A name is display information: when it cannot be resolved the field stays empty and the
+    list still loads.
+    """
+    lookup = getattr(getattr(request.app.state, "user_store", None), "get_team_member_labels", None)
+    ids = list(dict.fromkeys(uid for uid in user_ids if uid))
+    if not callable(lookup) or not ids:
+        return {}
+    try:
+        return dict(await lookup(team_id, ids))
+    except Exception:
+        logger.warning("kb_matrix.creator_names_failed team_id=%s", team_id, exc_info=True)
+        return {}
 
 
 @router.post("/matrices", dependencies=[Depends(require_not_readonly)])
@@ -384,7 +570,12 @@ async def create_matrix(
     ws = _ws_from_request(request, body.workspace_id)
     _ws, ctx = await _require_workspace_member_strict(request, user, ws)
     _require_member_rank(ctx)
-    files = await _validate_file_refs(request, ctx, body.file_ids)
+    # Before the per-file checks, so an oversized request is refused cheaply.
+    _check_matrix_caps(columns=(0, len(body.columns)), files=(0, len(dict.fromkeys(body.file_ids))))
+    # S8: only-me matrices exist while the switch is on; otherwise the request field is ignored and reported.
+    requested_visibility = body.visibility or "space"
+    visibility = requested_visibility if private_matrices_enabled() else "space"
+    files = await _validate_file_refs(request, ctx, body.file_ids, personal_owner=visibility == "private")
     columns = [c.model_dump() for c in body.columns]
     for c in columns:
         if c["type"] not in MATRIX_COLUMN_TYPES:
@@ -398,11 +589,20 @@ async def create_matrix(
             created_by=user.id,
             files=entries,
             columns=columns,
+            visibility=visibility,
         )
     except ValueError as e:
         raise _column_validation_error(e) from e
-    emit_audit("kb.matrix_created", {"matrix_id": m.matrix_id, "files_count": len(entries), "columns_count": len(m.columns)})
-    return {"matrix_id": m.matrix_id, "columns": m.columns}
+    emit_audit(
+        "kb.matrix_created",
+        {"matrix_id": m.matrix_id, "files_count": len(entries), "columns_count": len(m.columns), "visibility": m.visibility},
+    )
+    await matrix_usage.track_matrix_created(getattr(request.app.state, "metrics_log", None), ctx, matrix_id=m.matrix_id)
+    out: dict[str, Any] = {"matrix_id": m.matrix_id, "columns": m.columns, "visibility": m.visibility}
+    if requested_visibility != visibility:
+        # The matrix was created visible to Space members: only-me matrices are not enabled here.
+        out["ignored_fields"] = ["visibility"]
+    return out
 
 
 @router.post("/matrices/from_template", dependencies=[Depends(require_not_readonly)])
@@ -463,46 +663,44 @@ async def create_matrix_from_template(
         offset += _RECORDS_PAGE
 
     # File filtering (security review S-P1-2): materialization uses the same gate as creation. Never materialize records from
-    # personal files (visible only to the uploader) or files that fail team ACL checks; otherwise a single from_template
-    # exposes restricted files' extracted values + names to all space members.
+    # files the caller cannot read (the shared KB read check, resource grants included) or from personal files, which a
+    # matrix never holds; otherwise a single from_template exposes restricted files' extracted values + names to all space members.
     # Also calculate actual char_count (B-P2-5: zero systematically deflates estimates, distorting the FR-14 hard gate).
     files_store = _get_files_store(request)
-    allowed_files: dict[str, Any] = {}
-    file_versions: dict[str, int] = {}
-    skipped_files = 0
-    scope_ctx = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id, role="user")
-    for rec in records:
-        if rec.file_id in file_versions or rec.file_id in allowed_files:
-            continue
-        dto = await files_store.get(rec.file_id)
-        ok = (
-            dto is not None
-            and not dto.soft_deleted_at
-            and dto.scope != "personal"
-            and (
-                (dto.scope in ("space", "workspace") and dto.workspace_id == ctx.workspace_id)
-                or (dto.scope == "team" and dto.team_id == ctx.team_id and KbPermission.can_read(dto, scope_ctx))
-            )
-        )
-        if not ok:
-            skipped_files += 1
-            file_versions[rec.file_id] = -1  # Sentinel: already determined unavailable.
-            continue
-        allowed_files[rec.file_id] = dto
-        file_versions[rec.file_id] = int(getattr(dto, "version", 1) or 1)
+    record_file_ids = list(dict.fromkeys(rec.file_id for rec in records))
+    candidates: dict[str, KbFileDTO] = {}
+    for offset in range(0, len(record_file_ids), 256):
+        candidates.update({f.file_id: f for f in await files_store.get_many(record_file_ids[offset : offset + 256])})
+    decisions = await kb_file_decisions(
+        list(candidates.values()),
+        ctx,
+        getattr(request.app.state, "access_control_store", None),
+        files_store=files_store,
+        user_store=getattr(request.app.state, "user_store", None),
+    )
+    allowed_files: dict[str, KbFileDTO] = {
+        file_id: candidates[file_id]
+        for file_id in record_file_ids
+        if file_id in candidates and decisions.get(file_id) and candidates[file_id].scope != "personal"
+    }
+    skipped_files = len(record_file_ids) - len(allowed_files)
+    file_versions = {file_id: int(getattr(dto, "version", 1) or 1) for file_id, dto in allowed_files.items()}
     file_ids = list(allowed_files.keys())
     entries = await _files_with_char_counts(request, user, list(allowed_files.values()))
 
     store = _get_matrix_store(request)
-    m = await store.create_matrix(
-        name=f"{dt.name}（矩阵）",
-        workspace_id=ctx.workspace_id,
-        team_id=ctx.team_id,
-        created_by=user.id,
-        files=entries,
-        columns=columns,
-        template_doc_type_id=body.doc_type_id,
-    )
+    try:
+        m = await store.create_matrix(
+            name=f"{dt.name}（矩阵）",
+            workspace_id=ctx.workspace_id,
+            team_id=ctx.team_id,
+            created_by=user.id,
+            files=entries,
+            columns=columns,
+            template_doc_type_id=body.doc_type_id,
+        )
+    except ValueError as e:
+        raise _column_validation_error(e) from e
 
     # Materialize cells per record/field (§7.6): copy variants unchanged to preserve multiple sources;
     # cell prompt_version=1 matches columns (review P2 enforces NOT NULL); extract_failed rows produce no cells.
@@ -547,6 +745,7 @@ async def create_matrix_from_template(
             "skipped_files": skipped_files,
         },
     )
+    await matrix_usage.track_matrix_created(getattr(request.app.state, "metrics_log", None), ctx, matrix_id=m.matrix_id)
     return {"matrix_id": m.matrix_id, "files_count": len(file_ids), "cells": inserted}
 
 
@@ -616,6 +815,11 @@ async def graduate_matrix(
     # _validate_file_refs = re-fetch + personal 422 + can_read/cross-space 404;
     # any failure **fails the entire request closed**, including soft-deleted files: v1 is strict.
     matrix_file_ids = [str(f.get("file_id") or "") for f in matrix.files if f.get("file_id")]
+    if matrix.visibility == "private":
+        # A snapshot is queryable by the whole Space, so personal files stay out (S8): name the caller's own.
+        own_personal, _hidden = await _personal_rows(request, ctx, matrix_file_ids)
+        if own_personal:
+            raise _matrix_error(422, "matrix_graduation_personal_files", **_named_files(own_personal))
     await _validate_file_refs(request, ctx, matrix_file_ids)
 
     # ③ Idempotency (reuse the same (matrix, last_seq, mode); pending matches self-heal crash residue in place).
@@ -768,20 +972,141 @@ async def graduate_matrix(
     }
 
 
+_NAMED_FILES_LIMIT = 20
+
+
+def _named_files(files: list[KbFileDTO]) -> dict[str, Any]:
+    """An error payload naming the caller's own files: the first ``_NAMED_FILES_LIMIT`` and the count."""
+    return {"files": [{"file_id": f.file_id, "name": f.filename} for f in files[:_NAMED_FILES_LIMIT]], "count": len(files)}
+
+
+async def _personal_rows(request: Request, ctx: AccessContext, file_ids: list[str]) -> tuple[list[KbFileDTO], int]:
+    """The rows that are personal files: the caller's own (in row order, deleted ones included) and how many
+    belong to someone else (counted, never named)."""
+    files_store = _get_files_store(request)
+    ids = list(dict.fromkeys(file_id for file_id in file_ids if file_id))
+    found: dict[str, KbFileDTO] = {}
+    for offset in range(0, len(ids), 256):
+        found.update({f.file_id: f for f in await files_store.get_many(ids[offset : offset + 256])})
+    own: list[KbFileDTO] = []
+    others = 0
+    for file_id in ids:
+        f = found.get(file_id)
+        if f is None or f.scope != "personal":
+            continue
+        if KbPermission.owner_of(f) == ctx.user_id and f.team_id == ctx.team_id:
+            own.append(f)
+        else:
+            others += 1
+    return own, others
+
+
+async def _change_visibility(request: Request, ctx: AccessContext, matrix: MatrixDTO, visibility: str) -> MatrixDTO:
+    """Change who can see the matrix (S8): the creator only, while the switch is on.
+
+    - To ``space``: refused while the matrix holds personal files; the error names the caller's own (other
+      people's are only counted) and says to remove them first.
+    - To ``private``: refused while other members' runs are active (they could no longer see or cancel them)
+      or while a column has a navigation role. Other members' edits, verifications and runs stay in the
+      matrix; they lose access to it, as everyone but the creator does.
+    """
+    if visibility == matrix.visibility:
+        return matrix
+    if not private_matrices_enabled():
+        raise _matrix_error(422, "matrix_visibility_unavailable")
+    if matrix.created_by != ctx.user_id:
+        raise _matrix_error(403, "matrix_creator_required")
+    store = _get_matrix_store(request)
+
+    async def check(current: MatrixDTO) -> None:
+        if visibility == "space":
+            own, hidden = await _personal_rows(request, ctx, [str(f.get("file_id") or "") for f in current.files])
+            if own or hidden:
+                raise MatrixVisibilityError("matrix_personal_files_block_space", **_named_files(own), hidden=hidden)
+            return
+        others = [r for r in await store.list_active_runs_for_matrix(current.matrix_id) if r.initiated_by != current.created_by]
+        if others:
+            raise MatrixVisibilityError("matrix_visibility_runs_active", count=len(others))
+
+    try:
+        changed = await store.set_visibility(matrix.matrix_id, visibility, workspace_id=ctx.workspace_id, check=check)
+    except MatrixVisibilityError as e:
+        status = 409 if e.code == "matrix_visibility_runs_active" else 422
+        raise _matrix_error(status, e.code, **e.payload) from e
+    if changed is None:
+        raise _matrix_error(404, "matrix_not_found")
+    updated, did_change = changed
+    if did_change:
+        emit_audit("kb.matrix_visibility_changed", {"matrix_id": matrix.matrix_id, "visibility": visibility})
+    return updated
+
+
 @router.patch("/matrices/{matrix_id}", dependencies=[Depends(require_not_readonly)])
-async def rename_matrix(
+async def update_matrix(
     matrix_id: str,
-    body: _MatrixRenameIn,
+    body: _MatrixPatchIn,
     request: Request,
     workspace_id: str = "",
     user: User = Depends(_current_user),
 ) -> dict[str, Any]:
+    """Rename the matrix (member rank) and/or change who can see it (its creator, S8)."""
     ws = _ws_from_request(request, workspace_id)
     _ws, ctx = await _require_workspace_member_strict(request, user, ws)
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
-    await _get_matrix_store(request).rename_matrix(matrix.matrix_id, body.name, workspace_id=ctx.workspace_id)
-    return {"matrix_id": matrix_id, "name": body.name}
+    name = body.name.strip() if body.name is not None else None
+    if body.visibility is None and not name:
+        # A missing name answers as an empty one, as it did before the visibility field existed.
+        raise _matrix_error(422, "matrix_name_invalid")
+    if body.name is not None and not name:
+        raise _matrix_error(422, "matrix_name_invalid")
+    if body.visibility is not None:
+        matrix = await _change_visibility(request, ctx, matrix, body.visibility)
+    if name is not None:
+        await _get_matrix_store(request).rename_matrix(matrix.matrix_id, name, workspace_id=ctx.workspace_id)
+        emit_audit("kb.matrix_renamed", {"matrix_id": matrix_id})
+    out: dict[str, Any] = {"matrix_id": matrix_id, "name": name if name is not None else matrix.name}
+    if body.visibility is not None:
+        out["visibility"] = matrix.visibility
+    return out
+
+
+@router.get("/matrices/{matrix_id}/visibility")
+async def get_matrix_visibility(
+    matrix_id: str,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """What changing who can see the matrix would do (S8), for the creator's confirmation.
+
+    ``contributors`` names the other people who changed a cell or started a run here (they lose access when
+    the matrix becomes private; their edits and verifications stay). ``personal_files`` names the caller's
+    personal files that keep it from becoming visible to the Space (``hidden_personal_files`` counts other
+    people's), and ``active_runs_by_others`` the runs that keep it from becoming private.
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws, operation=SpaceOperation.READ_HISTORY)
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    if matrix.created_by != ctx.user_id:
+        raise _matrix_error(403, "matrix_creator_required")
+    store = _get_matrix_store(request)
+    contributor_ids = [uid for uid in await store.list_contributors(matrix.matrix_id) if uid != matrix.created_by]
+    names = await _member_labels(request, ctx.team_id, contributor_ids)
+    own, hidden = await _personal_rows(request, ctx, [str(f.get("file_id") or "") for f in matrix.files])
+    others_active = [r for r in await store.list_active_runs_for_matrix(matrix.matrix_id) if r.initiated_by != matrix.created_by]
+    return {
+        "matrix_id": matrix.matrix_id,
+        "visibility": matrix.visibility,
+        "can_change": private_matrices_enabled() and (ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "member")),
+        # People whose names cannot be resolved (for example after account deletion) are counted, not named.
+        "contributors": [names[uid] for uid in contributor_ids if names.get(uid)],
+        "contributors_count": len(contributor_ids),
+        "personal_files": _named_files(own)["files"],
+        "personal_files_count": len(own),
+        "hidden_personal_files": hidden,
+        "active_runs_by_others": len(others_active),
+    }
 
 
 @router.delete("/matrices/{matrix_id}", dependencies=[Depends(require_not_readonly)])
@@ -796,8 +1121,18 @@ async def delete_matrix(
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
     _require_owner_or_admin(matrix.created_by, ctx)  # FR-34 row-deletion permission.
-    await _get_matrix_store(request).soft_delete_matrix(matrix.matrix_id, workspace_id=ctx.workspace_id)
-    emit_audit("kb.matrix_deleted", {"matrix_id": matrix_id})
+    store = _get_matrix_store(request)
+    # Stop spending first: every active run goes through the normal cancel CAS
+    # (running|paused → cancelling); in-flight calls finish and their writes are discarded.
+    cancelled = 0
+    active = await store.list_active_runs_for_matrix(matrix.matrix_id)
+    if active:
+        engine = _get_engine(request)
+        for run in active:
+            if run.status in ("running", "paused") and await engine.cancel_run(run.run_id):
+                cancelled += 1
+    await store.soft_delete_matrix(matrix.matrix_id, workspace_id=ctx.workspace_id)
+    emit_audit("kb.matrix_deleted", {"matrix_id": matrix_id, "runs_cancelled": cancelled})
     return {"matrix_id": matrix_id, "deleted": True}
 
 
@@ -813,11 +1148,135 @@ async def replace_matrix_files(
     _ws, ctx = await _require_workspace_member_strict(request, user, ws)
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
-    files = await _validate_file_refs(request, ctx, body.file_ids)
+    _check_matrix_caps(files=(len(matrix.files), len(dict.fromkeys(body.file_ids))))
+    files = await _validate_file_refs(request, ctx, body.file_ids, personal_owner=_owner_personal(matrix, ctx))
     entries = await _files_with_char_counts(request, user, files)
-    await _get_matrix_store(request).replace_files(matrix.matrix_id, entries, workspace_id=ctx.workspace_id)
+    # Removed files' queued cells leave active runs in the same transaction (store). Kept for API
+    # compatibility (the UI adds and removes named rows); dropping rows with edited or verified
+    # cells follows the same creator-or-admin rule as POST …/files/remove.
+    try:
+        change = await _get_matrix_store(request).replace_files(
+            matrix.matrix_id,
+            entries,
+            workspace_id=ctx.workspace_id,
+            allow_reviewed=_is_owner_or_admin(matrix.created_by, ctx),
+            require_private=any(f.scope == "personal" for f in files),
+        )
+    except MatrixVisibilityError as e:
+        raise _matrix_error(409, e.code, **e.payload) from e
+    if change is not None and change.refused:
+        raise _matrix_error(403, "matrix_remove_requires_owner", edited=change.edited, verified=change.verified)
     emit_audit("kb.matrix_files_changed", {"matrix_id": matrix_id, "files_count": len(entries)})
     return {"matrix_id": matrix_id, "files_count": len(entries)}
+
+
+def _change_file_ids(body: _FilesChangeIn) -> list[str]:
+    """The named rows of an add or remove, de-duplicated in request order and capped per request."""
+    file_ids = list(dict.fromkeys(fid for fid in body.file_ids if fid))
+    if len(file_ids) > _MAX_FILES_PER_CHANGE:
+        raise _matrix_error(422, "matrix_files_batch_limit", limit=_MAX_FILES_PER_CHANGE, requested=len(file_ids))
+    return file_ids
+
+
+@router.post("/matrices/{matrix_id}/files", dependencies=[Depends(require_not_readonly)])
+async def add_matrix_files(
+    matrix_id: str,
+    body: _FilesChangeIn,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """Append rows (document matrix step 1, S2): only the named files are touched.
+
+    Files already in the matrix are skipped; the others go through the same per-file checks as
+    creation, and only they get a character count (one chunk read each).
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws)
+    _require_member_rank(ctx)
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    requested = _change_file_ids(body)
+    present = {str(f.get("file_id") or "") for f in matrix.files}
+    new_ids = [fid for fid in requested if fid not in present]
+    store = _get_matrix_store(request)
+    if new_ids:
+        # Before the per-file checks, so an oversized request is refused cheaply; the store checks again under its lock.
+        _check_matrix_caps(files=(len(matrix.files), len(matrix.files) + len(new_ids)))
+        files = await _validate_file_refs(request, ctx, new_ids, personal_owner=_owner_personal(matrix, ctx))
+        entries = await _files_with_char_counts(request, user, files)
+    else:
+        files, entries = [], []
+    try:
+        change = await store.add_files(
+            matrix.matrix_id,
+            entries,
+            workspace_id=ctx.workspace_id,
+            max_files=_max_matrix_files(),
+            require_private=any(f.scope == "personal" for f in files),
+        )
+    except MatrixFileLimitError as e:
+        raise _matrix_error(422, e.code, **e.payload) from e
+    except MatrixVisibilityError as e:
+        # The matrix stopped being private while the request held personal files.
+        raise _matrix_error(409, e.code, **e.payload) from e
+    if change is None:
+        raise _matrix_error(404, "matrix_not_found")
+    if change.changed:
+        emit_audit("kb.matrix_files_added", {"matrix_id": matrix_id, "added": len(change.changed), "files_count": change.files_count})
+    return {
+        "matrix_id": matrix_id,
+        "added": change.changed,
+        "skipped": len(requested) - len(change.changed),
+        "files_count": change.files_count,
+    }
+
+
+@router.post("/matrices/{matrix_id}/files/remove", dependencies=[Depends(require_not_readonly)])
+async def remove_matrix_files(
+    matrix_id: str,
+    body: _FilesChangeIn,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """Remove the named rows only (S2), so rows hidden from the caller are never dropped (spike bug D).
+
+    Members may remove rows; rows holding edited or verified cells need the matrix creator or a
+    Space/Team admin. No cell records who edited or verified it yet, so every such cell counts.
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws)
+    _require_member_rank(ctx)
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    requested = _change_file_ids(body)
+    change = await _get_matrix_store(request).remove_files(
+        matrix.matrix_id,
+        requested,
+        workspace_id=ctx.workspace_id,
+        allow_reviewed=_is_owner_or_admin(matrix.created_by, ctx),
+    )
+    if change is None:
+        raise _matrix_error(404, "matrix_not_found")
+    if change.refused:
+        raise _matrix_error(403, "matrix_remove_requires_owner", edited=change.edited, verified=change.verified)
+    if change.changed:
+        emit_audit(
+            "kb.matrix_files_removed",
+            {
+                "matrix_id": matrix_id,
+                "removed": len(change.changed),
+                "files_count": change.files_count,
+                "edited": change.edited,
+                "verified": change.verified,
+            },
+        )
+    return {
+        "matrix_id": matrix_id,
+        "removed": change.changed,
+        "files_count": change.files_count,
+        "edited": change.edited,
+        "verified": change.verified,
+    }
 
 
 # ─── columns ────────────────────────────────────────────────
@@ -835,6 +1294,7 @@ async def add_column(
     _ws, ctx = await _require_workspace_member_strict(request, user, ws)
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    _check_matrix_caps(columns=(len(matrix.columns), len(matrix.columns) + 1))
     try:
         column_id = await _get_matrix_store(request).add_column(matrix.matrix_id, body.model_dump(), workspace_id=ctx.workspace_id)
     except ValueError as e:
@@ -969,6 +1429,9 @@ async def update_column(
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
     _column_or_404(matrix, column_id)
+    if body.navigation_role not in (None, "none") and matrix.visibility == "private":
+        # Navigation roles publish cells as Space-wide source descriptions (S8); the store checks again under its lock.
+        raise _matrix_error(422, "matrix_navigation_role_private")
     store = _get_matrix_store(request)
     if body.type is not None:
         # Refine promotion as the sole change (FR-5 r5): M3 allows {type, options} together
@@ -985,6 +1448,8 @@ async def update_column(
             raise _matrix_error(422, "promote_must_be_sole_change")
         try:
             promoted = await store.promote_column(matrix.matrix_id, column_id, body.type, workspace_id=ctx.workspace_id, options=body.options)
+        except MatrixColumnBusyError as e:
+            raise _matrix_error(409, e.code, **e.payload) from e
         except ValueError as e:
             raise _column_validation_error(e, fallback="invalid_promotion") from e
         emit_audit("kb.matrix_column_promoted", {"matrix_id": matrix_id, "column_id": column_id, "new_type": body.type})
@@ -1001,6 +1466,8 @@ async def update_column(
             cross_verify=body.cross_verify,
             navigation_role=body.navigation_role,
         )
+    except MatrixVisibilityError as e:
+        raise _matrix_error(422, e.code, **e.payload) from e
     except ValueError as e:
         raise _column_validation_error(e) from e
     if updated is None:
@@ -1029,6 +1496,36 @@ async def delete_column(
 
 
 # ─── runs ───────────────────────────────────────────────────
+
+
+def _run_scope(body: _RunScopeIn, matrix: MatrixDTO) -> dict[str, Any]:
+    """Normalize a run request into the engine scope (step 1 §3.1), rejecting row subsets the engine cannot honor.
+
+    - ``single_cell`` keeps only its cell; ``file_ids`` and ``keep_verified`` do not apply to it.
+    - Force scopes store ``keep_verified`` (true unless explicitly false).
+    - ``file_ids`` is deduplicated in order and must name 1–MAX_SCOPE_FILE_IDS rows of this matrix.
+    """
+    scope: dict[str, Any] = {"kind": body.kind}
+    if body.column_id is not None:
+        scope["column_id"] = body.column_id
+    if body.kind == "single_cell":
+        if body.file_id is not None:
+            scope["file_id"] = body.file_id
+        return scope
+    if body.kind in ("force_all", "force_column"):
+        scope["keep_verified"] = body.keep_verified is not False
+    if body.file_ids is not None:
+        file_ids = list(dict.fromkeys(body.file_ids))
+        if not file_ids:
+            raise _matrix_error(422, "matrix_run_files_empty")
+        if len(file_ids) > MAX_SCOPE_FILE_IDS:
+            raise _matrix_error(422, "matrix_run_files_limit", limit=MAX_SCOPE_FILE_IDS, count=len(file_ids))
+        rows = {str(f.get("file_id") or "") for f in matrix.files}
+        unknown = sum(1 for file_id in file_ids if file_id not in rows)
+        if unknown:
+            raise _matrix_error(422, "matrix_run_files_not_in_matrix", count=unknown)
+        scope["file_ids"] = file_ids
+    return scope
 
 
 def _run_error_to_http(e: MatrixRunError) -> HTTPException:
@@ -1060,8 +1557,9 @@ async def estimate_run(
     )
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    scope = _run_scope(body, matrix)
     try:
-        return await _get_engine(request).estimate_run(matrix, body.model_dump(exclude_none=True), user_id=user.id)
+        return await _get_engine(request).estimate_run(matrix, scope, user_id=user.id)
     except ValueError as e:
         raise _matrix_error(422, "invalid_matrix_run_scope") from e
 
@@ -1083,12 +1581,17 @@ async def start_run(
     )
     _require_member_rank(ctx)
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    scope = _run_scope(body, matrix)
     try:
-        run = await _get_engine(request).start_run(matrix, body.model_dump(exclude_none=True), initiated_by=user.id)
+        run = await _get_engine(request).start_run(matrix, scope, initiated_by=user.id)
     except MatrixRunError as e:
         raise _run_error_to_http(e) from e
     except ValueError as e:
         raise _matrix_error(422, "invalid_matrix_run_scope") from e
+    trial = bool(scope.get("file_ids"))  # A run limited to a few rows, as the snapshot's ``trial``.
+    await matrix_usage.track_matrix_run_started(
+        getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id, scope_kind=body.kind, cells=run.cells_total, trial=trial
+    )
     return {
         "run_id": run.run_id,
         "cells_total": run.cells_total,
@@ -1107,7 +1610,10 @@ async def cancel_run(
 ) -> dict[str, Any]:
     """取消（FR-19/FR-34：发起者或 admin）。**不挂 require_not_readonly，归
     ALLOW_ROUTES**（review P1）：team 冻结时在飞 run 仍在烧 credits，cancel 是止损
-    动作，gating 它 = 冻结 team 无法停止消耗（readonly-gate「remediation」类目同理由）。"""
+    动作，gating 它 = 冻结 team 无法停止消耗（readonly-gate「remediation」类目同理由）。
+
+    Runs of a soft-deleted matrix stay cancellable (same Space and Team checks), so a
+    cancel that races a matrix delete converges instead of answering 404."""
     ws = _ws_from_request(request, workspace_id)
     _ws, ctx = await _require_workspace_member_strict(
         request,
@@ -1115,8 +1621,10 @@ async def cancel_run(
         ws,
         operation=SpaceOperation.EXECUTE,
     )
-    matrix = await _get_matrix_checked(request, ctx, matrix_id)
     store = _get_matrix_store(request)
+    matrix = await store.get_matrix(matrix_id, include_deleted=True)
+    if matrix is None or matrix.workspace_id != ctx.workspace_id or matrix.team_id != ctx.team_id or not _visible_to(matrix, ctx):
+        raise _matrix_error(404, "matrix_not_found")
     run = await store.get_run(run_id)
     if run is None or run.matrix_id != matrix.matrix_id:
         raise _matrix_error(404, "matrix_run_not_found")
@@ -1154,6 +1662,9 @@ async def rerun_cell(
         raise _run_error_to_http(e) from e
     except ValueError as e:
         raise _matrix_error(422, "invalid_matrix_run_scope") from e
+    await matrix_usage.track_matrix_run_started(
+        getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id, scope_kind="single_cell", cells=run.cells_total, trial=False
+    )
     return {"run_id": run.run_id, "cells_total": run.cells_total}
 
 
@@ -1176,7 +1687,7 @@ async def patch_cell(
     matrix = await _get_matrix_checked(request, ctx, matrix_id)
     col = _column_or_404(matrix, column_id)
     _file_in_matrix_or_404(matrix, file_id)
-    await _validate_file_refs(request, ctx, [file_id])
+    await _validate_file_refs(request, ctx, [file_id], personal_owner=_owner_personal(matrix, ctx))
     store = _get_matrix_store(request)
 
     if body.op == "edit_value":
@@ -1195,12 +1706,13 @@ async def patch_cell(
             column=col,
             workspace_id=ctx.workspace_id,
             team_id=ctx.team_id,
+            actor_user_id=user.id,
         )
         if cell is None:
             raise _matrix_error(404, "matrix_cell_not_found")
         emit_audit("kb.matrix_cell_edited", {"matrix_id": matrix_id, "file_id": file_id, "column_id": column_id})
     elif body.op == "keep_as_text":
-        cell = await store.keep_cell_as_text(matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id)
+        cell = await store.keep_cell_as_text(matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id, actor_user_id=user.id)
         if cell is None:
             raise _matrix_error(404, "matrix_cell_not_found")
         emit_audit("kb.matrix_cell_kept_as_text", {"matrix_id": matrix_id, "file_id": file_id, "column_id": column_id})
@@ -1208,7 +1720,7 @@ async def patch_cell(
         # M3 clears the edit flag (FR-9 r5): clear edited + cache_key/cached; retain the manual value as the current value,
         # now overwritable by batches (no superseded preservation). Unedited cells → 422 (helps FE catch stale UI).
         try:
-            cell = await store.revert_cell_edited(matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id)
+            cell = await store.revert_cell_edited(matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id, actor_user_id=user.id)
         except ValueError as e:
             raise _matrix_error(422, "not_edited") from e
         if cell is None:
@@ -1218,7 +1730,9 @@ async def patch_cell(
         if body.verified is None:
             raise _matrix_error(422, "verified_required")
         try:
-            cell, changed = await store.set_cell_verified(matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id, verified=body.verified)
+            cell, changed = await store.set_cell_verified(
+                matrix.matrix_id, file_id, column_id, workspace_id=ctx.workspace_id, verified=body.verified, actor_user_id=user.id
+            )
         except ValueError as e:
             raise _matrix_error(422, "verify_requires_done") from e
         if cell is None:
@@ -1229,9 +1743,119 @@ async def patch_cell(
                 "kb.matrix_cell_verified" if body.verified else "kb.matrix_cell_verify_reverted",
                 {"matrix_id": matrix_id, "file_id": file_id, "column_id": column_id},
             )
+            if body.verified:
+                await matrix_usage.track_matrix_cells_verified(
+                    getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id, count=1, bulk=False
+                )
     if cell is None:  # All three branches already return 404; defensive check (python -O strips asserts, S-P2-4).
         raise _matrix_error(404, "matrix_cell_not_found")
-    return {"cell": _cell_payload(cell, matrix)}
+    latest = await store.list_cell_events(matrix.matrix_id, file_id, column_id, limit=1)
+    names = await _member_labels(request, ctx.team_id, [e.actor_user_id or "" for e in latest])
+    return {"cell": {**_cell_payload(cell, matrix), "last_event": _last_event_payload(latest[0], names) if latest else None}}
+
+
+# ─── review (step 1 §4.2): bulk verify and cell history ─────
+
+
+def _last_event_payload(event: MatrixCellEventDTO, names: dict[str, str]) -> dict[str, Any]:
+    """What the side panel shows of a cell's latest change. ``actor_name`` is None for the AI and for people
+    whose name cannot be resolved (for example after account deletion)."""
+    return {"kind": event.kind, "actor_name": names.get(event.actor_user_id) if event.actor_user_id else None, "at": event.created_at}
+
+
+async def _readable_rows(request: Request, ctx: AccessContext, matrix: MatrixDTO, file_ids: list[str]) -> dict[str, int]:
+    """The named rows the caller can read now, with each file's current version (the snapshot's row check)."""
+    readable = await _readable_sources(request, ctx, file_ids, personal_owner=_owner_personal(matrix, ctx))
+    return {file_id: int(dto.version or 1) for file_id, dto in readable.items()}
+
+
+@router.post("/matrices/{matrix_id}/cells/verify", dependencies=[Depends(require_not_readonly)])
+async def verify_cells(
+    matrix_id: str,
+    body: _CellsVerifyIn,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """Mark many cells verified, or undo it: a column, named rows, or both (member rank).
+
+    Verifying takes cells that are done and not stale, edited ones included; undoing takes every verified
+    cell, as the single-cell actions do. Rows the caller cannot read are left untouched and counted as
+    ``unavailable``; every changed cell gets one history event, all with the same ``batch_id``.
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws)
+    _require_member_rank(ctx)
+    if body.verified is None:
+        raise _matrix_error(422, "verified_required")
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    columns = [_column_or_404(matrix, body.column_id)] if body.column_id is not None else list(matrix.columns)
+    rows = [str(f.get("file_id") or "") for f in matrix.files]
+    if body.file_ids is not None:
+        file_ids = list(dict.fromkeys(body.file_ids))
+        if not file_ids:
+            raise _matrix_error(422, "matrix_verify_files_empty")
+        present = set(rows)
+        unknown = sum(1 for file_id in file_ids if file_id not in present)
+        if unknown:
+            raise _matrix_error(422, "matrix_verify_files_not_in_matrix", count=unknown)
+        rows = file_ids
+    readable = await _readable_rows(request, ctx, matrix, rows)
+    keys = [(file_id, str(c.get("column_id") or "")) for file_id in rows if file_id in readable for c in columns]
+    outcome = await _get_matrix_store(request).verify_cells(
+        matrix.matrix_id,
+        keys,
+        verified=body.verified,
+        workspace_id=ctx.workspace_id,
+        actor_user_id=user.id,
+        column_versions={str(c.get("column_id") or ""): int(c.get("prompt_version") or 1) for c in columns},
+        file_versions=readable,
+    )
+    skipped = {**outcome.skipped, "unavailable": (len(rows) - len(readable)) * len(columns)}
+    emit_audit(
+        "kb.matrix_cells_bulk_verified",
+        {
+            "matrix_id": matrix.matrix_id,
+            "column_id": body.column_id,
+            "verified": body.verified,
+            "changed": len(outcome.changed),
+            "batch_id": outcome.batch_id,
+            **{f"skipped_{reason}": count for reason, count in skipped.items()},
+        },
+    )
+    if body.verified:
+        await matrix_usage.track_matrix_cells_verified(
+            getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id, count=len(outcome.changed), bulk=True
+        )
+    return {"changed": len(outcome.changed), "skipped": skipped, "batch_id": outcome.batch_id}
+
+
+@router.get("/matrices/{matrix_id}/cells/{file_id}/{column_id}/events")
+async def list_cell_events(
+    matrix_id: str,
+    file_id: str,
+    column_id: str,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """A cell's history, newest first, at most ``CELL_EVENT_LIMIT`` events (``more`` says older ones exist).
+
+    Any Space member who can read the row may read it; a row the caller cannot read answers like a missing one.
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws, operation=SpaceOperation.READ_HISTORY)
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    _column_or_404(matrix, column_id)
+    _file_in_matrix_or_404(matrix, file_id)
+    await _validate_file_refs(request, ctx, [file_id], personal_owner=_owner_personal(matrix, ctx))
+    events = await _get_matrix_store(request).list_cell_events(matrix.matrix_id, file_id, column_id, limit=CELL_EVENT_LIMIT + 1)
+    shown = events[:CELL_EVENT_LIMIT]
+    names = await _member_labels(request, ctx.team_id, [e.actor_user_id or "" for e in shown])
+    return {
+        "items": [{**_last_event_payload(e, names), "event_id": e.event_id, "run_id": e.run_id, "batch_id": e.batch_id} for e in shown],
+        "more": len(events) > CELL_EVENT_LIMIT,
+    }
 
 
 # ─── snapshot（§7.5）────────────────────────────────────────
@@ -1275,10 +1899,15 @@ def _run_payload(run: MatrixRunDTO | None, ctx: AccessContext | None = None, use
     can_cancel = False
     if ctx is not None:
         can_cancel = run.initiated_by == user_id or ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "ws_admin")
+    file_ids = run.scope.get("file_ids")
+    trial_files = len(file_ids) if isinstance(file_ids, list) and file_ids else None
     return {
         "run_id": run.run_id,
         "status": run.status,
         "scope": {"kind": run.scope.get("kind"), "column_id": run.scope.get("column_id")},
+        # Step 1 §3.1: a run limited to a few rows is a trial; the banner says so and how many files it covers.
+        "trial": trial_files is not None,
+        "trial_files": trial_files,
         "cells_total": run.cells_total,
         "cells_done": run.cells_done,
         "cells_failed": run.cells_failed,
@@ -1290,14 +1919,233 @@ def _run_payload(run: MatrixRunDTO | None, ctx: AccessContext | None = None, use
     }
 
 
+# A cell in a row the caller cannot read: no value, source, history or write position, so it stays the
+# same while the row stays hidden and a delta never needs to carry it.
+_HIDDEN_CELL: dict[str, Any] = {
+    "status": "failed",
+    "variants": [],
+    "fail_reason": "source_unavailable",
+    "edited": False,
+    "verified": False,
+    "stale": False,
+    "cached": False,
+    "prompt_version": 0,
+    "seq": 0,
+}
+
+
+@dataclass(frozen=True)
+class _ViewerRows:
+    """A matrix's rows as one caller may see them now, and how each cell is shown to that caller.
+
+    ``readable`` holds the files of the rows the caller can read; every other row keeps its place with no
+    name (``missing``) and hidden cells. ``sources`` is each readable row's display-only source state (only
+    while ``FEATURE_KB_USE_GUARD`` is on).
+    """
+
+    matrix: MatrixDTO
+    readable: dict[str, KbFileDTO]
+    sources: dict[str, Any]
+
+    @property
+    def columns(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "column_id": c.get("column_id"),
+                "name": c.get("name"),
+                "type": c.get("type"),
+                "question": c.get("question"),
+                "extraction_hint": c.get("extraction_hint"),
+                "prompt_version": c.get("prompt_version"),
+                "options": c.get("options"),
+                "cross_verify": bool(c.get("cross_verify")),
+                "navigation_role": c.get("navigation_role", "none"),
+            }
+            for c in self.matrix.columns
+        ]
+
+    @property
+    def rows(self) -> list[dict[str, Any]]:
+        rows = []
+        for f in self.matrix.files:
+            file_id = str(f.get("file_id") or "")
+            dto = self.readable.get(file_id)
+            rows.append(
+                {
+                    "file_id": file_id,
+                    "file_name": dto.filename if dto else "",
+                    "missing": dto is None,
+                    "file_version": int(dto.version or 1) if dto else 1,
+                }
+            )
+        return rows
+
+    def actor_ids(self, last_events: dict[tuple[str, str], MatrixCellEventDTO]) -> list[str]:
+        """The people behind the latest change of cells in readable rows; only their names are resolved."""
+        return list(dict.fromkeys(e.actor_user_id for (file_id, _col), e in last_events.items() if e.actor_user_id and file_id in self.readable))
+
+    def cell(self, cell: MatrixCellDTO, last_events: dict[tuple[str, str], MatrixCellEventDTO], names: dict[str, str]) -> dict[str, Any]:
+        dto = self.readable.get(cell.file_id)
+        if dto is None:
+            return {**_HIDDEN_CELL, "variants": []}
+        latest = last_events.get((cell.file_id, cell.column_id))
+        return {
+            **_cell_payload(cell, self.matrix, int(dto.version or 1)),
+            "current_source": self.sources.get(cell.file_id),
+            # Step 1 §4.2: the side panel's latest change; hidden rows above never carry it.
+            "last_event": _last_event_payload(latest, names) if latest else None,
+        }
+
+    def digest(
+        self,
+        header: dict[str, Any],
+        cell_keys: Iterable[tuple[str, str]],
+        last_events: dict[tuple[str, str], MatrixCellEventDTO],
+        names: dict[str, str],
+    ) -> str:
+        """``projection_digest`` (step 1 §6): every part of this caller's full projection a delta cannot carry.
+
+        A delta carries the cells written after ``since_seq`` and the runs. Everything else the full
+        projection shows can change without a cell write, so it is hashed here: the header except ``seq``
+        (name, structure, the caller's ``can_edit`` and ``can_manage``), the columns, each row's name,
+        hidden state and file version (permission changes, removals, renames and new versions that change
+        ``stale``), the rows' source states, the set of cell keys (removing a cell row moves no ``seq``) and
+        the names of the people behind readable latest changes.
+        """
+        material = {
+            "matrix": {key: value for key, value in header.items() if key != "seq"},
+            "columns": self.columns,
+            "rows": self.rows,
+            "sources": self.sources,
+            "cells": sorted(f"{file_id}:{column_id}" for file_id, column_id in cell_keys),
+            "actors": sorted((actor, names.get(actor)) for actor in self.actor_ids(last_events)),
+        }
+        encoded = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:32]
+
+
+async def _viewer_rows(request: Request, ctx: AccessContext, matrix: MatrixDTO) -> _ViewerRows:
+    """Check every row's file against the caller's current permissions, in one batch (step 1 §6)."""
+    from bowhead_core.kb.generations import use_guard_enabled
+    from bowhead_core.kb.maintenance import cached_source_state
+
+    readable = await _readable_sources(request, ctx, [str(f.get("file_id") or "") for f in matrix.files], personal_owner=_owner_personal(matrix, ctx))
+    sources: dict[str, Any] = {}
+    if use_guard_enabled():
+        from bowhead_gateway.kb_maintenance import team_runtime
+
+        try:
+            runtime = await team_runtime(request.app, ctx.team_id)
+            index_version = runtime.kb_store.index_version
+        except Exception:
+            index_version = None
+        sources = {file_id: cached_source_state(dto, index_version=index_version) for file_id, dto in readable.items()}
+    return _ViewerRows(matrix=matrix, readable=readable, sources=sources)
+
+
+async def _viewer_projection(
+    request: Request,
+    ctx: AccessContext,
+    matrix: MatrixDTO,
+    *,
+    header: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """The matrix as this caller may see it now: ``columns``, ``rows`` and ``cells`` of the snapshot.
+
+    Every row's file is checked against the caller's current permissions; a row the caller cannot read
+    keeps its place with no name (``missing=True``) and its cells carry no value, source or history. The
+    snapshot and the Excel export both read this projection, so an export never shows more than the grid.
+    The snapshot passes its ``header``: the optional source-navigation cache is warmed and the projection
+    digest returned. The export passes none and gets None.
+    """
+    store = _get_matrix_store(request)
+    # Cells are read before the row check, so the permissions applied are never older than the cells shown.
+    all_cells = await store.list_cells(matrix.matrix_id)
+    last_events = await store.last_cell_events(matrix.matrix_id)
+    view = await _viewer_rows(request, ctx, matrix)
+    if header is not None:
+        from bowhead_gateway.kb_source_navigation import refresh_matrix_navigation
+
+        await refresh_matrix_navigation(request.app, ctx, matrix, view.readable, all_cells)
+    names = await _member_labels(request, ctx.team_id, view.actor_ids(last_events))
+    projection = {
+        "columns": view.columns,
+        "rows": view.rows,
+        "cells": {f"{c.file_id}:{c.column_id}": view.cell(c, last_events, names) for c in all_cells},
+    }
+    if header is None:
+        return projection, None
+    return projection, view.digest(header, [(c.file_id, c.column_id) for c in all_cells], last_events, names)
+
+
+async def _viewer_delta(
+    request: Request, ctx: AccessContext, matrix: MatrixDTO, header: dict[str, Any], since_seq: int, digest: str
+) -> dict[str, Any] | None:
+    """The cells written after ``since_seq`` in rows the caller can read, or None when ``digest`` is stale.
+
+    The cell keys are read after the changed cells, so a cell removed before then already changes the digest.
+    """
+    store = _get_matrix_store(request)
+    changed = await store.list_cells_since(matrix.matrix_id, since_seq)
+    last_events = await store.last_cell_events(matrix.matrix_id)
+    keys = await store.list_cell_keys(matrix.matrix_id)
+    view = await _viewer_rows(request, ctx, matrix)
+    names = await _member_labels(request, ctx.team_id, view.actor_ids(last_events))
+    current = view.digest(header, keys, last_events, names)
+    if current != digest:
+        return None
+    visible = [c for c in changed if c.file_id in view.readable]
+    from bowhead_gateway.kb_source_navigation import refresh_matrix_navigation
+
+    await refresh_matrix_navigation(request.app, ctx, matrix, view.readable, visible)
+    return {
+        "kind": "delta",
+        "seq": header["seq"],
+        "structure_seq": header["structure_seq"],
+        "projection_digest": current,
+        "cells": {f"{c.file_id}:{c.column_id}": view.cell(c, last_events, names) for c in visible},
+    }
+
+
+def _snapshot_header(matrix: MatrixDTO, ctx: AccessContext) -> dict[str, Any]:
+    can_edit = ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "member")
+    return {
+        "matrix_id": matrix.matrix_id,
+        "name": matrix.name,
+        "can_edit": can_edit,  # e2e-plan P2-1 delivered: FE shadow role checks retired.
+        # Creator or Space/Team admin: may delete the matrix and remove rows with edited or verified cells.
+        "can_manage": can_edit and _is_owner_or_admin(matrix.created_by, ctx),
+        "seq": matrix.last_seq,
+        "structure_seq": matrix.structure_seq,
+        "poll_ms": _poll_ms(),
+        "template_doc_type_id": matrix.template_doc_type_id,
+        # S8: who can see the matrix, and whether this caller (its creator, switch on) may change that.
+        "visibility": matrix.visibility,
+        "can_change_visibility": can_edit and private_matrices_enabled() and matrix.created_by == ctx.user_id,
+    }
+
+
 @router.get("/matrices/{matrix_id}/snapshot")
 async def get_snapshot(
     matrix_id: str,
     request: Request,
     workspace_id: str = "",
     since_seq: int | None = None,
+    digest: str | None = None,
+    opened: bool = False,
     user: User = Depends(_current_user),
 ) -> dict[str, Any]:
+    """The matrix as the caller may see it now (``kind: "full"``), or only what changed (``kind: "delta"``).
+
+    Every answer re-checks each row against the caller's current permissions. A full answer carries
+    ``projection_digest``. A poll that sends ``since_seq`` with the digest of its last answer gets a delta
+    while the digest still matches: the cells written after ``since_seq`` in rows the caller can read, the
+    new ``seq`` and the runs. When anything else changed (see ``_ViewerRows.digest``), and for clients that
+    send no digest, the answer is full.
+
+    ``opened`` marks the page's first request (step 1 S9): it records one ``kb.matrix.opened``, and only
+    on a request without ``since_seq``, so polls and later reloads never count.
+    """
     ws = _ws_from_request(request, workspace_id)
     _ws, ctx = await _require_workspace_member_strict(
         request,
@@ -1313,96 +2161,77 @@ async def get_snapshot(
     runs = await store.list_runs_for_snapshot(matrix.matrix_id)
     runs_payload = [_run_payload(r, ctx, user.id) for r in runs]
     run_compat = runs_payload[0] if runs_payload else None
+    header = _snapshot_header(matrix, ctx)
 
-    all_cells = await store.list_cells(matrix.matrix_id)
-    _ws, ctx = await _require_workspace_member_strict(request, user, ws, operation=SpaceOperation.READ_HISTORY)
-    # Project every source through the current viewer permissions.
-    from bowhead_core.kb.generations import use_guard_enabled
-    from bowhead_core.kb.maintenance import cached_source_state
+    if digest and since_seq is not None and matrix.structure_seq <= since_seq <= matrix.last_seq:
+        delta = await _viewer_delta(request, ctx, matrix, header, since_seq, digest)
+        if delta is not None:
+            return {**delta, "runs": runs_payload, "run": run_compat}
 
-    index_version = None
-    if use_guard_enabled():
-        from bowhead_gateway.kb_maintenance import team_runtime
-
-        try:
-            runtime = await team_runtime(request.app, ctx.team_id)
-            index_version = runtime.kb_store.index_version
-        except Exception:
-            index_version = None
-    file_meta: dict[str, tuple[str, bool, int]] = {}
-    navigation_files = {}
-    source_states = {}
-    for f in matrix.files:
-        fid = str(f.get("file_id") or "")
-        try:
-            dto = (await _validate_file_refs(request, ctx, [fid]))[0]
-        except HTTPException:
-            dto = None
-        if dto is None or dto.soft_deleted_at:
-            file_meta[fid] = ("", True, 1)
-        else:
-            file_meta[fid] = (dto.filename, False, int(dto.version or 1))
-            navigation_files[fid] = dto
-            if use_guard_enabled():
-                source_states[fid] = cached_source_state(dto, index_version=index_version)
-
-    from bowhead_gateway.kb_source_navigation import refresh_matrix_navigation
-
-    await refresh_matrix_navigation(request.app, ctx, matrix, navigation_files, all_cells)
-
-    def visible_cell(cell):
-        meta = file_meta.get(cell.file_id, ("", True, 1))
-        if meta[1]:
-            return {
-                "status": "failed",
-                "variants": [],
-                "fail_reason": "source_unavailable",
-                "edited": False,
-                "verified": False,
-                "stale": False,
-                "cached": False,
-                "prompt_version": cell.prompt_version,
-                "seq": cell.seq,
-            }
-        return {**_cell_payload(cell, matrix, meta[2]), "current_source": source_states.get(cell.file_id)}
-
-    # Source access can change without matrix seq moving. Return a full projection
-    # on polls as well, so revoked names/old variants cannot survive a delta merge.
-    can_edit = ctx.is_team_admin or workspace_role_satisfies(ctx.workspace_role, "member")
+    projection, projection_digest = await _viewer_projection(request, ctx, matrix, header=header)
+    if opened and since_seq is None:
+        await matrix_usage.track_matrix_opened(getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id)
     return {
-        "matrix": {
-            "matrix_id": matrix.matrix_id,
-            "name": matrix.name,
-            "can_edit": can_edit,  # e2e-plan P2-1 delivered: FE shadow role checks retired.
-            "seq": matrix.last_seq,
-            "structure_seq": matrix.structure_seq,
-            "poll_ms": _poll_ms(),
-            "template_doc_type_id": matrix.template_doc_type_id,
-        },
-        "columns": [
-            {
-                "column_id": c.get("column_id"),
-                "name": c.get("name"),
-                "type": c.get("type"),
-                "question": c.get("question"),
-                "extraction_hint": c.get("extraction_hint"),
-                "prompt_version": c.get("prompt_version"),
-                "options": c.get("options"),
-                "cross_verify": bool(c.get("cross_verify")),
-                "navigation_role": c.get("navigation_role", "none"),
-            }
-            for c in matrix.columns
-        ],
-        "rows": [
-            {
-                "file_id": str(f.get("file_id") or ""),
-                "file_name": file_meta.get(str(f.get("file_id") or ""), ("", True, 1))[0],
-                "missing": file_meta.get(str(f.get("file_id") or ""), ("", True, 1))[1],
-                "file_version": file_meta.get(str(f.get("file_id") or ""), ("", True, 1))[2],
-            }
-            for f in matrix.files
-        ],
-        "cells": {f"{c.file_id}:{c.column_id}": visible_cell(c) for c in all_cells},
+        "kind": "full",
+        "matrix": header,
+        **projection,
+        "projection_digest": projection_digest,
         "runs": runs_payload,
         "run": run_compat,  # Deprecated: FE reads runs[] from M3.
     }
+
+
+# ─── export (step 1 §5) ─────────────────────────────────────
+
+
+@router.get("/matrices/{matrix_id}/export.xlsx")
+async def export_matrix(
+    matrix_id: str,
+    request: Request,
+    workspace_id: str = "",
+    user: User = Depends(_current_user),
+) -> Response:
+    """The matrix as an Excel workbook (Answers, Sources, About) in the caller's interface language.
+
+    A read: every Space role that may open the snapshot may export it. The workbook is built only from
+    the snapshot's per-viewer projection, so rows the caller cannot read are exported without values.
+    """
+    ws = _ws_from_request(request, workspace_id)
+    _ws, ctx = await _require_workspace_member_strict(request, user, ws, operation=SpaceOperation.READ_HISTORY)
+    matrix = await _get_matrix_checked(request, ctx, matrix_id)
+    projection, _digest = await _viewer_projection(request, ctx, matrix)
+
+    from bowhead_core.kb.matrix_export import XLSX_MIME, build_matrix_workbook, export_filename
+
+    from bowhead_gateway.error_handler import _resolve_ui_language
+
+    language = await _resolve_ui_language(request)
+    exported = await anyio.to_thread.run_sync(
+        functools.partial(
+            build_matrix_workbook,
+            matrix_name=matrix.name,
+            columns=projection["columns"],
+            rows=projection["rows"],
+            cells=projection["cells"],
+            language=language,
+            exporter_name=user.display_name or (user.email or "").partition("@")[0],
+            exported_at=datetime.now(tz=UTC),
+        )
+    )
+    emit_audit(
+        "kb.matrix_exported",
+        {
+            "matrix_id": matrix.matrix_id,
+            "files": exported.files,
+            "columns": exported.columns,
+            "hidden_cells": exported.hidden_cells,
+            "language": language,
+        },
+    )
+    await matrix_usage.track_matrix_exported(getattr(request.app.state, "metrics_log", None), ctx, matrix_id=matrix.matrix_id)
+    headers = {
+        "Content-Disposition": "attachment; filename*=UTF-8''" + quote(export_filename(matrix.name), safe=""),
+        "Cache-Control": "no-store, private",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return Response(content=exported.content, media_type=XLSX_MIME, headers=headers)

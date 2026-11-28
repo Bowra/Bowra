@@ -110,6 +110,7 @@
   "client_refresh_required": "Diese Seitenversion kann keinen neuen Sendevorgang sicher starten. Behalten Sie den Entwurf bei und aktualisieren Sie die Seite.",
   "chart_selection_unavailable": "Diese Diagrammauswahl hat sich geändert oder ist nicht verfügbar. Öffnen Sie das Diagramm, wählen Sie den Bereich erneut und senden Sie Ihren Entwurf.",
   "presentation_selection_unavailable": "Das referenzierte Präsentationselement hat sich geändert oder ist nicht verfügbar. Öffnen Sie die Datei erneut, wählen Sie das Element unter „Bearbeiten“ erneut aus und senden Sie Ihren Entwurf.",
+  "document_selection_unavailable": "Der referenzierte Absatz oder die referenzierten Seiten des Word-Dokuments haben sich geändert oder sind nicht verfügbar. Öffnen Sie die Datei erneut, referenzieren Sie den Absatz oder die Seiten erneut und senden Sie Ihren Entwurf.",
   "subagent_draft_unsaved_changes": "Rechts gibt es ungespeicherte Änderungen. Speichern oder verwerfen Sie sie, bevor Sie diese Nachricht senden. Ihre Eingabe bleibt erhalten.",
   "subagent_draft_store_unavailable": "Entwürfe sind vorübergehend nicht verfügbar, möglicherweise wegen eines Service-Updates. Versuchen Sie es später erneut; Ihre Agenten sind davon nicht betroffen.",
   "clock_tamper": "Die Serveruhr ist ungültig. Diese Aktion ist daher nicht verfügbar. Bitten Sie die Systemadministration, die Systemzeit zu prüfen.",
@@ -754,5 +755,5 @@
   "personal_mcp_sign_in_renewal_unavailable": "Der Dienst hat nicht geantwortet, während Bowhead Ihre Anmeldung erneuert hat. Ihre Anmeldung ist weiterhin gültig; versuchen Sie es später erneut.",
   "personal_mcp_oauth_endpoint_locked": "Eine angemeldete Verbindung behält ihre Adresse. Um eine andere Adresse zu verwenden, fügen Sie eine neue Verbindung hinzu.",
   "personal_mcp_oauth_sign_in_required": "Diese Verbindung wird durch die Anmeldung beim Dienst erstellt. Wählen Sie „Weiter zur Anmeldung“.",
-  "personal_mcp_oauth_unavailable": "Anmeldeverbindungen sind in dieser Bereitstellung nicht verfügbar."
+  "tool_disabled_by_team": "Ihr Team hat dieses integrierte Tool ausgeschaltet, daher kann es Agenten oder Plugins nicht hinzugefügt werden. Agenten und Plugins, die es bereits enthalten, bleiben unverändert und verwenden es bei der Ausführung nicht. Eine verantwortliche Person oder ein Administrator kann es unter Fähigkeiten → Tools wieder einschalten."
 }

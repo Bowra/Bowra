@@ -6,12 +6,94 @@ import copy
 from typing import TYPE_CHECKING, Any
 
 from bowhead_core.agent_knowledge_policy import KnowledgeAccessError, KnowledgeScope
+from bowhead_core.kb.knowledge_base_access import KnowledgeLevels, knowledge_base_selection, named_knowledge_base_id, selected_usable
+from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
 from bowhead_core.kb.permission import KbPermission, ScopeContext
 
 if TYPE_CHECKING:
     import aiosqlite
 
 KNOWLEDGE_TOOLS = frozenset({"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record", "kb_list_sources"})
+KNOWLEDGE_BASES_OFF_HINT = (
+    "This Agent reads selected knowledge bases, which are turned off on this deployment, so it has no knowledge source. "
+    "Tell the user: an administrator can turn knowledge bases on, or the Agent's owner can choose other knowledge sources."
+)
+NO_USABLE_KNOWLEDGE_BASE_HINT = (
+    "None of this Agent's selected knowledge bases are available to you here. A Space's knowledge bases apply only in that Space, "
+    "and another person's My knowledge never applies. Ask the Agent's owner to review its knowledge sources, or ask for access."
+)
+
+
+async def knowledge_levels_of(ctx) -> KnowledgeLevels | None:
+    """The caller's knowledge base levels in the tool context's Space, through its authorizer.
+
+    None when the authorizer cannot resolve them; files in named knowledge bases are then
+    refused while files in default knowledge bases keep today's rule.
+    """
+    resolve = getattr(getattr(ctx, "kb_file_authorizer", None), "knowledge_levels", None)
+    if not callable(resolve):
+        return None
+    try:
+        levels = await resolve(ctx.user_id, ctx.team_id, ctx.workspace_id)
+    except Exception:
+        return None
+    return levels if isinstance(levels, KnowledgeLevels) else None
+
+
+async def _knowledge_base_ceiling(ctx, scope: KnowledgeScope) -> tuple[tuple[str, ...], KnowledgeLevels | None, str | None]:
+    """The scope's selected knowledge bases the invoker can use in this context, the levels, and why none.
+
+    With ``FEATURE_KNOWLEDGE_BASES`` off nothing is usable (fail closed, never widened). Levels that
+    cannot be resolved refuse the read as unavailable rather than as an empty selection.
+    """
+    if not knowledge_bases_enabled():
+        return (), None, KNOWLEDGE_BASES_OFF_HINT
+    levels = await knowledge_levels_of(ctx)
+    if levels is None:
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    usable = selected_usable(levels, scope.knowledge_base_ids or ())
+    return usable, levels, None if usable else NO_USABLE_KNOWLEDGE_BASE_HINT
+
+
+async def knowledge_base_filter_of(ctx) -> tuple[str, ...] | None:
+    """The usable selected knowledge bases of the context's scope; None without a knowledge base ceiling."""
+    scope = getattr(ctx, "knowledge_scope", None)
+    if scope is None or scope.knowledge_base_ids is None:
+        return None
+    prepared = getattr(ctx, "knowledge_base_filter", None)
+    if getattr(ctx, "knowledge_read_prepared", False) and prepared is not None:
+        return prepared
+    usable, _levels, _hint = await _knowledge_base_ceiling(ctx, scope)
+    return usable
+
+
+async def _knowledge_base_files(ctx, scope: KnowledgeScope, usable: tuple[str, ...], levels: KnowledgeLevels) -> list[Any]:
+    """The files in the usable selected knowledge bases now that the invoker can read: one listing, one batch."""
+    store, authorizer = getattr(ctx, "kb_files_store", None), getattr(ctx, "kb_file_authorizer", None)
+    if store is None or authorizer is None:
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    files = await store.list_for_scopes_filtered(
+        team_id=ctx.team_id,
+        personal_owner_id=ctx.user_id,
+        space_id=ctx.workspace_id,
+        team_scope_id=ctx.team_id,
+        knowledge_base_ids=usable,
+    )
+    caller = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id, knowledge_levels=levels)
+    candidates = [
+        file
+        for file in files
+        if not file.soft_deleted_at and file.team_id == ctx.team_id and scope.permits(file) and KbPermission.can_read(file, caller)
+    ]
+    if not candidates:
+        return []
+    batch = getattr(authorizer, "batch", None)
+    if not callable(batch):
+        return [file for file in candidates if await authorizer(file, ctx.user_id, ctx.team_id, ctx.workspace_id)]
+    decisions = await batch(candidates, ctx.user_id, ctx.team_id, ctx.workspace_id)
+    if decisions is None:
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    return [file for file in candidates if decisions.get(file.file_id)]
 
 
 async def readable_source(ctx, file_id: str, *, generation: Any = ..., enforce: bool = False) -> bool:
@@ -20,12 +102,16 @@ async def readable_source(ctx, file_id: str, *, generation: Any = ..., enforce: 
         return True
     if scope is not None:
         scope.require_context(ctx)
-    if scope is not None and not scope.permits(file_id):
+    if scope is not None and not scope.permits_file_id(file_id):
         return False
     if ctx.kb_files_store is None or ctx.kb_file_authorizer is None:
         raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
     file = await ctx.kb_files_store.get(file_id)
+    if file is not None and scope is not None and not scope.permits(file):
+        return False
     caller = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id)
+    if file is not None and named_knowledge_base_id(file):
+        caller.knowledge_levels = await knowledge_levels_of(ctx)
     return bool(
         file
         and not file.soft_deleted_at
@@ -37,14 +123,42 @@ async def readable_source(ctx, file_id: str, *, generation: Any = ..., enforce: 
 
 
 async def prepare_source_read(ctx, tool_name: str):
+    """Prepare one knowledge Tool call of an Agent with a source ceiling, at call time.
+
+    A selected-knowledge-base ceiling reads the knowledge bases' current contents, so files added
+    after the Agent was saved count, and keeps only what the invoker can use here. ``kb_search`` gets
+    a chunk-key pre-filter; the other Tools get the readable files. With nothing usable the call
+    reads nothing and ``knowledge_ceiling_hint`` says why.
+    """
     if ctx.knowledge_scope is None or tool_name not in KNOWLEDGE_TOOLS:
         return ctx
-    ctx.knowledge_scope.require_context(ctx)
+    scope = ctx.knowledge_scope
+    scope.require_context(ctx)
     result = copy.copy(ctx)
     result.knowledge_read_prepared = True
     result.knowledge_pending_citations = []
     result.knowledge_source_generations = {}
-    ids = ctx.knowledge_scope.file_ids
+    result.knowledge_base_filter = result.knowledge_base_selection = result.knowledge_ceiling_hint = result.knowledge_prepared_levels = None
+    ids = scope.file_ids
+    if scope.knowledge_base_ids is not None:
+        usable, levels, hint = await _knowledge_base_ceiling(ctx, scope)
+        result.knowledge_base_filter, result.knowledge_ceiling_hint, result.knowledge_prepared_levels = usable, hint, levels
+        if not usable:
+            result.knowledge_readable_file_ids = ()
+            if tool_name == "kb_list_sources":
+                result.knowledge_navigation_pending = {}
+            return result
+        if ids is None and tool_name == "kb_search":
+            result.knowledge_base_selection = knowledge_base_selection(
+                levels, usable, user_id=ctx.user_id, space_id=ctx.workspace_id, team_id=ctx.team_id
+            )
+            result.knowledge_readable_file_ids = None
+            return result
+        if ids is None and tool_name != "kb_list_sources":
+            for file in await _knowledge_base_files(ctx, scope, usable, levels):
+                result.knowledge_source_generations[file.file_id] = file.active_generation_id
+            result.knowledge_readable_file_ids = tuple(result.knowledge_source_generations)
+            return result
     if tool_name == "kb_list_sources":
         result.knowledge_navigation_pending = {}
         return result
@@ -71,6 +185,35 @@ async def prepare_source_read(ctx, tool_name: str):
 def require_prepared_read(ctx) -> None:
     if ctx.knowledge_scope is not None and not ctx.knowledge_read_prepared:
         raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+
+
+async def record_file_ceiling(ctx) -> tuple[str, ...]:
+    """Files whose extraction records and rows a record Tool may read for this caller.
+
+    An Agent read uses the ceiling prepared from its knowledge scope. An ordinary read uses
+    every file the caller can read in the current Space: records are stored under the upload
+    Space whoever owns the file, so the Space alone would expose other members' personal files.
+    Raises ``knowledge_source_authorization_unavailable`` when the ceiling cannot be decided.
+    """
+    from bowhead_core.kb.permission import readable_file_ids
+
+    if ctx.knowledge_scope is not None:
+        require_prepared_read(ctx)
+        return ctx.knowledge_readable_file_ids or ()
+    store, authorizer = getattr(ctx, "kb_files_store", None), getattr(ctx, "kb_file_authorizer", None)
+    batch = getattr(authorizer, "batch", None)
+    if store is None or not callable(batch):
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    allowed = await readable_file_ids(
+        store,
+        lambda files: batch(files, ctx.user_id, ctx.team_id, ctx.workspace_id),
+        user_id=ctx.user_id,
+        team_id=ctx.team_id,
+        workspace_id=ctx.workspace_id,
+    )
+    if allowed is None:
+        raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+    return allowed
 
 
 def retained_knowledge_scope(ctx) -> KnowledgeScope | None:
@@ -192,13 +335,17 @@ async def _require_sources(ctx, source_maps: list[dict]) -> None:
     scope = ctx.knowledge_scope
     if scope is not None:
         scope.require_context(ctx)
-        if not all(scope.permits(file_id) for file_id in required):
+        if not all(scope.permits_file_id(file_id) for file_id in required):
             raise KnowledgeAccessError("knowledge_source_changed")
     ids = list(required)
     files = {}
     for offset in range(0, len(ids), 256):
         files.update({file.file_id: file for file in await store.get_many(ids[offset : offset + 256])})
+    if scope is not None and not all(scope.permits(file) for file in files.values()):
+        raise KnowledgeAccessError("knowledge_source_changed")
     caller = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id)
+    if any(named_knowledge_base_id(file) for file in files.values()):
+        caller.knowledge_levels = await knowledge_levels_of(ctx)
     for file_id, generations in required.items():
         file = files.get(file_id)
         if (
@@ -264,7 +411,7 @@ async def validate_retained_sources(ctx: Any, sources: dict, *, knowledge_connec
                 file.soft_deleted_at
                 or file.team_id != ctx.team_id
                 or file.active_generation_id != sources[file.file_id]
-                or (scope is not None and not scope.permits(file.file_id))
+                or (scope is not None and not scope.permits(file))
                 for file in files
             ):
                 raise KnowledgeAccessError("knowledge_source_changed")

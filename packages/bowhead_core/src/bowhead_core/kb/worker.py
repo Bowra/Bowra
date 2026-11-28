@@ -27,8 +27,10 @@ from bowhead_core.kb.errors import UnsupportedMimeError
 from bowhead_core.kb.files_store import summary_json_with_truncation
 from bowhead_core.kb.generations import KbGenerationStore, generation_writes_enabled
 from bowhead_core.kb.ingestion import KnowledgeAction
+from bowhead_core.kb.knowledge_base_store import default_for_scope, knowledge_base_key
 from bowhead_core.kb.loader.dispatch import get_loader
 from bowhead_core.kb.parse_recovery import PARSE_ERROR_SOURCE_MISSING, PARSE_ERROR_TIMEOUT, PARSE_TIMEOUT_S
+from bowhead_core.kb.source_location import SourceIndex, bind_field_sources
 from bowhead_core.kb.splitter.markdown_section import make_markdown_splitter
 from bowhead_core.kb.splitter.paragraph_aware import DEFAULT_CHUNK_SIZE, count_tokens, make_paragraph_splitter
 from bowhead_core.kb.splitter.section_aware import section_aware_split
@@ -99,9 +101,9 @@ def _bomb_load_result(reason: str) -> LoadResult:
     )
 
 
-def _index_identity(file: KbFileDTO) -> tuple[str, str, str, str]:
-    """决定分块落在哪个集合、谁能检索到的四个字段。"""
-    return (file.scope, file.scope_id, file.workspace_id, file.team_id)
+def _index_identity(file: KbFileDTO) -> tuple[str, str, str, str, str]:
+    """The fields that decide a chunk's collection and who can retrieve it: the scope and the knowledge base."""
+    return (file.scope, file.scope_id, file.workspace_id, file.team_id, knowledge_base_key(file))
 
 
 def _is_transient_load_failure(load_result) -> bool:
@@ -254,13 +256,15 @@ class KbWorker:
             from dataclasses import fields
 
             names = {field.name for field in fields(ChunkMetadata)}
+            # The text and IDs are copied verbatim; the knowledge base key follows the current row.
+            knowledge_base_id = await self._chunk_knowledge_base_id(file)
             chunks = [
                 KbChunk(
                     chunk_id=cid,
                     file_id=file_id,
                     content=content,
                     embedding=embedding,
-                    metadata=ChunkMetadata(**{k: v for k, v in metadata.items() if k in names}),
+                    metadata=ChunkMetadata(**{**{k: v for k, v in metadata.items() if k in names}, "knowledge_base_id": knowledge_base_id}),
                 )
                 for (cid, content, metadata), embedding in zip(rows, embeddings, strict=True)
             ]
@@ -289,7 +293,7 @@ class KbWorker:
         refreshed = await self._files.get(file_id)
         if refreshed is None or refreshed.soft_deleted_at or refreshed.version != expected_file_version:
             return False
-        chunks = self._build_kb_chunks(refreshed, docs, embeddings)
+        chunks = self._build_kb_chunks(refreshed, docs, embeddings, await self._chunk_knowledge_base_id(refreshed))
         await self._store.hard_delete_file(refreshed)
         await self._store.add_chunks(refreshed, chunks)
         actual = await self._store.count_chunks(refreshed)
@@ -428,7 +432,7 @@ class KbWorker:
                 emit_audit("kb.parse_superseded", {"file_id": file_id, "expected_version": expected_version, "version": current.version})
                 logger.info("parse_and_index: file_id=%s superseded by version %s, not writing", file_id, current.version)
                 return None
-            kb_chunks = self._build_kb_chunks(current, docs, embeddings)
+            kb_chunks = self._build_kb_chunks(current, docs, embeddings, await self._chunk_knowledge_base_id(current))
             await self._store.hard_delete_file(current)
             await self._store.add_chunks(current, kb_chunks)
 
@@ -466,7 +470,7 @@ class KbWorker:
             raise RuntimeError("complete source fingerprint unavailable")
         generations = KbGenerationStore(self._files._db_path)
         generation_id = await generations.begin(current, sha256, len(docs), self._store.index_version)
-        chunks = self._build_kb_chunks(current, docs, embeddings)
+        chunks = self._build_kb_chunks(current, docs, embeddings, await self._chunk_knowledge_base_id(current))
         for chunk in chunks:
             chunk.chunk_id = make_chunk_id(generation_id, chunk.metadata.chunk_index, chunk.content)
             chunk.metadata.generation_id = generation_id
@@ -839,19 +843,19 @@ class KbWorker:
                 extractor_model=doc_type.extractor_model,
                 cross_verify_enabled=doc_type.cross_verify_enabled,
             )
-            # Provenance path B: backfill each field's chunk_id by fuzzy-matching its
-            # source_snippet against the file's indexed chunks (best-effort — the
-            # extractor works on concatenated full_text and has no chunk_id itself).
-            # Failure never blocks the record write (chunk_id stays None).
+            # Provenance path B: locate each field's grounded source_snippet in the file's
+            # indexed chunks for its chunk_id, chunk_index and page (best-effort — the
+            # extractor works on concatenated full_text and has no chunk_id itself). The
+            # model's own source_page estimate is never kept (document matrix S7), so a failed
+            # chunk read leaves every field without a chunk and a page; the record is still written.
             try:
-                from bowhead_core.kb.structured_extractor import backfill_chunk_ids
-
-                file_chunks = await self._store.get_chunks_for_file(file)
-                bound = backfill_chunk_ids(result.fields, file_chunks)
-                if bound:
-                    emit_audit("kb.chunk_id_backfilled", {"file_id": file.file_id, "fields_bound": bound})
+                file_chunks = await self._store.get_ordered_source_chunks(file)
             except Exception:
                 logger.warning("chunk_id backfill failed file_id=%s", file.file_id, exc_info=True)
+                file_chunks = []
+            bound = bind_field_sources(result.fields, SourceIndex(file_chunks, file.mime_type))
+            if bound:
+                emit_audit("kb.chunk_id_backfilled", {"file_id": file.file_id, "fields_bound": bound})
             # Sprint 2 P0-PM-2: classifier-resolved records default needs_review
             # so user sees "(自动抽取, 未人工确认)" in chat answers + must approve.
             verify_status = "needs_review" if auto_classified else "needs_review" if result.has_low_confidence_fields else "ready"
@@ -1435,11 +1439,20 @@ class KbWorker:
             embeddings.extend(batch_embs)
         return embeddings
 
+    async def _chunk_knowledge_base_id(self, file) -> str:
+        """The knowledge base key new chunks carry: the scope's default needs no read; a stored named ID is checked."""
+        key = knowledge_base_key(file)
+        stored = getattr(file, "knowledge_base_id", None)
+        if not stored or stored == default_for_scope(file.scope, file.scope_id, file.team_id):
+            return key
+        return (await self._files.effective_knowledge_base_ids([file]))[file.file_id]
+
     def _build_kb_chunks(
         self,
         file,
         docs: list[KbDocument],
         embeddings: list[list[float]],
+        knowledge_base_id: str | None = None,
     ) -> list[KbChunk]:
         # P1-4: strict zip prevents silent truncation on docs/embeddings length mismatch
         if len(docs) != len(embeddings):
@@ -1471,6 +1484,7 @@ class KbWorker:
                         version=file.version,
                         uploaded_by=file.uploaded_by,
                         uploaded_at=file.uploaded_at,
+                        knowledge_base_id=knowledge_base_key(file) if knowledge_base_id is None else knowledge_base_id,
                     ),
                 )
             )

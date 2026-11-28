@@ -595,6 +595,35 @@ class DomainConnection(DiagnosticConnection):
             raise sqlite3.OperationalError("Unknown SQLite domain guard")
         return int(self._scalar(spec["predicate"], values))
 
+    def _file_retention_unavailable(self, artifact_id: str) -> int:
+        if self._domain not in {"files", "execution", "core"}:
+            raise sqlite3.OperationalError("Invalid file retention reference domain")
+        return int(
+            self._scalar(
+                """SELECT EXISTS(SELECT 1 FROM file_retention_state r
+            JOIN artifacts a ON a.id=r.artifact_id WHERE r.artifact_id=? AND a.deleted_at=r.trashed_at)
+            OR EXISTS(SELECT 1 FROM artifact_purge_claims WHERE artifact_id=?)""",
+                (artifact_id, artifact_id),
+            )
+        )
+
+    def _file_retention_lineage_unavailable(self, root: str) -> int:
+        # File pins resolve the newest live member even after its first version was pruned.
+        if self._scalar(
+            """SELECT EXISTS(SELECT 1 FROM artifacts a WHERE (a.id=? OR a.lineage_id=?)
+            AND a.deleted_at IS NULL AND a.status='ready' AND NOT EXISTS(
+                SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=a.id))""",
+            (root, root),
+        ):
+            return 0
+        return self._file_retention_unavailable(root) or int(
+            self._scalar(
+                """SELECT EXISTS(SELECT 1 FROM artifacts a
+            JOIN file_retention_state r ON a.id=r.artifact_id WHERE a.lineage_id=? AND r.trashed_at=a.deleted_at)""",
+                (root,),
+            )
+        )
+
     def _workspace_team(self, workspace_id: str) -> str | None:
         return self._scalar("SELECT team_id FROM workspaces WHERE id=?", (workspace_id,))
 
@@ -904,6 +933,8 @@ def guard_connection(connection: DomainConnection, core_path: Path, domain: str)
     connection.create_function("bowhead_domain_authority_v1", 1, connection._authority)
     connection.create_function("bowhead_domain_mutation_v2", 2, connection._mutation)
     connection.create_function("bowhead_domain_predicate_v1", -1, connection._predicate)
+    connection.create_function("bowhead_file_retention_unavailable_v1", 1, connection._file_retention_unavailable)
+    connection.create_function("bowhead_file_retention_lineage_unavailable_v1", 1, connection._file_retention_lineage_unavailable)
     connection.create_function("bowhead_workspace_team_v1", 1, connection._workspace_team)
     connection.create_function("bowhead_retention_days_v1", 2, connection._retention_days)
     connection.create_function("bowhead_domain_cleanup_v1", 2, connection._enqueue_cleanup)

@@ -108,6 +108,9 @@ class _ResultsScope:
 
 
 def _matches_filters(item: ProjectedResult, filters: ResultsFiltersV1) -> bool:
+    # A Turn's files are artifacts; the store filters them by `created_by_turn`.
+    if filters.turn_id is not None and item.object_type != "artifact":
+        return False
     if filters.primary != "all" and item.primary_group != filters.primary:
         return False
     return filters.secondary == "all" or item.secondary_group == filters.secondary
@@ -423,6 +426,7 @@ async def _position_synthetics(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=authorized_artifact_ids,
             direct_report_artifact_ids=direct_report_artifact_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,
@@ -446,6 +450,9 @@ def _position_artifacts(
     report_relations: ReportRelations,
 ) -> list[ProjectedResult]:
     out: list[ProjectedResult] = []
+    from bowhead_core.docx_inline_edit_flag import docx_inline_edit_enabled
+
+    word_editing = docx_inline_edit_enabled()
     for entry in entries:
         projected = project_artifact_result(
             entry.artifact,
@@ -463,6 +470,8 @@ def _position_artifacts(
             capabilities = (*capabilities, "view_history")
         if writable and not report_only and _presentation_editable(entry.artifact):
             capabilities = (*capabilities, "edit_presentation")
+        if writable and not report_only and word_editing and _document_editable(entry.artifact):
+            capabilities = (*capabilities, "edit_document")
         projected = replace(
             projected,
             key=str(entry.sort_tuple[-1]),
@@ -473,6 +482,13 @@ def _position_artifacts(
         synthetic_before = sum(compare_sort_tuples(item.sort_tuple, projected.sort_tuple) < 0 for item in synthetics)
         out.append(replace(projected, position=entry.position + synthetic_before))
     return out
+
+
+def _document_editable(artifact: object) -> bool:
+    """A Word file the owner may edit in place (docx inline edit design §7.1); the edit routes re-check it."""
+    from bowhead_gateway.document_edit_service import document_editable
+
+    return document_editable(artifact)
 
 
 def _presentation_editable(artifact: object) -> bool:
@@ -530,6 +546,7 @@ async def _resolve_authorized_key(
         normalized_query=query,
         primary=filters.primary,
         secondary=filters.secondary,
+        turn_id=filters.turn_id,
         authorized_artifact_ids=authorized_artifact_ids,
         direct_report_artifact_ids=report_relations.direct_ids,
         relation_search_artifact_ids=relation_search_artifact_ids,
@@ -582,7 +599,8 @@ async def _query_results(
     if request_body.surface == "quick" and request_body.cursor is not None:
         raise ResultsQueryError("results_query_invalid")
     page_size = request_body.page_size or (quick_page_size if request_body.surface == "quick" else 50)
-    filter_map = filters.model_dump(mode="json")
+    # Unset optional filters stay out, so a request without a Turn filter keeps its cursor binding.
+    filter_map = filters.model_dump(mode="json", exclude_none=True)
     binding = ResultsCursorBinding(
         scope_fingerprint=results_scope_fingerprint(
             route_kind=scope.route_kind,
@@ -678,6 +696,7 @@ async def _query_results(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=scope.authorized_artifact_ids,
             direct_report_artifact_ids=projection.report_relations.direct_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,
@@ -766,6 +785,7 @@ async def _query_results(
                 normalized_query=query,
                 primary=filters.primary,
                 secondary=filters.secondary,
+                turn_id=filters.turn_id,
                 authorized_artifact_ids=scope.authorized_artifact_ids,
                 direct_report_artifact_ids=projection.report_relations.direct_ids,
                 relation_search_artifact_ids=relation_search_artifact_ids,
@@ -789,6 +809,7 @@ async def _query_results(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=scope.authorized_artifact_ids,
             direct_report_artifact_ids=projection.report_relations.direct_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,
@@ -804,6 +825,7 @@ async def _query_results(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=scope.authorized_artifact_ids,
             direct_report_artifact_ids=projection.report_relations.direct_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,
@@ -845,6 +867,7 @@ async def _query_results(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=scope.authorized_artifact_ids,
             direct_report_artifact_ids=projection.report_relations.direct_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,
@@ -956,6 +979,7 @@ async def _query_results(
             normalized_query=query,
             primary=filters.primary,
             secondary=filters.secondary,
+            turn_id=filters.turn_id,
             authorized_artifact_ids=scope.authorized_artifact_ids,
             direct_report_artifact_ids=projection.report_relations.direct_ids,
             relation_search_artifact_ids=relation_search_artifact_ids,

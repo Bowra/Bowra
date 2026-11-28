@@ -20,6 +20,7 @@ vi.mock("@/lib/team-tool-sources-api", () => ({
   createSource: (...args: unknown[]) => createSource(...args),
   proposeDescriptions: vi.fn(),
   authorizeSource: vi.fn(),
+  teamMcpOAuthRecovery: vi.fn(() => null),
 }));
 
 import { CreateToolCard } from "./create-tool-card";

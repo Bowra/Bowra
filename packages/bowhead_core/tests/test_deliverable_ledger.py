@@ -109,6 +109,26 @@ async def test_delivered_files_carry_their_identifiers_and_data_files_do_not(sto
     assert led.files >= 1
 
 
+async def test_work_files_are_not_delivered_and_canvas_exports_are(store: ArtifactStore) -> None:
+    """A deck kept only as a work file was told to the user as ready (116, pptx dogfood labeling spike)."""
+    deck = await store.put_bytes(
+        content=b"x",
+        filename="QBR.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        kind="sandbox_output",
+        created_by="u_1",
+        created_by_turn="t_1",
+    )
+    export = await store.put_bytes(
+        content=b"y", filename="Canvas.pdf", mime="application/pdf", kind="canvas_export", created_by="u_1", created_by_turn="t_1"
+    )
+    led = await build_deliverable_ledger(turn_id="t_1", artifact_store=store)
+    facts = produced_facts(led)
+    # Results shows canvas exports among the deliverables, so they reach the user too.
+    assert facts["delivered_files"] == [{"artifact_id": export.id, "name": "Canvas.pdf"}]
+    assert facts["undelivered_files"] == [{"artifact_id": deck.id, "name": "QBR.pptx"}]
+
+
 async def test_files_zero_is_the_prod_miss_shape(store: ArtifactStore) -> None:
     """07-23 那两轮：skill 跑成功、答案说"PDF 已经导出好了"、库里 0 个交付物。"""
     led = await build_deliverable_ledger(
@@ -437,6 +457,8 @@ def test_produced_facts_name_the_files_and_keep_unknown_items_unknown() -> None:
         "canvas_sections": 9,
         "memories": 0,
         "verified": {"files": True, "reused_files": True, "canvas_sections": True, "memories": True},
+        # Stated even when empty: a run whose saved files were all work files delivered nothing.
+        "delivered_files": [],
     }
     # A later Turn revises a file by identifier, so delivered files are named with theirs.
     delivered = produced_facts(DeliverableLedger(files=3, file_names=("r.pdf", "rows.csv"), delivered=(("art_1", "r.pdf"),)))
@@ -450,14 +472,15 @@ def test_produced_facts_name_the_files_and_keep_unknown_items_unknown() -> None:
     [
         ("zh-CN", "用户拿不到"),
         ("en-US", "the user cannot get it"),
-        ("de-DE", "nicht geliefert"),
+        ("de-DE", "nicht erhalten"),
         ("fr-FR", "n’a pas été livré"),
         ("ja-JP", "the user cannot get it"),
     ],
 )
 def test_files_note_is_stated_in_the_answer_language_whatever_the_helper_wrote(language: str, marker: str) -> None:
     note = produced_files_note(DeliverableLedger(files=0), language)
-    assert "produced.file_names" in note and marker in note
+    assert "produced.delivered_files" in note and "produced.undelivered_files" in note and marker in note
+    assert "produced.file_names" not in note
     assert "reused_file_names" not in note
 
 

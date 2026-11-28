@@ -287,3 +287,64 @@ async def test_content_template_is_unavailable_without_admission_and_members_can
     assert set(await _templates(setup.http)) == {f"shopify_analysis:{tool_id}", f"shopify_content:{tool_id}"}
     setup.state.user = User(id="owner_1", team_id="team_1", email="owner_1@example.com", status="active")
     assert (await setup.http.get("/api/v1/team-builtin-tools/plugin-templates")).status_code == 403
+
+
+async def test_notion_template_reuses_only_one_reviewed_oauth_source(setup):
+    from bowhead_core.notion_knowledge import NOTION_MCP_URL, NOTION_RESEARCH_OPERATIONS, notion_knowledge_tool_ref
+    from bowhead_core.resource_execution_gate import check_team_tool_execution
+    from bowhead_core.user_store import TeamToolSource, _now
+
+    source = TeamToolSource(
+        id="ots_notion1",
+        team_id="team_1",
+        name="Company Notion",
+        kind="mcp",
+        base_url=NOTION_MCP_URL,
+        status="disabled",
+        selected_op_ids=[*NOTION_RESEARCH_OPERATIONS, "notion-create-pages"],
+        tools_schema=[
+            {"name": operation, "annotations": {"readOnlyHint": True, "destructiveHint": False}} for operation in NOTION_RESEARCH_OPERATIONS
+        ]
+        + [{"name": "notion-create-pages", "annotations": {"readOnlyHint": False, "destructiveHint": True}}],
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    await setup.store.create_team_tool_source(source)
+    await setup.store.update_team_tool_source_auth(source.team_id, source.id, auth_type="oauth", auth={"oauth_tokens": {"access_token": "fixture"}})
+    unavailable = await setup.http.get("/api/v1/team-builtin-tools/plugin-templates")
+    assert unavailable.json()["notion_setup_required"] is True
+    await setup.store.update_team_tool_source_meta(source.team_id, source.id, status="enabled")
+    template = (await _templates(setup.http))[f"notion_knowledge:{source.id}"]
+    assert template["connection_id"] == source.id
+    assert template["tool_refs"] == [notion_knowledge_tool_ref(source.id, operation, "initial") for operation in NOTION_RESEARCH_OPERATIONS]
+    plugin = await _create_from_template(setup.http, template)
+    assert plugin["skill_grants"][0]["skill_ref"]["id"] == "builtin:notion-research-documentation"
+    call = {
+        "team_id": source.team_id,
+        "source_id": source.id,
+        "operation_id": "notion-search",
+        "advertised_name": template["tool_refs"][0],
+        "notion_knowledge_binding": "initial",
+    }
+    runtime = SimpleNamespace(team_id=source.team_id, skill_instance_store=setup.store)
+    assert await check_team_tool_execution(runtime, **call) is None
+
+    await setup.store.update_team_tool_source_auth(
+        source.team_id,
+        source.id,
+        auth_type="oauth",
+        auth={"oauth_tokens": {"access_token": "replacement"}, "oauth_meta": {"notion_knowledge_binding": "replacement"}},
+    )
+    new_template = (await _templates(setup.http))[f"notion_knowledge:{source.id}"]
+    assert set(new_template["tool_refs"]).isdisjoint(template["tool_refs"])
+    denied = await check_team_tool_execution(runtime, **call)
+    assert denied["error_kind"] == "notion_connection_changed"
+    stale = await setup.http.post(
+        "/api/v1/team-capabilities",
+        json={
+            "name": "Stale Notion setup",
+            "tool_refs": template["tool_refs"],
+            "skill_grants": template["skill_grants"],
+        },
+    )
+    assert stale.status_code == 422

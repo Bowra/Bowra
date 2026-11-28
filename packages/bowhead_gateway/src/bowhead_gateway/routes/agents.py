@@ -96,7 +96,7 @@ from bowhead_core.agent_fork_service import (
     AgentForkService,
     read_agent_fork_policies,
 )
-from bowhead_core.agent_knowledge_policy import MAX_SELECTED_FILES, KnowledgeAccess, KnowledgeAccessError
+from bowhead_core.agent_knowledge_policy import MAX_SELECTED_FILES, KnowledgeAccess, KnowledgeAccessError, require_supported_knowledge_access
 from bowhead_core.agent_listing_safety import (
     AgentListingSafetyStore,
     PersistedListingSafetyReport,
@@ -928,18 +928,21 @@ async def _revision_store(
     user: User,
     store: UserStore,
 ) -> AgentRevisionStore:
-    from bowhead_gateway.agent_knowledge_sources import source_validator
+    from bowhead_gateway.agent_knowledge_sources import knowledge_base_validator, source_validator
 
     configured = getattr(request.app.state, "agent_revision_store", None)
     if isinstance(configured, AgentRevisionStore):
         if configured._knowledge_source_validator is None:
             configured._knowledge_source_validator = source_validator(request, store)
+        if configured._knowledge_base_validator is None:
+            configured._knowledge_base_validator = knowledge_base_validator(request, store)
         return configured
     return AgentRevisionStore(
         store.db_path,
         validator=await _publication_validator(request, user=user, store=store),
         eval_gate=AgentEvalReleaseGate(),
         knowledge_source_validator=source_validator(request, store),
+        knowledge_base_validator=knowledge_base_validator(request, store),
     )
 
 
@@ -2647,6 +2650,9 @@ async def agent_authoring_catalog(
         "model_policy": behavior_catalog.model_policy.to_public_dict(),
         "primary_capabilities": [item.to_public_dict() for item in behavior_catalog.primary_capabilities],
         "tools": [tool.to_public_dict() for tool in (*tool_catalog.native_tools, *tool_catalog.team_tools) if tool.discoverable],
+        # Built-in Tools the team turned off: not offered above, but kept unchanged where an Agent or
+        # Plugin already selected them (pickers must neither list nor drop them).
+        "team_disabled_tools": list(tool_catalog.team_disabled_refs),
         "skills": skills,
     }
 
@@ -3270,6 +3276,37 @@ async def get_agent_knowledge_sources(
         _raise_release_http(exc)
 
 
+@router.get("/{agent_id}/knowledge-base-sources")
+async def get_agent_knowledge_base_sources(
+    agent_id: str,
+    request: Request,
+    response: Response,
+    selected: list[str] = Query(default=[]),
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """The selected-knowledge-base picker of the Agent editor (knowledge base organization phase 1, slice 5).
+
+    Editors only, like the file catalog. With ``FEATURE_KNOWLEDGE_BASES`` off it answers
+    ``state: disabled`` and lists nothing; before the Team's chunk key backfill it answers
+    ``preparing`` (and starts the backfill). Selected IDs the editor cannot use are left out.
+    """
+    from bowhead_gateway.agent_knowledge_sources import knowledge_base_catalog
+
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        require_supported_knowledge_access(
+            {"knowledge_access": {"schema_version": 2, "mode": "selected_knowledge_bases", "knowledge_base_ids": list(dict.fromkeys(selected))}}
+        )
+        readers = _read_store(store)
+        detail = await readers.working_copy(team_id=user.team_id, agent_id=agent_id, actor_user_id=user.id)
+        if not detail["actions"]["edit"]:
+            raise AgentRevisionForbiddenError("agent_knowledge_sources_unavailable")
+        return await knowledge_base_catalog(request, store, team_id=user.team_id, user_id=user.id, selected=selected)
+    except Exception as exc:
+        _raise_release_http(exc)
+
+
 @router.get("/{agent_id}/working-copy")
 async def get_agent_working_copy(
     agent_id: str,
@@ -3601,6 +3638,15 @@ async def agent_version_workbench(
         except Exception as feedback_exc:  # noqa: BLE001
             log.warning("agent_workbench.member_feedback_failed", agent_id=agent_id, error=type(feedback_exc).__name__)
             result["member_feedback"] = []
+        # The Owner's recent trials of the saved draft (测试用例 → 试用记录); empty for everyone else.
+        # Optional like member feedback: a failed read leaves the list empty.
+        try:
+            from bowhead_core.agent_owner_trial import list_recent_owner_trials
+
+            result["recent_trials"] = await list_recent_owner_trials(store.db_path, team_id=user.team_id, agent_id=agent_id, owner_user_id=user.id)
+        except Exception as trials_exc:  # noqa: BLE001
+            log.warning("agent_workbench.recent_trials_failed", agent_id=agent_id, error=type(trials_exc).__name__)
+            result["recent_trials"] = []
         summary = result.get("active_execution_summary")
         if isinstance(summary, dict):
             await _with_progress(summary, store.db_path)
@@ -5079,7 +5125,8 @@ async def list_agent_eval_conversation_candidates(
     _require_eval_runtime(request)
     try:
         await AgentEvalProductStore(store.db_path).manager_snapshot(team_id=user.team_id, agent_id=agent_id, actor_user_id=user.id)
-        items = await list_conversation_candidates(store.db_path, team_id=user.team_id, agent_id=agent_id, user_id=user.id)
+        # 存为用例: the Owner's own trial Turns of this Agent are candidates too (trial-tech-design §5).
+        items = await list_conversation_candidates(store.db_path, team_id=user.team_id, agent_id=agent_id, user_id=user.id, include_owner_trials=True)
     except Exception as exc:
         _raise_eval_http(exc)
     return {"kind": "agent_eval_conversation_candidates", "schema_version": 1, "max_selection": MAX_TURNS_PER_SUGGESTION, "items": items}
@@ -5160,7 +5207,9 @@ async def _suggest_eval_cases_from_turns(
     ask. Points are drafts the Owner confirms later; a chunk the model fails on keeps its cases
     without points rather than failing the whole selection.
     """
-    turns = await read_conversation_turns(store.db_path, team_id=user.team_id, agent_id=agent_id, user_id=user.id, turn_ids=turn_ids)
+    turns = await read_conversation_turns(
+        store.db_path, team_id=user.team_id, agent_id=agent_id, user_id=user.id, turn_ids=turn_ids, include_owner_trials=True
+    )
     team_router, _miss = await resolve_team_router(request.app.state, user.team_id, agent_type="echo", site="agent_eval_case_suggest")
     if team_router is None:
         raise AgentEvalStoreError("team_model_unconfigured")

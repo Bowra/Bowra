@@ -74,6 +74,8 @@ export interface EditedCopy {
   artifact_id: string;
   filename: string;
   version_no: number;
+  /** Who made the copy: the person in this editor, or a helper asked to revise the upload. */
+  made_by: "you" | "ai";
 }
 
 export interface PresentationInventory {
@@ -89,6 +91,8 @@ export interface PresentationInventory {
   /** Uploads only: the name the first save gives the new file. */
   new_filename: string | null;
   edited_copies: EditedCopy[];
+  /** Older versions the next save pushes out of the kept three (design §13.7); absent when unknown. */
+  drops_on_save?: number[];
 }
 
 export interface LatestVersionFacts {
@@ -291,9 +295,17 @@ function parseInventory(value: unknown): PresentationInventory {
     new_filename: typeof value.new_filename === "string" ? value.new_filename : null,
     edited_copies: Array.isArray(value.edited_copies)
       ? value.edited_copies.flatMap((item): EditedCopy[] => isRecord(item) && typeof item.artifact_id === "string" && typeof item.filename === "string"
-        ? [{ artifact_id: item.artifact_id, filename: item.filename, version_no: typeof item.version_no === "number" ? item.version_no : 1 }]
+        ? [{
+          artifact_id: item.artifact_id,
+          filename: item.filename,
+          version_no: typeof item.version_no === "number" ? item.version_no : 1,
+          made_by: item.made_by === "ai" ? "ai" : "you",
+        }]
         : [])
       : [],
+    ...(Array.isArray(value.drops_on_save)
+      ? { drops_on_save: value.drops_on_save.filter((item): item is number => typeof item === "number" && Number.isInteger(item) && item > 0) }
+      : {}),
   };
 }
 
@@ -498,6 +510,11 @@ export interface ReapplyRow {
   applicable: boolean;
   /** What the newer version holds when it differs. */
   latestText: string | null;
+  /**
+   * 「用我的」: the edit made against the newer version (its `expect` is what that version holds), when
+   * the target still exists there and is editable; null otherwise (design §13.7).
+   */
+  rebased: PendingEdit | null;
 }
 
 function elementByKey(inventory: PresentationInventory, key: string): InventoryElement | undefined {
@@ -520,19 +537,23 @@ function sameChart(a: InventoryChart, b: InventoryChart): boolean {
 export function matchPendingEdits(edits: PendingEdits, latest: PresentationInventory): ReapplyRow[] {
   return edits.map((edit): ReapplyRow => {
     const element = elementByKey(latest, edit.key);
-    if (!element || !element.editable) return { edit, applicable: false, latestText: null };
+    if (!element || !element.editable) return { edit, applicable: false, latestText: null, rebased: null };
     if (edit.kind === "text") {
       const paragraph = element.paragraphs?.[edit.paragraph];
-      if (!paragraph) return { edit, applicable: false, latestText: null };
-      return { edit, applicable: paragraph.text === edit.expect, latestText: paragraph.text === edit.expect ? null : paragraph.text };
+      if (!paragraph) return { edit, applicable: false, latestText: null, rebased: null };
+      const same = paragraph.text === edit.expect;
+      return { edit, applicable: same, latestText: same ? null : paragraph.text, rebased: same ? null : { ...edit, expect: paragraph.text } };
     }
     if (edit.kind === "cell") {
       const cell = element.rows?.[edit.row]?.[edit.col];
-      if (!cell || !cell.editable) return { edit, applicable: false, latestText: cell?.text ?? null };
-      return { edit, applicable: cell.text === edit.expect, latestText: cell.text === edit.expect ? null : cell.text };
+      if (!cell || !cell.editable) return { edit, applicable: false, latestText: cell?.text ?? null, rebased: null };
+      const same = cell.text === edit.expect;
+      return { edit, applicable: same, latestText: same ? null : cell.text, rebased: same ? null : { ...edit, expect: cell.text } };
     }
-    if (!element.chart) return { edit, applicable: false, latestText: null };
-    return { edit, applicable: sameChart(element.chart, edit.expect), latestText: null };
+    if (!element.chart) return { edit, applicable: false, latestText: null, rebased: null };
+    const same = sameChart(element.chart, edit.expect);
+    const fits = element.chart.series.length === edit.values.length && element.chart.series.every((series, s) => series.values.length === edit.values[s].length);
+    return { edit, applicable: same, latestText: null, rebased: same || !fits ? null : { ...edit, expect: element.chart } };
   });
 }
 
@@ -619,3 +640,12 @@ export function pageTextItems(items: ReadonlyArray<PdfTextLike>, view: ReadonlyA
     }];
   });
 }
+
+/**
+ * A cell holding just a number (digits with group separators, a decimal part, a sign, a percent or
+ * currency sign): typing replaces it, as in a spreadsheet; other text appends (design §13.7).
+ */
+export function isNumberText(text: string): boolean {
+  return /^\s*[-+−]?\s*[$€£¥￥]?\s*[-+−]?\d[\d,.\s\u00a0\u202f']*\s*[%‰]?\s*$/.test(text) && /\d/.test(text);
+}
+

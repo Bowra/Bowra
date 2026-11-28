@@ -83,6 +83,11 @@ export interface KbFileDTO {
   can_change_scope: boolean;
   /** File versions: the source file has a newer version (shown to the file's owner only). */
   newer_version?: { artifact_id: string; version_no: number } | null;
+  /**
+   * Knowledge bases (FEATURE_KNOWLEDGE_BASES): the file's knowledge base, sent only while the switch is on.
+   * Absent or null means the default knowledge base of its scope.
+   */
+  knowledge_base_id?: string | null;
 }
 
 export interface KbFileListResponse {
@@ -105,6 +110,7 @@ export interface KbFileListParams {
   cursor?: string;
   offset?: number;
   limit?: number;
+  file_ids?: readonly string[];
   status?: string;          // comma-separated parse_status values
   mime?: string;            // comma-separated mime prefixes
   doc_type_id?: string;
@@ -178,11 +184,12 @@ async function jsonOrThrow<T>(r: Response, _what: string): Promise<T> {
 
 // ─── endpoints ───────────────────────────────────────────
 
-export async function fetchKbFiles(opts: KbFileListParams): Promise<KbFileListResponse> {
+export async function fetchKbFiles(opts: KbFileListParams, init?: Pick<RequestInit, "headers" | "signal" | "cache">): Promise<KbFileListResponse> {
   const qs = new URLSearchParams({ scope: opts.scope });
   if (opts.cursor) qs.set("cursor", opts.cursor);
   if (opts.offset != null) qs.set("offset", String(opts.offset));
   if (opts.limit != null) qs.set("limit", String(opts.limit));
+  opts.file_ids?.forEach((id) => qs.append("file_ids", id));
   if (opts.status) qs.set("status", opts.status);
   if (opts.mime) qs.set("mime", opts.mime);
   if (opts.doc_type_id) qs.set("doc_type_id", opts.doc_type_id);
@@ -192,7 +199,8 @@ export async function fetchKbFiles(opts: KbFileListParams): Promise<KbFileListRe
   if (opts.order_by) qs.set("order_by", opts.order_by);
   if (opts.order_dir) qs.set("order_dir", opts.order_dir);
   const r = await fetch(`/api/v1/kb/files?${qs.toString()}`, {
-    headers: { ...getWorkspaceHeader() },
+    ...init,
+    headers: init?.headers ?? getWorkspaceHeader(),
   });
   return jsonOrThrow<KbFileListResponse>(r, "fetchKbFiles");
 }
@@ -243,12 +251,19 @@ export interface KbGoogleImportResult {
 /** Import Picker-selected Google Drive files into the knowledge base as the current user. */
 export async function importKbFromGoogleDrive(
   fileIds: string[],
-  opts: { scope: KbScope; scope_id: string; use_llm?: boolean },
+  opts: { scope: KbScope; scope_id: string; use_llm?: boolean; knowledge_base_id?: string | null },
 ): Promise<KbGoogleImportResult[]> {
   const r = await fetch("/api/v1/google/kb-import", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getWorkspaceHeader() },
-    body: JSON.stringify({ file_ids: fileIds, scope: opts.scope, scope_id: opts.scope_id, use_llm: Boolean(opts.use_llm) }),
+    body: JSON.stringify({
+      file_ids: fileIds,
+      scope: opts.scope,
+      scope_id: opts.scope_id,
+      use_llm: Boolean(opts.use_llm),
+      // Knowledge bases: the target knowledge base of the scope's home; omitted means its default, as today.
+      ...(opts.knowledge_base_id ? { knowledge_base_id: opts.knowledge_base_id } : {}),
+    }),
   });
   const payload = await jsonOrThrow<{ results: KbGoogleImportResult[] }>(r, "importKbFromGoogleDrive");
   return payload.results;
@@ -313,6 +328,11 @@ export interface KbBundlePresignResponse {
 export interface KbUploadOptions {
   /** Optional immutable caller context; generic KB callers keep their existing defaults. */
   spaceHeaders?: Record<string, string>;
+  /**
+   * Knowledge bases (FEATURE_KNOWLEDGE_BASES): the target knowledge base, which must be in the scope's home.
+   * Omitted means the scope's default knowledge base, as today; the server ignores it while the switch is off.
+   */
+  knowledge_base_id?: string | null;
   use_llm?: boolean;
   onProgress?: (pct: number) => void;
   signal?: AbortSignal;
@@ -414,6 +434,7 @@ async function uploadKbSmall(
   fd.append("scope_id", opts.scope_id);
   fd.append("use_llm", String(opts.use_llm));
   if (opts.doc_type_id) fd.append("doc_type_id", opts.doc_type_id);
+  if (opts.knowledge_base_id) fd.append("knowledge_base_id", opts.knowledge_base_id);
   return xhrPostFormJson<KbFileDTO>("/api/v1/kb/files", fd, "uploadKbFile", opts);
 }
 
@@ -451,6 +472,7 @@ export async function uploadLargeKbFile(
         use_llm: opts.use_llm ?? false,
         doc_type_id: opts.doc_type_id ?? null,
         checksum_sha256: checksum || null,
+        ...(opts.knowledge_base_id ? { knowledge_base_id: opts.knowledge_base_id } : {}),
       }),
     });
     let presign: KbPresignResponse;
@@ -558,6 +580,7 @@ async function uploadKbBundleSmall(
   fd.append("scope", opts.scope);
   fd.append("scope_id", opts.scope_id);
   fd.append("use_llm", String(opts.use_llm));
+  if (opts.knowledge_base_id) fd.append("knowledge_base_id", opts.knowledge_base_id);
   return xhrPostFormJson<KbBundleUploadResponse>("/api/v1/kb/files/bundle", fd, "uploadKbBundle", opts);
 }
 
@@ -588,6 +611,7 @@ export async function uploadLargeKbBundle(
         scope_id: opts.scope_id,
         use_llm: opts.use_llm,
         checksum_sha256: checksum || null,
+        ...(opts.knowledge_base_id ? { knowledge_base_id: opts.knowledge_base_id } : {}),
       }),
     });
     let presign: KbBundlePresignResponse;
@@ -755,7 +779,7 @@ export async function bulkBindKbFilesDocType(
 
 export async function searchKb(
   query: string,
-  opts: { top_k?: number; scope_filter?: KbScope[] } = {},
+  opts: { top_k?: number; scope_filter?: KbScope[]; knowledge_base_id?: string | null } = {},
 ): Promise<KbSearchResult> {
   const r = await fetch("/api/v1/kb/search", {
     method: "POST",
@@ -764,6 +788,8 @@ export async function searchKb(
       query,
       ...(opts.top_k !== undefined ? { top_k: opts.top_k } : {}),
       ...(opts.scope_filter ? { scope_filter: opts.scope_filter } : {}),
+      // Knowledge bases: one knowledge base's deep search (ignored by the server while the switch is off).
+      ...(opts.knowledge_base_id ? { knowledge_base_id: opts.knowledge_base_id } : {}),
     }),
   });
   return jsonOrThrow<KbSearchResult>(r, "searchKb");

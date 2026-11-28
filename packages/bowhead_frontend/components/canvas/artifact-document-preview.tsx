@@ -82,6 +82,8 @@ export type DocumentPreviewCache = {
   focusPage?: number;
   docxHtml?: string;
   docxWarningCount?: number;
+  /** Word pages could not be rendered for this file: the reading view stays (docx inline edit design §5.1). */
+  docxPagesFailed?: boolean;
 };
 
 export function ArtifactDocumentPreview({
@@ -94,9 +96,12 @@ export function ArtifactDocumentPreview({
   thumbnails = false,
   onReferencePage,
   referencedPages,
+  pagesHref,
 }: {
   profile: DocumentProfile;
   href: string;
+  /** A Word file's rendered pages; without it Word files show the reading view. */
+  pagesHref?: string;
   title: string;
   sizeBytes?: number | null;
   onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
@@ -122,6 +127,20 @@ export function ArtifactDocumentPreview({
       />
     );
   }
+  if (pagesHref) {
+    return (
+      <DocxPagesPreview
+        href={href}
+        pagesHref={pagesHref}
+        title={title}
+        sizeBytes={sizeBytes}
+        onError={onError}
+        cacheRef={cacheRef}
+        onReferencePage={onReferencePage}
+        referencedPages={referencedPages}
+      />
+    );
+  }
   return (
     <DocxArtifactPreview
       href={href}
@@ -129,6 +148,89 @@ export function ArtifactDocumentPreview({
       onError={onError}
       cacheRef={cacheRef}
     />
+  );
+}
+
+/**
+ * A Word file's pages as rendered (docx inline edit design §5.1). The reading view stands in while
+ * the pages render and stays when they cannot be rendered; an open failure is reported only from
+ * the view that remains.
+ */
+function DocxPagesPreview({
+  href,
+  pagesHref,
+  title,
+  sizeBytes,
+  onError,
+  cacheRef,
+  onReferencePage,
+  referencedPages,
+}: {
+  href: string;
+  pagesHref: string;
+  title: string;
+  sizeBytes?: number | null;
+  onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
+  cacheRef: MutableRefObject<DocumentPreviewCache>;
+  /** 「引用这一页」 under each rendered page (docx inline edit design §7.4). */
+  onReferencePage?: (page: number) => SlideToggleOutcome;
+  referencedPages?: ReadonlyArray<number>;
+}) {
+  const t = useTranslations("artifact_viewer");
+  const [pages, setPages] = useState<"pending" | "ready" | "failed">(
+    cacheRef.current.pdfData ? "ready" : cacheRef.current.docxPagesFailed ? "failed" : "pending",
+  );
+
+  useEffect(() => {
+    if (pages !== "pending") return;
+    const controller = new AbortController();
+    let cancelled = false;
+    fetchDocumentBytes(pagesHref, MAX_PDF_PREVIEW_BYTES, controller.signal).then(
+      (data) => {
+        if (cancelled) return;
+        cacheRef.current.pdfData = data.slice(0);
+        setPages("ready");
+      },
+      () => {
+        if (cancelled) return;
+        cacheRef.current.docxPagesFailed = true;
+        setPages("failed");
+      },
+    );
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [cacheRef, pages, pagesHref]);
+
+  if (pages === "ready") {
+    return (
+      <PdfArtifactPreview
+        href={pagesHref}
+        title={title}
+        onError={onError}
+        cacheRef={cacheRef}
+        presentation={false}
+        thumbnails={false}
+        onReferencePage={onReferencePage}
+        referencedPages={referencedPages}
+      />
+    );
+  }
+  return (
+    <>
+      {pages === "pending" ? (
+        <div className="artifact-document-status" role="status" data-testid="artifact-docx-pages-pending">
+          {t("document_pages_rendering")}
+        </div>
+      ) : null}
+      <DocxArtifactPreview
+        href={href}
+        sizeBytes={sizeBytes}
+        onError={pages === "failed" ? onError : undefined}
+        cacheRef={cacheRef}
+      />
+    </>
   );
 }
 

@@ -796,6 +796,7 @@ async def rename_session(
         cost_usd=session.cost_usd,
         tokens_total=session.tokens_total,
         intents=session.intents,
+        origin=getattr(session, "origin", "normal") or "normal",
     )
 
 
@@ -923,6 +924,7 @@ async def get_session(
                     reference_kind=("result" if ref.get("referenceKind") == "result" else None),
                     selected_context=ref.get("selectedContext"),
                     presentation_selection=ref.get("presentationSelection"),
+                    document_selection=ref.get("documentSelection"),
                     bundle_artifact_ids=(
                         [str(item) for item in ref["bundleArtifactIds"]] if isinstance(ref.get("bundleArtifactIds"), list) else None
                     ),
@@ -993,6 +995,12 @@ async def get_session(
             )
         )
 
+    origin = getattr(session, "origin", "normal") or "normal"
+    trial_agent_id = None
+    if origin == "agent_trial":
+        from bowhead_core.agent_owner_trial import session_trial_agent_id
+
+        trial_agent_id = await session_trial_agent_id(store.db_path, session_id=session_id)
     return SessionDetailDTO(
         context_generation=await store.context_conversation_generation(session_id=session_id),
         session=SessionDTO(
@@ -1005,6 +1013,8 @@ async def get_session(
             cost_usd=session.cost_usd,
             tokens_total=session.tokens_total,
             intents=session.intents,
+            origin=origin,
+            trial_agent_id=trial_agent_id,
         ),
         turns=turns_out,
         chat_execution=await _session_chat_execution_bootstrap(

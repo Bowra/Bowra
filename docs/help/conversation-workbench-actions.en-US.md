@@ -35,6 +35,7 @@ If the connection is interrupted, Bowra checks the original request when you reo
 
 ## Drag files into the conversation
 
+- To attach a copied image or screenshot, click the message box and press **⌘V** on Mac or **Ctrl+V** on Windows or Linux. Wait for the image to finish uploading before sending.
 - Drag files from your computer onto the conversation area (the column with the messages and the composer) and a dashed frame appears. When it says **Drop to add to this message**, release the mouse: the files are added to the composer as attachments and start uploading, just as if you had selected **+** at the bottom left of the composer.
 - If the files can't be added, the frame turns red and says why, for example everything you're dragging is a video, audio, or another unsupported type, the message already has too many attachments, or attachments can't be added right now. Releasing then adds nothing.
 - When you drag several files at once, you can drop as long as some of them can be added: those upload as usual, and any unsupported file shows up in the composer as an attachment with the reason, which you can remove.
@@ -68,10 +69,11 @@ If the connection is interrupted, Bowra checks the original request when you reo
 
 File buttons in the execution details show the original filename. Open a file to check its preview and download that same original. AI-written titles and descriptions do not replace the filename on these buttons, including in older conversations. A filename identifies the saved file; it does not certify its contents.
 
-## The dot on Results
+## New content on Results
 
-- While you stay on the conversation and a new report section, data table, or file appears in the results, a small dot appears on **Results** at the top on phones, and on the collapsed **Results** strip on the right on computers. Screen readers read it as "new content".
-- The dot goes away once you open the results. If you refresh the page before looking, the dot is still there.
+- While you stay on the conversation and a new report section, data table, or file appears in the results, the collapsed **Results** strip on the right on computers shows how many items are new; screen readers read it as "N new items". On phones, a small dot appears on **Results** at the top, read as "new content".
+- When an answer ends and the results area is closed, a note appears once next to the strip on computers, saying what the turn added, for example "New this turn: 1 presentation · report: 4 sections changed · 2 work files". Select **View** to open the results area. The note goes away after a few seconds or when you do something else.
+- The count and the dot go away once you open the results. If you refresh the page before looking, they're still there.
 
 ## Share a turn with an Agent's owner as an evaluation case
 

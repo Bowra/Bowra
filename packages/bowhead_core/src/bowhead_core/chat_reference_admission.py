@@ -245,6 +245,69 @@ async def prepare_skill_reference_start_admission(
     return replace(candidate, input_document=document, skill_reads=closure, skill_sources=sources).snapshot()
 
 
+async def _admit_owner_trial_primary_in_connection(
+    db: aiosqlite.Connection,
+    *,
+    admission: ReferenceStartAdmission,
+    source: ChatTurnUserSource,
+    team_id: str,
+    bindings: AgentExecutionBindingStore,
+):
+    """Record the Turn as the Owner's trial and reserve its primary on the frozen draft (trial-tech-design §4.3).
+
+    The session must be the Owner's ``agent_trial`` session of this Agent; the finalizer created it
+    with that origin or found it so. The admitted revision and behavior must still be the prepared ones.
+    """
+    from bowhead_core.agent_execution_binding import AgentExecutionBindingError
+
+    resource = reference_start_receiver(admission.input_document, admission.automatic_receiver)
+    assert resource.trial_candidate_id is not None
+    if admission.automatic_receiver is not None or admission.orchestration_contract not in {None, "lead-delegation.v1"}:
+        raise AgentExecutionBindingError("agent_trial_session_mismatch")
+    from bowhead_core.sqlite_readable_schema import readable_table_exists
+
+    if not await readable_table_exists(db, "agent_owner_trial_turn"):
+        raise AgentExecutionBindingError("agent_trial_unavailable")
+    async with db.execute(
+        "SELECT origin,user_id FROM sessions WHERE id=?",
+        (source.session_id,),
+    ) as cursor:
+        session = await cursor.fetchone()
+    async with db.execute(
+        "SELECT 1 FROM agent_owner_trial_turn WHERE session_id=? AND (agent_id!=? OR owner_user_id!=?) LIMIT 1",
+        (source.session_id, resource.id, source.user_id),
+    ) as cursor:
+        other_trial = await cursor.fetchone()
+    if session is None or tuple(session) != ("agent_trial", source.user_id) or other_trial is not None:
+        raise AgentExecutionBindingError("agent_trial_session_mismatch")
+    await bindings.record_owner_trial_turn_in_connection(
+        db,
+        team_id=team_id,
+        user_id=source.user_id,
+        turn_id=source.turn_id,
+        agent_id=resource.id,
+        candidate_id=resource.trial_candidate_id,
+        revision_ref=resource.version,
+    )
+    binding = await bindings.admit_owner_trial_execution_in_connection(
+        db,
+        team_id=team_id,
+        user_id=source.user_id,
+        turn_id=source.turn_id,
+        agent_id=resource.id,
+        candidate_id=resource.trial_candidate_id,
+        dispatch_key="reference:primary",
+    )
+    if (
+        binding.revision_ref != admission.expected.revision_ref
+        or binding.behavior_descriptor is None
+        or binding.behavior_descriptor.behavior_fingerprint != admission.expected.behavior_fingerprint
+        or binding.runtime_profile_name != admission.profile_name
+    ):
+        raise AgentExecutionBindingError("agent_candidate_stale")
+    return binding
+
+
 async def admit_reference_start_in_connection(
     db: aiosqlite.Connection,
     *,
@@ -343,7 +406,9 @@ async def admit_reference_start_in_connection(
         "dispatch_key": "reference:primary",
         "expected": admission.expected,
     }
-    if resource.source_kind == "team":
+    if resource.source_kind == "team" and resource.trial_candidate_id is not None:
+        binding = await _admit_owner_trial_primary_in_connection(db, admission=admission, source=source, team_id=team_id, bindings=bindings)
+    elif resource.source_kind == "team":
         binding = await bindings.admit_team_execution_in_connection(db, agent_id=resource.id, **common)
     else:
         prepared = admission.system_revision

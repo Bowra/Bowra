@@ -6,6 +6,7 @@ import messagesZh from "@/messages/zh-CN.json";
 
 vi.mock("@/lib/kb-api", () => ({ bulkChangeKbFilesScope: vi.fn() }));
 
+import { bulkChangeKbFilesScope } from "@/lib/kb-api";
 import { KbScopeModal } from "./kb-scope-modal";
 
 function renderModal(isTeamAdmin: boolean) {
@@ -69,3 +70,44 @@ describe("KbScopeModal · 范围单选", () => {
     expect(card("team").tabIndex).toBe(0);
   });
 });
+
+describe("KbScopeModal · reason for changing someone else's file", () => {
+  const sm = messagesZh.knowledge_base.scope_modal;
+
+  function renderFor(ownerId: string) {
+    render(
+      <NextIntlClientProvider locale="zh-CN" messages={messagesZh}>
+        <KbScopeModal
+          targets={[{ file_id: "kbf_1", filename: "a.pdf", scope: "space", owner_id: ownerId }]}
+          bulk={false}
+          me={{ user_id: "u_1", team_id: "t_1", is_team_admin: true, workspace_id: "ws_1" }}
+          onClose={vi.fn()}
+          onMigrated={vi.fn()}
+          toast={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId("kb-scope-modal-team"));
+    fireEvent.click(screen.getByRole("button", { name: sm.next }));
+  }
+
+  it("asks for a reason of at least 10 characters and sends it with the change", async () => {
+    vi.mocked(bulkChangeKbFilesScope).mockResolvedValue({ results: [{ file_id: "kbf_1", ok: true }], succeeded: 1, failed: 0 } as never);
+    renderFor("u_other");
+    const confirm = screen.getByRole("button", { name: sm.confirm_migrate }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("kb-scope-reason"), { target: { value: "短原因" } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("kb-scope-reason"), { target: { value: "统一放到团队范围，方便各空间检索" } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(bulkChangeKbFilesScope).toHaveBeenCalledWith(["kbf_1"], expect.objectContaining({ new_scope: "team", reason: "统一放到团队范围，方便各空间检索" }));
+  });
+
+  it("does not ask for a reason when you own the file", () => {
+    renderFor("u_1");
+    expect(screen.queryByTestId("kb-scope-reason")).toBeNull();
+    expect((screen.getByRole("button", { name: sm.confirm_migrate }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+

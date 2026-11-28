@@ -3,7 +3,7 @@ import { parseCoachCanvasBinding } from "./coach-canvas-target";
 import { parseContextActivity } from "./context-activity";
 import { parseContextMaintenanceAction } from "./context-maintenance";
 import { projectCoachResourceOpen } from "./coach-resource-editors";
-import { projectCoachCaseEffects, projectCoachOperationOpen } from "./coach-operations";
+import { projectCoachCaseEffects, projectCoachChangeEffects, projectCoachOperationOpen } from "./coach-operations";
 import { projectCoachAlignmentCard } from "./coach-alignment-cards";
 import { sandboxInputArtifactIds } from "./final-deliverables";
 /**
@@ -103,6 +103,7 @@ import {
 } from "./plan-store";
 import { parseThetaQuestions } from "./clarification-questions";
 import type { ThetaClarificationState } from "./types";
+import { readTrialAttribution } from "./agent-trial";
 import type {
   EmojiAckEvent,
   NarrativeDeltaEvent,
@@ -160,6 +161,7 @@ function applyAgentAttribution(
     agentReleaseId: read("agent_release_id"),
     agentExecutionId: read("agent_execution_id"),
     displayNameSnapshot: read("display_name_snapshot"),
+    trial: readTrialAttribution(payload.trial) ?? undefined,
   });
 }
 const _narrativeCursor = new Map<string, NarrativeCursor>();
@@ -242,6 +244,16 @@ export interface DispatchToTurnStoreOptions {
   frameBatchedText?: boolean;
 }
 
+/** The helper's own caveats on a warning return: text items only, bounded as the backend bounds them. */
+function readPeerCaveats(raw: unknown): { caveats?: string[] } {
+  if (!Array.isArray(raw)) return {};
+  const caveats = raw
+    .filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    .slice(0, 12)
+    .map((item) => item.trim().slice(0, 400));
+  return caveats.length ? { caveats } : {};
+}
+
 /**
  * Try to dispatch a raw SSE frame into the turn-store. Returns true if
  * the event was claimed (so caller may skip its own legacy handling for
@@ -257,8 +269,10 @@ export function dispatchToTurnStore(
   if (!rawPayload || typeof rawPayload !== "object") return false;
   const payload = rawPayload as Record<string, unknown>;
   const cardId = pickCardId(payload);
-  if (eventName === "tool_result" || eventName === "step_done")
+  if (eventName === "tool_result" || eventName === "step_done") {
     projectCoachCaseEffects(payload, streamTurnId ?? cardId ?? null);
+    projectCoachChangeEffects(payload, streamTurnId ?? cardId ?? null);
+  }
   // A pending model retry is a transient running status: the next model output
   // or terminal event clears it. Live SSE and replay share this rule, so a
   // replayed finished turn always ends without it.
@@ -800,6 +814,7 @@ export function dispatchToTurnStore(
         ...(typeof payload.resume_refused === "string" && payload.resume_refused
           ? { resumeRefused: payload.resume_refused }
           : {}),
+        ...(status === "succeeded_with_warnings" ? readPeerCaveats(payload.caveats) : {}),
       });
       return false;
     }
@@ -1301,6 +1316,15 @@ function mapOutputArtifacts(
       ...(dataRole ? { dataRole } : {}),
       ...(typeof item.path === "string" && item.path
         ? { path: item.path.slice(0, OUTPUT_ARTIFACT_TEXT_CAP) }
+        : {}),
+      ...(typeof item.kind === "string" && item.kind
+        ? { kind: item.kind.slice(0, 64) }
+        : {}),
+      ...(typeof item.lineage_id === "string" && item.lineage_id
+        ? { lineageId: item.lineage_id.slice(0, OUTPUT_ARTIFACT_TEXT_CAP) }
+        : {}),
+      ...(typeof item.version_no === "number" && Number.isInteger(item.version_no) && item.version_no > 0
+        ? { versionNo: item.version_no }
         : {}),
     });
     if (refs.length >= OUTPUT_ARTIFACT_REF_CAP) break;

@@ -10,6 +10,7 @@ Cet article présente le glisser-déposer, les raccourcis et les indications de 
 
 ## Glisser des fichiers dans la conversation
 
+- Pour joindre une image copiée ou une capture d’écran, cliquez dans le champ de saisie et appuyez sur **⌘V** sur Mac ou **Ctrl+V** sous Windows ou Linux. Attendez la fin de l’importation avant d’envoyer le message.
 - Faites glisser des fichiers depuis votre ordinateur vers la colonne des messages et du champ de saisie. Un cadre pointillé apparaît. Lorsque **Déposer pour ajouter à ce message** s’affiche, relâchez : les fichiers deviennent des pièces jointes et commencent à être importés, comme avec **+** en bas à gauche du champ.
 - Si l’ajout est impossible, le cadre devient rouge et explique pourquoi : uniquement des vidéos, de l’audio ou des types non compatibles, trop de pièces jointes, ou ajout temporairement indisponible. Relâcher n’ajoute alors rien.
 - Pour plusieurs fichiers, le dépôt est possible si au moins un fichier est accepté. Ceux-ci sont importés ; les fichiers incompatibles apparaissent avec leur raison dans le champ de saisie et peuvent être retirés.
@@ -34,10 +35,11 @@ Cet article présente le glisser-déposer, les raccourcis et les indications de 
 - Le raccourci est indisponible lorsqu’un menu, une liste, une fenêtre ou une bulle est ouverte. Fermez-la d’abord.
 - Il fonctionne sur un écran d’ordinateur large lorsque des résultats existent. Safari utilise ⌘⇧\ pour afficher tous les onglets : si l’aperçu des onglets s’ouvre, utilisez le bouton d’agrandissement.
 
-## Point sur Résultats
+## Nouveau contenu dans Résultats
 
-- Lorsque vous restez dans la conversation et qu’une section de rapport, un tableau de données ou un fichier apparaît, un point s’affiche sur **Résultats** en haut sur téléphone ou sur la bande réduite à droite sur ordinateur. Le lecteur d’écran annonce « nouveau contenu ».
-- Le point disparaît lorsque vous ouvrez les résultats. Il reste présent après une actualisation tant que vous ne les avez pas consultés.
+- Lorsque vous restez dans la conversation et qu’une section de rapport, un tableau de données ou un fichier apparaît, la bande réduite **Résultats** à droite sur ordinateur affiche le nombre de nouveaux éléments ; le lecteur d’écran annonce « N nouveaux éléments ». Sur téléphone, un point s’affiche sur **Résultats** en haut, annoncé « nouveau contenu ».
+- Lorsqu’une réponse se termine et que la zone des résultats est fermée, une indication apparaît une fois à côté de la bande sur ordinateur et dit ce que le tour a ajouté, par exemple « Nouveau dans ce tour : 1 présentation · rapport : 4 sections modifiées · 2 fichiers de travail ». Choisissez **Voir** pour ouvrir la zone des résultats. L’indication disparaît au bout de quelques secondes ou dès que vous faites autre chose.
+- Le nombre et le point disparaissent lorsque vous ouvrez les résultats. Ils restent présents après une actualisation tant que vous ne les avez pas consultés.
 
 ## Partager un échange avec le propriétaire d’un Agent comme cas d’évaluation
 

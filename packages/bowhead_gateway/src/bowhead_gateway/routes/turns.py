@@ -72,6 +72,16 @@ class ManualEffectSettlementRequest(BaseModel):
     object_version_digest: str = Field(min_length=1, max_length=256)
 
 
+class AgentTrialAttributionDTO(BaseModel):
+    """Which frozen draft answered in an Owner draft trial (the live event's ``trial`` member)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    candidate_kind: Literal["draft", "submitted"]
+    frozen_at: str
+
+
 class AgentExecutionAttributionDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,6 +101,8 @@ class AgentExecutionAttributionDTO(BaseModel):
     started_at: str | None = None
     ended_at: str | None = None
     failure_code: str | None = None
+    # Absent outside an Owner draft trial, so ordinary responses keep their exact shape.
+    trial: AgentTrialAttributionDTO | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RootAgentBindingDTO(BaseModel):
@@ -656,6 +668,19 @@ async def _reference_projection(
         workspace_id=session.workspace_id,
         session_id=session.id,
     )
+    # The catalog lists released Agents only. An Owner draft trial's receiver is the Owner's own
+    # frozen draft, visible to that Owner in their trial session (trial-tech-design §6).
+    from bowhead_core.agent_owner_trial import read_owner_trial
+
+    trial = await read_owner_trial(_session_store(request).db_path, turn_id=turn_id)
+    if trial is not None and trial.owner_user_id == user.id and trial.session_id == session.id:
+        from bowhead_core.chat_reference_projection import reference_resource_identity
+        from bowhead_core.chat_references import AgentResourceRef
+
+        trial_receiver = AgentResourceRef(
+            kind="agent", source_kind="team", id=trial.agent_id, version=trial.revision_ref, trial_candidate_id=trial.candidate_id
+        )
+        visible = visible | {reference_resource_identity(trial_receiver)}
     cipher = None
     if include_content or submission_id is not None:
         try:
@@ -2313,6 +2338,12 @@ async def record_satisfaction(
         operation=SpaceOperation.WRITE,
     )
     user_id = user.id
+    from bowhead_core.agent_owner_trial import turn_is_owner_trial
+
+    # An Owner draft trial is not a member's answer: it never feeds satisfaction signals (trial-tech-design §5).
+    _trial_db = getattr(getattr(request.app.state, "session_store", None), "db_path", None)
+    if _trial_db is not None and await turn_is_owner_trial(_trial_db, turn_id=turn_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"error": {"code": "agent_trial_feedback_unavailable"}})
 
     # Q6 fix: normalize with allowlist. Unknown code → other; deduplicate.
     safe_codes = payload.normalized_reason_codes()

@@ -128,6 +128,39 @@ async def test_undo_restores_the_value_before_consecutive_coach_writes_and_reapp
     assert kinds.count("patch_undo") == 2 and kinds.count("patch_reapply") == 2
 
 
+async def test_undoing_an_ai_optimize_rewrite_keeps_the_earlier_coach_write(tmp_path):
+    _, revisions, store, working = await _setup(tmp_path)
+    _, v1 = await _coach_write(store, working, "1", [{"op": "replace", "path": PROMPT, "value": "Coach prompt."}])
+    optimized, v2, _ = await store.create_applied(
+        team_id="team_release",
+        agent_id="osa_release",
+        effective_owner_user_id="user_owner",
+        source_ref="ai_optimize:system_prompt:3f0c",
+        operations=[{"op": "replace", "path": PROMPT, "value": "# Role\nCoach prompt."}],
+        atomic_groups=[{"id": "g0", "operation_indexes": [0]}],
+        expected_baseline=AgentProposalBaseline(working.id, v1, working.base_release_id),
+        rationale="AI optimize.",
+    )
+    row = (await _coach_rows(store))[PROMPT]["coach"]
+    assert (row["proposal_id"], row["before"], row["value"]) == (optimized.id, "Coach prompt.", "# Role\nCoach prompt.")
+
+    undone = await store.undo_fields(
+        team_id="team_release", agent_id="osa_release", actor_user_id="user_owner", fields=[PROMPT], expected_working_copy_row_version=v2
+    )
+    assert (await _draft(revisions)).definition["system_prompt"] == "Coach prompt."
+    row = (await _coach_rows(store))[PROMPT]["coach"]
+    assert (row["state"], row["before"], row["value"]) == ("applied", "Base prompt.", "Coach prompt.")
+
+    await store.undo_fields(
+        team_id="team_release",
+        agent_id="osa_release",
+        actor_user_id="user_owner",
+        fields=[PROMPT],
+        expected_working_copy_row_version=undone["working_copy"].row_version,
+    )
+    assert (await _draft(revisions)).definition["system_prompt"] == "Base prompt."
+
+
 async def test_undo_after_a_manual_edit_is_a_conflict_that_writes_nothing(tmp_path):
     _, revisions, store, working = await _setup(tmp_path)
     _, version = await _coach_write(store, working, "1", [{"op": "replace", "path": PROMPT, "value": "Coach prompt."}])

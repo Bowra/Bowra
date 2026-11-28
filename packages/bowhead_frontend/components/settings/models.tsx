@@ -47,9 +47,15 @@ import { DiscoveryPicker } from "@/components/settings/models/discovery-picker";
 import { DialogShell } from "@/components/ui/dialog";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
 import {
+  connectionUseLabelKey,
+  isKnowledgeBaseRole,
+  KNOWLEDGE_BASE_ROLE_CAPABILITIES,
   ModelSettingsOverview,
   roleTranslationKey,
   type AssignmentSummaryRow,
+  type ConnectionUse,
+  type ConnectionUseLink,
+  type KnowledgeBaseRole,
   type ModelSettingsOverviewProvider,
 } from "@/components/settings/models/model-settings-overview";
 import { ReadinessReview } from "@/components/settings/models/readiness-review";
@@ -60,11 +66,12 @@ import { VerificationStatus } from "@/components/settings/models/verification-st
 import { toast } from "@/lib/use-toast";
 import {
   VerificationSelector,
+  verificationCandidateKey,
   type VerificationCandidate,
 } from "@/components/settings/models/verification-selector";
 import {
   discoverDraftProviderModels, discoverProviderModels, fetchAdminLlmConfig, reconcileVerifiedAssignments, llmMaxRetriesFromConfig, saveAdminLlmConfig, validateAdminLlmConfig, verifyDraftProviderCapability, verifyProviderCapability,
-  type AdminLlmConfigResp, type LlmConfigValidationIssue, type LlmReadinessRow, type LlmConfigValidationResp, type LlmVerificationEntry, type VerifyProviderCode, type VerifyProviderStep,
+  type AdminLlmConfigResp, type VerifyDraftProviderBody, type LlmConfigValidationIssue, type LlmReadinessRow, type LlmConfigValidationResp, type LlmVerificationEntry, type VerifyProviderCode, type VerifyProviderStep,
 } from "@/lib/llm-config-api";
 import {
   cancelVerificationBatch,
@@ -1136,6 +1143,45 @@ function capsFromSupports(supports: Record<string, boolean> | undefined): string
   return caps;
 }
 
+/** What a saved connection serves besides its catalog: active knowledge-base roles, then image and search models
+ *  (design: docs/sprints/model-settings-save-flow-2026-11-25/connection-purposes-design.md). */
+export function connectionUses(
+  config: { kb?: Partial<Pick<KbConfig, "models" | "active">>; media?: MediaConfig; search?: SearchConfig },
+  runtimeKey: string,
+): ConnectionUse[] {
+  const uses: ConnectionUse[] = [];
+  for (const role of Object.keys(KNOWLEDGE_BASE_ROLE_CAPABILITIES) as KnowledgeBaseRole[]) {
+    const name = config.kb?.active?.[role];
+    const model = typeof name === "string" ? config.kb?.models?.[name] : undefined;
+    // Readiness reads `real_id`, then `model` (team_llm_readiness.build_required_assignments).
+    const modelId = String(model?.real_id || model?.model || "");
+    if (model?.provider === runtimeKey && modelId) uses.push({ modelId, role });
+  }
+  for (const model of Object.values(config.media?.models || {})) {
+    if (model.provider === runtimeKey && model.real_id) uses.push({ modelId: model.real_id, role: "image" });
+  }
+  for (const model of Object.values(config.search?.models || {})) {
+    if (model.provider === runtimeKey && model.real_id) uses.push({ modelId: model.real_id, role: "search" });
+  }
+  return uses;
+}
+
+/** Knowledge-base models a connection serves that its catalog does not declare, with the capabilities their roles need. */
+export function knowledgeBaseOnlyModels(
+  uses: ConnectionUse[],
+  catalogIds: ReadonlySet<string>,
+): Array<{ id: string; roles: KnowledgeBaseRole[]; capabilities: ModelCapability[] }> {
+  const byModel = new Map<string, KnowledgeBaseRole[]>();
+  for (const use of uses) {
+    if (isKnowledgeBaseRole(use.role) && !catalogIds.has(use.modelId)) byModel.set(use.modelId, [...(byModel.get(use.modelId) || []), use.role]);
+  }
+  return [...byModel].map(([id, roles]) => ({
+    id,
+    roles,
+    capabilities: [...new Set(roles.flatMap((role) => KNOWLEDGE_BASE_ROLE_CAPABILITIES[role]))] as ModelCapability[],
+  }));
+}
+
 function normModels(spec: ProviderSpec): NModel[] {
   const inferred = capsFromSupports(spec.supports);
   const out: NModel[] = [];
@@ -1621,12 +1667,14 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const connectionBaselineRef = useRef<string | null>(null);
   const t = useTranslations("settings.models");
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
+  const leavingConnection = section === "connection" || bowraImported;
   const confirmLeave = useCallback(() => confirm({
-    title: t("v4.leave_title"),
-    description: t("v4.leave_confirm"),
+    // The connection editor's action is Save, so its leave prompt speaks of unsaved changes, not unapplied ones.
+    title: t(leavingConnection ? "v4.leave_title_connection" : "v4.leave_title"),
+    description: t(leavingConnection ? "v4.leave_confirm_connection" : "v4.leave_confirm"),
     confirmLabel: t("v4.leave_action"),
     cancelLabel: t("v4.leave_keep"),
-  }), [confirm, t]);
+  }), [confirm, leavingConnection, t]);
   const confirmCancelVerification = useCallback(() => confirm({
     title: t("v2.verification_cancel_title"),
     description: t("v2.verification_cancel_confirm"),
@@ -1678,6 +1726,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   /** The connection editor's cost plan opens as a dialog only when asked for; a plan prepared on its own (Bowra
    *  import) waits in the save bar so Save and Cancel stay reachable. */
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  /** The verification selector opened from one connection's row: its candidates and preselection. */
+  const [verificationScope, setVerificationScope] = useState<{ providerId: string; name: string; selected: string[] } | null>(null);
+  /** 外部能力 test results for this visit (the probes record no evidence). */
+  const [externalTests, setExternalTests] = useState<Partial<Record<"image" | "search", { state: "running" | "passed" | "failed"; reason?: string }>>>({});
   const [verificationDrafts, setVerificationDrafts] = useState<V2ProviderDraft[] | null>(null);
   const [verificationSelectionOpen, setVerificationSelectionOpen] = useState(false);
   const [verificationBusy, setVerificationBusy] = useState(false);
@@ -2596,10 +2648,13 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   );
   const overviewProviders = useMemo<ModelSettingsOverviewProvider[]>(() => (
     Object.entries(baseConfig.providers).map(([runtimeKey, spec]) => {
-      const mediaCount = Object.values(baseConfig.media?.models || {})
-        .filter((model) => model.provider === runtimeKey).length;
-      const searchCount = Object.values(baseConfig.search?.models || {})
-        .filter((model) => model.provider === runtimeKey).length;
+      const catalog = normModels(spec);
+      const catalogIds = new Set(catalog.map((model) => model.id));
+      const uses = connectionUses(baseConfig, runtimeKey);
+      const fact = (modelId: string, capability: string) => {
+        const entry = data?.verification?.entries.find((item) => item.provider_id === draftProviderIds[runtimeKey] && item.model_id === modelId && item.capability === capability);
+        return { capability, state: entry?.fact_state || "unknown", observedAt: entry?.observed_at ?? null };
+      };
       return {
         runtimeKey,
         providerId: draftProviderIds[runtimeKey],
@@ -2610,14 +2665,21 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           || spec.transports?.chat?.request?.url_template
           || spec.transports?.embed?.request?.url_template
           || "",
-        modelCount: normModels(spec).length + mediaCount + searchCount,
-        models: normModels(spec).map((model) => ({
+        // One count for every model the rows below show (walk W4).
+        modelCount: new Set([...catalogIds, ...uses.map((use) => use.modelId)]).size,
+        models: catalog.map((model) => ({
           id: model.id,
-          capabilities: model.caps.filter((capability) => VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)).map((capability) => {
-            const entry = data?.verification?.entries.find((item) => item.provider_id === draftProviderIds[runtimeKey] && item.model_id === model.id && item.capability === capability);
-            return { capability, state: entry?.fact_state || "unknown", observedAt: entry?.observed_at ?? null };
-          }),
+          capabilities: verifiableModelCapabilities(model.caps).map((capability) => fact(model.id, capability)),
+          alsoUsedFor: uses.filter((use) => use.modelId === model.id).map((use) => use.role),
         })),
+        knowledgeBase: knowledgeBaseOnlyModels(uses, catalogIds).map((model) => ({
+          id: model.id,
+          roles: model.roles,
+          capabilities: model.capabilities.map((capability) => fact(model.id, capability)),
+        })),
+        external: uses.flatMap((use) => (use.role === "image" || use.role === "search") && !catalogIds.has(use.modelId)
+          ? [{ id: use.modelId, kind: use.role }]
+          : []),
         fingerprint: fingerprints[runtimeKey] || spec.fingerprint || null,
         authType: spec.auth?.type,
       };
@@ -2629,8 +2691,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     const candidates = Object.entries(baseConfig.providers).flatMap(([runtimeKey, spec]) => {
       const providerId = draftProviderIds[runtimeKey];
       if (!providerId) return [];
-      return normModels(spec).flatMap((model) =>
-        verifiableModelCapabilities(model.caps).map((capability) => {
+      const catalog = normModels(spec).map((model) => ({ id: model.id, capabilities: verifiableModelCapabilities(model.caps) }));
+      // Knowledge-base models outside the catalog plan from the same catalog-only draft and record under the
+      // signature readiness reads for their role (test_kb_model_verification_plan.py).
+      const knowledgeBase = knowledgeBaseOnlyModels(connectionUses(baseConfig, runtimeKey), new Set(catalog.map((model) => model.id)));
+      return [...catalog, ...knowledgeBase].flatMap((model) =>
+        model.capabilities.map((capability) => {
           const matchingRows = readinessRows.filter((row) =>
             row.provider_id === providerId
             && row.model_id === model.id
@@ -2662,7 +2728,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       || left.providerName.localeCompare(right.providerName)
       || left.modelId.localeCompare(right.modelId)
       || left.capability.localeCompare(right.capability));
-  }, [baseConfig.providers, data?.verification?.entries, draftProviderIds, overviewValidation?.readiness?.rows]);
+  }, [baseConfig, data?.verification?.entries, draftProviderIds, overviewValidation?.readiness?.rows]);
   /** "Verify current assignments" covers the capabilities the assignments use. */
   const verificationCandidates = useMemo(
     () => allVerificationCandidates.filter((candidate) => !sectionsEnabled || candidate.referenced),
@@ -3496,6 +3562,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 
   const dismissVerification = useCallback(() => {
     setPlanDialogOpen(false);
+    setVerificationScope(null);
     setVerificationPlan(null);
     setVerificationBatch(null);
     setVerificationDrafts(null);
@@ -4186,6 +4253,16 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     && model.caps.some((capability) =>
       VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)))));
 
+  /** Why 验证 is off while Save is not (walk W5); other gaps already show as the save-blocked reason. */
+  const verifyBlocked: "api_key_missing" | "no_verifiable_capability" | null = !connect || testEnabled || saveBlocked
+    ? null
+    : connect.authType !== "none" && connect.mode !== "edit" && !connect.apiKey.trim()
+      ? "api_key_missing"
+      : v2Enabled && !connect.models.some((model) => model.id.trim()
+        && model.caps.some((capability) => VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)))
+        ? "no_verifiable_capability"
+        : null;
+
   // ─── render helpers ──────────────────────────────────────────────
   const modelLabel = (m: { providerKey: string; id: string }) => `${m.id}　·　${m.providerKey}`;
   const protoLabel = (ptype: ProviderType) => (
@@ -4242,6 +4319,62 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   }
   const showOverview = LLM_SETTINGS_V4_ENABLED
     && ((!scoped && pageMode === "overview") || (scoped && (section === "index" || section === "external")));
+  /** Saved image-generation and web-search choices, shown by model and connection on 外部能力 (walk W10). */
+  const externalTargets = useMemo(() => {
+    const target = (models: Record<string, MediaModel> | undefined, active: string | undefined) => {
+      const model = active ? models?.[active] : undefined;
+      return model?.provider ? { model: model.real_id || active || "", connection: model.provider } : undefined;
+    };
+    return {
+      image: target(baseConfig.media?.models, baseConfig.media?.active?.image_gen),
+      search: target(baseConfig.search?.models, baseConfig.search?.active?.web_search),
+    };
+  }, [baseConfig.media, baseConfig.search]);
+
+  const testExternalCapability = useCallback(async (kind: "image" | "search") => {
+    const block = kind === "image" ? baseConfig.media : baseConfig.search;
+    const activeName = kind === "image" ? block?.active?.image_gen : block?.active?.web_search;
+    const model = activeName ? block?.models?.[activeName] : undefined;
+    const provider = model?.provider ? baseConfig.providers[model.provider] : undefined;
+    if (!model?.provider || !model.real_id || !provider) return;
+    const capability = t(kind === "image" ? "overview.external_media_image_generation" : "overview.external_web_search");
+    // Image generation and search both run a real billable request; say so before sending.
+    if (!(await confirm({
+      title: t("overview.external_test_title", { capability }),
+      description: t(kind === "image" ? "overview.external_test_body_image" : "overview.external_test_body_search", { model: model.real_id }),
+      confirmLabel: t("overview.external_test"),
+      tone: "primary",
+    }))) return;
+    setExternalTests((current) => ({ ...current, [kind]: { state: "running" } }));
+    try {
+      const result = await verifyDraftProviderCapability(model.provider, {
+        provider_type: (provider.type || "openai_compatible") as VerifyDraftProviderBody["provider_type"],
+        base_url: String(provider.endpoint || provider.base_url || ""),
+        model: model.real_id,
+        capability: kind === "image" ? IMAGE_CAP : SEARCH_CAP,
+        capability_protocol: model.protocol,
+        anthropic_version: typeof provider.anthropic_version === "string" ? provider.anthropic_version : undefined,
+        messages_path: typeof provider.messages_path === "string" ? provider.messages_path : undefined,
+      });
+      // The top-level code only summarises (capability_failed); the failing step names the cause.
+      const failure = result.steps?.find((step) => !step.ok) ?? result;
+      const reasonKey = `verify.${failure.code}`;
+      setExternalTests((current) => ({
+        ...current,
+        [kind]: result.ok
+          ? { state: "passed" }
+          : {
+              state: "failed",
+              reason: t.has(reasonKey)
+                ? t(reasonKey)
+                : t("overview.external_test_failed_code", { code: failure.code, status: failure.http_status ?? "—" }),
+            },
+      }));
+    } catch (cause) {
+      setExternalTests((current) => ({ ...current, [kind]: { state: "failed", reason: userFacingError(cause) } }));
+    }
+  }, [baseConfig.media, baseConfig.search, baseConfig.providers, confirm, t, userFacingError]);
+
   const modelOverview = showOverview ? (
     <ModelSettingsOverview
       onVerifyItem={verifySingleRow}
@@ -4269,8 +4402,36 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       onAddProvider={() => router.push("/team/settings/models/connections/new/")}
       onConnectBowra={data?.features?.bowra_connect ? () => void connectBowra() : undefined}
       onVerifyProvider={(runtimeKey) => {
-        // A connection's Verify checks everything it declares, as the editor's does (audit F11).
-        void planSelectedVerification(allVerificationCandidates.filter((candidate) => candidate.providerId === draftProviderIds[runtimeKey]));
+        // A connection's Verify offers everything it declares, as the editor's does (audit F11), and preselects only
+        // what needs verifying; everything when nothing does (walk W3).
+        const providerId = draftProviderIds[runtimeKey];
+        const candidates = allVerificationCandidates.filter((candidate) => candidate.providerId === providerId);
+        if (!providerId || !candidates.length) return;
+        const needing = candidates.filter((candidate) => candidate.factState !== "verified" && candidate.factState !== "aged");
+        setVerificationScope({ providerId, name: runtimeKey, selected: (needing.length ? needing : candidates).map(verificationCandidateKey) });
+        setVerificationSelectionOpen(true);
+      }}
+      onVerifyCapability={(runtimeKey, modelId, capability) => {
+        // A list label that needs attention verifies just that item, straight to the cost confirmation (walk W2).
+        const providerId = draftProviderIds[runtimeKey];
+        const candidate = allVerificationCandidates.find((item) => item.providerId === providerId && item.modelId === modelId && item.capability === capability);
+        if (!providerId || !candidate) return;
+        setVerificationScope({ providerId, name: runtimeKey, selected: [verificationCandidateKey(candidate)] });
+        setVerificationSelectionOpen(true);
+        void planSelectedVerification([candidate]);
+      }}
+      externalTargets={externalTargets}
+      externalTests={externalTests}
+      onTestExternal={(kind) => void testExternalCapability(kind)}
+      useLinks={{
+        assignments: {
+          href: modelSettingsOverviewPath("assignments"),
+          open: () => {
+            setOverviewTab("assignments");
+            router.replace(modelSettingsOverviewPath("assignments"), { scroll: false });
+          },
+        },
+        external: { href: externalEntry, open: () => router.push(externalEntry) },
       }}
       onEditProvider={(key) => router.push(`/team/settings/models/connections/edit/?id=${encodeURIComponent(draftProviderIds[key] || "")}`)}
       onRetryReadiness={() => void refreshOverviewReadiness(baseConfig, data?.version ?? 0, v2Enabled)}
@@ -4609,7 +4770,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                   onClick={() => void reloadLatestKeepingDraft()}>{t("sections.reload_keep_draft")}</button> : null}
               </> : undefined}
               dirty={connectionDirty || isDirty}
-              saveEnabled={saveEnabled} saveBlocked={saveBlocked} testEnabled={testEnabled}
+              saveEnabled={saveEnabled} saveBlocked={saveBlocked} testEnabled={testEnabled} verifyBlocked={verifyBlocked}
+              uses={connect.mode === "edit" && connect.origKey ? connectionUses(baseConfig, connect.origKey) : undefined}
+              useLinks={{
+                assignments: { href: modelSettingsOverviewPath("assignments"), open: () => router.push(modelSettingsOverviewPath("assignments")) },
+                external: { href: modelExternalCapabilitiesPath(), open: () => router.push(modelExternalCapabilitiesPath()) },
+              }}
               deploymentMode={data?.features?.deployment_mode}
               parameterProfiles={data?.features?.model_runtime_parameters ? data.parameter_profiles : undefined}
               previewKey={JSON.stringify({ connect, version: data?.version })}
@@ -5124,7 +5290,11 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 
       {verificationSelectionOpen ? (
         <VerificationSelector
-          candidates={verificationCandidates}
+          key={verificationScope ? `${verificationScope.providerId}:${verificationScope.selected.join(",")}` : "assignments"}
+          candidates={verificationScope ? allVerificationCandidates.filter((candidate) => candidate.providerId === verificationScope.providerId) : verificationCandidates}
+          initialSelected={verificationScope?.selected}
+          title={verificationScope ? t("v2.selection_title_connection", { name: verificationScope.name }) : undefined}
+          description={verificationScope ? t("v2.selection_body_connection") : undefined}
           error={error}
           busy={verificationBusy}
           onPlan={(selected) => void planSelectedVerification(selected)}
@@ -5534,6 +5704,11 @@ export function ConnectPanel(props: {
   deploymentMode?: "local" | "saas";
   /** **Sole** reason Save is disabled (same source as saveEnabled; see `saveBlockReason`). */
   saveBlocked: SaveBlockReason | null;
+  /** Why Verify is disabled while Save is allowed. */
+  verifyBlocked?: "api_key_missing" | "no_verifiable_capability" | null;
+  /** What the saved connection also serves outside its catalog, and where those uses are changed (design W4). */
+  uses?: ConnectionUse[];
+  useLinks?: { assignments: ConnectionUseLink; external: ConnectionUseLink };
   testEnabled: boolean;
   capLabel: (c: string) => string;
   onPatch: (p: Partial<ConnectDraft>) => void;
@@ -5564,6 +5739,7 @@ export function ConnectPanel(props: {
 }) {
   const tKeyField = useTranslations("provider_key_field");
   const locale = useLocale();
+  const chatModel = props.draft.models.find((model) => model.caps.some((capability) => capability === "chat" || capability === "tool" || capability === "vision"));
   const {
     t,
     draft,
@@ -5576,6 +5752,9 @@ export function ConnectPanel(props: {
     capabilityStates,
     verifyStatus,
     rowFailures,
+    verifyBlocked,
+    uses = [],
+    useLinks,
     dirty = false,
     saveEnabled,
     deploymentMode,
@@ -5803,6 +5982,7 @@ export function ConnectPanel(props: {
               the single most common setup mistake, and the adapter's appended
               path is invisible in the form. Show the URL that will actually be
               called so the answer needs no docs. */}
+          {/* The preview is the chat request: hide it when the declared models serve no chat (walk W4). */}
           {(
             draft.protocol === "custom_http"
               ? Boolean(
@@ -5813,7 +5993,7 @@ export function ConnectPanel(props: {
                   ),
                 )
               : Boolean(draft.baseUrl.trim())
-          ) ? (
+          ) && (draft.models.length === 0 || chatModel) ? (
             <span className="hint mono" data-testid="provider-effective-endpoint">
               {t("connect.effective_endpoint")}
               {" "}
@@ -5821,7 +6001,7 @@ export function ConnectPanel(props: {
                 draft.protocol,
                 draft.baseUrl,
                 draft.messagesPath,
-                draft.models[0]?.deployment || draft.models[0]?.id,
+                (chatModel || draft.models[0])?.deployment || (chatModel || draft.models[0])?.id,
                 draft.apiVersion,
                 draft.customChatUrl,
               )}
@@ -6396,6 +6576,20 @@ export function ConnectPanel(props: {
           ) : null}
           {pureImage ? <div className="unver-note legacy-mset-unver-neutral"><Info size={12} /> <span><b>{t("connect.pure_image_title")}</b>{t("connect.pure_image_note")}</span></div> : null}
           {pureSearch ? <div className="unver-note legacy-mset-unver-neutral"><Info size={12} /> <span><b>{t("connect.pure_search_title")}</b>{t("connect.pure_search_note")}</span></div> : null}
+          {uses.length ? (
+            <section className="connect-uses" aria-labelledby="mset-connect-uses">
+              <b id="mset-connect-uses">{t("connect.uses_title")}</b>
+              <p className="hint">{t("connect.uses_body")}</p>
+              <ul>
+                {uses.map((use) => <li key={`${use.role}:${use.modelId}`}><code translate="no">{use.modelId}</code> · {t(`overview.${connectionUseLabelKey(use.role)}`)}</li>)}
+              </ul>
+              {useLinks ? <div className="connect-uses-links">
+                {([["assignments", uses.some((use) => isKnowledgeBaseRole(use.role)), "overview.uses_open_assignments"], ["external", uses.some((use) => !isKnowledgeBaseRole(use.role)), "overview.uses_open_external"]] as const)
+                  .filter(([, shown]) => shown)
+                  .map(([target, , labelKey]) => <a key={target} className="overview-uses-link" href={appPath(useLinks[target].href)} onClick={(event) => { event.preventDefault(); useLinks[target].open(); }}>{t(labelKey)}</a>)}
+              </div> : null}
+            </section>
+          ) : null}
         </div>
         {/* v2 results live on the capability chips and in the verification panel; this v1 summary would
             repeat them, and during a run it claimed capability checks were not performed. */}
@@ -6417,7 +6611,9 @@ export function ConnectPanel(props: {
         dirty={dirty} guard={false} saving={saving}
         message={<>        {saveError ? (
           <span className="save-error" role="alert">{saveError}</span>
-        ) : verifyStatus ? verifyStatus : saveBlocked ? (
+        ) : verifyStatus ? verifyStatus : !saveBlocked && verifyBlocked ? (
+          <span className="save-blocked" role="status">{t(`connect.verify_blocked_${verifyBlocked}`)}</span>
+        ) : saveBlocked ? (
           <span className="save-blocked" id="connect-save-blocked" role="status">
             {saveBlocked === "name_missing"
               // The field is "来源标识" in v2, "名称" in v1 — reasons must use the same name as the field,
@@ -6428,11 +6624,11 @@ export function ConnectPanel(props: {
               : t(`connect.blocked_${saveBlocked}`)}
           </span>
         ) : null}
-{!saveError && !verifyStatus && !saveBlocked ? t("sections.connection_actions") : null}</>}
+{!saveError && !verifyStatus && !saveBlocked && !verifyBlocked ? t("sections.connection_actions") : null}</>}
         saveDisabled={!saveEnabled}
         saveLabel={t("common.save")} discardLabel={t("common.cancel")}
         onSave={onSave} onDiscard={onCancel}
-        actions={<Button type="button" disabled={busy || !testEnabled || draft.testing} onClick={onTest}>
+        actions={<Button type="button" disabled={busy || !testEnabled || draft.testing} title={verifyBlocked ? t(`connect.verify_blocked_${verifyBlocked}`) : undefined} onClick={onTest}>
           <Bolt size={13} /> {v2 ? t("overview.verify_one") : t("connect.test")}
         </Button>}
       />

@@ -87,12 +87,12 @@ def test_builtin_catalog_peer_only_set_pinned() -> None:
         "settings-space-preferences",
         "settings-team-administration",
     }
-    plugin_skills = {"shopify-analysis", "shopify-content-optimization"}
-    assert len(peer_only) == 28, sorted(peer_only)
+    plugin_skills = {"shopify-analysis", "shopify-content-optimization", "notion-research-documentation", "n8n-workflows"}
+    assert len(peer_only) == 30, sorted(peer_only)
     assert "python_sandbox" in peer_only
     assert system_agent_skills <= peer_only, sorted(system_agent_skills - peer_only)
     assert plugin_skills <= peer_only, sorted(plugin_skills - peer_only)
-    # After batch 3 removed bi-concept-resolve, its absence is tautological; len==28 above guards reintroduction. Check the set shape here.
+    # After batch 3 removed bi-concept-resolve, its absence is tautological; len==30 above guards reintroduction. Check the set shape here.
     assert "analyst-framework" not in peer_only  # Lead routing signal; keep visible.
     analyst_skills = peer_only - {"python_sandbox"} - system_agent_skills - plugin_skills
     assert len(analyst_skills) == 17, sorted(analyst_skills)

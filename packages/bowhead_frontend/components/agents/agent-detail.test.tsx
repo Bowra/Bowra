@@ -254,7 +254,7 @@ describe("AgentDetail", () => {
     } as never);
     renderIntl(<AgentDetail />);
 
-    const panel = (await screen.findByText("这个智能体的已发布版本或安全状态需要处理后才能使用。请联系负责人或团队管理员检查。")).closest("section") as HTMLElement;
+    const panel = (await screen.findByText("这个智能体的已发布版本或安全状态需要处理后才能使用。请联系所有者或团队管理员检查。")).closest("section") as HTMLElement;
     expect(within(panel).queryByRole("link")).toBeNull();
     expect(within(panel).queryByRole("button")).toBeNull();
     // The execution fact says why, not "hire to use" next to a missing hire button.

@@ -33,6 +33,7 @@ import {
 import type { StepConfirmation, StepConfirmationOutcome } from "@/lib/turn-store";
 
 import { EmailSendPreview, McpArgumentList, ShopifyContentPreview } from "./previews";
+import { TrialConfirmationLine } from "../agent-trial-chat";
 
 export interface ToolConfirmationCardProps {
   confirmation: StepConfirmation;
@@ -315,6 +316,8 @@ function PendingConfirmation({ confirmation, agentName }: ToolConfirmationCardPr
         {headline}
       </p>
       <p className="tcf-risk">{risk}</p>
+      {/* An Owner draft trial is not a sandbox: say so where the Owner confirms a real effect. */}
+      <TrialConfirmationLine />
       {state.status === "loading" ? <p className="tcf-note">{t("loadingDetails")}</p> : null}
       {state.status === "gone" ? <p className="tcf-note">{t("detailsGone")}</p> : null}
       {state.status === "failed" ? (

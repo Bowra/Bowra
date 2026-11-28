@@ -54,7 +54,7 @@ describe("toolDisplay", () => {
     const withGoogle = builtinTools({ googleWorkspace: true }).map((c) => c.ref);
     // Criterion: customer can perceive this happening; **not** author-side NATIVE_ALLOWLIST reuse.
     // Report-write/destructive/nonanalyst tools excluded from author surface still belong in display.
-    for (const shown of ["write_report", "remove_chart", "bi_query", "send_email", "get_current_user", "template_document_submit"]) {
+    for (const shown of ["write_report", "remove_chart", "bi_query", "send_email", "get_current_user", "template_document_submit", "wecom_notify"]) {
       expect(refs, `${shown} 该陈列却没有`).toContain(shown);
     }
     // Since 93e9c47db only entries declared `kind: "tool"` are listed; protocol and
@@ -70,9 +70,9 @@ describe("toolDisplay", () => {
     // Includes the current-user reader; Google delivery Tools require the connection.
     expect(GOOGLE_DELIVERY_TOOL_REFS.size).toBe(3);
     expect(caps.map((tool) => tool.ref)).toContain("get_current_user");
-    expect(caps.length).toBe(41);
+    expect(caps.length).toBe(42);
     for (const ref of GOOGLE_DELIVERY_TOOL_REFS) expect(withGoogle).toContain(ref);
-    expect(withGoogle.length).toBe(44);
+    expect(withGoogle.length).toBe(45);
   });
 
   it("lists system capabilities apart from the selectable Tools, named in every locale", () => {

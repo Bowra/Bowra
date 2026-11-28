@@ -20,6 +20,16 @@ export const RESULTS_EXPLORER_SEARCH_DEBOUNCE_MS = 200;
  * entry: directly when it is the version shown, otherwise through the key the
  * server resolved the anchor to.
  */
+/**
+ * A locate's answer and why it has no item: the server did not find it, a newer request or a scope
+ * change replaced this one (it says nothing about the item), the request failed, or locating is off.
+ * Only "not_found" means the item is missing; the 116 not-found view after a deck save (1.7.76) could
+ * come from any of them.
+ */
+export type LocateResult =
+  | { item: ResultItemDTO; reason: "found" }
+  | { item: null; reason: "not_found" | "superseded" | "failed" | "unavailable" };
+
 export function locatedResultItem(response: ResultsQueryResponse, key: string): ResultItemDTO | null {
   return response.items.find((item) => resultItemMatchesKey(item, key))
     ?? (response.resolved_current_key
@@ -124,6 +134,7 @@ function filtersKey(filters: ResultsFiltersDTO): string {
     filters.primary,
     filters.secondary,
     filters.technical_only ? "1" : "0",
+    filters.turn_id ?? "",
   ].join(":");
 }
 
@@ -188,7 +199,8 @@ export function useResultsQuery({
     primary: filters.primary,
     secondary: filters.secondary,
     technical_only: filters.technical_only,
-  }), [filters.lens, filters.primary, filters.secondary, filters.technical_only]);
+    ...(filters.turn_id ? { turn_id: filters.turn_id } : {}),
+  }), [filters.lens, filters.primary, filters.secondary, filters.technical_only, filters.turn_id]);
   const activeRequestKey = `${normalizedQuery}\n${filtersKey(normalizedFilters)}`;
   const scopeKey = JSON.stringify([scope, sessionId, entryId]);
   const [state, setState] = useState<QueryState>(EMPTY_STATE);
@@ -519,13 +531,13 @@ export function useResultsQuery({
     }
   }, [enabled, loadVisible, mergeCatalog, purgeScope, requestIsCurrent, scope, scopeKey, sessionId]);
 
-  const locate = useCallback(async (key: string): Promise<ResultItemDTO | null> => {
-    if (!enabled || !sessionId) return null;
+  const locateResult = useCallback(async (key: string): Promise<LocateResult> => {
+    if (!enabled || !sessionId) return { item: null, reason: "unavailable" };
     const cached = catalogScopeKeyRef.current === scopeKey
       ? catalogRef.current.get(key)
         ?? Array.from(catalogRef.current.values()).find((item) => resultItemMatchesKey(item, key))
       : null;
-    if (cached) return cached;
+    if (cached) return { item: cached, reason: "found" };
     locateControllerRef.current?.abort();
     const controller = new AbortController();
     locateControllerRef.current = controller;
@@ -549,17 +561,22 @@ export function useResultsQuery({
       if (
         locateGenerationRef.current !== generation
         || !requestIsCurrent(controller, requestedScope)
-      ) return null;
+      ) return { item: null, reason: "superseded" };
       mergeCatalog(response.items);
-      return locatedResultItem(response, key);
+      const item = locatedResultItem(response, key);
+      return item ? { item, reason: "found" } : { item: null, reason: "not_found" };
     } catch (error) {
       if (isAbort(error) || locateGenerationRef.current !== generation
-        || !requestIsCurrent(controller, requestedScope)) return null;
+        || !requestIsCurrent(controller, requestedScope)) return { item: null, reason: "superseded" };
       const resultsError = asResultsError(error);
       if (resultsError.purgesScope) purgeScope();
-      return null;
+      return { item: null, reason: "failed" };
     }
   }, [enabled, mergeCatalog, purgeScope, requestIsCurrent, scope, scopeKey, sessionId]);
+  const locate = useCallback(
+    async (key: string): Promise<ResultItemDTO | null> => (await locateResult(key)).item,
+    [locateResult],
+  );
 
   const locatePage = useCallback(async (
     key: string,
@@ -803,8 +820,9 @@ export function useResultsQuery({
     loadPrevious,
     refreshBase,
     locate,
+    locateResult,
     locatePage,
     checkChanges,
     acceptChanges,
-  }), [acceptChanges, catalogItems, checkChanges, displayedState, loadNext, loadPrevious, locate, locatePage, refreshBase, retry, scopedState, targetPending]);
+  }), [acceptChanges, catalogItems, checkChanges, displayedState, loadNext, loadPrevious, locate, locatePage, locateResult, refreshBase, retry, scopedState, targetPending]);
 }

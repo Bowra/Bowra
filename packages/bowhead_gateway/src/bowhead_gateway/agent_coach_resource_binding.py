@@ -20,18 +20,21 @@ async def validate_resource_binding(resources: AgentCoachResources, *, target: d
     seen = set()
     for item in context["resources"]:
         reference = item["reference"]
-        identity = (reference["kind"], reference.get("source_kind"), reference["id"])
+        kind = reference["kind"]
+        identity = (kind, reference.get("source_kind"), reference["id"])
         if identity in seen:
             raise ValueError("resource_binding_duplicate")
         seen.add(identity)
         result = await resources.get(reference=reference)
         if not result.get("ok"):
-            raise ValueError("resource_binding_unavailable_or_changed")
+            raise ValueError("resource_binding_plugin_unavailable_or_changed" if kind == "capability" else "resource_binding_unavailable_or_changed")
         detail = result["resource"]
-        kind = reference["kind"]
         if kind == "tool":
             selected = detail.get("can_select") is True and reference["id"] in definition.get("tool_refs", [])
         elif kind == "capability":
+            if detail.get("can_select") is not True:
+                reason = "disabled_by_me" if detail.get("restriction") == "disabled_by_me" else "not_ready"
+                raise ValueError(f"resource_binding_plugin_{reason}")
             selected = reference["id"] in definition.get("capability_ids", [])
         else:
             # A Skill not offered for selection has no exact grant to copy, but a candidate may still keep it.

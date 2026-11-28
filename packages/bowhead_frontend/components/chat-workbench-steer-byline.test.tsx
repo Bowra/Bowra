@@ -14,6 +14,9 @@ const canvasState = {
   canvasId: "cv_1" as string | null,
   title: null as string | null,
   streamingSectionIds: new Set<string>(),
+  // Real `CanvasState` fields the live report card reads (chat running state R2.1).
+  bufferedLeadSectionIds: new Set<string>(),
+  turnPatched: null,
 };
 
 vi.mock("@/lib/canvas-store", async (importOriginal) => ({

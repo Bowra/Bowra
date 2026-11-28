@@ -7,6 +7,7 @@ import enMessages from "@/messages/en-US.json";
 import zhMessages from "@/messages/zh-CN.json";
 import { ArtifactPreview } from "./artifact-preview";
 import { readPresentationHandoff } from "./presentation-edit/handoff";
+import { setDocxInlineEditCapabilityForTest } from "@/lib/use-docx-inline-edit-capability";
 
 const { pdfGetDocument } = vi.hoisted(() => ({
   pdfGetDocument: vi.fn(),
@@ -15,6 +16,10 @@ const { pdfGetDocument } = vi.hoisted(() => ({
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   getDocument: pdfGetDocument,
+}));
+
+vi.mock("mammoth", () => ({
+  convertToHtml: vi.fn().mockResolvedValue({ value: "<p>Reading view text</p>", messages: [] }),
 }));
 
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({
@@ -95,6 +100,7 @@ vi.mock("next-intl", () => ({
 
 afterEach(() => {
   cleanup();
+  setDocxInlineEditCapabilityForTest(null);
   pdfGetDocument.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -674,6 +680,69 @@ describe("ArtifactPreview", () => {
     fireEvent.click(screen.getByRole("button", { name: "referenced_page_label" }));
     expect(onToggleSlide).toHaveBeenLastCalledWith(expect.objectContaining({ fileId: "art_deck" }), 3, { stay: false });
     expect(screen.getAllByRole("button", { name: "reference_page_label" })).toHaveLength(3);
+  });
+
+  describe("Word pages (docx inline edit design §5.1)", () => {
+    const docx = (onOpenFailed?: () => void) => (
+      <ArtifactPreview
+        fileId="art_docx"
+        filename="review.docx"
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        profile="docx"
+        preview={null}
+        downloadHref="/api/v1/files/art_docx"
+        onOpenFailed={onOpenFailed}
+      />
+    );
+    const pagesUrl = "/api/v1/files/art_docx/representations/docx-pdf";
+
+    function stubFetch(pages: () => Promise<Response>) {
+      const fetchMock = vi.fn((url: string) => url === pagesUrl ? pages() : Promise.resolve(new Response(new Uint8Array([80, 75]), { status: 200 })));
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("shows the reading view while the pages render, then the pages", async () => {
+      setDocxInlineEditCapabilityForTest(true);
+      pdfGetDocument.mockReturnValue({
+        promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({ getViewport: () => ({ width: 10, height: 10 }), render: () => ({ promise: Promise.resolve() }) }) }),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      });
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+      let release: (response: Response) => void = () => undefined;
+      const fetchMock = stubFetch(() => new Promise<Response>((resolve) => { release = resolve; }));
+      render(docx());
+
+      expect(await screen.findByTestId("artifact-docx-pages-pending")).toHaveTextContent("document_pages_rendering");
+      expect(await screen.findByText("Reading view text")).toBeInTheDocument();
+      release(new Response(new Uint8Array([37, 80, 68, 70]), { status: 200 }));
+      expect(await screen.findByTestId("artifact-preview-pdf")).toBeInTheDocument();
+      await waitFor(() => expect(pdfGetDocument).toHaveBeenCalledTimes(1));
+      expect(screen.queryByTestId("artifact-docx-pages-pending")).toBeNull();
+      expect(fetchMock.mock.calls.filter(([url]) => url === pagesUrl)).toHaveLength(1);
+    });
+
+    it("keeps the reading view when the pages cannot be rendered", async () => {
+      setDocxInlineEditCapabilityForTest(true);
+      const onOpenFailed = vi.fn();
+      stubFetch(() => Promise.resolve(new Response(null, { status: 503 })));
+      render(docx(onOpenFailed));
+
+      expect(await screen.findByText("Reading view text")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByTestId("artifact-docx-pages-pending")).toBeNull());
+      expect(screen.getByText("Reading view text")).toBeInTheDocument();
+      expect(pdfGetDocument).not.toHaveBeenCalled();
+      expect(onOpenFailed).not.toHaveBeenCalled();
+    });
+
+    it("asks for no pages while the switch is off", async () => {
+      const fetchMock = stubFetch(() => Promise.resolve(new Response(null, { status: 503 })));
+      render(docx());
+
+      expect(await screen.findByText("Reading view text")).toBeInTheDocument();
+      expect(screen.queryByTestId("artifact-docx-pages-pending")).toBeNull();
+      expect(fetchMock.mock.calls.some(([url]) => url === pagesUrl)).toBe(false);
+    });
   });
 
   it("reports an unavailable PDF response without misclassifying it as corrupt", async () => {

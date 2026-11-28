@@ -16,6 +16,10 @@ import { selectedSkillsForStart } from "@/lib/composer-selected-skills";
 import { composerAgentHandoffAdmitted, takeComposerPrefill, useComposerAgentUseHandoff } from "@/lib/composer-handoff";
 import { resolveAgentReferenceDocument } from "@/lib/agent-reference-document";
 import { randomUuid } from "@/lib/random-id";
+import { useAgentTrialChatController, type TrialHandoff } from "@/components/chat/use-agent-trial-chat-controller";
+import { clearNewChatDraftForTrial } from "@/lib/agent-trial-composer";
+import { AgentTrialBand, AgentTrialChatContext, TrialFirstQuestions } from "@/components/chat/agent-trial-chat";
+import { AgentTrialLayoutContext } from "@/components/agents/agent-trial-layout";
 import { useAgentDraftUrl } from "@/lib/use-agent-draft-url";
 import { agentCreationDraftId } from "@/lib/agent-creation-handoff";
 import { useSessionSettleRefresh } from "@/lib/use-session-settle-refresh";
@@ -31,7 +35,7 @@ import { documentOpenItems } from "@/components/canvas/document-open-items";
 import { documentCanvasScopeKey, type DocumentCanvasScope } from "@/lib/document-canvas-navigation";
 import { documentCanvasOpen, documentCanvasVersion, subscribeDocumentCanvas } from "@/lib/document-canvas-events";
 import { subscribeDocumentCanvasRequests } from "@/lib/document-canvas-requests";
-import { subscribeCoachOperationRequests } from "@/lib/coach-operation-requests";
+import { recordedChangePointer, subscribeCoachOperationRequests, type CoachReceiptScope } from "@/lib/coach-operation-requests";
 import { subscribeCoachAlignmentContinue } from "@/lib/coach-alignment-cards";
 import { COACH_AGENT_ID, composerAcceptsContinue, shouldSendStagedContinue } from "@/lib/coach-alignment-continue";
 import { DocumentDraftCanvasObject, type DocumentDraftCanvasPublication } from "@/components/canvas/document-draft-canvas-object";
@@ -75,8 +79,9 @@ import { SubagentManualDraftBootstrap } from "@/components/canvas/sections/subag
 import { SubagentDraftEntry } from "@/components/canvas/sections/subagent-draft-entry";
 import { type ManualSubagentDraftDetail } from "@/lib/subagent-drafts-api";
 import { CoachResourceEditor } from "@/components/canvas/coach-resource-editor";
-import { captureCoachCanvasBinding, CoachCanvasNotReadyError } from "@/lib/coach-canvas-target";
-import { agentEditorsToReload, useCoachResourceEditors } from "@/lib/use-coach-resource-editors";
+import { captureCoachCanvasBinding, CoachCanvasNotReadyError, type CoachEditorPort } from "@/lib/coach-canvas-target";
+import { agentEditorForOperationOpen, agentEditorsToReload, CoachOpenAgentEditorsContext, openAgentEditorIds, useCoachResourceEditors } from "@/lib/use-coach-resource-editors";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
 import { coachResourceOpens, coachResourcesVersion, subscribeCoachResources } from "@/lib/coach-resource-editors";
 import { CoachOperationView, type CoachOperationTarget } from "@/components/canvas/coach-operation-view";
 import { useAppRouter } from "@/lib/use-app-router";
@@ -84,7 +89,7 @@ import { agentCaseProposalPath } from "@/lib/agent-case-proposal-path";
 import { CoachReceiptScopeContext } from "@/lib/coach-receipt-scope";
 import { maySelectCoachOperation, type CoachOperationIntent } from "@/lib/coach-operation-selection";
 import { useCoachOperationViews } from "@/lib/use-coach-operation-views";
-import { coachOperationOpens, coachOperationsVersion, subscribeCoachOperations, type CoachOperationOpen } from "@/lib/coach-operations";
+import { coachChangeEffects, coachOperationOpens, coachOperationsVersion, subscribeCoachOperations, type CoachOperationOpen } from "@/lib/coach-operations";
 import { useAgentCanvasObjects } from "@/lib/use-agent-canvas-objects";
 import { AgentDraftCanvasObject } from "@/components/canvas/sections/agent-draft-canvas-object";
 import { SubagentIntentCard } from "@/components/canvas/sections/subagent-intent-card";
@@ -670,6 +675,7 @@ function _toArchivedTurn(
       mime: attachment.mime,
       ...(attachment.selected_context ? { selectedContext: attachment.selected_context } : {}),
       ...(attachment.presentation_selection ? { presentationSelection: attachment.presentation_selection } : {}),
+      ...(attachment.document_selection ? { documentSelection: attachment.document_selection } : {}),
       ...(attachment.reference_kind === "result"
         ? { referenceKind: "result" as const }
         : {}),
@@ -715,6 +721,7 @@ function _toAttachmentRef(
     mime: attachment.mime,
     ...(attachment.selected_context ? { selectedContext: attachment.selected_context } : {}),
     ...(attachment.presentation_selection ? { presentationSelection: attachment.presentation_selection } : {}),
+    ...(attachment.document_selection ? { documentSelection: attachment.document_selection } : {}),
     ...(attachment.reference_kind === "result"
       ? { referenceKind: "result" as const }
       : {}),
@@ -2495,6 +2502,10 @@ function CanvasHomeInner() {
       setSessionChatExecution(detail.chat_execution
         ? { sessionId: sid, bootstrap: detail.chat_execution }
         : null);
+      // An Owner draft trial reopened from 试用记录 or a reload: the chat continues in trial mode.
+      setSessionTrial(detail.session.origin === "agent_trial"
+        ? { sessionId: sid, agentId: detail.session.trial_agent_id ?? null }
+        : null);
       const { payload, lastTurn, historyTurns } =
         _buildSessionHydrationBase(detail, sid);
       if (!isCurrentHydration(hydrationEpoch, sid)) return;
@@ -2636,8 +2647,61 @@ function CanvasHomeInner() {
   const operationTurnIntents = useRef(new Map<string, CoachOperationIntent>());
   const multipleCanvasEnabled = authSession?.me?.capabilities?.configuration_canvas === true;
   const agentCanvas = useAgentCanvasObjects(canvasScopeKey, multipleCanvasEnabled);
-  const resourceCanvas = useCoachResourceEditors(canvasScopeKey && activeSessionId && multipleCanvasEnabled
-    ? JSON.stringify([canvasScopeKey, activeSessionId]) : null);
+  // Owner draft trial (trial-tech-design §7): the trial chat beside the Agent editor in the Canvas. The hand-off
+  // of a new trial chat, and the opened session when it is a trial (session DTO `origin`).
+  const [trialHandoff, setTrialHandoff] = useState<TrialHandoff | null>(null);
+  const [sessionTrial, setSessionTrial] = useState<{ sessionId: string; agentId: string | null } | null>(null);
+  // The editor can open before the first message: the trial keeps one Canvas scope for its whole life.
+  const trialCanvasReady = Boolean(multipleCanvasEnabled && canvasScopeKey && authSession?.me?.id && authSession.me.team_id && activeWorkspaceId);
+  const trialEditorPortRef = useRef<(agentId: string) => CoachEditorPort | null>(() => null);
+  const openTrialEditorRef = useRef<(agentId: string) => void>(() => undefined);
+  const trialChat = useAgentTrialChatController({
+    enabled: authSession?.me?.capabilities?.agent_draft_trial === true && referenceInputEnabled,
+    handoff: trialHandoff,
+    activeSessionId,
+    sessionTrial,
+    workspaceId: activeWorkspaceId ?? null,
+    editorPort: (agentId) => trialEditorPortRef.current(agentId),
+    openEditor: trialCanvasReady ? (agentId) => openTrialEditorRef.current(agentId) : null,
+    navigate: (path) => router.push(path),
+    resetKey: composerResetKey,
+    // The same admission the hand-off gets in the new chat (composerAgentHandoffAdmitted).
+    startUseAvailable: authSession?.me?.capabilities?.composer?.agent_start_use === true,
+  });
+  const trialChatActive = trialChat.value !== null;
+  // A new trial starts with an empty composer (F26): the new-chat draft from earlier is discarded once per
+  // hand-off, and the home composer remounts to show the empty input.
+  const [trialComposerGeneration, setTrialComposerGeneration] = useState(0);
+  const trialDraftCleared = useRef<TrialHandoff | null>(null);
+  useEffect(() => {
+    if (!trialHandoff || trialDraftCleared.current === trialHandoff || activeSessionId || !composerDraftPersistenceScope) return;
+    trialDraftCleared.current = trialHandoff;
+    void clearNewChatDraftForTrial(composerDraftPersistenceScope).then((cleared) => {
+      if (cleared) setTrialComposerGeneration((value) => value + 1);
+    });
+  }, [activeSessionId, composerDraftPersistenceScope, trialHandoff]);
+  const resourceCanvasSession = trialChat.scopeKey ?? activeSessionId;
+  const resourceCanvas = useCoachResourceEditors(canvasScopeKey && resourceCanvasSession && multipleCanvasEnabled
+    ? JSON.stringify([canvasScopeKey, resourceCanvasSession]) : null);
+  trialEditorPortRef.current = (agentId) => resourceCanvas.objects.find((object) => object.pointer.reference.kind === "agent"
+    && object.pointer.reference.id === agentId)?.editorRef.current ?? null;
+  // 编辑草稿 reveals the Canvas again when a narrow layout shows the chat only.
+  const [trialEditorReveal, setTrialEditorReveal] = useState(0);
+  const openTrialEditor = (agentId: string) => {
+    if (!authSession?.me?.id || !authSession.me.team_id || !activeWorkspaceId) return;
+    canvasOpenIntentRef.current += 1;
+    documentCanvas.deselect();
+    operationCanvas.select(null);
+    settingsCanvas.deselect();
+    setSubagentCardOpen(false);
+    setCanvasResultsSelected(false);
+    showDraftInUrl(null);
+    // Before the first message there is no session yet; the editor reads the Agent without one.
+    resourceCanvas.open({ requestId: randomUuid(), turnId: runner.turnId ?? "", userId: authSession.me.id, teamId: authSession.me.team_id,
+      workspaceId: activeWorkspaceId, sessionId: activeSessionId ?? "", reference: { kind: "agent", id: agentId, revision: "current" }, parent: null }, true);
+    setTrialEditorReveal((value) => value + 1);
+  };
+  openTrialEditorRef.current = openTrialEditor;
   const operationCanvas = useCoachOperationViews(canvasScopeKey && activeSessionId && multipleCanvasEnabled
     ? JSON.stringify([canvasScopeKey, activeSessionId]) : null);
   const documentScope = useMemo<DocumentCanvasScope | null>(() => multipleCanvasEnabled && canvasScopeKey && activeSessionId
@@ -2734,7 +2798,22 @@ function CanvasHomeInner() {
   const activeDraftChatBinding = draftChatEditEnabled ? selectedAgentObject?.binding ?? null : null;
   const draftChatPresentationConnected = Boolean(activeDraftChatBinding)
     && draftChatSubmissionError !== selectedAgentObject?.payload.draft_id;
+  // Starting from the Agent page opens the editor beside the trial on wide screens; narrow screens start with the
+  // chat and open the editor full screen on 编辑草稿 (canvas ⑫).
+  const trialEditorOpened = useRef<string | null>(null);
+  const trialEditorAgentId = trialChat.value?.agentId ?? null;
+  useEffect(() => {
+    if (!trialEditorAgentId || !trialCanvasReady || trialChat.origin !== "handoff" || !trialChat.scopeKey) return;
+    if (trialEditorOpened.current === trialChat.scopeKey) return;
+    trialEditorOpened.current = trialChat.scopeKey;
+    if (window.matchMedia?.("(min-width: 1024px)").matches) openTrialEditor(trialEditorAgentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per trial
+  }, [trialEditorAgentId, trialCanvasReady, trialChat.origin, trialChat.scopeKey]);
   const captureCanvasSubmissionWire = (actionKind: "start" | "steer", hasReferenceInput: boolean, documentRevisionTarget?: DocumentRevisionTarget, bindDraft = true): ComposerSubmissionWireSnapshot | null => {
+    // A trial message is an ordinary @ start: no plan mode and no editor binding, even with the Agent editor open.
+    if (trialChatActive && hasReferenceInput && !documentRevisionTarget) {
+      return actionKind === "start" ? captureComposerSubmissionWireSnapshot(activeSessionId, false, null) : null;
+    }
     if (documentRevisionTarget) {
       if (actionKind !== "start" || hasReferenceInput || documentRevisionTarget.session_id !== activeSessionId) return null;
       return captureComposerSubmissionWireSnapshot(activeSessionId, authSession?.me?.capabilities?.planning === true, null);
@@ -3321,6 +3400,19 @@ function CanvasHomeInner() {
     const keepStagedText = () => {
       if (pendingAgentUse.text) setExternalComposerPrefill(pendingAgentUse.text);
     };
+    // Owner draft trial: the frozen draft is bound directly (the catalog lists released Agents only).
+    if (pendingAgentUse.trial) {
+      const admitted = authSession?.me?.capabilities?.agent_draft_trial === true
+        && authSession.me.capabilities.composer?.reference_input === true;
+      if (admitted) {
+        setTrialHandoff({ agentId: pendingAgentUse.agentId, label: pendingAgentUse.label, ...pendingAgentUse.trial });
+        setAgentUseNotice(null);
+      } else {
+        setAgentUseNotice(agentUseUnavailableText);
+      }
+      settleAgentUse();
+      return;
+    }
     if (!composerAgentHandoffAdmitted(pendingAgentUse.agentId, authSession?.me?.capabilities?.composer)) {
       setAgentUseNotice(agentUseUnavailableText);
       keepStagedText();
@@ -4865,11 +4957,17 @@ function CanvasHomeInner() {
 
   useSyncExternalStore(subscribeCoachOperations, coachOperationsVersion, coachOperationsVersion);
   const openedOperations = coachOperationOpens(runner.turnId);
+  // FEATURE_AGENT_RELEASE_BAR: Coach's "open" of an Agent draft write opens that Agent's editor, not the old
+  // operation view (slices-2-5 §6 "Opening"); each open once, like the operation view's own `seen`.
+  const releaseBarOn = useAgentReleaseBarCapability();
+  const editorOpensHandled = useRef(new Set<string>());
   useEffect(() => {
     if (!canvasScopeKey || !multipleCanvasEnabled || runner.sessionId !== activeSessionId) return;
     for (const pointer of openedOperations) {
       if (pointer.userId !== authSession?.me?.id || pointer.teamId !== authSession.me.team_id
         || pointer.workspaceId !== activeWorkspaceId || pointer.sessionId !== activeSessionId) continue;
+      const editor = agentEditorForOperationOpen(pointer, releaseBarOn);
+      if (editor && editorOpensHandled.current.has(pointer.requestId)) continue;
       const focus = document.activeElement;
       const input = focus instanceof HTMLInputElement || focus instanceof HTMLTextAreaElement ? focus.value
         : focus instanceof HTMLElement && focus.isContentEditable ? focus.textContent ?? "" : "";
@@ -4878,22 +4976,39 @@ function CanvasHomeInner() {
       const editing = Boolean(input.trim()) && input.trim() !== intent?.submittedText?.trim();
       const select = maySelectCoachOperation(pointer, {
         intent, scope: canvasScopeKey, generation: canvasOpenIntentRef.current,
-        selectedKey: operationCanvas.selectedKey,
+        selectedKey: editor ? resourceCanvas.selectedKey : operationCanvas.selectedKey,
         available: !editing && !subagentCardOpen && !settingsCanvas.selected && !agentCanvas.selectedKey
-          && !resourceCanvas.selectedKey && !documentCanvas.selectedKey && !canvasResultsSelected,
+          && !(editor ? operationCanvas.selectedKey : resourceCanvas.selectedKey) && !documentCanvas.selectedKey && !canvasResultsSelected,
       });
+      if (editor) {
+        editorOpensHandled.current.add(pointer.requestId);
+        if (select) {
+          documentCanvas.deselect();
+          operationCanvas.select(null);
+          settingsCanvas.deselect();
+          setSubagentCardOpen(false);
+          setCanvasResultsSelected(false);
+          showDraftInUrl(null);
+        }
+        resourceCanvas.open(editor, select);
+        continue;
+      }
       if (operationCanvas.open(pointer, select)) revealCanvasResults();
     }
   }, [openedOperations, canvasScopeKey, multipleCanvasEnabled, runner.sessionId, activeSessionId,
-    authSession?.me?.id, authSession?.me?.team_id, activeWorkspaceId, operationCanvas.open]);
+    authSession?.me?.id, authSession?.me?.team_id, activeWorkspaceId, operationCanvas.open, releaseBarOn, resourceCanvas.open]);
   // Coach writes the Agent draft directly: an open hosted editor of that Agent reloads to show the change,
   // unless it holds unsaved input (Coach was not sent a message over that input in the first place).
   const reloadedForOperation = useRef(new Set<string>());
+  // FEATURE_AGENT_RELEASE_BAR: the same writes read from the run record also reload, without an "open".
+  const recordedChanges = releaseBarOn ? coachChangeEffects(runner.turnId) : undefined;
   useEffect(() => {
-    for (const object of agentEditorsToReload(openedOperations, resourceCanvas.objects, reloadedForOperation.current)) {
+    for (const object of agentEditorsToReload(openedOperations, resourceCanvas.objects, reloadedForOperation.current, recordedChanges)) {
       resourceCanvas.reload(object.key, object.incarnation);
     }
-  }, [openedOperations, resourceCanvas.objects, resourceCanvas.reload]);
+  }, [openedOperations, recordedChanges, resourceCanvas.objects, resourceCanvas.reload]);
+  // A Chat receipt for an Agent whose editor is open says only that it is open on the right.
+  const openAgentEditors = useMemo(() => openAgentEditorIds(resourceCanvas.objects), [resourceCanvas.objects]);
   const selectOperationCanvas = (key: string) => {
     if (!operationCanvas.objects.some((object) => object.key === key)) return;
     canvasOpenIntentRef.current += 1;
@@ -5030,7 +5145,17 @@ function CanvasHomeInner() {
     if (shouldSendStagedContinue(pending.text, disposition, workbenchComposerDraftControlRef.current)) setComposerSubmitRequest((value) => value + 1);
     else pending.onUnsent?.();
   };
+  // A receipt read from the run record names its reference: open it only when that Turn projected it, in the
+  // current receipt scope (the same check an "open" event's pointer gets in openOperationTarget).
+  const receiptScopeRef = useRef<CoachReceiptScope | null>(null);
+  receiptScopeRef.current = authSession?.me?.id && authSession.me.team_id && activeWorkspaceId && activeSessionId
+    ? { userId: authSession.me.id, teamId: authSession.me.team_id, workspaceId: activeWorkspaceId, sessionId: activeSessionId } : null;
   useEffect(() => subscribeCoachOperationRequests((request) => {
+    if ("reference" in request) {
+      const pointer = recordedChangePointer(request, receiptScopeRef.current);
+      if (pointer) openOperationTargetRef.current(pointer, { kind: "resource", reference: { kind: "agent", id: request.reference.agent_id, revision: "current" } });
+      return;
+    }
     const pointer = coachOperationOpens(request.turnId).find((item) => item.requestId === request.requestId);
     if (!pointer || pointer.reference.kind !== "agent_change") return;
     openOperationTargetRef.current(pointer, { kind: "resource", reference: { kind: "agent", id: pointer.reference.agent_id, revision: "current" } });
@@ -5285,6 +5410,9 @@ function CanvasHomeInner() {
       className="home-work-composer-dock home-work-composer-dock--inline"
     >
       <div className="home-work-composer-inner">
+        {/* A new trial chat says it is a trial before its first message, with questions from the Owner's cases. */}
+        <AgentTrialBand />
+        <TrialFirstQuestions onPick={(question) => setExternalComposerPrefill(question)} />
         {agentUseNotice ? <p role="alert">{agentUseNotice}</p> : null}
         {recoveredChatAction || showSubmissionRecovery ? (
           <ComposerRecoveryNotice
@@ -5304,7 +5432,7 @@ function CanvasHomeInner() {
         <V2Composer
           onInputInteraction={() => { canvasOpenIntentRef.current += 1; }}
           surface="home"
-          key={composerResetKey}
+          key={`${composerResetKey}:${trialComposerGeneration}`}
           draftControlRef={homeComposerDraftControlRef}
           onSend={handleSend}
           disabled={
@@ -5450,6 +5578,10 @@ function CanvasHomeInner() {
     // topbar's runner-derived title/meta are built HERE and passed down via slots
     // (runner never leaves the page). The right cluster (space/notifications/credits)
     // is owned by <Topbar> and shared across every route.
+    // Owner draft trial: the chat, the composer and the Canvas editor read the trial from these contexts.
+    <AgentTrialChatContext.Provider value={trialChat.value}>
+    <AgentTrialLayoutContext.Provider value={trialChatActive}>
+    {trialChat.dialogs}
     <AppShell
       onNewSession={handleNewSession}
       mobileActions={sessionMenu}
@@ -5498,6 +5630,7 @@ function CanvasHomeInner() {
       <SessionTurnOrdinalsContext.Provider value={turnOrdinalsForReports}>
       <CoachReceiptScopeContext.Provider value={authSession?.me?.id && authSession.me.team_id && activeWorkspaceId && activeSessionId
         ? { userId: authSession.me.id, teamId: authSession.me.team_id, workspaceId: activeWorkspaceId, sessionId: activeSessionId } : null}>
+      <CoachOpenAgentEditorsContext.Provider value={openAgentEditors}>
       {banner ? <div className="v2-banner">{banner}</div> : null}
       {canvasSaveBlockObject ? (
         <div className="v2-banner v2-banner--actions" role="alert">
@@ -5657,6 +5790,7 @@ function CanvasHomeInner() {
           }
           onCanvasInteraction={() => { canvasOpenIntentRef.current += 1; }}
           resultsRevealRequest={canvasResultsReveal?.sessionId === activeSessionId ? canvasResultsReveal.sequence : 0}
+          creationPanelRevealRequest={trialEditorReveal}
           creationPanelOpen={editorCanvas !== null && !canvasResultsSelected}
           canvasObjectOpener={canvasObjectTabs ? null : documentOpener}
           canvasObjectTabs={canvasObjectTabs}
@@ -5675,7 +5809,7 @@ function CanvasHomeInner() {
           homePane={!runner.started && !showingReportOnly ? <HomeWorkSurface workspaceId={activeWorkspaceId || null} workspaceName={workspace.activeName}
             workspaceLoading={workspace.loading} workspaceError={workspace.error} readOnly={sendReadOnlyActive}
             onStartPrompt={(prompt) => { setExternalComposerPrefill(prompt); return true; }} onWorkspaceInvalidated={workspace.refresh}
-            composerSlot={showHomeComposer ? homeComposerDock : undefined} /> : undefined}
+            composerSlot={showHomeComposer ? homeComposerDock : undefined} composerOnly={trialChatActive} /> : undefined}
         />
       ) : (
         <div className={`home-work-page${editorCanvas ? " home-work-page--agent-creation" : ""}`}>
@@ -5699,6 +5833,8 @@ function CanvasHomeInner() {
               }}
               onWorkspaceInvalidated={workspace.refresh}
               composerSlot={showHomeComposer ? homeComposerDock : undefined}
+              // An Owner draft trial's first screen offers its own case questions, not ordinary work (F24).
+              composerOnly={trialChatActive}
             />
           </div>
           {editorCanvas ? (
@@ -5776,9 +5912,12 @@ function CanvasHomeInner() {
           onConfirm={(title) => void submitTopbarRename(renamingSessionId, title)}
         />
       ) : null}
+      </CoachOpenAgentEditorsContext.Provider>
       </CoachReceiptScopeContext.Provider>
       </SessionTurnOrdinalsContext.Provider>
     </AppShell>
+    </AgentTrialLayoutContext.Provider>
+    </AgentTrialChatContext.Provider>
   );
 }
 

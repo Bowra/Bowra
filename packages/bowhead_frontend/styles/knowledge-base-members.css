@@ -1,0 +1,287 @@
+/* Knowledge bases (FEATURE_KNOWLEDGE_BASES, organization phase 1 slice 4): knowledge-base-members. Tokens only; font sizes in rem. */
+
+/* Members tab (③) and Share dialog (④ ⑬): components/knowledge/bases/kb-members-panel.tsx, kb-member-picker.tsx, kb-share-dialog.tsx */
+
+.kbm-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kbm-editor {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.kbm-editor--dialog {
+  gap: 14px;
+}
+
+.kbm-muted {
+  color: var(--c-ink-3);
+}
+
+.kbm-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 16px 0 0;
+  font-size: var(--fs-md);
+}
+
+/* "Who can use it" values that cannot be changed here. */
+.kbm-static-value {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+/* List head: title and description on the left, "Add members" on the right. */
+.kbm-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kbm-table-frame {
+  margin-top: 8px;
+}
+
+.kbm-cell-main {
+  display: block;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.kbm-cell-sub {
+  display: block;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.kbm-row-stale .kbm-cell-main {
+  color: var(--c-ink-3);
+}
+
+.kbm-level-fixed {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+}
+
+.kbm-source {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.kbm-summary {
+  margin: 8px 0 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.kbm-levels {
+  margin-top: 12px;
+}
+
+.kbm-levels-title {
+  margin: 0 0 4px;
+  color: var(--c-ink-2);
+  font-weight: 600;
+}
+
+.kbm-levels ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+/* ── Picker ── */
+.kbm-picker-block {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.kbm-field {
+  display: grid;
+  gap: 6px;
+}
+
+.kbm-field-label {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.kbm-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kbm-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.kbm-picker-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.kbm-picker-input {
+  width: 100%;
+}
+
+.kbm-picker-hint {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+/* Results float above the content below, like a menu. */
+.kbm-results {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow:
+    var(--shadow-overlay),
+    0 0 0 var(--hairline) var(--c-separator);
+}
+
+.kbm-results-group {
+  padding: 6px 8px 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.kbm-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+
+.kbm-result.is-active {
+  background: var(--c-accent-soft);
+}
+
+.kbm-result-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbm-result-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+
+.kbm-results-note {
+  padding: 8px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.kbm-results-more {
+  padding: 2px 4px;
+}
+
+/* ── Share dialog ── */
+.kbm-dialog-desc {
+  margin: 0 0 14px;
+}
+
+.kbm-audience-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.kbm-audience-card {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.kbm-card-title {
+  font-weight: 500;
+}
+
+.kbm-card-desc {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.kbm-audience-static {
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.kbm-dialog-add {
+  display: flex;
+}
+
+.settings-dialog__footer .kbm-copy-link {
+  margin-right: auto;
+}
+
+/* Phones (< 640): one column of cards, touch targets of at least 44 px. */
+@media (max-width: 639.98px) {
+  .kbm-audience-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kbm-audience-card,
+  .kbm-result,
+  .kbm-level,
+  .kbm-picker-row .settings-button,
+  .kbm-dialog-add .settings-button,
+  .kbm-list-head .settings-button {
+    min-height: 44px;
+  }
+
+  .kbm-picker-search {
+    flex-basis: 100%;
+  }
+}

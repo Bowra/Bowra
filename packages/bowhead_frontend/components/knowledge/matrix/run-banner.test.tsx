@@ -44,3 +44,24 @@ it("keeps the cancel control for a running task inside the summary", () => {
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
   expect(props.onCancel).toHaveBeenCalledWith("r1");
 });
+
+it("labels a trial run with its file count before the scope", () => {
+  renderIntl(<RunBanners {...props} runs={[{ ...run("r1", "running"), scopeKind: "all_pending", trial: true, trialFiles: 3 }, { ...run("r2", "running"), scopeKind: "failed" }]} />);
+  const [trial, failed] = screen.getAllByTestId("kb-matrix-runbanner");
+  expect(trial).toHaveTextContent(/^试跑 3 份文件 · 全部未完成 · 正在运行/);
+  expect(failed).toHaveTextContent(/^失败的格子 · 正在运行/);
+});
+
+it("says a finished run skipped the automatic retry for an outage", () => {
+  renderIntl(<RunBanners {...props} runs={[{ ...run("r1", "succeeded"), cellsDone: 1, cellsFailed: 3, errorCode: "provider_outage" }, { ...run("r2", "succeeded"), cellsDone: 3, cellsFailed: 1 }]} />);
+  const [outage, plain] = screen.getAllByTestId("kb-matrix-runbanner");
+  expect(outage).toHaveTextContent(messages.kbMatrix.banner_done_outage);
+  expect(plain).not.toHaveTextContent(messages.kbMatrix.banner_done_outage);
+});
+
+it("says another member's run stopped because the matrix was made private (S8)", () => {
+  renderIntl(<RunBanners {...props} runs={[{ ...run("r1", "cancelled"), cellsDone: 1, errorCode: "matrix_became_private" }, { ...run("r2", "cancelled"), cellsDone: 2 }]} />);
+  const [stopped, cancelled] = screen.getAllByTestId("kb-matrix-runbanner");
+  expect(stopped).toHaveTextContent("已停止：矩阵已改为仅创建者可见，其他成员发起的运行不再继续 · 已完成的 1 格保留");
+  expect(cancelled).toHaveTextContent("已取消 · 已完成的 2 格保留");
+});

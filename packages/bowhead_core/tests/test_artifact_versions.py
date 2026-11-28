@@ -378,6 +378,19 @@ async def test_a_file_started_in_the_turn_keeps_its_rewrites_as_versions(store: 
     assert [item.id for item in await store.list_session_deliverables(session_id="s1", user_id="u")] == [v[3].id]
 
 
+async def test_a_dry_run_names_the_version_the_next_save_pushes_out(store: ArtifactStore) -> None:
+    """pptx inline edit §13.7: the editor says which version goes before the person saves."""
+    v = await _chain(store, ["t1", "t2"])
+    assert await store.versions_pruned_by_next_version(v[1].id) == [], "Three versions after the save: none goes"
+    v.append(await _put(store, turn="t3", target=v[1].id, content=b"<html>3</html>"))
+    assert await store.versions_pruned_by_next_version(v[2].id) == [(v[0].id, 1)]
+    assert await _live(store, [x.id for x in v]) == {x.id for x in v}, "A dry run changes nothing"
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("INSERT INTO resource_grants VALUES ('artifact', ?, NULL)", (v[0].id,))
+        await db.commit()
+    assert await store.versions_pruned_by_next_version(v[2].id) == [], "A shared version stays, so nothing is said"
+
+
 async def test_the_first_turn_counts_even_after_its_first_version_was_pruned(store: ArtifactStore) -> None:
     """A file from t1 revised twice in t2: t2's superseded version is a draft, also once v1 is gone."""
     v = await _chain(store, ["t1", "t2", "t2"])
@@ -550,3 +563,28 @@ def test_a_declared_nested_file_or_folder_counts_by_its_saved_name() -> None:
     assert _declared(invocation, "site.zip") and _declared(invocation, "report.pdf") and _declared(invocation, "game.html")
     assert not _declared(invocation, "index.html")
     assert not _declared(SimpleNamespace(arguments={"purpose": "analysis", "deliverable_outputs": ["site/"]}), "site.zip")
+
+
+async def test_a_copy_keeps_its_source_after_its_first_version_is_pruned(store: ArtifactStore) -> None:
+    """pptx dogfood 2026-11-25: only three versions are kept, and the first one alone recorded the upload a copy was
+    made from. Pruning it with the fourth save cut the link, so the upload no longer offered its copy. Every new
+    version now carries the lineage's live source; a lineage without one, or with a deleted one, gets none."""
+    upload = await _put(store, source="upload", kind="user_upload", created_by_turn=None, filename="deck.pptx")
+    first = await _put(store, derived_from=upload.id)
+    versions = [first]
+    for turn in ("t2", "t3", "t2"):
+        versions.append(await _put(store, turn=turn, target=versions[-1].id))
+    assert [version.derived_from for version in versions] == [upload.id] * 4
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=?", (datetime.now(UTC).isoformat(), first.id))
+        await db.commit()
+    later = await _put(store, turn="t3", target=versions[-1].id)
+    assert later.derived_from == upload.id, "The pruned first version still names the source"
+
+    plain = [await _put(store, filename="plain.html")]
+    plain.append(await _put(store, turn="t2", target=plain[0].id, filename="plain.html"))
+    assert plain[1].derived_from is None
+
+    assert await store.soft_delete(upload.id, user_id="u")
+    after_delete = await _put(store, turn="t2", target=later.id)
+    assert after_delete.derived_from is None, "A deleted source is not carried forward"

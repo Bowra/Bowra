@@ -277,7 +277,9 @@ def _extract_xlsx_rows(
         logger.error("openpyxl not installed — xlsx fast-path unavailable")
         return []
     from bowhead_core.kb.structured_extractor import _coerce_value
+    from bowhead_core.xlsx_dates import install as read_east_asian_dates
 
+    read_east_asian_dates()
     wb = load_workbook(file_path, read_only=True, data_only=True)
     sheet = wb.active
     if sheet is None or sheet.max_row < 2:

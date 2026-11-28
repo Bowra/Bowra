@@ -265,26 +265,30 @@ async def test_auth_refusal_with_unconfirmed_settlement_stays_unknown() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("family", ["openai", "anthropic"])
+@pytest.mark.parametrize("surface", ["chat", "responses", "messages"])
 @pytest.mark.parametrize("mode", ["invoke", "stream"])
+@pytest.mark.parametrize(
+    ("status", "kind", "evidence"),
+    [
+        (429, ProviderFailureKind.RATE_LIMITED, "provider_http_rate_limited/v1"),
+        (503, ProviderFailureKind.UPSTREAM, "provider_http_service_unavailable/v1"),
+    ],
+)
 @respx.mock
-async def test_observed_http_429_keeps_rate_limit_failure(
-    family: str,
-    mode: str,
+async def test_observed_http_rejection_keeps_retryable_failure(
+    surface: str, mode: str, status: int, kind: ProviderFailureKind, evidence: str
 ) -> None:
-    base_url = _BASE if family == "openai" else _ANTHROPIC_BASE
-    path = "/chat/completions" if family == "openai" else "/v1/messages"
-    route = respx.post(f"{base_url}{path}").respond(
-        429,
-        json={"error": {"type": "rate_limit_error", "message": "Rate limit exceeded"}},
-    )
+    if surface == "messages":
+        url = f"{_ANTHROPIC_BASE}/v1/messages"
+        adapter = AnthropicCompatibleAdapter(base_url=_ANTHROPIC_BASE, api_key="test-key", provider_name="provider")
+    else:
+        path = "/responses" if surface == "responses" else "/chat/completions"
+        url = f"{_BASE}{path}"
+        options = {"models": [{"id": "model", "api_surface": "responses"}]} if surface == "responses" else {}
+        adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="test-key", provider_name="provider", provider_options=options)
+    route = respx.post(url).respond(status, json={"error": {"message": "Synthetic provider rejection"}})
     hook = _Hook()
     observer = _Observer()
-    adapter = (
-        OpenAICompatibleAdapter(base_url=base_url, api_key="test-key", provider_name="provider")
-        if family == "openai"
-        else AnthropicCompatibleAdapter(base_url=base_url, api_key="test-key", provider_name="provider")
-    )
     try:
         with physical_invocation_scope(hook), physical_observation_scope(observer), pytest.raises(ProviderCallError) as raised:
             request = LLMRequest(model="model", messages=[Message(role="user", content="hi")])
@@ -296,17 +300,18 @@ async def test_observed_http_429_keeps_rate_limit_failure(
     finally:
         await adapter.close()
 
-    assert raised.value.status_code == 429
-    assert raised.value.kind is ProviderFailureKind.RATE_LIMITED
+    assert raised.value.status_code == status
+    assert raised.value.kind is kind and raised.value.retryable
     assert len(route.calls) == 1
-    assert hook.attempts[0].outcomes == ["not_applied:provider_http_rate_limited/v1"]
-    assert observer.attempts[0].outcomes == ["not_applied:provider_http_rate_limited/v1"]
+    assert hook.attempts[0].outcomes == [f"not_applied:{evidence}"]
+    assert observer.attempts[0].outcomes == [f"not_applied:{evidence}"]
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(("status", "evidence"), [(429, "provider_http_rate_limited/v1"), (503, "provider_http_service_unavailable/v1")])
 @respx.mock
-async def test_http_429_with_unconfirmed_settlement_stays_unknown() -> None:
-    route = respx.post(f"{_BASE}/chat/completions").respond(429, json={"error": {"code": "rate_limit_exceeded"}})
+async def test_http_rejection_with_unconfirmed_settlement_stays_unknown(status: int, evidence: str) -> None:
+    route = respx.post(f"{_BASE}/chat/completions").respond(status)
     observer = _DecliningObserver()
     adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="test-key", provider_name="provider")
     try:
@@ -316,7 +321,7 @@ async def test_http_429_with_unconfirmed_settlement_stays_unknown() -> None:
     finally:
         await adapter.close()
     assert len(route.calls) == 1
-    assert observer.attempts[0].outcomes == ["declined:provider_http_rate_limited/v1"]
+    assert observer.attempts[0].outcomes == [f"declined:{evidence}"]
 
 
 @pytest.mark.unit
@@ -1874,13 +1879,14 @@ async def test_router_retries_no_output_timeout_only_when_admitted(monkeypatch, 
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("no response"), httpx2.Response(503)])
 @respx.mock
-async def test_refused_retry_does_not_fall_through_to_a_fallback_provider() -> None:
+async def test_refused_retry_does_not_fall_through_to_a_fallback_provider(failure: httpx2.ReadTimeout | httpx2.Response) -> None:
     from bowhead_router.errors import StreamingTargetsExhaustedError
     from bowhead_router.registry import ProviderConfig, ProviderRegistry
     from bowhead_router.retry import retry_observer_scope
 
-    primary_route = respx.post(f"{_BASE}/chat/completions").mock(side_effect=httpx2.ReadTimeout("no response"))
+    primary_route = respx.post(f"{_BASE}/chat/completions").mock(side_effect=[failure])
     fallback_route = respx.post(f"{_ANTHROPIC_BASE}/v1/messages").respond(500)
     registry = ProviderRegistry()
     registry.load(
@@ -1940,8 +1946,13 @@ async def test_provider_failure_observation_precedes_fence_and_cannot_enable_ret
 @pytest.mark.parametrize("family", ["openai", "anthropic"])
 @pytest.mark.parametrize("mode", ["invoke", "stream"])
 @pytest.mark.parametrize("durable", [False, True])
+@pytest.mark.parametrize(
+    ("status", "kind"), [(500, ProviderFailureKind.UPSTREAM), (502, ProviderFailureKind.UPSTREAM), (504, ProviderFailureKind.TIMEOUT)]
+)
 @respx.mock
-async def test_unknown_invocation_retains_provider_diagnosis_without_resending(family: str, mode: str, durable: bool) -> None:
+async def test_unknown_invocation_retains_provider_diagnosis_without_resending(
+    family: str, mode: str, durable: bool, status: int, kind: ProviderFailureKind
+) -> None:
     observer = _Observer()
     hook = _Hook()
     if family == "openai":
@@ -1950,7 +1961,7 @@ async def test_unknown_invocation_retains_provider_diagnosis_without_resending(f
     else:
         adapter = AnthropicCompatibleAdapter(base_url=_ANTHROPIC_BASE, api_key="test-key", provider_name="provider")
         url = f"{_ANTHROPIC_BASE}/v1/messages"
-    route = respx.post(url).respond(500, json={"error": {"type": "api_error", "message": "Synthetic upstream unavailable"}})
+    route = respx.post(url).respond(status, json={"error": {"type": "api_error", "message": "Synthetic upstream unavailable"}})
     request = LLMRequest(model="model", messages=[Message(role="user", content="hello")])
     try:
         with (
@@ -1968,7 +1979,7 @@ async def test_unknown_invocation_retains_provider_diagnosis_without_resending(f
     assert route.call_count == 1
     failure = raised.value.failure
     assert failure is not None
-    assert (failure.kind, failure.status_code, failure.mode) == (ProviderFailureKind.UPSTREAM, 500, mode)
+    assert (failure.kind, failure.status_code, failure.mode) == (kind, status, mode)
     assert failure.upstream_message == "Synthetic upstream unavailable"
     assert observer.attempts[0].outcomes == ["unknown:provider_response_unclassified"]
     assert [attempt.outcomes for attempt in hook.attempts] == ([["unknown:provider_response_unclassified"]] if durable else [])

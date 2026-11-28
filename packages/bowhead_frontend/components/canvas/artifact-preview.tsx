@@ -15,6 +15,8 @@ import { codeLanguageForFile } from "@/lib/code-highlight";
 import { formatByteSize } from "@/lib/format";
 import { fileExtensionLabel } from "@/lib/file-type-icon";
 import { itemsOnOneLine, noOverflow, writeFitTokens, type FitStep } from "@/lib/toolbar-fit";
+import { useDocxInlineEditCapability } from "@/lib/use-docx-inline-edit-capability";
+import { DocumentEditor, type DocumentEditorHandle } from "./document-edit/document-editor";
 import { useToolbarFit } from "@/lib/use-toolbar-fit";
 import type { AttachmentRef } from "@/lib/types";
 import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors";
@@ -73,9 +75,11 @@ export interface PresentationEditHost {
   agentRunning?: boolean;
   /** A save or a move to another version: show `artifactId` next (the viewer reloads its list first), then run `then`. */
   onOpenVersion: (artifactId: string, then?: () => void) => void;
+  /** A save produced this version (the editor is still open): list it before the person leaves. */
+  onSaved?: (artifactId: string) => void;
   /** Add a reference to one deck element to the Composer (design §6.9). */
   /** `quiet` when the control that asked confirms on its own (「已引用」), so no toast covers the header. */
-  onReferenceElement?: (reference: import("@/lib/types").AttachmentRef, options?: { quiet?: boolean }) => void;
+  onReferenceElement?: (reference: import("@/lib/types").AttachmentRef, options?: { quiet?: boolean; stay?: boolean }) => void;
   /**
    * 「引用这一页」: add a page of `file` to its page set in the Composer, or remove it (design §13.6).
    * `stay` when the full view or the editor asked: they stay open instead of showing the Composer.
@@ -160,6 +164,7 @@ export function ArtifactPreview({
   const editOriginRef = useRef<"panel" | "full">(handoff?.origin ?? (handoff?.expanded ? "full" : "panel"));
   const [editStartPage, setEditStartPage] = useState<number | undefined>(handoff?.edit ? undefined : handoff?.page);
   const editorRef = useRef<PresentationEditorHandle>(null);
+  const documentEditorRef = useRef<DocumentEditorHandle>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [imageView, setImageView] = useState<ImageViewState>(DEFAULT_IMAGE_VIEW_STATE);
   const [textView, setTextView] = useState<TextViewState>(DEFAULT_TEXT_VIEW_STATE);
@@ -178,7 +183,10 @@ export function ArtifactPreview({
   });
   const safeHtmlActive = mode === "preview" && isSafeHtmlMime(mime) && !loading && !error;
   const pptxPreview = mode === "preview" && profile === "pptx";
-  const inPlaceFullView = safeHtmlActive || pptxPreview;
+  // Word files show their rendered pages while the switch is on (docx inline edit design §5.1).
+  const docxPages = useDocxInlineEditCapability() && mode === "preview" && profile === "docx";
+  // Word pages open in the same in-place full view as slides, where the Word editor also shows.
+  const inPlaceFullView = safeHtmlActive || pptxPreview || docxPages;
   const videoActive = mode === "preview" && isVideoPreviewMime(mime) && !loading && !error;
   const inlineHref = withInlineDisposition(href);
   const htmlMode = useHtmlPreviewMode(fileId);
@@ -257,6 +265,7 @@ export function ArtifactPreview({
         downloadHref={href} onDownload={onDownload} onModeChange={onViewerModeChange} />
     ) : null,
     href: pptxPreview ? `${href.split(/[?#]/, 1)[0]}/representations/pptx-pdf` : rendererHref,
+    pagesHref: docxPages ? `${href.split(/[?#]/, 1)[0]}/representations/docx-pdf` : undefined,
     inlineHref,
     alt: filename,
     sizeBytes,
@@ -308,6 +317,9 @@ export function ArtifactPreview({
   // The capability only decides whether Edit is offered; once open, the editor stays until it is left
   // (the server checks every save again).
   const editingPresentation = pptxPreview && Boolean(editHost) && editing && expanded;
+  // Word files: the same host, the edit_document capability (docx inline edit design §7.1, §8.4).
+  const canEditDocument = docxPages && !loading && !error && Boolean(presentationEdit) && Boolean(capabilities?.has("edit_document"));
+  const editingDocument = docxPages && Boolean(editHost) && editing && expanded;
   const startEditing = (trigger?: HTMLElement) => {
     if (!expanded && trigger) returnFocusRef.current = trigger;
     editOriginRef.current = expanded ? "full" : "panel";
@@ -352,20 +364,23 @@ export function ArtifactPreview({
     size: sizeBytes ?? 0, referenceKind: "result",
   };
   const toggleSlide = editHost?.onToggleSlide && capabilities?.has("reference_in_chat") ? editHost.onToggleSlide : undefined;
-  const referencePage = pptxPreview && toggleSlide && !editingPresentation
+  // Word pages too, while their pages are shown (docx inline edit design §7.4).
+  const referencePage = (pptxPreview || docxPages) && toggleSlide && !editingPresentation && !editingDocument
     ? (page: number) => toggleSlide(deckFile, page, { stay: expanded })
     : undefined;
   const referencedPages = editHost?.referencedSlides?.[fileId];
   useEffect(() => {
-    if (!editingPresentation) return;
+    if (!editingPresentation && !editingDocument) return;
     markPresentationEditing(fileId, true);
     return () => markPresentationEditing(fileId, false);
-  }, [editingPresentation, fileId]);
+  }, [editingDocument, editingPresentation, fileId]);
+  // The full view says how many pages of this file wait in the Composer (design §13.7).
+  const headerMeta = expanded && referencedPages?.length ? `${meta} · ${t("pages_referenced", { count: referencedPages.length })}` : meta;
   const sharedHeaderProps = {
-    artifactId: fileId, filename, meta, href, onDownload, capabilities, resultRole, mode,
+    artifactId: fileId, filename, meta: headerMeta, href, onDownload, capabilities, resultRole, mode,
     downloadLabel, feedbackRecorded, onFeedbackUnsupported,
     compactActions,
-    onEditPresentation: canEditPresentation ? startEditing : undefined,
+    onEditPresentation: canEditPresentation || canEditDocument ? startEditing : undefined,
     onReference: onReference && leaveFullViewThen(onReference),
     referenceLabel: pptxPreview ? t("reference_whole_file") : undefined,
     onViewerModeChange: compactToolbar && onViewerModeChange ? leaveFullViewThen(onViewerModeChange) : onViewerModeChange,
@@ -373,12 +388,31 @@ export function ArtifactPreview({
   };
   return (
     <>
-      <InPlaceFullView active={inPlaceFullView && expanded} label={filename} closeOnEscape={!editingPresentation}
+      <InPlaceFullView active={inPlaceFullView && expanded} label={filename} closeOnEscape={!editingPresentation && !editingDocument}
         onClose={() => {
           if (editingPresentation) editorRef.current?.requestExit(true);
+          else if (editingDocument) documentEditorRef.current?.requestExit(true);
           else setExpanded(false);
         }} returnFocusRef={returnFocusRef}>
-        {editingPresentation && editHost ? (
+        {editingDocument && editHost ? (
+          <DocumentEditor
+            ref={documentEditorRef}
+            sessionId={editHost.sessionId}
+            artifactId={fileId}
+            filename={filename}
+            downloadHref={href}
+            initialPdfData={documentPreviewCacheRef.current.pdfData}
+            initialPage={editStartPage}
+            agentRunning={editHost.agentRunning}
+            onReference={onReference && capabilities?.has("reference_in_chat") ? onReference : undefined}
+            onReferenceElement={editHost.onReferenceElement && capabilities?.has("reference_in_chat") ? editHost.onReferenceElement : undefined}
+            onTogglePage={toggleSlide ? (file, page) => toggleSlide(file, page, { stay: true }) : undefined}
+            referencedPages={referencedPages}
+            fromFullView={editOriginRef.current === "full"}
+            onSaved={editHost.onSaved}
+            onExit={finishEditing}
+          />
+        ) : editingPresentation && editHost ? (
           <PresentationEditor
             ref={editorRef}
             sessionId={editHost.sessionId}
@@ -394,6 +428,9 @@ export function ArtifactPreview({
               : undefined}
             onToggleSlide={toggleSlide ? (file, page) => toggleSlide(file, page, { stay: true }) : undefined}
             referencedSlides={editHost.referencedSlides}
+            // The editor always shows in the full view; only editing started there has two ways out.
+            fromFullView={editOriginRef.current === "full"}
+            onSaved={editHost.onSaved}
             onExit={finishEditing}
           />
         ) : <>
@@ -615,6 +652,7 @@ function ArtifactPreviewBody({
   onRetry,
   recoveryActions,
   href,
+  pagesHref,
   inlineHref,
   alt,
   sizeBytes,
@@ -641,6 +679,7 @@ function ArtifactPreviewBody({
   onRetry?: () => void;
   recoveryActions?: React.ReactNode;
   href: string;
+  pagesHref?: string;
   inlineHref: string;
   alt: string;
   sizeBytes?: number | null;
@@ -724,6 +763,7 @@ function ArtifactPreviewBody({
         <ArtifactDocumentPreview
           profile={profile}
           href={href}
+          pagesHref={pagesHref}
           title={alt}
           sizeBytes={profile === "pptx" ? undefined : sizeBytes}
           onError={onOpenFailed}

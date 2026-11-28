@@ -57,14 +57,6 @@ async def lifecycle_ctx(initialize_migrated_kb_files_database, tmp_path):
         name="Contracts",
         created_by=user.id,
     )
-    record_id = await records.create(
-        workspace_id=workspace_id,
-        doc_type_id=doc_type_id,
-        file_id="kf_contract",
-        fields={},
-        verify_status="ready",
-        created_by=user.id,
-    )
     file_id = await files.create(
         artifact_id="art_contract",
         filename="contract.pdf",
@@ -75,6 +67,15 @@ async def lifecycle_ctx(initialize_migrated_kb_files_database, tmp_path):
         workspace_id=workspace_id,
         team_id=team.id,
         uploaded_by=user.id,
+    )
+    # A record is served only while its file is readable, so it comes from the Space file above.
+    record_id = await records.create(
+        workspace_id=workspace_id,
+        doc_type_id=doc_type_id,
+        file_id=file_id,
+        fields={},
+        verify_status="ready",
+        created_by=user.id,
     )
     async with aiosqlite.connect(users.db_path) as db:
         await db.execute(

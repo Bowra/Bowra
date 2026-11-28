@@ -602,6 +602,130 @@ describe("unsavedCaseChanges (the case editor's save bar)", () => {
 });
 
 
+describe("AgentEvalPanel · redesigned 测试用例 (FEATURE_AGENT_RELEASE_BAR)", () => {
+  const savedCase = { case_key: "quality.1", case_revision_id: "aec_1", task: "看一下静安店本周的销售情况", expected_contract: { points: [] }, fixture_ref: {}, scorer_config: {}, effect_policy: { mode: "no_effects" }, valid_until: null };
+  const owner = { ...MANAGER.suites[0], suite_id: "aes_owner", suite_kind: "owner_quality" as const, name: "质量用例", platform_managed: false, visibility: "owner" as const,
+    revision: { ...MANAGER.suites[0].revision!, suite_revision_id: "aev_owner", case_count: 1, cases: [savedCase] } };
+  const withOwner: AgentEvalManager = { ...MANAGER, suites: [owner, MANAGER.suites[0]] };
+  const render = (props: Partial<Parameters<typeof AgentEvalPanel>[0]> = {}) => renderIntl(
+    <AgentEvalPanel agentId="osa_1" archived={false} refreshToken="1" redesigned liveVersion={3} liveRevisionId="arv_live" {...props} />,
+  );
+
+  beforeEach(() => {
+    vi.mocked(getAgentEvalManager).mockResolvedValue(withOwner);
+    vi.mocked(saveAgentEvalSuite).mockResolvedValue(withOwner);
+    vi.mocked(runAgentEval).mockResolvedValue({ kind: "agent_eval_run", schema_version: 1, run_id: "aer_live", suite_revision_id: "aev_owner", target_kind: "live", revision_id: "arv_live", status: "running", trigger_kind: "manual", summary: null });
+  });
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("says the platform suite in one sentence and leaves the rail cards out", async () => {
+    render();
+    expect(await screen.findByText(/一条用例 = 一个典型问题/)).toBeTruthy();
+    expect(document.querySelector(".am-ci-aside")).toBeNull();
+    expect(screen.queryByText("运行这组评测")).toBeNull();
+    expect(screen.queryByText("审批前需要完成评测")).toBeNull();
+  });
+
+  it("puts 手写一条, 从对话起草 and 自动建议用例 in one 添加用例 menu", async () => {
+    render();
+    await screen.findByText("看一下静安店本周的销售情况");
+    fireEvent.click(screen.getByRole("button", { name: "添加用例" }));
+    const menu = await screen.findByRole("menu", { name: "添加用例" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["手写一条", "从对话起草", "自动建议用例"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "手写一条" }));
+    expect(await screen.findByLabelText("测试用例 2")).toBeTruthy();
+  });
+
+  it("tests on the released version from the suite ⋯ with target live", async () => {
+    render();
+    await screen.findByText("看一下静安店本周的销售情况");
+    fireEvent.click(screen.getByRole("button", { name: "用例组的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "在已发布的 v3 上测试" }));
+    await waitFor(() => expect(runAgentEval).toHaveBeenCalledWith("osa_1", {
+      suite_revision_id: "aev_owner",
+      workspace_id: "ws_1",
+      target: "live",
+      expected_revision_id: "arv_live",
+      attempts: 1,
+    }, expect.any(String)));
+    // The running line with 停止 sits in the suite footer.
+    expect(await screen.findByText("正在已发布的 v3 上跑这组用例…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  });
+
+  it("opens the last results, the platform run and the auto rerun from the suite ⋯", async () => {
+    render();
+    await screen.findByText("看一下静安店本周的销售情况");
+    fireEvent.click(screen.getByRole("button", { name: "用例组的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "上次在已发布版本上的结果" }));
+    const results = await screen.findByRole("dialog", { name: "上次在已发布版本上的结果" });
+    expect(within(results).getByText("质量用例")).toBeTruthy();
+    expect(within(results).getByText("安全执行契约")).toBeTruthy();
+    fireEvent.click(within(results).getByRole("button", { name: "关闭" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "用例组的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "重要变更后自动重跑" }));
+    const auto = await screen.findByRole("dialog", { name: "重要变更后自动重跑" });
+    expect(within(auto).getAllByRole("checkbox").length).toBeGreaterThan(1);
+    fireEvent.click(within(auto).getByRole("button", { name: "关闭" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "用例组的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "单独跑基础安全检查" }));
+    await waitFor(() => expect(runAgentEval).toHaveBeenCalledWith("osa_1", expect.objectContaining({ suite_revision_id: "aev_contract", target: "candidate" }), expect.any(String)));
+  });
+
+  it("reports unsaved cases, saves for the bar, and discards back to the saved suite", async () => {
+    const edited = { ...owner, revision: { ...owner.revision, cases: [{ ...savedCase, task: "看一下静安店上周的销售情况" }] } };
+    vi.mocked(saveAgentEvalSuite).mockResolvedValue({ ...withOwner, suites: [edited, MANAGER.suites[0]] });
+    const onUnsavedChange = vi.fn();
+    const casesRef = { current: null as { save: () => Promise<boolean> } | null };
+    render({ onUnsavedChange, casesRef });
+    await screen.findByText("看一下静安店本周的销售情况");
+    fireEvent.click(screen.getByRole("button", { name: "编辑问题" }));
+    fireEvent.change(await screen.findByLabelText("测试用例 1"), { target: { value: "看一下静安店上周的销售情况" } });
+    expect(await screen.findByText("用例有 1 项修改还没保存。没保存的修改不会参与测试。")).toBeTruthy();
+    await waitFor(() => expect(onUnsavedChange).toHaveBeenLastCalledWith(1));
+    const footer = document.querySelector(".am-ev-save") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: "保存用例" }).className).toContain("settings-button--secondary");
+    expect(within(footer).getByRole("button", { name: "放弃修改" }).className).toContain("settings-button--secondary");
+
+    await act(async () => { expect(await casesRef.current!.save()).toBe(true); });
+    expect(saveAgentEvalSuite).toHaveBeenCalledWith("osa_1", expect.objectContaining({ cases: [expect.objectContaining({ task: "看一下静安店上周的销售情况" })] }));
+    await waitFor(() => expect(onUnsavedChange).toHaveBeenLastCalledWith(0));
+
+    fireEvent.change(screen.getByLabelText("测试用例 1"), { target: { value: "随便改一下" } });
+    fireEvent.click(within(document.querySelector(".am-ev-save") as HTMLElement).getByRole("button", { name: "放弃修改" }));
+    const confirm = await screen.findByRole("dialog");
+    expect(within(confirm).getByText("放弃用例修改？")).toBeTruthy();
+    fireEvent.click(within(confirm).getByRole("button", { name: "放弃修改" }));
+    expect(await screen.findByText("看一下静安店上周的销售情况")).toBeTruthy();
+    expect(screen.queryByText("用例有 1 项修改还没保存。没保存的修改不会参与测试。")).toBeNull();
+  });
+
+  it("offers testing the released version in the footer when there is no draft", async () => {
+    render({ hasDraft: false });
+    await screen.findByText("看一下静安店本周的销售情况");
+    const footer = document.querySelector(".am-ev-save") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: "在已发布的 v3 上测试" })).toBeTruthy();
+  });
+
+  it("takes the new suite revision after accepted suggestions", async () => {
+    function Harness() {
+      const [request, setRequest] = useState(0);
+      return <>
+        <button type="button" onClick={() => setRequest((value) => value + 1)}>accepted</button>
+        <AgentEvalPanel agentId="osa_1" archived={false} refreshToken="1" redesigned liveVersion={3} liveRevisionId="arv_live" reloadRequest={request} />
+      </>;
+    }
+    renderIntl(<Harness />);
+    await screen.findByText("看一下静安店本周的销售情况");
+    const accepted = { ...owner, revision: { ...owner.revision, suite_revision_id: "aev_owner_2", case_count: 2, cases: [savedCase, { ...savedCase, case_key: "quality.2", case_revision_id: "aec_2", task: "上周三号店的销售额是多少？" }] } };
+    vi.mocked(getAgentEvalManager).mockResolvedValue({ ...withOwner, suites: [accepted, MANAGER.suites[0]] });
+    fireEvent.click(screen.getByRole("button", { name: "accepted" }));
+    expect(await screen.findByText("上周三号店的销售额是多少？")).toBeTruthy();
+  });
+});
+
 describe("saved-suite execution and honest answer criteria", () => {
   const point = { id: "p_ab12", kind: "judgment", text: "The total is 300", source: "owner", state: "confirmed" };
   const savedCase = { case_key: "quality.1", task: "Add 100 and 200", expected_contract: { points: [point] }, fixture_ref: {}, scorer_config: {}, effect_policy: { mode: "no_effects" }, valid_until: null };

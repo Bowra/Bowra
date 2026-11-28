@@ -14,7 +14,7 @@ Gespeicherte Zugangsdaten können nicht erneut angezeigt werden. Lassen Sie die 
 
 ## Mit dem eigenen Konto bei einem Dienst anmelden
 
-Manche MCP-Dienste stellen kein Token bereit, sondern verlangen eine Anmeldung mit Ihrem eigenen Konto, zum Beispiel Notion, Linear, Sentry oder n8n. Wenn Ihre Bereitstellung dies anbietet, wählen Sie unter **Authentifizierung** die Option **Beim Dienst anmelden**. Belassen Sie **Keine Authentifizierung** und verlangt der Dienst eine Anmeldung, wechselt der Dialog dorthin und nennt, wo Sie sich anmelden.
+Manche MCP-Dienste stellen kein Token bereit, sondern verlangen eine Anmeldung mit Ihrem eigenen Konto, zum Beispiel Notion, Linear, Sentry oder n8n. Wählen Sie unter **Authentifizierung** die Option **Beim Dienst anmelden**. Belassen Sie **Keine Authentifizierung** und verlangt der Dienst eine Anmeldung, wechselt der Dialog dorthin und nennt, wo Sie sich anmelden.
 
 1. Geben Sie einen Namen und die Remote-MCP-Adresse ein und wählen Sie **Weiter zur Anmeldung**.
 2. Melden Sie sich beim Dienst an und genehmigen Sie den angeforderten Zugriff. Manche Dienste erlauben es, die Rechte von Bowhead einzuschränken (zum Beispiel nur Lesen); die später verfügbaren Tools richten sich nach dieser Wahl.
@@ -28,7 +28,7 @@ Manche Dienste akzeptieren nur Apps, die ihre Administration registriert hat (zu
 
 | Situation                                                                       | Wo verbinden                                       | Wessen Konto der Dienst sieht                      |
 | ------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
-| Das Team teilt ein Dienstkonto, das eine Administration verwaltet               | Team-Einstellungen → Tool-Quellen                  | Die Anmeldung der Administration, vom Team geteilt |
+| Das Team teilt ein Dienstkonto, das eine Administration verwaltet               | Fähigkeiten → Tools → Werkzeugquellen verwalten    | Die Anmeldung der Administration, vom Team geteilt |
 | Jede Person soll in eigenem Namen handeln, und der Dienst bietet eine Anmeldung | Meine Verbindungen → Beim Dienst anmelden          | Ihr eigenes                                        |
 | Der Dienst gibt Ihnen ein persönliches Token oder einen API-Schlüssel           | Meine Verbindungen → Bearer Token / API Key        | Ihr eigenes                                        |
 | Slack                                                                           | Meine Verbindungen → Eigenes Slack-Konto verbinden | Ihr eigenes, über die Slack-App des Teams          |

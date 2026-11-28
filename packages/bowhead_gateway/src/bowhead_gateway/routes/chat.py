@@ -29,6 +29,7 @@ from bowhead_core.agent_draft_send_target import AgentDraftSendTarget, agent_dra
 from bowhead_core.chart.selected_context import ChartSelectedContext
 from bowhead_core.chat_references import InputDocument, SkillResourceRef
 from bowhead_core.document_revision_target import DOCUMENT_REVISION_ADMISSION_ERRORS, DocumentRevisionTarget
+from bowhead_core.document_selection import AnyDocumentSelection
 from bowhead_core.i18n_flag import (
     is_kill_switch_active,
     is_paradigm_v2_enabled_for_workspace,
@@ -487,6 +488,9 @@ class ChatAttachmentRef(BaseModel):
     )
     selected_context: ChartSelectedContext | None = Field(default=None, alias="selectedContext")
     presentation_selection: AnyPresentationSelection | None = Field(default=None, alias="presentationSelection")
+    # A Word paragraph or pages (docx inline edit design §7.4); never with ``presentationSelection``,
+    # which the attachment check refuses as ``document_selection_unavailable``.
+    document_selection: AnyDocumentSelection | None = Field(default=None, alias="documentSelection")
     bundle_artifact_ids: list[str] | None = Field(
         default=None,
         alias="bundleArtifactIds",
@@ -773,6 +777,9 @@ class ChatSendResponse(BaseModel):
     context_maintenance: ContextMaintenanceAction | None = Field(default=None, exclude_if=lambda value: value is None)
     document_revision_target: DocumentRevisionTarget | None = Field(default=None, exclude_if=lambda value: value is None)
     agent_draft_target: AgentDraftSendTarget | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Owner draft trial notice (``agent_trial_candidate_under_test``, decision TD1): a test runs on the
+    # candidate while the saved draft has moved, so this message used the draft being tested.
+    agent_trial_notice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     session_id: str
     turn_id: str
     stream_url: str
@@ -1746,6 +1753,64 @@ from bowhead_gateway.routes.planning_flags import (  # noqa: E402
 )
 
 
+def _trial_reference_of(body: ChatSendRequest):
+    from bowhead_core.agent_owner_trial import trial_reference
+
+    return trial_reference(body.input_document)
+
+
+async def _owner_trial_send_refusal(
+    request: Request,
+    body: ChatSendRequest,
+    *,
+    session: Any | None,
+    user_id: str,
+    reference_mode: bool,
+) -> str | None:
+    """The trial refusal code for this send, or None (trial-tech-design §4.1, §4.5).
+
+    A trial message names only the trial Agent, needs the switch, starts a new ``agent_trial`` session
+    or continues its Owner's trial of the same Agent, and takes no plan, steer or replay. A trial session
+    continues only with trial messages; a maintenance-only send stays allowed.
+    """
+    from bowhead_core.agent_owner_trial import (
+        TRIAL_SESSION_ORIGIN,
+        OwnerTrialRefusal,
+        agent_draft_trial_enabled,
+        read_trial_session_facts,
+        require_trial_document,
+        require_trial_session,
+    )
+
+    trial = _trial_reference_of(body) if reference_mode else None
+    in_trial_session = session is not None and getattr(session, "origin", "normal") == TRIAL_SESSION_ORIGIN
+    if trial is None and not in_trial_session:
+        return None
+    if trial is not None and not agent_draft_trial_enabled():
+        return "agent_trial_disabled"
+    if body.submission_kind in {"steer", "replay"}:
+        return "agent_trial_steer_unavailable"
+    if trial is None:
+        if body.context_maintenance is not None and body.input_document is None and not body.message.strip():
+            return None
+        return "agent_trial_reference_required"
+    if body.planning_mode == "planning" or (body.plan_execution_id or "").strip():
+        return "agent_trial_plan_unavailable"
+    if body.document_revision_target is not None:
+        return "agent_trial_document_tools_unavailable"
+    if body.selected_skills:
+        return "agent_trial_extra_references"
+    try:
+        require_trial_document(body.input_document)
+        if session is not None:
+            store = getattr(getattr(request.app.state, "orchestrator", None), "session_store", None) or request.app.state.session_store
+            facts = await read_trial_session_facts(store.db_path, session_id=session.id)
+            require_trial_session(facts, user_id=user_id, agent_id=trial.id)
+    except OwnerTrialRefusal as exc:
+        return exc.code
+    return None
+
+
 def _reference_rejected_before_admission(exc: HTTPException) -> HTTPException:
     """Mark a reference preparation refusal as definitive: no Turn, dispatch or receipt was written.
 
@@ -1802,6 +1867,21 @@ async def _read_reference_submission(body: ChatSendRequest, request: Request) ->
         if receipt.outcome == "rejected":
             raise chat_submission_receipt_http_error(receipt.response, fallback_code="submission_rejected")
         return ChatSendResponse.model_validate(receipt.response)
+    if _trial_reference_of(body) is not None:
+        from bowhead_core.agent_owner_trial import agent_draft_trial_enabled
+
+        # A trial names its own refusal before entry support is consulted (trial-tech-design §4.1, §4.5).
+        trial_code = (
+            "agent_trial_disabled"
+            if not agent_draft_trial_enabled()
+            else "agent_trial_steer_unavailable"
+            if body.submission_kind in {"steer", "replay"}
+            else "agent_trial_plan_unavailable"
+            if body.planning_mode == "planning" or (body.plan_execution_id or "").strip()
+            else None
+        )
+        if trial_code is not None:
+            raise _reference_rejected_before_admission(HTTPException(status_code=409, detail={"error": {"code": trial_code}}))
     from bowhead_gateway.chat_reference_start import reference_initial_writer_ready
 
     entry_mode = "steer" if body.submission_kind == "steer" else "plan" if body.planning_mode == "planning" else "ordinary"
@@ -2473,6 +2553,20 @@ async def _send_impl(
                     detail={"error": {"code": "access_context_denied"}},
                 ) from _e
             _log.info("access_context.shadow_unavailable user=%s ws=%s err=%s", resolved_user_id, body.workspace_id, type(_e).__name__)
+
+    # Owner draft trial (trial-tech-design §4.1): a trial message and an ``agent_trial`` session go together,
+    # and each refusal names its condition. Nothing has been written for this submission yet.
+    _trial_refusal = await _owner_trial_send_refusal(
+        request, body, session=_existing_session_for_send, user_id=resolved_user_id, reference_mode=reference_mode
+    )
+    if _trial_refusal is not None:
+        _trial_error = HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"error": {"code": _trial_refusal}})
+        raise _reference_rejected_before_admission(_trial_error) if reference_mode else _trial_error
+    _trial_session_origin = (
+        "agent_trial"
+        if (reference_mode and _trial_reference_of(body) is not None) or getattr(_existing_session_for_send, "origin", "normal") == "agent_trial"
+        else "normal"
+    )
 
     # A response receipt is checked immediately after current-scope authorization,
     # before mutable availability/credit/model gates. A same-ID retry must replay
@@ -3928,9 +4022,25 @@ async def _send_impl(
     # spawning the worker so the stream endpoint sees a live turn. (The active-turn
     # marker — which routes a concurrent /send into the steer path — is set inside
     # spawn_turn below, just before the worker is created.)
+    _trial_notice = None
+    _trial_ref = _trial_reference_of(body) if reference_start is not None else None
+    if _trial_ref is not None and _trial_ref.trial_candidate_id is not None:
+        from bowhead_core.agent_owner_trial import candidate_under_test
+
+        try:
+            if await candidate_under_test(
+                orchestrator.session_store.db_path,
+                team_id=resolved_team_id or "",
+                agent_id=_trial_ref.id,
+                candidate_id=_trial_ref.trial_candidate_id,
+            ):
+                _trial_notice = "agent_trial_candidate_under_test"
+        except Exception:  # noqa: BLE001 -- an optional notice never blocks the send
+            _log.warning("chat.trial_notice_unavailable turn=%s", turn_req.turn_id)
     _send_response = ChatSendResponse(
         document_revision_target=turn_req.document_revision_target,
         agent_draft_target=turn_req.agent_draft_target if action_identity is not None else None,
+        agent_trial_notice=_trial_notice,
         context_maintenance=turn_req.context_maintenance,
         session_id=session_id,
         turn_id=turn_req.turn_id,
@@ -3966,6 +4076,7 @@ async def _send_impl(
                 document_revision_target=body.document_revision_target,
                 context_maintenance=body.context_maintenance,
                 selected_skills=admitted_selected_skills,
+                session_origin=_trial_session_origin,
             )
         else:
             await _persist_turn_row_for_stream(
@@ -4121,6 +4232,13 @@ async def _send_impl(
                 raise HTTPException(409, detail={"error": {"code": "unsupported_entry"}}) from None
             if str(_pte) == "reference_attachment_unavailable":
                 raise HTTPException(409, detail={"error": {"code": "attachment_unavailable"}}) from None
+            if _trial_session_origin == "agent_trial":
+                from bowhead_core.agent_owner_trial import trial_refusal_code
+
+                # Admission repeats the trial checks in the Turn transaction (§4.3); keep their codes.
+                _trial_code = trial_refusal_code(_pte)
+                if _trial_code is not None:
+                    raise HTTPException(409, detail={"error": {"code": _trial_code}}) from None
             if isinstance(_pte, (AgentExecutionBindingError, SkillReadResolutionError)) or (
                 isinstance(_pte, ValueError) and str(_pte) in {"reference_scope_unavailable", "reference_policy_changed"}
             ):

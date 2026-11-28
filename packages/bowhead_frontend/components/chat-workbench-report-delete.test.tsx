@@ -98,6 +98,9 @@ beforeEach(() => {
   canvasState.sessionId = "s_1";
   api.deleteCanvas.mockResolvedValue(undefined);
   const store = new Map<string, string>();
+  // These tests read the report pane: the reader left Results open in these conversations (chat running state R2.7,
+  // where a report no longer opens Results by itself).
+  store.set("bowhead.results_open.v1", JSON.stringify(Object.fromEntries(["s_1", "s_2", "s_stop"].map((id) => [id, { state: "open", at: 1 }]))));
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: {

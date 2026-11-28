@@ -8,11 +8,13 @@ exhaustion is published as ``llm_provider_timeout``.
 """
 
 import json
+import sqlite3
 
 import anyio
 import httpx2
 import pytest
 import respx
+from bowhead_core.sqlite_domains import domain_database_path
 from test_ordinary_lead_question_http import response
 from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
@@ -31,7 +33,11 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("recovers", [True, False])
-async def test_no_output_timeout_retries_with_visible_progress(http_start, monkeypatch, recovers):
+@pytest.mark.parametrize(
+    ("failure", "retry_reason", "terminal_reason"),
+    [("timeout", "timeout", "llm_provider_timeout"), ("http_503", "upstream", "llm_provider_unavailable")],
+)
+async def test_model_failure_retries_with_visible_progress(http_start, monkeypatch, recovers, failure, retry_reason, terminal_reason):
     case = http_start
     case.client.headers["Content-Type"] = "application/json"
     enable_lead_writer(case, monkeypatch)
@@ -49,6 +55,8 @@ async def test_no_output_timeout_retries_with_visible_progress(http_start, monke
             return response(body, {"role": "assistant", "content": "Sales"}, "stop")
         calls.append(body)
         if len(calls) == 1 or not recovers:
+            if failure == "http_503":
+                return httpx2.Response(503, json={"error": {"message": "Model temporarily unavailable"}})
             raise httpx2.ReadTimeout("no response")
         return response(body, {"role": "assistant", "content": "Sales were 42."}, "stop")
 
@@ -62,17 +70,24 @@ async def test_no_output_timeout_retries_with_visible_progress(http_start, monke
     turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
     persisted = [(row["event_type"], json.loads(row["payload_json"])) for row in rows(case, "turn_events") if row["turn_id"] == turn_id]
     retries = [payload for kind, payload in persisted if kind == "llm.retry_scheduled"]
-    assert [(r["retry"], r["max_retries"], r["reason"], r["profile"]) for r in retries] == [(1, 1, "timeout", "lead")]
+    assert [(r["retry"], r["max_retries"], r["reason"], r["profile"]) for r in retries] == [(1, 1, retry_reason, "lead")]
     if recovers:
         assert turn["status"] == "completed", turn["error"]
         assert len(calls) == 2
     else:
         # Two stream attempts, then the existing single invoke fallback.
         assert len(calls) == 3
-        assert turn["status"] == "failed" and turn["error"] == "llm_provider_timeout"
+        assert turn["status"] == "failed" and turn["error"] == terminal_reason
         done = next(payload for kind, payload in persisted if kind == "done")
-        assert done["reason_code"] == "llm_provider_timeout"
+        assert done["reason_code"] == terminal_reason
         assert done["recovery_action"] == "retry"
+    if failure == "http_503":
+        with sqlite3.connect(domain_database_path(str(case.path), "execution")) as db:
+            rejected = db.execute(
+                "SELECT receipt_state,tokens_input,tokens_output,tokens_cached FROM llm_usage_events WHERE turn_id=? AND outcome_code=?",
+                (turn_id, "provider_http_service_unavailable/v1"),
+            ).fetchall()
+        assert rejected == [("not_applied", 0, 0, 0)] * (1 if recovers else 3)
     with anyio.fail_after(5):
         replay = await case.client.get(accepted.json()["stream_url"])
     replayed = [json.loads(line[6:]) for line in replay.text.splitlines() if line.startswith("data: ")]

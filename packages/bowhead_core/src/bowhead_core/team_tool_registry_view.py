@@ -322,6 +322,63 @@ async def _confirm_call(
     return None, snapshot
 
 
+def describe_remote_failure(e: BaseException, source_id: str) -> dict[str, Any]:
+    """Map a remote MCP call's exception to ``{ok: False, error_kind, error}``.
+
+    credential-readiness R7 review P2: a REMOTE MCP team source (WP2, incl. OAuth) surfaces its
+    401/403 as a transport exception — the in-process engine's upstream_auth envelope never fires
+    for it. Classify here so both team-source shapes get the same admin attribution.
+    """
+    status_error = _upstream_status_error(e)
+    status = _status_code(status_error)
+    grant_failure = _oauth_grant_failure(e)
+    if isinstance(grant_failure, OAuthGrantRejected) and grant_failure.reason == "notion_connection_changed":
+        return {
+            "ok": False,
+            "error_kind": "notion_connection_changed",
+            "error": "Ask a team administrator to review this Plugin's Notion connection and select its tools again.",
+        }
+    if isinstance(grant_failure, OAuthGrantRejected):
+        # The broker refused before connecting: the provider will not renew the sign-in.
+        return {"ok": False, "error_kind": "upstream_auth", "error": _sign_in_ended_error(source_id)}
+    if isinstance(grant_failure, OAuthRefreshUnavailable):
+        return _sign_in_renewal_result(source_id, grant_failure)
+    if is_upstream_auth_error(e):
+        return {"ok": False, "error_kind": "upstream_auth", "error": _upstream_auth_error(source_id)}
+    if status == 429 and status_error is not None:
+        # The service's own rate limit: name it and pass its Retry-After, so the model stops
+        # calling this source instead of reading a bare "ExceptionGroup" and trying other tools.
+        return _rate_limited_result(source_id, _retry_after_seconds(status_error))
+    if status is not None and status >= 400:
+        return _upstream_status_result(source_id, status)
+    if _is_timeout_error(e):
+        # F1-a: name the actual failure. The tool is reachable and authorized; it just took
+        # too long. Retrying the same call verbatim will normally time out again.
+        return {
+            "ok": False,
+            "error_kind": "timeout",
+            "error": (
+                "The tool did not respond in time. It is reachable — this call was too slow. Narrow the request or use a different tool; do not retry it unchanged."
+            ),
+        }
+    return {"ok": False, "error_kind": "protocol", "error": _scrub(type(e).__name__)}
+
+
+def _remote_failure(e: BaseException, *, team_id: str, source_id: str, tool: str) -> dict[str, Any]:
+    res = describe_remote_failure(e, source_id)
+    innermost = [type(x).__name__ for x in _wrapped_exceptions(e)][-1]
+    logger.warning(
+        "team_tool.remote_call_failed team=%s source=%s tool=%s error_kind=%s http_status=%s exception=%s",
+        team_id,
+        source_id,
+        tool,
+        res["error_kind"],
+        _status_code(_upstream_status_error(e)),
+        innermost,
+    )
+    return res
+
+
 def _make_team_handler(
     team_id: str,
     source_id: str,
@@ -331,6 +388,7 @@ def _make_team_handler(
     client: ToolCallClient,
     audit_store: Any | None,
     confirmation: _CallConfirmation | None = None,
+    notion_knowledge_binding: str | None = None,
 ) -> Any:
     """Closure dispatching one team tool through the turn's ClientSession + mapping the
     result to Bowhead-native form. Captures the owning team_id for the §3.5 dispatch-time
@@ -352,55 +410,21 @@ def _make_team_handler(
             source_id=source_id,
             operation_id=operation_id,
             advertised_name=advertised_name,
+            notion_knowledge_binding=notion_knowledge_binding,
         )
         if res is None and confirmation is not None:
             res, args = await _confirm_call(ctx, team_id=team_id, advertised_name=advertised_name, args=args, confirmation=confirmation)
+        if res is None and notion_knowledge_binding:
+            from bowhead_core.notion_knowledge import notion_knowledge_arguments
+
+            try:
+                args = notion_knowledge_arguments(operation_id, args)
+            except ValueError as exc:
+                res = {"ok": False, "error_kind": "invalid_arguments", "error": str(exc)}
         try:
             result = await client.call_tool(full_name, args or {}) if res is None else None
         except Exception as e:
-            # credential-readiness R7 review P2: a REMOTE MCP team source (WP2, incl.
-            # OAuth) surfaces its 401/403 as a transport exception on this path — the
-            # in-process engine's upstream_auth envelope never fires for it. Classify
-            # here so both team-source shapes get the same admin attribution.
-            status_error = _upstream_status_error(e)
-            status = _status_code(status_error)
-            grant_failure = _oauth_grant_failure(e)
-            res: dict[str, Any]
-            if isinstance(grant_failure, OAuthGrantRejected):
-                # The broker refused before connecting: the provider will not renew the sign-in.
-                res = {"ok": False, "error_kind": "upstream_auth", "error": _sign_in_ended_error(source_id)}
-            elif isinstance(grant_failure, OAuthRefreshUnavailable):
-                res = _sign_in_renewal_result(source_id, grant_failure)
-            elif is_upstream_auth_error(e):
-                res = {"ok": False, "error_kind": "upstream_auth", "error": _upstream_auth_error(source_id)}
-            elif status == 429 and status_error is not None:
-                # The service's own rate limit: name it and pass its Retry-After, so the model stops
-                # calling this source instead of reading a bare "ExceptionGroup" and trying other tools.
-                res = _rate_limited_result(source_id, _retry_after_seconds(status_error))
-            elif status is not None and status >= 400:
-                res = _upstream_status_result(source_id, status)
-            elif _is_timeout_error(e):
-                # F1-a: name the actual failure. The tool is reachable and authorized; it just took
-                # too long. Retrying the same call verbatim will normally time out again.
-                res = {
-                    "ok": False,
-                    "error_kind": "timeout",
-                    "error": (
-                        "The tool did not respond in time. It is reachable — this call was too slow. Narrow the request or use a different tool; do not retry it unchanged."
-                    ),
-                }
-            else:
-                res = {"ok": False, "error_kind": "protocol", "error": _scrub(type(e).__name__)}
-            innermost = [type(x).__name__ for x in _wrapped_exceptions(e)][-1]
-            logger.warning(
-                "team_tool.remote_call_failed team=%s source=%s tool=%s error_kind=%s http_status=%s exception=%s",
-                team_id,
-                source_id,
-                full_name,
-                res["error_kind"],
-                status,
-                innermost,
-            )
+            res = _remote_failure(e, team_id=team_id, source_id=source_id, tool=full_name)
         else:
             if res is not None:
                 result = None
@@ -433,6 +457,10 @@ def _make_team_handler(
                     res = {"ok": True, "data": structured}
                 else:
                     res = {"ok": True, "data": _scrub(_content_text(result.content))}
+        if notion_knowledge_binding and operation_id == "notion-search" and res.get("ok"):
+            from bowhead_core.notion_knowledge import notion_knowledge_search_result
+
+            res = notion_knowledge_search_result(res)
         # §9.6 exec audit (execute-then-meter; NO decrypted secret, NO raw args — digest only).
         if audit_store is not None:
             try:
@@ -451,6 +479,142 @@ def _make_team_handler(
         return res
 
     return handler
+
+
+def _n8n_arguments_problem(schema: dict[str, Any], args: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Refuse arguments that do not match the approved input schema, before anything is sent."""
+    from jsonschema import Draft202012Validator
+
+    try:
+        error = next(iter(Draft202012Validator(schema).iter_errors(args or {})), None)
+    except Exception:  # noqa: BLE001 — a schema the validator cannot use refuses the call
+        return {"ok": False, "error_kind": "input_invalid", "error": "Nothing ran: this workflow's input schema could not be applied."}
+    if error is None:
+        return None
+    where = ".".join(str(part) for part in error.absolute_path) or "the input"
+    return {
+        "ok": False,
+        "error_kind": "input_invalid",
+        "error": f"Nothing ran: {where} does not match the workflow's input schema ({_scrub(str(error.message))[:300]}). Fix the arguments and call again.",
+    }
+
+
+def _make_n8n_handler(
+    team_id: str,
+    entry: TeamToolEntry,
+    client: ToolCallClient,
+    audit_store: Any | None,
+    confirmation: _CallConfirmation | None,
+) -> Any:
+    """Run one approved n8n workflow (``n8n_workflow_run``) after the same checks as other team tools."""
+    approval = entry.n8n_workflow
+    source_id = entry.source_id
+
+    async def handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
+        if not getattr(ctx, "team_id", "") or ctx.team_id != team_id:
+            return {"ok": False, "error_kind": "team_denied", "error": "tool not available for this team"}
+        t0 = time.perf_counter()
+        from bowhead_core.resource_execution_gate import check_team_tool_execution
+
+        res = await check_team_tool_execution(
+            ctx,
+            team_id=team_id,
+            source_id=source_id,
+            operation_id=entry.dispatch_name,
+            advertised_name=entry.advertised_name,
+            n8n_workflow_digest=approval.digest,
+        )
+        if res is None:
+            res = _n8n_arguments_problem(approval.input_schema, args)
+        if res is None and confirmation is not None:
+            res, args = await _confirm_call(ctx, team_id=team_id, advertised_name=entry.advertised_name, args=args, confirmation=confirmation)
+        open_session = getattr(client, "session", None)
+        base_url = getattr(client, "base_url", None)
+        if res is None and (open_session is None or not base_url):
+            res = {"ok": False, "error_kind": "protocol", "error": "Nothing ran: this n8n source has no remote connection in this run."}
+        if res is None:
+            from bowhead_core.n8n_workflow_run import INTERACTIVE_DEADLINE_SECONDS, SCHEDULED_DEADLINE_SECONDS, run_n8n_workflow
+
+            labels = getattr(ctx, "team_tool_source_labels", None) or {}
+
+            def describe(exc: BaseException) -> dict[str, Any]:
+                return _remote_failure(exc, team_id=team_id, source_id=source_id, tool=entry.dispatch_name)
+
+            res = await run_n8n_workflow(
+                open_session,
+                approval,
+                dict(args or {}),
+                source_id=source_id,
+                source_label=str(labels.get(entry.advertised_name) or source_id),
+                base_url=str(base_url),
+                deadline_seconds=SCHEDULED_DEADLINE_SECONDS if getattr(ctx, "scheduled_run", None) is not None else INTERACTIVE_DEADLINE_SECONDS,
+                describe_failure=describe,
+            )
+        if audit_store is not None:
+            try:
+                await audit_store.log_tool_call(
+                    team_id=team_id,
+                    tool_name=entry.dispatch_name,
+                    status="ok" if res.get("ok") else "error",
+                    user_id=getattr(ctx, "user_id", "") or None,
+                    source_id=source_id,
+                    args_digest=_args_digest(args),
+                    error_kind=res.get("error_kind"),
+                    duration_ms=int((time.perf_counter() - t0) * 1000),
+                )
+            except Exception as _audit_exc:
+                logger.warning("cca.team_tool_audit_failed team=%s tool=%s err=%s", team_id, entry.dispatch_name, type(_audit_exc).__name__)
+        if res.get("execution_id"):
+            logger.info(
+                "team_tool.n8n_run team=%s source=%s workflow=%s execution=%s status=%s error_kind=%s",
+                team_id,
+                source_id,
+                approval.workflow_id,
+                res.get("execution_id"),
+                res.get("status"),
+                res.get("error_kind"),
+            )
+        return res
+
+    return handler
+
+
+def _n8n_spec(team_id: str, entry: TeamToolEntry, client: ToolCallClient, audit_store: Any | None, confirm_mcp: bool) -> ToolSpec:
+    """A derived n8n workflow tool. Its category is the administrator's approval, not n8n's annotations."""
+    approval = entry.n8n_workflow
+    category: TeamMcpCategory = approval.category
+    confirmation: _CallConfirmation | None = None
+    if confirm_mcp:
+        needs_approval = False
+        if category != "read":
+            confirmation = _CallConfirmation(
+                tool_name=sanitize_external_tool_description(approval.name)[:120],
+                description=sanitize_external_tool_description(approval.description)[:1000],
+                schema_digest=approval.digest,
+                source_fallback=entry.source_id,
+                category=category,
+            )
+    else:
+        needs_approval = category != "read"
+    return ToolSpec(
+        schema=ToolSchema(
+            name=entry.advertised_name,
+            description=sanitize_external_tool_description(entry.description),
+            input_schema=entry.input_schema,
+        ),
+        handler=_make_n8n_handler(team_id, entry, client, audit_store, confirmation),
+        needs_approval=needs_approval,
+        risk_level="medium" if needs_approval or confirmation is not None else "low",
+        allowed_for_roles=frozenset({"analyst"}),
+        source="external",
+        annotations=ToolAnnotations(open_world=True, destructive=category == "destructive", read_only=category == "read"),
+        team_tool_binding=TeamToolExecutionBinding(
+            team_id=team_id,
+            source_id=entry.source_id,
+            operation_id=entry.dispatch_name,
+            advertised_name=entry.advertised_name,
+        ),
+    )
 
 
 def build_team_specs(
@@ -479,6 +643,9 @@ def build_team_specs(
     confirm_mcp = team_tool_confirmation_enabled()
     specs: list[ToolSpec] = []
     for entry in entries:
+        if entry.n8n_workflow is not None:
+            specs.append(_n8n_spec(team_id, entry, client, audit_store, confirm_mcp))
+            continue
         needs_approval = entry.destructive
         destructive = entry.destructive
         read_only = not entry.destructive
@@ -525,6 +692,7 @@ def build_team_specs(
                     client,
                     audit_store,
                     confirmation,
+                    entry.notion_knowledge_binding,
                 ),
                 needs_approval=needs_approval,
                 risk_level="medium" if needs_approval or confirmation is not None else "low",

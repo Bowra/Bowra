@@ -14,8 +14,6 @@ import { withHttpFailureReason } from "@/lib/user-facing-error";
 // Append a global ui-integ-* hook to each class (new appearance in styles/ui-refresh-pages-settings.css).
 const styles = withUiHooks(rawStyles, "ui-integ");
 
-const empty: TeamsAdminConfig = { configured: false, status: "draft", allowed_scopes: ["personal"] };
-
 // Inline tags used by t.rich: monospace API paths and scope names.
 const richTags = { code: (chunks: ReactNode) => <code>{chunks}</code> };
 
@@ -23,13 +21,25 @@ export function TeamsIntegrationDetail() {
   const router = useAppRouter();
   const t = useTranslations("settings.integrations.teams");
   const tCommon = useTranslations("settings.integrations.detail_common");
-  const [config, setConfig] = useState<TeamsAdminConfig>(empty);
+  const [config, setConfig] = useState<TeamsAdminConfig | null>(null);
+  const [status, setStatus] = useState<TeamsAdminConfig["status"]>("draft");
   const [secret, setSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
 
-  useEffect(() => { void fetchTeamsAdminConfig().then(setConfig).catch((cause: unknown) => setError(withHttpFailureReason(t("load_failed"), cause, { read: true }))); }, [t]);
+  useEffect(() => {
+    let current = true;
+    void fetchTeamsAdminConfig().then((saved) => {
+      if (current) {
+        setStatus(saved.status);
+        setConfig(saved);
+      }
+    }).catch((cause: unknown) => {
+      if (current) setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
+    });
+    return () => { current = false; };
+  }, [t]);
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setSaving(true); setError("");
@@ -39,7 +49,7 @@ export function TeamsIntegrationDetail() {
         entra_tenant_id: String(form.get("tenant") || ""), microsoft_app_id: String(form.get("app") || ""), app_type: "SingleTenant",
         sso_auth_app_id: String(form.get("ssoApp") || ""), sso_audience: String(form.get("audience") || ""),
         sso_connection_name: String(form.get("connection") || ""), teams_manifest_id: String(form.get("manifest") || ""),
-        status: String(form.get("status") || "draft") as TeamsAdminConfig["status"], ...(secret ? { app_secret: secret } : {}),
+        status, ...(secret ? { app_secret: secret } : {}),
       })); setSecret("");
     } catch (cause) { setError(withHttpFailureReason(t("save_failed"), cause)); } finally { setSaving(false); }
   };
@@ -52,20 +62,20 @@ export function TeamsIntegrationDetail() {
     </header>
     {helpOpen ? <TeamsHelp /> : null}
     {error ? <div className={`${styles.statusBanner} ${styles.statusBannerWarn}`}><strong>{t("error_title")}</strong><p>{error}</p></div> : null}
-    <form className={styles.teamsConfigCard} onSubmit={save}>
+    {config && <form className={styles.teamsConfigCard} onSubmit={save}>
       <div className={styles.teamsCardHeader}><div><p className={styles.eyebrow}>{t("connection_eyebrow")}</p><h2>{t("card_title")}</h2><p>{t("card_body")}</p></div><span className={styles.teamsScopeBadge}>{t("scope_badge")}</span></div>
       <div className={styles.teamsFormGrid}>
-        <Field label={t("tenant_label")} hint="Azure Entra Directory (tenant) ID"><input required name="tenant" defaultValue={config.entra_tenant_id} /></Field>
-        <Field label="Azure Bot App ID" hint="Application (client) ID"><input required name="app" defaultValue={config.microsoft_app_id} /></Field>
-        <Field label="Bot client secret" hint={config.app_secret_configured ? tCommon("secret_saved_hint") : t("secret_hint")}><input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} /></Field>
-        <Field label="Teams manifest ID" hint={t("manifest_hint")}><input required name="manifest" defaultValue={config.teams_manifest_id} /></Field>
+        <Field label={t("tenant_label")} hint="Azure Entra Directory (tenant) ID"><input required={status === "enabled"} name="tenant" defaultValue={config.entra_tenant_id} /></Field>
+        <Field label="Azure Bot App ID" hint="Application (client) ID"><input required={status === "enabled"} name="app" defaultValue={config.microsoft_app_id} /></Field>
+        <Field label="Bot client secret" hint={config.app_secret_configured ? tCommon("secret_saved_hint") : t("secret_hint")}><input type="password" required={status === "enabled" && !config.app_secret_configured} value={secret} onChange={(event) => setSecret(event.target.value)} /></Field>
+        <Field label="Teams manifest ID" hint={t("manifest_hint")}><input required={status === "enabled"} name="manifest" defaultValue={config.teams_manifest_id} /></Field>
         <Field label="SSO App ID"><input name="ssoApp" defaultValue={config.sso_auth_app_id} /></Field>
-        <Field label="SSO audience" hint={t("audience_hint")}><input required name="audience" defaultValue={config.sso_audience} /></Field>
-        <Field label="Azure Bot OAuth connection"><input required name="connection" defaultValue={config.sso_connection_name} /></Field>
-        <Field label={tCommon("status_label")}><select name="status" defaultValue={config.status}><option value="draft">{tCommon("status_draft")}</option><option value="verified">{t("status_verified")}</option><option value="enabled">{tCommon("status_enabled")}</option><option value="disabled">{tCommon("status_disabled")}</option></select></Field>
+        <Field label="SSO audience" hint={t("audience_hint")}><input required={status === "enabled"} name="audience" defaultValue={config.sso_audience} /></Field>
+        <Field label="Azure Bot OAuth connection"><input required={status === "enabled"} name="connection" defaultValue={config.sso_connection_name} /></Field>
+        <Field label={tCommon("status_label")}><select name="status" value={status} onChange={(event) => setStatus(event.target.value as TeamsAdminConfig["status"])}><option value="draft">{tCommon("status_draft")}</option><option value="verified">{t("status_verified")}</option><option value="enabled">{tCommon("status_enabled")}</option><option value="disabled">{tCommon("status_disabled")}</option></select></Field>
       </div>
       <div className={styles.teamsFormFooter}><p>{t("footer")}</p><button className={styles.primaryButton} disabled={saving} type="submit">{saving ? tCommon("saving") : tCommon("save")}</button></div>
-    </form>
+    </form>}
   </div>;
 }
 

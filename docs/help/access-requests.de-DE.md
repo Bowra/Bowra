@@ -43,7 +43,7 @@ Es stehen zwei Optionen zur Verfügung:
 
 Beachten Sie:
 
-- Nur die verantwortliche Person eines Agents kann Anfragen für diesen Agent bearbeiten. Nach der Genehmigung kann die Änderung noch dieselbe Prüfung wie eine reguläre Veröffentlichung durchlaufen. Währenddessen sieht die anfragende Person **Genehmigt, wird angewendet**. Hat der Agent unveröffentlichte Änderungen, veröffentlichen oder verwerfen Sie diese zuerst und genehmigen Sie danach die Anfrage.
+- Nur die Eigentümerin oder der Eigentümer eines Agents kann Anfragen für diesen Agent bearbeiten. Nach der Genehmigung kann die Änderung noch dieselbe Prüfung wie eine reguläre Veröffentlichung durchlaufen. Währenddessen sieht die anfragende Person **Genehmigt, wird angewendet**. Hat der Agent unveröffentlichte Änderungen, veröffentlichen oder verwerfen Sie diese zuerst und genehmigen Sie danach die Anfrage.
 - Bei Berichten und Skills können auch Team-Owner und Team-Admins Anfragen bearbeiten. Wenn die verantwortliche Person innerhalb von 72 Stunden nicht geantwortet hat, werden Team-Owner und Team-Admins erinnert.
 - Bei drei oder mehr offenen Anfragen werden Benachrichtigungen zusammengefasst: **Sie haben N Zugriffsanfragen zu prüfen**.
 - Bearbeitete Anfragen einschließlich ihrer Ergebnisse und Nachrichten stehen unter **Bearbeitet**.

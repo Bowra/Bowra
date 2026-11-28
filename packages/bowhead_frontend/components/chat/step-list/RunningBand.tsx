@@ -45,19 +45,17 @@ import { turnElapsedMs } from "@/lib/turn-elapsed";
 import type { ModelRetryStatus, PeerTerminal } from "@/lib/turn-store";
 import type { AgentProgress } from "@/lib/types";
 
-import { AgentBadge } from "./AgentBadge";
 import { agentDisplayName } from "./agent-meta";
 import { useContextActivities } from "./ContextActivity";
 import { collaborationTopicState, useCollaborationTrace } from "./collaboration-trace-state";
 import { buildBandModel, type PeerIdentity } from "./running-band-model";
+import { activeHelperCount, buildRunGroups } from "./run-groups";
+import { useFoldedNotes } from "./folded-notes";
+import { RunStyleSwitcher } from "./RunStyleSwitcher";
+import { RunStyleView } from "./RunStyles";
+import { useRunningViewStyle } from "@/lib/running-view-style";
 import type { StepView } from "./types";
-import {
-  Check as LucideCheck,
-  ChevronDown as LucideChevronDown,
-  Circle as LucideCircle,
-  TriangleAlert as LucideTriangleAlert,
-  X as LucideX,
-} from "lucide-react";
+import { ChevronDown as LucideChevronDown } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
 
 /**
@@ -220,19 +218,6 @@ export function formatModelRetry(status: ModelRetryStatus, t: BandT): string {
   return t(modelRetryMessageKey(status.reason), { retry: status.retry, max: status.maxRetries });
 }
 
-const DoneGlyph = () => (
-  <LucideGlyph icon={LucideCheck} size={13} aria-hidden />
-);
-const FailGlyph = () => (
-  <LucideGlyph icon={LucideX} size={13} aria-hidden />
-);
-const ActiveGlyph = () => (
-  <LucideGlyph icon={LucideCircle} size={13} aria-hidden />
-);
-const IssueGlyph = () => (
-  <LucideGlyph icon={LucideTriangleAlert} size={13} aria-hidden />
-);
-
 export interface RunningBandProps extends PeerIdentity {
   steps: StepView[];
   running: boolean;
@@ -241,6 +226,8 @@ export interface RunningBandProps extends PeerIdentity {
   peerTerminalById?: Record<string, PeerTerminal>;
   /** turn-store `peerProse`: the sole destination for peer prose after hiding the running ledger. */
   peerProse?: Record<string, string>;
+  /** turn-store `peerTasks`: names a helper dispatched without a spawn row (plan path). */
+  peerTasks?: Record<string, string>;
   /** Turn start (epoch ms, like `runner.startedAt`), for the disclosure timer. */
   startedAt?: number | null;
   /**
@@ -305,31 +292,21 @@ export const PROGRESS_QUIET_MS = 60_000;
 export function RunningBand({
   steps, running, startedAt = null, answerStreaming = false, paused = false, modelRetry = null, onExpand,
   expanded = false, elapsedKey = null,
-  peerNames, peerDisplayNames, peerTerminalById, peerProse, transport = null, agentProgress = null,
+  peerNames, peerDisplayNames, peerTerminalById, peerProse, peerTasks, transport = null, agentProgress = null,
 }: RunningBandProps) {
   const t = useTranslations("step_list");
   const paced = useDwellPacedSteps(steps, running);
-  // This peer has **real internal steps** (spawn rows do not count: they are Lead's tool calls).
-  // ⚠Feed **unthrottled** `steps`: `step_done` changes state in place while later steps remain queued for throttling;
-  //   using the throttled prefix would show "未完成", then change back to "已重试" 450ms later,
-  //   retracting an already stated terminal fact.
-  const peerIdsWithSteps = useMemo(
-    () => new Set(
-      steps.filter((s) => !s.peerProseKey)
-        .map((s) => s.subagentId).filter((v): v is string => Boolean(v)),
-    ),
-    [steps],
-  );
-  // Same unthrottled `steps` as above: separate sources would first show one fact in an independent row,
-  // then rewrite it 450ms later; changed React key replays animation and shifts position.
-  const peerIdsWithSpawnRow = useMemo(
-    () => new Set(steps.map((s) => s.peerProseKey).filter((v): v is string => Boolean(v))),
-    [steps],
-  );
   const model = buildBandModel({
-    steps: paced, answerStreaming, peerNames, peerDisplayNames,
-    peerTerminalById, peerProse, peerIdsWithSteps, peerIdsWithSpawnRow,
+    steps: paced, answerStreaming, peerNames, peerDisplayNames, peerTerminalById, peerProse,
   });
+  // Chat running state R1.5: the card's body, one group per agent appearance in the order things happened.
+  // R1.9: Lead's text written before a later step is a note in Lead's group, at its place in time.
+  const notes = useFoldedNotes();
+  const groups = useMemo(
+    () => buildRunGroups({ steps: paced, peerNames: peerNames ?? {}, peerTasks, peerDisplayNames, peerTerminalById, notes }),
+    [paced, peerNames, peerTasks, peerDisplayNames, peerTerminalById, notes],
+  );
+  const activeHelpers = activeHelperCount(groups);
   const elapsed = useElapsedText(startedAt, running, t, elapsedKey);
   /** No active step (opening or gap): never present finished work as ongoing (invariant ③). */
   const noActiveStep = model.phase !== "running";
@@ -438,20 +415,51 @@ export function RunningBand({
         ? t("band_doing", { what: model.current.what })
         : t("band_working");
 
+  // Chat running state R1.4: the heartbeat line carries what used to be the current row's state (confirmation,
+  // retry, no signal, quiet progress, silence, context organizing, waiting for a helper, Lead deciding);
+  // otherwise the phase word. The groups below name each agent's current step, so the two never say the same
+  // sentence. Waiting copy names the helper only once its name has arrived (never Lead's own name).
+  const stateAction = noSignal || awaitingConfirmation || modelRetry || compacting.length > 0 || progressQuiet || paused;
+  const heartbeat = stateAction
+    ? action
+    : model.current?.waitingOnPeer
+      ? t("band_waiting_peer", { name: model.current.waitingOnPeer })
+      : model.current?.waitingOnPeerUnknown
+        ? t("band_waiting_peer_anon")
+        : model.phase === "gap"
+          ? t("band_thinking")
+          // Lead checking the delivery is its own state (PRD state table), not the tool's "collaboration" category.
+          : groups.some((group) => group.kind === "lead" && group.protocol === "review")
+            ? t("band_closeout_review")
+            : barText;
+  const activeHelper = activeHelpers === 1 ? groups.find((group) => group.kind === "helper" && group.status === "run") : undefined;
+  const whoIsActive = activeHelpers > 1
+    ? t("band_active_n", { count: activeHelpers })
+    : activeHelper
+      ? agentDisplayName(activeHelper.agent, activeHelper.displayName)
+      : "";
+  const turnElapsed = startedAt !== null ? turnElapsedMs(startedAt, nowTick, elapsedKey) : null;
+  // Chat running state R3.2: the reader's display style, one account setting.
+  const { style: runStyle } = useRunningViewStyle();
+  // A step's start is a server time like `startedAt` after `turn_started`; measuring inside the Turn cancels skew.
+  const stepElapsedMs = (step: StepView): number | null =>
+    turnElapsed === null || startedAt === null || step.startedAtMs === undefined
+      ? null
+      : Math.max(0, turnElapsed - Math.max(0, step.startedAtMs - startedAt));
+
   // Prose tail: second line of the current row; changes per token, requiring throttling for readability.
   const prose = useThrottledText(model.current?.prose ?? "", model.current?.owner ?? "lead");
   // ⚠When prose exists, **replace `detail`** (argument summary + duration), preserving `agentName` and "接手自 X".
   //   `.bh-band__foot` is a single line: both together silently sacrifice the less-observed item under flex pressure
   //   (observed in this repo). Prefer prose because it is live, exactly what the user's "至少显得有内容" decision
   //   requires; click to read the full label.
+  // Agent messaging and context organizing have no group line of their own; they stay as one foot line.
   const footMeta = [
     waitingCount > 0 ? t("collaboration.waiting_count", { count: waitingCount }) : "",
     collaborationSummary,
     compactingAgent
       ? agentDisplayName(compactingAgent.profile, compactingAgent.subagent_id ? peerDisplayNames?.[compactingAgent.subagent_id] : undefined)
-      : model.current?.agentName ?? "",
-    ...(prose ? [] : (model.current?.detail ?? [])),
-    model.current?.handoffFrom ? t("band_handoff", { from: model.current.handoffFrom }) : "",
+      : "",
   ].filter(Boolean).join(" · ");
 
   return (
@@ -472,118 +480,81 @@ export function RunningBand({
       <span className="bh-band__sr" role="status" aria-live="polite">
         {/* The disclosure button's aria-label overrides the visible peer failure count. */}
         {[action,
-          model.stepOrdinal > 0 ? t("band_step_n", { count: model.stepOrdinal }) : "",
           model.peerFailCount > 0
             ? t("band_peer_fail_n", { count: model.peerFailCount }) : "",
         ].filter(Boolean).join(" · ")}
       </span>
       )}
-      <button
-        type="button"
-        // ⚠Expanded disclosure is the **last** child; its own `border-bottom`
-        //   overlaps `.bh-band`'s outline into two differently colored hairlines (caught by independent review).
-        //   Add .legacy-band-bar--expanded to remove the bottom line (formerly inline styles, workbench/canvas batch 1).
-        className={expanded ? "bh-band__bar legacy-band-bar--expanded" : "bh-band__bar"}
-        onClick={onExpand}
-        data-testid="running-band-bar"
-        aria-expanded={expanded}
-        aria-label={expanded ? t("collapse_trace") : t("expand_trace")}
-      >
-        <span className="bh-band__spin" aria-hidden />
-        <span className="bh-band__txt">{barText}</span>
-        {/* Opening stepOrdinal is 0; "第 0 步" is internal, not for users. */}
-        <span className="bh-band__meta">
-          {[model.stepOrdinal > 0 ? t("band_step_n", { count: model.stepOrdinal }) : "", elapsed]
-            .filter(Boolean).join(" · ")}
-        </span>
-        {/* ★The persistent half. With only 2 history rows, an early-failing peer scrolls away after seconds,
-            leaving no trace on the turn's primary surface: precisely the dismiss-it-because-it-scrolls-away
-            behavior forbidden in inventory §2.1. Keep the count here; click for the full reason. */}
-        {model.peerFailCount > 0 ? (
-          <span className="bh-band__fail" data-testid="running-band-peer-fail">
-            {t("band_peer_fail_n", { count: model.peerFailCount })}
-          </span>
-        ) : null}
-        <span
-          className={expanded ? "bh-band__chev legacy-band-chev--expanded" : "bh-band__chev"}
-          aria-hidden
+      {/* The header: the disclosure and, while the card shows its body, the style switcher (a sibling, never inside
+          the button). The expanded trace carries its own switcher. */}
+      <div className="bh-band__head">
+        <button
+          type="button"
+          // ⚠Expanded disclosure is the **last** child; its own `border-bottom`
+          //   overlaps `.bh-band`'s outline into two differently colored hairlines (caught by independent review).
+          //   Add .legacy-band-bar--expanded to remove the bottom line (formerly inline styles, workbench/canvas batch 1).
+          className={expanded ? "bh-band__bar legacy-band-bar--expanded" : "bh-band__bar"}
+          onClick={onExpand}
+          data-testid="running-band-bar"
+          aria-expanded={expanded}
+          aria-label={expanded ? t("collapse_trace") : t("expand_trace")}
         >
-          <LucideGlyph icon={LucideChevronDown} size={15} />
-        </span>
-      </button>
+          <span className="bh-band__spin" aria-hidden />
+          <span className="bh-band__txt">{heartbeat}</span>
+          {/* No step number: an ordinary Turn has no total, and "第 N 步" read as one (PRD R1.4). */}
+          <span className="bh-band__meta">
+            {[elapsed, whoIsActive].filter(Boolean).join(" · ")}
+          </span>
+          {/* ★The persistent half. With only 2 history rows, an early-failing peer scrolls away after seconds,
+              leaving no trace on the turn's primary surface: precisely the dismiss-it-because-it-scrolls-away
+              behavior forbidden in inventory §2.1. Keep the count here; click for the full reason. */}
+          {model.peerFailCount > 0 ? (
+            <span className="bh-band__fail" data-testid="running-band-peer-fail">
+              {t("band_peer_fail_n", { count: model.peerFailCount })}
+            </span>
+          ) : null}
+          <span
+            className={expanded ? "bh-band__chev legacy-band-chev--expanded" : "bh-band__chev"}
+            aria-hidden
+          >
+            <LucideGlyph icon={LucideChevronDown} size={15} />
+          </span>
+        </button>
+        {expanded ? null : <RunStyleSwitcher className="bh-band__switch" />}
+      </div>
 
-      {/* ⚠Expanded state keeps only disclosure: three rows alongside the full trace below give two progress surfaces,
-          exactly what hiding the ledger in ③ must eliminate. */}
+      {/* ⚠Expanded state keeps only disclosure: the groups alongside the full trace below would give two progress
+          surfaces, exactly what hiding the ledger in ③ must eliminate. */}
       {expanded ? null : (
       <div className="bh-band__hist">
-        {model.history.map((row, i) => (
-          row.kind === "skeleton" ? (
-            // Skeleton padding: its sole purpose is constant height from the first frame.
-            <div key={row.key} className="bh-band__row bh-band__row--ghost" aria-hidden>
-              <span className="bh-band__gbar legacy-band-gbar--lead" />
-              <span className="bh-band__gbar" style={{ width: 78 + i * 32, opacity: 0.5 + i * 0.2 }} />
-            </div>
-          ) : (
-            <div
-              key={row.key}
-              className={`bh-band__row bh-band__row--h${i + 1} is-${row.tone}`}
-              data-row-kind={row.kind}
-            >
-              <span className="bh-band__glyph">
-                {/* Neither warning severity nor peer failure proves that a retry occurred. */}
-                {row.kind === "peer"
-                  ? (row.peerOutcome === "fail" ? <FailGlyph /> : <DoneGlyph />)
-                  : row.tone === "warn" ? <IssueGlyph />
-                    : row.tone === "fail" ? <FailGlyph />
-                      : row.tone === "active" ? <ActiveGlyph /> : <DoneGlyph />}
-              </span>
-              {/* If banned-word filtering empties the headline, use a generic fallback, **never** the skeleton branch,
-                  which would make a finished step look like it is still loading. */}
-              <span className="bh-band__lab">
-                {row.kind === "peer"
-                  ? (row.peerName
-                    // Named: include attribution.
-                    ? t(
-                      row.peerOutcome === "fail" ? "band_peer_failed" : "band_peer_done",
-                      { name: row.peerName },
-                    )
-                    // Unnamed (dispatch failed before agent_spawned): use anonymous copy,
-                    // **never invent a name** here; that would be a Chinese constant leaking into en-US.
-                    : t(row.peerOutcome === "fail"
-                      ? "band_peer_failed_anon" : "band_peer_done_anon"))
-                  : row.label || t("band_row_done")}
-              </span>
-              <span className="bh-band__rmeta">
-                {row.kind === "step" && row.tone === "warn"
-                  ? t(row.stepState === "cancelled" ? "band_row_cancelled"
-                    : row.stepState === "partial" ? "band_row_partial" : "band_row_failed")
-                  : row.meta}
-              </span>
-            </div>
-          )
-        ))}
-
-        <div className="bh-band__now">
-          {/* ⚠AgentBadge requires backend `agent_name`, not AgentKey;
-              passing a key collapses all custom agents into one generic badge. */}
-          <AgentBadge agent={compactingAgent?.profile ?? model.current?.agentBadgeName ?? "lead"} size={20} />
-          <div className="bh-band__now-main">
-            <div className="bh-band__act">{action}</div>
-            {footMeta || prose ? (
-              <div className="bh-band__foot">
-                {footMeta ? <span className="bh-band__foot-meta">{footMeta}</span> : null}
-                {prose ? (
-                  <span
-                    className={model.current?.proseIsCode ? "bh-band__foot-prose bh-band__foot-prose--code" : "bh-band__foot-prose"}
-                    data-testid="running-band-prose"
-                  >
-                    {prose}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
+        {groups.length === 0 && model.density === "rows" ? [0, 1].map((i) => (
+          // Opening placeholder until the first step arrives.
+          <div key={`__skeleton_${i}`} className="bh-band__row bh-band__row--ghost" aria-hidden>
+            <span className="bh-band__gbar legacy-band-gbar--lead" />
+            <span className="bh-band__gbar" style={{ width: 78 + i * 32, opacity: 0.5 + i * 0.2 }} />
           </div>
-        </div>
+        )) : null}
+        <RunStyleView
+          style={runStyle}
+          running
+          nowMs={startedAt !== null && turnElapsed !== null ? startedAt + turnElapsed : null}
+          turnStartMs={startedAt}
+          groups={groups}
+          activeHelpers={activeHelpers}
+          stepElapsedMs={stepElapsedMs}
+          formatTime={(ms) => formatElapsed(ms, t)}
+          // Lead's steps carry Lead's own id; any owner that is not a known helper is Lead.
+          owner={prose ? {
+            id: model.current?.owner && peerNames?.[model.current.owner] ? model.current.owner : "lead",
+            text: prose,
+            isCode: Boolean(model.current?.proseIsCode),
+          } : null}
+        />
+        {footMeta ? (
+          <div className="bh-band__foot" data-row-kind="collaboration">
+            <span className="bh-band__foot-meta">{footMeta}</span>
+          </div>
+        ) : null}
       </div>
       )}
     </div>

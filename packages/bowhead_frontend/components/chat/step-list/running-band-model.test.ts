@@ -1,18 +1,17 @@
 /**
- * running-band-model — data-extraction layer guards.
+ * running-band-model — data-extraction layer guards for the heartbeat line and the shared row builder.
  *
- * These four guards cover **real defects across three implementations** (handoff document §5 items 6/7/8),
- * rather than imagined boundaries: lost concurrent steps, rejected filenames/table names, overly coarse handoffs.
- * Each records its mutation (restore old implementation → must fail); keep these records.
+ * Each records its mutation (restore old implementation → must fail); keep these records. The card body's
+ * grouping lives in `run-groups.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 
 import { PRODUCT_NAME } from "@/lib/product-identity";
 
 import {
-  HISTORY_ROWS,
   buildBandModel,
   humanLabel,
+  rowOf,
   stripInternal,
 } from "./running-band-model";
 import { getToolMeta } from "./tool-catalog";
@@ -111,170 +110,15 @@ describe("humanLabel — 认不出就留空，绝不出裸 slug", () => {
   });
 });
 
-describe("三行结构 — 高度恒定的前提", () => {
-  it("零步骤：preparing + 两条骨架 + 回落 Lead", () => {
-    const m = buildBandModel({ steps: [] });
-    expect(m.phase).toBe("preparing");
-    expect(m.stepOrdinal).toBe(0);
-    expect(m.history).toHaveLength(HISTORY_ROWS);
-    expect(m.history.every((r) => r.kind === "skeleton")).toBe(true);
-    expect(m.current?.agentName).toBe(PRODUCT_NAME);
-  });
-
-  it("一步：仍是两条历史（一条骨架 + 一条真步）", () => {
-    const m = buildBandModel({ steps: [step({ stepId: "a", state: "active" })] });
-    expect(m.history).toHaveLength(HISTORY_ROWS);
-    expect(m.history.filter((r) => r.kind === "skeleton")).toHaveLength(HISTORY_ROWS);
-  });
-
-  it("五步：仍是两条历史（只留最近的）", () => {
-    const steps = ["a", "b", "c", "d", "e"].map((id, i) =>
-      step({ stepId: id, state: i === 4 ? "active" : "done" }));
-    const m = buildBandModel({ steps });
-    expect(m.history).toHaveLength(HISTORY_ROWS);
-    expect(m.history.map((r) => r.key)).toEqual(["c", "d"]);
-  });
-
-  it("★ 空窗（全部做完、下一步还没起）走 gap，不把做完的事报成「正在…」", () => {
-    // 2026-11-08 dogfood F9: a gap is not the opening; only the opening is `preparing` ("正在准备").
-    // Mutation: return `phase: "preparing"` for every no-active-step state → this case fails.
-    const m = buildBandModel({ steps: [step({ stepId: "a", state: "done" })] });
-    expect(m.phase).toBe("gap");
-    expect(m.current?.what).toBe("");
-  });
-});
-
-describe("★ 并发不丢步（交接 §5 第 6 条）", () => {
-  it("active 之后还有已完成步时，那一步仍在历史里", () => {
-    // Mutation: restore others to `steps.slice(0, activeIdx)` → this test must fail.
-    const steps = [
-      step({ stepId: "a", state: "done" }),
-      step({ stepId: "b", state: "active" }),
-      step({ stepId: "c", state: "done" }),
-    ];
-    const m = buildBandModel({ steps });
-    expect(m.current).not.toBeNull();
-    expect(m.history.map((r) => r.key)).toEqual(["a", "c"]);
-    expect(m.stepOrdinal).toBe(3);
-  });
-
-  it("两个并发 active：锁定**最后一个**，另一个进历史", () => {
-    const steps = [
-      step({ stepId: "a", state: "active" }),
-      step({ stepId: "b", state: "active" }),
-    ];
-    const m = buildBandModel({ steps });
-    expect(m.history.map((r) => r.key)).toEqual(["__skeleton_0", "a"]);
-    expect(m.history[1].tone).toBe("active");
-  });
-});
-
-describe("★ 交棒判定用 peer id，不用 AgentKey（交接 §5 第 8 条）", () => {
-  const peerNames = { p1: "compute", p2: "compute" };
-  const peerDisplayNames = { p1: "销售分析", p2: "库存分析" };
-
-  it("同一 profile 的两个 peer 交棒**要**播报", () => {
-    // Mutation: compare agentKeyOf instead of ownerIdOf → this test must fail (both are "compute").
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", subagentId: "p1" }),
-        step({ stepId: "b", state: "active", subagentId: "p2" }),
-      ],
-      peerNames,
-      peerDisplayNames,
-    });
-    expect(m.current?.handoffFrom).toBe("销售分析");
-    expect(m.current?.agentName).toBe("库存分析");
-  });
-
-  it("★ 上一步**仍在跑**时不算交棒（并发两个 peer 时那是假话）", () => {
-    // Handoff means the previous owner finished and ownership changed. With concurrent peers, the previous step remains active,
-    // so `接手自 X` is false: X has not handed over and is still working.
-    // Mutation: remove `prev.state !== "active"` → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "active", subagentId: "p1" }),
-        step({ stepId: "b", state: "active", subagentId: "p2" }),
-      ],
-      peerNames,
-      peerDisplayNames,
-    });
-    expect(m.current?.handoffFrom).toBeNull();
-  });
-
-  it("★ 两个 peer 的**显示名相同**时不播报（116 dogfood 实测）", () => {
-    // A plan turn spawned three `compute` peers, all named `主分析`, producing footnote
-    // `主分析 · … · 接手自 主分析`; current agent and handoff source have identical names,
-    // offering users no information and appearing buggy.
-    // Different peer IDs are internal facts; identical display names = **no user-visible owner change**.
-    // Mutation: remove `prevName !== curName` → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", subagentId: "p1" }),
-        step({ stepId: "b", state: "active", subagentId: "p2" }),
-      ],
-      peerNames: { p1: "compute", p2: "compute" },
-      peerDisplayNames: { p1: "主分析", p2: "主分析" },
-    });
-    expect(m.current?.agentName).toBe("主分析");
-    expect(m.current?.handoffFrom).toBeNull();
-  });
-
-  it("同一个 peer 连续跑不播报", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", subagentId: "p1" }),
-        step({ stepId: "b", state: "active", subagentId: "p1" }),
-      ],
-      peerNames,
-      peerDisplayNames,
-    });
-    expect(m.current?.handoffFrom).toBeNull();
-  });
-
-  it("Lead → peer 也算交棒（非 peer 步统一算 lead）", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done" }),
-        step({ stepId: "b", state: "active", subagentId: "p1" }),
-      ],
-      peerNames,
-      peerDisplayNames,
-    });
-    expect(m.current?.handoffFrom).toBe(PRODUCT_NAME);
-  });
-
-  it("徽章拿的是后端 agent_name 原值，不是 AgentKey", () => {
-    const m = buildBandModel({
-      steps: [step({ stepId: "b", state: "active", subagentId: "p1" })],
-      peerNames: { p1: "some-custom-agent" },
-      peerDisplayNames: {},
-    });
-    expect(m.current?.agentBadgeName).toBe("some-custom-agent");
-  });
-});
-
 describe("tone — 失败要留在账上", () => {
   it("preserves warning severity for the original failed step", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "failed", summary: "超时", error: { kind: "transient" } as never }),
-        step({ stepId: "b", state: "active" }),
-      ],
-    });
-    const row = m.history.find((r) => r.key === "a")!;
+    const row = rowOf(step({ stepId: "a", state: "failed", summary: "超时", error: { kind: "transient" } as never }));
     expect(row.tone).toBe("warn");
     expect(row.meta).toBe("");
   });
 
   it("★ 硬失败进历史仍是红，不因为「Lead 绕开了」就报成绿 ✓", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "failed", error: { kind: "permanent" } as never }),
-        step({ stepId: "b", state: "active" }),
-      ],
-    });
-    expect(m.history.find((r) => r.key === "a")!.tone).toBe("fail");
+    expect(rowOf(step({ stepId: "a", state: "failed", error: { kind: "permanent" } as never })).tone).toBe("fail");
   });
 });
 
@@ -282,54 +126,8 @@ describe("★ peer 终态进带（运行态账本关掉后，这是它唯一的�
   const peerNames = { p1: "compute", p2: "compute" };
   const peerDisplayNames = { p1: "主分析", p2: "库存分析" };
 
-  it("零子步骤的 peer 挂掉 → 历史行上出一行红 ✕", () => {
-    // Without this, direct-LLM-result / early-hard-failure / plan-path peers are entirely invisible on the band.
-    // Mutation: omit `peerTerminalById` from buildBandModel (or ignore it) → this test must fail.
-    const m = buildBandModel({
-      steps: [step({ stepId: "a", state: "active" })],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 5 } },
-    });
-    const row = m.history.find((r) => r.kind === "peer");
-    expect(row).toBeTruthy();
-    expect(row!.tone).toBe("fail");
-    expect(row!.peerOutcome).toBe("fail");
-    expect(row!.peerName).toBe("主分析");
-  });
 
-  it("★ **有**子步骤的 peer **成功**时不出终态行（成功由它的绿步骤体现）", () => {
-    // An extra `已完成` row adds noise and appears before its actual work.
-    // Mutation: stop excluding peers with child steps from `ownedPeerIds` → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", subagentId: "p1" }),
-        step({ stepId: "b", state: "active" }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "succeeded", evtSeq: 9 } },
-    });
-    expect(m.history.some((r) => r.kind === "peer")).toBe(false);
-  });
 
-  it("★★★ 但**有**子步骤的 peer **挂掉**时一定要出红行（fail/done 刻意不对称）", () => {
-    // Seventh independent review caught a real sprint regression: before ③ disabled the ledger, it correctly
-    // showed peer terminals; afterward these failures had only spawn's
-    // `派子 agent · 已重试` (backend hardcoded is_transient), **without even a red row**.
-    // Failure is new information, so include it; success already appears in green steps, so may omit it: asymmetric rules.
-    // Mutation: remove `.filter(id => !failPeerIds.has(id))` from `ownedPeerIds` → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", subagentId: "p1", evtSeq: 1 }),
-        step({ stepId: "b", state: "active", evtSeq: 2 }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 9 } },
-    });
-    const peerRow = m.history.find((r) => r.kind === "peer");
-    expect(peerRow).toBeTruthy();
-    expect(peerRow!.peerOutcome).toBe("fail");
-    expect(m.peerFailCount).toBe(1);
-  });
 
   it("★★★ peer 已挂但 spawn 步还 active 时，当前行不许还在「正在派子 agent」", () => {
     // Eighth independent review: `peer_dispatch_failed` emits **inside** subagent_spawn
@@ -350,130 +148,17 @@ describe("★ peer 终态进带（运行态账本关掉后，这是它唯一的�
     // Current must not remain on that failed spawn step.
     expect(m.current?.what).not.toContain("派子");
     expect(m.phase).toBe("gap");              // No other active step → gap copy
-    // Failure still gets its red row and normal count.
-    expect(m.history.some((r) => r.kind === "peer" && r.peerOutcome === "fail")).toBe(true);
-    expect(m.peerFailCount).toBe(1);
-    // `第 N 步` still counts it, since that step really occurred.
-    expect(m.stepOrdinal).toBe(2);
-  });
-
-  it("★★★ peer 挂掉时它的 spawn 行整行去掉，不许留着渲「已重试」", () => {
-    // Two surfaces of one fact: retain the red terminal row, remove the misleading spawn row.
-    // Backend hardcodes spawn failures as is_transient=True; retaining it puts `✕ 未完成` beside
-    // `派子 agent · 已重试`, contradicting itself.
-    // Mutation: skip `timelineSteps` filtering (use others directly) → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "spawn", state: "failed", toolName: "subagent_spawn",
-          headerZh: "派子 agent", subagentId: "lead_1", peerProseKey: "p1", evtSeq: 1,
-          error: { kind: "transient", uiKind: "permanent", message: "挂了" } }),
-        step({ stepId: "t1", state: "done", subagentId: "p1", evtSeq: 2 }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 3 } },
-    });
-    const rows = m.history.filter((r) => r.kind !== "skeleton");
-    expect(rows.some((r) => r.key === "spawn")).toBe(false);
-    expect(rows.some((r) => r.kind === "peer" && r.peerOutcome === "fail")).toBe(true);
-  });
-
-  it("★★ 排序按 evtSeq —— 早挂的 peer 会被后来的步骤挤出历史行", () => {
-    // Why use evtSeq instead of application-time steps.length or always appending:
-    // always appending **permanently pins** a peer failing at step 1 to the last slot,
-    // crowding out all subsequent steps and freezing history for the entire turn.
-    // Mutation: make mergeTimeline always push peer rows to the end → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", evtSeq: 1 }),
-        step({ stepId: "b", state: "done", evtSeq: 10 }),
-        step({ stepId: "c", state: "done", evtSeq: 11 }),
-        step({ stepId: "d", state: "active", evtSeq: 12 }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 2 } },
-    });
-    // Peer terminal occurred after step 1, before step 2, so was already pushed out.
-    expect(m.history.map((r) => r.key)).toEqual(["b", "c"]);
-  });
-
-  it("★★ 同样按 evtSeq —— 刚挂的 peer 就该在历史行上", () => {
-    // Positive control for the preceding test: alone it would also pass if peer rows could never enter history.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", evtSeq: 1 }),
-        step({ stepId: "b", state: "done", evtSeq: 2 }),
-        step({ stepId: "c", state: "active", evtSeq: 3 }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 99 } },
-    });
-    expect(m.history.map((r) => r.key)).toEqual(["b", "peer:p1"]);
-  });
-
-  it("没有 evtSeq 的 peer 终态回落到末尾（bypass-bus 事件没有序）", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", state: "done", evtSeq: 1 }),
-        step({ stepId: "b", state: "done", evtSeq: 2 }),
-      ],
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed" } },
-    });
-    expect(m.history.map((r) => r.key)).toEqual(["b", "peer:p1"]);
-  });
-
-  it("★ 带上只有 fail / done —— bail 在带的生命周期里不可达，不做那一态", () => {
-    // Independent review found the former amber bail state + dedicated glyph + two i18n entries were all dead code.
-    // Production `peerFailureRecovered` is `cardFinalState === "completed"`,
-    // while the band requires `runner.running`, overlapping only for one or two frames between card_finalized and done,
-    // yielding only a red-to-amber flash one frame before band unmount.
-    // Saying the peer did not finish while running is truthful; discounting it because Lead took over
-    // is retrospective, rendered by the ledger after the turn ends.
-    // Mutation: pass external peerFailureRecovered through `bandTerminalStatus` → this test must fail.
-    const m = buildBandModel({
-      steps: [], peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 7 } },
-    });
-    const row = m.history.find((r) => r.kind === "peer")!;
-    expect(row.peerOutcome).toBe("fail");
-    expect(row.tone).toBe("fail");
+    // The failure is still counted for the heartbeat chip.
     expect(m.peerFailCount).toBe(1);
   });
 
-  it("成功的零子步骤 peer（直接 LLM 结果）也出行，且不计进失败数", () => {
-    const m = buildBandModel({
-      steps: [], peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "succeeded", durationMs: 1200, evtSeq: 3 } },
-    });
-    const row = m.history.find((r) => r.kind === "peer")!;
-    expect(row.peerOutcome).toBe("done");
-    expect(row.tone).toBe("done");
-    // Reuse the ledger's formatPeerDuration instead of implementing another formatter.
-    expect(row.meta).toBe("1.2s");
-    expect(m.peerFailCount).toBe(0);
-  });
 
-  it("★ 恒高不变：加了 peer 行之后历史仍恒为 HISTORY_ROWS", () => {
-    const m = buildBandModel({
-      steps: [], peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "failed", evtSeq: 1 } },
-    });
-    expect(m.history).toHaveLength(HISTORY_ROWS);
-  });
 
-  it("peerIdsWithSteps 显式传入时压过从 steps 的推断（节流期不闪）", () => {
-    // The band supplies **unthrottled** data: peer steps may remain queued when its terminal arrives;
-    // deriving from released steps misclassifies it as zero-child-step, briefly showing a row that disappears after 450ms.
-    // Mutation: ignore `peerIdsWithSteps`, always deriving from steps → this test must fail.
-    const m = buildBandModel({
-      steps: [],                       // No steps released by throttling yet
-      peerNames, peerDisplayNames,
-      // Use a **successful** terminal: failures always get rows (asymmetric fail/done), so a failure fixture would make this guard ineffective.
-      peerTerminalById: { p1: { status: "succeeded", evtSeq: 4 } },
-      peerIdsWithSteps: new Set(["p1"]),  // But it actually has child steps
-    });
-    expect(m.history.some((r) => r.kind === "peer")).toBe(false);
-  });
+
+
+
+
+
 });
 
 describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯一落点）", () => {
@@ -565,20 +250,10 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerNames, peerDisplayNames,
       peerProse: { p1: "我早就说完了" },
     });
-    expect(m.current?.agentName).toBe(PRODUCT_NAME);
+    expect(m.current?.owner).toBe("lead");
     expect(m.current?.prose).toBe("");
   });
 
-  it("★ 拿不到名字的 peer 终态**不编名字**（编出来是中文常量，en-US 会串味）", () => {
-    // Real path: `peer_dispatch_failed` before `agent_spawned`,
-    // with neither peerNames nor peerDisplayNames containing the peer yet.
-    // Mutation: fall back to `AGENT_META.generic.zh` for `peerName` → this test must fail.
-    const m = buildBandModel({
-      steps: [], peerTerminalById: { pX: { status: "failed", evtSeq: 1 } },
-    });
-    const row = m.history.find((r) => r.kind === "peer")!;
-    expect(row.peerName).toBe("");
-  });
 
   it("★★★ spawn 行上 peer 的 id 在 `peerProseKey`，不在 `subagentId`", () => {
     // `turn-store.ts:77-82` calls this inversion the 3-strikes bug: on Lead's
@@ -602,8 +277,7 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerProse: { p1: "我正在拆解营收构成" },
     });
     expect(m.current?.prose).toBe("我正在拆解营收构成");
-    // Ownership must match: this row shows that peer, not Bowhead.
-    expect(m.current?.agentName).toBe("主分析");
+    // Ownership must match: the prose belongs to that peer's group, not Bowhead's.
     expect(m.current?.owner).toBe("p1");
   });
 
@@ -619,7 +293,8 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerNames: {},
       peerProse: { "sub_未知": "还没登记就说话" },
     });
-    expect(m.current?.agentName).toBe(PRODUCT_NAME);
+    // Lead's own id owns the row; the unregistered `sub_*` id never does.
+    expect(m.current?.owner).toBe("lead_1");
     expect(m.current?.prose).toBe("");
   });
 
@@ -635,14 +310,13 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerProse: { p1: "", p2: "我在看库存周转" },
     });
     expect(m.current?.prose).toBe("我在看库存周转");
-    expect(m.current?.agentName).toBe("库存分析");
     expect(m.current?.owner).toBe("p2");
   });
 
   it("回落但那个 peer 还没登记名字 → 仍回落 Lead（不编造）", () => {
     const m = buildBandModel({ steps: [], peerProse: { pX: "无名氏说话" } });
     expect(m.current?.prose).toBe("无名氏说话");
-    expect(m.current?.agentName).toBe(PRODUCT_NAME);
+    expect(m.current?.owner).toBe("lead");
   });
 
   it("★★ 散文里的 `[` / `{` 不能让整条散文闪没", () => {
@@ -700,113 +374,12 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
     });
   }
 
-  it("★★ 零子步骤 peer 只占**一行**（不是 spawn 行 + 终态行两行）", () => {
-    // Mutation: restore `ownedPeerIds` to `steps.map(s => s.subagentId)` → two rows, this test must fail.
-    const rows = spawnOnlyPeer("succeeded").history.filter((r) => r.kind !== "skeleton");
-    expect(rows).toHaveLength(1);
-    expect(rows[0].peerName).toBe("主分析");
-    expect(rows[0].peerOutcome).toBe("done");
-    expect(rows[0].meta).toBe("1.2s");     // Ownership and duration both remain
-  });
 
-  it("★★★ 零子步骤 peer **挂掉**时那一行必须说「没完成」，不能说「已重试」", () => {
-    // Fifth independent review caught a regression **introduced while fixing the previous review**:
-    // backend hardcodes spawn failure as is_transient=True; FE excludes self-healing only when
-    // diagnostics.retryable===false ⇒ toneOf gives warn ⇒
-    // `派子 agent · 已重试`. The peer hard-failed, rather than retrying.
-    // Its existing spawn row causes independent terminal omission, leaving only that false claim on screen
-    // (previously false row + real red row; the fix removed the truthful one).
-    // Mutation: remove spawn rewriting from `rowForStep`, using `rowOf(st)` directly → this test must fail.
-    const rows = spawnOnlyPeer("failed").history.filter((r) => r.kind !== "skeleton");
-    expect(rows).toHaveLength(1);
-    expect(rows[0].kind).toBe("peer");
-    expect(rows[0].peerOutcome).toBe("fail");
-    expect(rows[0].tone).toBe("fail");        // Red, not amber
-    expect(rows[0].peerName).toBe("主分析");
-  });
 
-  it("★★★ **有**子步骤的 peer：spawn 行不许抢先宣布「已完成」", () => {
-    // Sixth independent review: the previous spawn rewrite was too broad,
-    // showing `主分析 已完成 · 120s` on spawn while that peer's work still appeared below;
-    // completion preceded actual work, violating this module's no-terminal-row-for-peers-with-child-steps rule.
-    // Common in multi-agent turns, rather than an edge case.
-    // Mutation: remove `!childStepPeerIds.has(spawnFor)` from `rowForStep` → this test must fail.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "spawn", state: "done", toolName: "subagent_spawn",
-          headerZh: "派子 agent", subagentId: "lead_1", peerProseKey: "p1" }),
-        step({ stepId: "t1", state: "active", subagentId: "p1", headerZh: "查询数据" }),
-      ],
-      peerNames: { p1: "compute" }, peerDisplayNames: { p1: "主分析" },
-      peerTerminalById: { p1: { status: "succeeded", durationMs: 120000, evtSeq: 9 } },
-    });
-    expect(m.history.some((r) => r.kind === "peer")).toBe(false);
-  });
 
-  it("★★ 名字还没到（peer_dispatch_failed 早于 agent_spawned）也只出一行，且不说谎", () => {
-    // Sixth independent review: gating on `peerNames` left spawn unrewritten on this real path,
-    // falsely rendering `已重试` alongside an extra unnamed terminal row: two rows, one false claim.
-    // Mutation: add `peerNames[spawnFor]` to either `rowForStep` / `ownedPeerIds` → this test must fail.
-    const m = buildBandModel({
-      steps: [step({
-        stepId: "spawn", state: "failed", toolName: "subagent_spawn",
-        headerZh: "派子 agent", subagentId: "lead_1", peerProseKey: "sub_x",
-        error: { kind: "transient", uiKind: "permanent", message: "挂了" },
-      })],
-      peerNames: {},   // agent_spawned has not arrived yet
-      peerTerminalById: { sub_x: { status: "failed", evtSeq: 2 } },
-    });
-    const rows = m.history.filter((r) => r.kind !== "skeleton");
-    expect(rows).toHaveLength(1);
-    expect(rows[0].peerOutcome).toBe("fail");
-    expect(rows[0].peerName).toBe("");        // Unnamed → rendering uses anonymous copy, never exposing internal ID
-    expect(rows[0].tone).toBe("fail");
-  });
 
-  it("终态没带时长时，spawn 行自己的 meta 不能被换成空白", () => {
-    const m = buildBandModel({
-      steps: [step({
-        stepId: "spawn", state: "done", toolName: "subagent_spawn",
-        headerZh: "派子 agent", subagentId: "lead_1", peerProseKey: "p1",
-        summary: "1 个子任务",
-      })],
-      peerNames: { p1: "compute" }, peerDisplayNames: { p1: "主分析" },
-      peerTerminalById: { p1: { status: "succeeded", evtSeq: 9 } },   // No durationMs
-    });
-    const row = m.history.find((r) => r.kind === "peer")!;
-    expect(row.meta).toBe("1 个子任务");
-  });
 
-  it("★★ 两个归属集合必须同源：spawn 行还没放行时不出独立行（否则 key 会跳）", () => {
-    // Ninth independent review: `doneViaSpawnRow` used throttled steps, `childStepPeerIds`
-    // unthrottled props; a zero-child-step peer done before spawn release first showed
-    // independent key=`peer:p1`, then rewritten key=`spawn` after 450ms when spawn was released,
-    // replaying entry animation and shifting the row as the React key changed.
-    // Mutation: ignore `peerIdsWithSpawnRow` in `spawnRowPeerIds`, deriving only from steps → this test must fail.
-    const m = buildBandModel({
-      steps: [],                                  // Throttling has not released spawn yet
-      peerNames, peerDisplayNames,
-      peerTerminalById: { p1: { status: "succeeded", evtSeq: 5 } },
-      peerIdsWithSteps: new Set(),
-      peerIdsWithSpawnRow: new Set(["p1"]),       // But spawn really exists
-    });
-    // Spawn carries it → no independent row this frame; rewrite in place on release, retaining stepId throughout.
-    expect(m.history.some((r) => r.kind === "peer")).toBe(false);
-  });
 
-  it("peer 还没终态时 spawn 行照常是普通步骤行（不提前改写）", () => {
-    // Positive control: always treating spawn as peer rows must not satisfy the two preceding tests.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "spawn", state: "active", toolName: "subagent_spawn",
-          headerZh: "派子 agent", subagentId: "lead_1", peerProseKey: "p1" }),
-        step({ stepId: "b", state: "active" }),
-      ],
-      peerNames: { p1: "compute" }, peerDisplayNames: { p1: "主分析" },
-    });
-    const rows = m.history.filter((r) => r.kind !== "skeleton");
-    expect(rows.every((r) => r.kind === "step")).toBe(true);
-  });
 
   it("没有任何散文时为空串（渲染层据此不渲那一格）", () => {
     const m = buildBandModel({
@@ -908,16 +481,9 @@ describe("★★ 116 dogfood 逮到的两条", () => {
     expect(m.current?.what?.startsWith("正在")).toBe(false);
   });
 
-  it("★ 正对照：历史行仍用 active 名（它不包「正在」那一层）", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "r", state: "active", toolName: "subagent_return", headerZh: "子 agent 交付", subagentId: "p1" }),
-        step({ stepId: "b", state: "active", subagentId: "p1" }),
-      ],
-      peerNames: { p1: "compute" }, peerDisplayNames: { p1: "主分析" },
-    });
-    const row = m.history.find((r) => r.key === "r");
-    expect(row?.label).toBe("正在整理结果");
+  it("★ 正对照：行用 active 名（它不包「正在」那一层）", () => {
+    const row = rowOf(step({ stepId: "r", state: "active", toolName: "subagent_return", headerZh: "子 agent 交付", subagentId: "p1" }));
+    expect(row.label).toBe("正在整理结果");
   });
 
   it("★★★ spawn 步**还没出散文**时也不许当当前行（判据是工具名不是 peerProseKey）", () => {
@@ -1277,7 +843,6 @@ describe("★ density — 纯聊天轮收成单行（清点 §4 ② 的拍板）
   it("答案流式中 + 零步骤 → single，历史为空", () => {
     const m = buildBandModel({ steps: [], answerStreaming: true });
     expect(m.density).toBe("single");
-    expect(m.history).toHaveLength(0);
   });
 
   it("★ 答案流式中 + 零步骤，但**有 peer 终态** → 不收单行（否则那一行直接丢）", () => {
@@ -1288,61 +853,49 @@ describe("★ density — 纯聊天轮收成单行（清点 §4 ② 的拍板）
       peerTerminalById: { p1: { status: "failed", evtSeq: 2 } },
     });
     expect(m.density).toBe("rows");
-    expect(m.history.some((r) => r.kind === "peer")).toBe(true);
   });
 
-  it("答案流式中但**有**步骤 → 仍是三行（分析轮不受影响）", () => {
+  it("答案流式中但**有**步骤 → 不收单行（分析轮不受影响）", () => {
     const m = buildBandModel({
       steps: [step({ stepId: "a", state: "active" })],
       answerStreaming: true,
     });
     expect(m.density).toBe("rows");
-    expect(m.history).toHaveLength(HISTORY_ROWS);
   });
 
-  it("答案还没开始 + 零步骤 → 三行骨架（开场空窗仍要占位）", () => {
+  it("答案还没开始 + 零步骤 → 不收单行（开场空窗仍要占位）", () => {
     const m = buildBandModel({ steps: [], answerStreaming: false });
     expect(m.density).toBe("rows");
-    expect(m.history).toHaveLength(HISTORY_ROWS);
   });
 });
 
-describe("Turn visibility FR1: history rows say what the step did", () => {
+describe("Turn visibility FR1: rows say what the step did", () => {
   it("adds the step's label to the tool name, as the trace row does", () => {
     // Observed execution: the collapsed band read "运行代码 · 运行成功" twice while the trace
     // read "运行代码 · 读取门店销售额…". Mutation: drop the label from `rowOf` → this test fails.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", label: "读取门店销售额并核对口径" }),
-        step({ stepId: "b", toolName: "read_attachment", headerZh: "读取附件", label: "store_sales_2026H1.csv" }),
-        step({ stepId: "c", state: "active" }),
-      ],
-    });
-    expect(m.history.map((r) => r.label)).toEqual(["运行代码 · 读取门店销售额并核对口径", "读取附件 · store_sales_2026H1.csv"]);
+    const rows = [
+      step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", label: "读取门店销售额并核对口径" }),
+      step({ stepId: "b", toolName: "read_attachment", headerZh: "读取附件", label: "store_sales_2026H1.csv" }),
+    ].map(rowOf);
+    expect(rows.map((r) => r.label)).toEqual(["运行代码 · 读取门店销售额并核对口径", "读取附件 · store_sales_2026H1.csv"]);
   });
 
   it("keeps the name alone when the label repeats it or is an internal string", () => {
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", label: "查询数据" }),
-        step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", label: '{"code": "print(1)"}' }),
-        step({ stepId: "c", state: "active" }),
-      ],
-    });
-    expect(m.history.map((r) => r.label)).toEqual(["查询数据", "运行代码"]);
+    const rows = [
+      step({ stepId: "a", label: "查询数据" }),
+      step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", label: '{"code": "print(1)"}' }),
+    ].map(rowOf);
+    expect(rows.map((r) => r.label)).toEqual(["查询数据", "运行代码"]);
   });
 
   it("keeps the saved file type in a finished step's summary", () => {
     // an observed deployment dogfood (an observed task): a code step that saved one CSV read "运行成功 · 1 输出" in the band
     // and "运行成功 · 1 输出（CSV）" in the trace; the heading-slug strip took "（CSV）" off the summary.
     // Mutation: run the summary through `stripInternal` again → this test fails.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", summary: "运行成功 · 1 输出（CSV）" }),
-        step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", summary: "exit_code=0" }),
-        step({ stepId: "c", state: "active" }),
-      ],
-    });
-    expect(m.history.map((r) => r.meta)).toEqual(["运行成功 · 1 输出（CSV）", ""]);
+    const rows = [
+      step({ stepId: "a", toolName: "python_sandbox", headerZh: "运行代码", summary: "运行成功 · 1 输出（CSV）" }),
+      step({ stepId: "b", toolName: "python_sandbox", headerZh: "运行代码", summary: "exit_code=0" }),
+    ].map(rowOf);
+    expect(rows.map((r) => r.meta)).toEqual(["运行成功 · 1 输出（CSV）", ""]);
   });
 });

@@ -33,6 +33,9 @@ def read_xlsx_rows_from_path(file_path: str, max_total_rows: int = 5000) -> list
     """
     import openpyxl
 
+    from bowhead_core.xlsx_dates import install as read_east_asian_dates
+
+    read_east_asian_dates()
     wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
     out: list[tuple[str, list[list[Any]]]] = []
     total = 0
@@ -63,6 +66,9 @@ def read_xlsx_rows_from_bytes(data: bytes, max_total_rows: int = 5000) -> list[t
 
     import openpyxl
 
+    from bowhead_core.xlsx_dates import install as read_east_asian_dates
+
+    read_east_asian_dates()
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
     out: list[tuple[str, list[list[Any]]]] = []
     total = 0

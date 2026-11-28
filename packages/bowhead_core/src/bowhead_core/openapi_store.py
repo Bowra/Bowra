@@ -32,7 +32,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _hash(token: str) -> str:
+def credential_digest(token: str) -> str:
     # Instance-stable key; never persist the bearer token itself.
     key = os.environ.get("BOWHEAD_FERNET_KEY", "").encode()
     return hmac.new(key, token.encode(), hashlib.sha256).hexdigest()
@@ -51,7 +51,7 @@ class OpenApiStore:
             raise ValueError("invalid scopes")
         token = _new_token()
         key_id = "oak_" + secrets.token_urlsafe(12)
-        row = (key_id, team_id, name.strip(), _hash(token), token[:12], json.dumps(sorted(set(scopes))), expires_at, _now())
+        row = (key_id, team_id, name.strip(), credential_digest(token), token[:12], json.dumps(sorted(set(scopes))), expires_at, _now())
         async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO team_openapi_keys(id,team_id,name,token_hash,token_prefix,scopes_json,expires_at,status,created_at) VALUES(?,?,?,?,?,?,?,'active',?)",
@@ -115,7 +115,7 @@ class OpenApiStore:
         async with diagnostic_connect(self.db_path) as db:
             result = await db.execute(
                 "UPDATE team_openapi_keys SET token_hash=?,token_prefix=?,status='active',last_used_at=NULL WHERE team_id=? AND id=?",
-                (_hash(token), token[:12], team_id, key_id),
+                (credential_digest(token), token[:12], team_id, key_id),
             )
             await db.commit()
         if result.rowcount != 1:
@@ -128,7 +128,7 @@ class OpenApiStore:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,name,token_prefix,scopes_json,expires_at FROM team_openapi_keys WHERE token_hash=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
-                (_hash(token), now),
+                (credential_digest(token), now),
             ) as cur:
                 row = await cur.fetchone()
             if row is not None:

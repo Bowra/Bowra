@@ -134,4 +134,24 @@ describe("SplitPane keyboard and double-click reset", () => {
     expect(edge).toHaveAttribute("data-has-new", "1");
     expect(edge.querySelector(".v2-ws-new-dot")).not.toBeNull();
   });
+
+  it("shows how many results are new and the reminder beside the collapsed edge (chat running state R2.6)", () => {
+    renderIntl(
+      <SplitPane
+        mode="chat"
+        chat={<div>chat</div>}
+        canvas={<div>results</div>}
+        canvasLabel="成果"
+        canvasHasNew
+        canvasNewCount={3}
+        canvasReopenAside={<div data-testid="aside">本轮新增</div>}
+        onSnapCanvas={noop}
+        onSnapChat={noop}
+        onReopen={noop}
+      />,
+    );
+    const edge = screen.getByRole("button", { name: "重开成果，有 3 项新内容" });
+    expect(edge.querySelector(".v2-ws-new-count")).toHaveTextContent("3");
+    expect(screen.getByTestId("aside")).toBeInTheDocument();
+  });
 });

@@ -58,6 +58,7 @@ from bowhead_router.invocation import (
     confirm_provider_rate_limit_rejection,
     exact_authoritative_usage,
     fail_physical_invocation,
+    settle_provider_service_unavailable,
     settle_transport_failure,
 )
 from bowhead_router.outbound import (
@@ -317,6 +318,9 @@ class AnthropicCompatibleAdapter:
         elif resp.status_code == 429:
             await confirm_provider_rate_limit_rejection(attempt, status_code=resp.status_code)
             attempt = None
+        elif resp.status_code == 503:
+            await settle_provider_service_unavailable(attempt, status_code=resp.status_code)
+            attempt = None
         try:
             self._raise_for_status(resp)
             try:
@@ -425,6 +429,10 @@ class AnthropicCompatibleAdapter:
                         attempt = None
                     elif resp.status_code == 429:
                         await confirm_provider_rate_limit_rejection(attempt, status_code=resp.status_code)
+                        attempt_settled = True
+                        attempt = None
+                    elif resp.status_code == 503:
+                        await settle_provider_service_unavailable(attempt, status_code=resp.status_code)
                         attempt_settled = True
                         attempt = None
                     # 0.13.2 fix: 429 is transient (rate limit / brief quota

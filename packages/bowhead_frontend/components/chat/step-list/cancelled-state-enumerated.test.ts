@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { stepStateToStatus } from "./agent-grouping";
 import { buildBandModel } from "./running-band-model";
+import { buildRunGroups } from "./run-groups";
 import type { StepView } from "./types";
 
 function stepAt(state: StepView["state"]): StepView {
@@ -51,12 +52,15 @@ describe("cancelled 必须被各处显式列举", () => {
   });
 
   it("running band：cancelled 的步骤不能被当成 active（那就是继续转圈）", () => {
-    const band = buildBandModel({ steps: [stepAt("cancelled")] } as never);
-    const tones = JSON.stringify(band ?? {});
+    // An ordinary tool step: a dispatch row is never a line while its helper runs.
+    const toolStep = (state: StepView["state"]): StepView => ({ ...stepAt(state), toolName: "bi_query" });
+    const lines = buildRunGroups({ steps: [toolStep("cancelled")], peerNames: {} }).flatMap((group) => group.lines);
     // This step must not appear as active in the band (active = still showing a spinner).
-    expect(tones).not.toContain('"tone":"active"');
+    expect(lines.map((line) => line.tone)).not.toContain("active");
     // Positive control: the same shape with state=active must actually show active.
-    const live = JSON.stringify(buildBandModel({ steps: [stepAt("active")] } as never) ?? {});
-    expect(live).toContain('"tone":"active"');
+    const live = buildRunGroups({ steps: [toolStep("active")], peerNames: {} }).flatMap((group) => group.lines);
+    expect(live.map((line) => line.tone)).toContain("active");
+    // The heartbeat model never takes a cancelled step as the current one either.
+    expect(buildBandModel({ steps: [stepAt("cancelled")] } as never).phase).not.toBe("running");
   });
 });

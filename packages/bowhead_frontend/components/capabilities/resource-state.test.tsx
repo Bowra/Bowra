@@ -14,6 +14,8 @@ import {
   type BuiltinPluginState,
 } from "@/lib/builtin-resources-api";
 import { toast } from "@/lib/use-toast";
+import { listSources, type TeamToolSourcePublic } from "@/lib/team-tool-sources-api";
+import type { DiscoveryTool } from "@/lib/capability-catalog-api";
 import { CapabilityCenter } from "./capability-center";
 
 const state = vi.hoisted(() => ({ query: "", session: null as AuthSessionValue | null }));
@@ -23,6 +25,7 @@ vi.mock("@/components/shell/AppShell", () => ({ AppShell: ({ children }: { child
 vi.mock("@/components/shell/Topbar", () => ({ Topbar: () => null }));
 vi.mock("@/lib/capability-catalog-api", () => ({ fetchCapabilityDiscoveryCatalog: vi.fn() }));
 vi.mock("@/lib/use-toast", () => ({ toast: vi.fn() }));
+vi.mock("@/lib/team-tool-sources-api", () => ({ listSources: vi.fn() }));
 vi.mock("@/lib/builtin-resources-api", () => ({
   fetchBuiltinPlugins: vi.fn(),
   fetchBuiltinTools: vi.fn(),
@@ -82,6 +85,7 @@ describe("Capability Center resource state", () => {
     vi.mocked(setBuiltinPluginTeamState).mockResolvedValue();
     vi.mocked(setBuiltinPluginMyState).mockResolvedValue();
     vi.mocked(setBuiltinToolTeamState).mockResolvedValue();
+    vi.mocked(listSources).mockResolvedValue([]);
   });
   afterEach(() => {
     cleanup();
@@ -286,5 +290,108 @@ describe("Capability Center resource state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("heading", { name: /Built-in Plugins/ })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Turn “Web research” on or off for the team" })).toBeTruthy();
+  });
+
+  describe("Tools page", () => {
+    const external = (name: string, source: string, extra: Partial<DiscoveryTool> = {}): DiscoveryTool => ({
+      stable_ref: `teammcp.${source}.${name}`,
+      display_name: name,
+      description: `${name} description`,
+      display_name_en: name,
+      description_en: `${name} description`,
+      display_name_de: "",
+      description_de: "",
+      display_name_fr: "",
+      description_fr: "",
+      source_kind: "team_mcp",
+      source_display_name: source,
+      risk: "read",
+      selectable: true,
+      locked_reason: null,
+      ...extra,
+    });
+
+    beforeEach(() => {
+      state.query = "type=tools";
+    });
+
+    it("groups every built-in Tool by its Plugin, with knowledge management under Knowledge base", async () => {
+      vi.mocked(fetchBuiltinPlugins).mockResolvedValue({
+        plugins: [plugin("knowledge-management", ["kb_add_file"]), plugin("web-research", ["web_search"])],
+        team_plugins_my_disabled: [],
+      });
+      vi.mocked(fetchBuiltinTools).mockResolvedValue([
+        { name: "kb_add_file", risk: "artifact_write", enabled: true },
+        { name: "web_search", risk: "read", enabled: true },
+      ]);
+      authenticate("owner");
+      renderIntl(<CapabilityCenter />, { locale: "en-US" });
+      const knowledge = await screen.findByRole("region", { name: "Knowledge base" });
+      expect(within(knowledge).getByRole("heading", { name: "Add to Knowledge" })).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "Skills" })).toBeNull();
+    });
+
+    it("lists external Tools under their source with risk tags and the specific reason a locked one can't be added", async () => {
+      vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({
+        builtin_plugins: [],
+        capabilities: [],
+        tools: [
+          external("findPets", "pet"),
+          external("addPet", "pet", { risk: "external_write", selectable: false, locked_reason: "approval_executor_unavailable" }),
+          external("execute_workflow", "n8n", { risk: "destructive" }),
+        ],
+      });
+      authenticate("member");
+      renderIntl(<CapabilityCenter />, { locale: "en-US" });
+      const pet = await screen.findByRole("region", { name: "pet" });
+      expect(within(pet).getByRole("heading", { level: 3 }).textContent).toBe("pet 2");
+      const addPet = within(pet).getByRole("heading", { name: /addPet/ }).closest("li") as HTMLElement;
+      expect(within(addPet).getByText("Writes externally")).toBeTruthy();
+      expect(within(addPet).getByText("This deployment can't confirm this kind of write yet, so it can't be added to Agents.")).toBeTruthy();
+      const findPets = within(pet).getByRole("heading", { name: "findPets" }).closest("li") as HTMLElement;
+      expect(findPets.textContent).toBe("findPetsfindPets description");
+      const n8n = screen.getByRole("region", { name: "n8n" });
+      expect(within(n8n).getByText("Destructive")).toBeTruthy();
+      // Members are not told about sources they cannot manage.
+      expect(listSources).not.toHaveBeenCalled();
+    });
+
+    it("tells administrators how many sources are not on, since the catalog leaves their Tools out", async () => {
+      vi.mocked(fetchCapabilityDiscoveryCatalog).mockResolvedValue({ builtin_plugins: [], capabilities: [], tools: [external("findPets", "pet")] });
+      vi.mocked(listSources).mockResolvedValue([
+        { id: "ots_1", status: "enabled" },
+        { id: "ots_2", status: "disabled" },
+        { id: "ots_3", status: "disabled" },
+      ] as TeamToolSourcePublic[]);
+      authenticate("owner");
+      renderIntl(<CapabilityCenter />, { locale: "en-US" });
+      const note = await screen.findByRole("note");
+      expect(note.textContent).toContain("2 more external Tool sources are not turned on, so their Tools are not listed here.");
+      expect(within(note).getByRole("link", { name: "Manage tool sources" }).getAttribute("href")).toBe("/team/settings/tools/");
+    });
+
+    it("shows members a state only for Tools the team turned off, and the system capabilities as always on", async () => {
+      authenticate("member");
+      renderIntl(<CapabilityCenter />, { locale: "en-US" });
+      const email = (await screen.findByRole("heading", { name: /Send Email/ })).closest("li") as HTMLElement;
+      expect(within(email).getByText("Off for the team")).toBeTruthy();
+      const search = screen.getByRole("heading", { name: "Web Search" }).closest("li") as HTMLElement;
+      expect(within(search).queryByText("On")).toBeNull();
+      expect(within(search).queryByText("Off for the team")).toBeNull();
+      expect(screen.queryByRole("switch")).toBeNull();
+      const system = screen.getByTestId("system-capabilities");
+      expect(within(system).getByText("Find conversation results")).toBeTruthy();
+      expect(within(system).getByText("Always on")).toBeTruthy();
+    });
+
+    it("counts matches out of the total while searching, and says when nothing matches", async () => {
+      authenticate("owner");
+      renderIntl(<CapabilityCenter />, { locale: "en-US" });
+      await screen.findByRole("heading", { level: 2, name: /Built-in Tools/ });
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search Tools" }), { target: { value: "web" } });
+      expect(screen.getByRole("heading", { level: 2, name: /Built-in Tools/ }).textContent).toBe("Built-in Tools 1 / 2");
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search Tools" }), { target: { value: "zzz-no-tool" } });
+      expect(screen.getByText("No Tools match your search.")).toBeTruthy();
+    });
   });
 });

@@ -123,13 +123,14 @@ _FLAT_SANDBOX_TOOL = "python_exec"
 
 
 # Distinguish the runner's two whole-run failure classes (review R2-1): `_fail_data_materialization`
-# marks a completed run ok=False/exit_code=1 when **artifacts** cannot materialize (file over 50MB, upload failure,
+# marks a completed run as failed when **artifacts** cannot materialize (oversize file, upload failure,
 # or missing declared deliverable), while the runner itself states that run success remains independent from
 # artifact presence. In this failure class, **user code completed**, and stdout numbers are final values.
 # ⚠ The criterion depends on runner reason text (three `_fail_data_materialization` callers in `runner.py`);
 # text drift treats these as genuine crashes, a conservative fallback that does not misbind sources.
 _SANDBOX_MATERIALIZATION_ERROR_RE = re.compile(
     r"^(?:sandbox \S+ (?:exceeds Data artifact limit|Data artifact upload failed)"
+    r"|(?:sandbox file|declared deliverable) .+ is \d+ bytes, above the \d+ MiB output limit"
     r"|declared deliverable outputs were not produced and persisted:.*)$",
 )
 
@@ -314,7 +315,7 @@ def _build_value_to_source_map(
         # Same three batch 5ⓑ entry points, aligned with _extract_sandbox_tables: legacy pseudo-tool name /
         # skill_invoke(name="python_sandbox") / flat `python_exec`. Recognizing only
         # "python_sandbox" repeated the batch 5ⓑ blind spot: switching compute to the flat entry silently disabled
-        # the entire weak branch (2026-08-29 device t_1c34b8e87ef9: volume/price contribution derived values had no citations,
+        # the entire weak branch (2026-08-29 device an observed task: volume/price contribution derived values had no citations,
         # leaving no inputs for the e2-r1 ten-thousand/hundred-million bridge; scenario comparisons are in the expression-discovery changelog).
         _tn = str(getattr(inv, "tool_name", "") or "")
         _args = inv.arguments if isinstance(getattr(inv, "arguments", None), dict) else {}
@@ -347,7 +348,7 @@ def _build_value_to_source_map(
                 # e2-r2 second half: flat/skill-runtime artifact IDs are in `result_json.outputs[]`,
                 # absent at top level. Without reading them, fallback uses call_id, which no resolver recognizes,
                 # inevitably classifying ownership as `linked_unavailable`; opening the prose citation shows `该来源不可用`
-                # (measured on 1.1.94 device t_1831b22ed3c1, exposed after e2-r2 actually bound values).
+                # (measured on 1.1.94 device an observed task, exposed after e2-r2 actually bound values).
                 # Prefer the stdout artifact: weak values come from stdout, making this the most precise attribution.
                 # It is also an artifact from this turn, so the existing art_ resolver returns OWNED, **without adding authorization bypasses**.
                 src_id = _sandbox_output_artifact_id(inv.result) or str(getattr(inv, "call_id", "") or "")

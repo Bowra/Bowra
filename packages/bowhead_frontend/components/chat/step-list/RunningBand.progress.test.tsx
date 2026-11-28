@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 const steps: StepView[] = [];
-const actionText = (container: HTMLElement): string => container.querySelector(".bh-band__act")?.textContent ?? "";
+const actionText = (container: HTMLElement): string => container.querySelector(".bh-band__txt")?.textContent ?? "";
 const one = { agents: [{ subagentId: "sub_1", profile: "compute", displayName: "数据分析专家", step: 37 }] };
 
 describe("RunningBand progress line", () => {

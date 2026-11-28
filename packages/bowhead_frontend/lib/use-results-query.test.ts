@@ -330,6 +330,38 @@ describe("useResultsQuery", () => {
     expect(hook.result.current.items[0]?.key).toBe("artifact:new");
   });
 
+  it("says why a locate found nothing, so only a missing item reads as not found", async () => {
+    let resolveFirst!: (value: ResultsQueryResponse) => void;
+    queryResultsMock
+      .mockResolvedValueOnce(page([item("artifact:base")]))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(page([item("artifact:saved")]))
+      .mockResolvedValueOnce(page([]))
+      .mockRejectedValueOnce(new Error("network"));
+    const hook = renderHook(() => useResultsQuery({ enabled: true, query: "", scope: "session", sessionId: "s_1" }));
+    await flushLoad();
+
+    let superseded!: ReturnType<typeof hook.result.current.locateResult>;
+    let found!: ReturnType<typeof hook.result.current.locateResult>;
+    act(() => {
+      superseded = hook.result.current.locateResult("artifact:saved");
+      found = hook.result.current.locateResult("artifact:saved");
+    });
+    await act(async () => { await found; });
+    resolveFirst(page([item("artifact:saved")]));
+    await expect(superseded).resolves.toEqual({ item: null, reason: "superseded" });
+    await expect(found).resolves.toMatchObject({ item: { key: "artifact:saved" }, reason: "found" });
+    // Listed now: a later locate answers from the catalog without a request.
+    await expect(hook.result.current.locateResult("artifact:saved")).resolves.toMatchObject({ reason: "found" });
+
+    let missing!: ReturnType<typeof hook.result.current.locateResult>;
+    act(() => { missing = hook.result.current.locateResult("artifact:gone"); });
+    await expect(missing).resolves.toEqual({ item: null, reason: "not_found" });
+    let failed!: ReturnType<typeof hook.result.current.locateResult>;
+    act(() => { failed = hook.result.current.locateResult("artifact:other"); });
+    await expect(failed).resolves.toEqual({ item: null, reason: "failed" });
+  });
+
   it("locates a visible page and prepends its independent previous page", async () => {
     queryResultsMock
       .mockResolvedValueOnce(page([item("artifact:first")]))

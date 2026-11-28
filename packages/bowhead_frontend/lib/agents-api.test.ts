@@ -4,16 +4,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   forkAgent,
   acceptAgentProposalSuggestedCases,
+  completeAgentVersionRelease,
   type AgentChangeProposal,
   getAgentCapabilityReport,
   getAgentDetail,
   getAgentUnhireImpact,
   listAgentCatalog,
+  releasePrivateAgentDraft,
   setAgentPersonalStatus,
   startAgentVersionComparison,
   type AgentVersionWorkbench,
   unhireAgent,
 } from "./agents-api";
+import { subscribeAgentReleased } from "./agent-release-events";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -184,5 +187,36 @@ describe("Agent version comparison", () => {
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
     expect(bodies[0]).not.toHaveProperty("refresh_plan");
     expect(bodies[1]).toMatchObject({ plan_id: "aep_1", refresh_plan: true, run_kind: "release" });
+  });
+});
+
+describe("Agent release announcement", () => {
+  const workbench = {
+    candidate_identity: { candidate_id: "arc_1", candidate_hash: "sha256:c", row_version: 2 },
+    active_plan_identity: { id: "aep_1", hash: "sha256:p" },
+    active_snapshot_identity: { id: "aes_1", hash: "sha256:s" },
+    active_override_identity: null,
+    next_draft_identity: { id: "awc_1", row_version: 3 },
+  } as unknown as AgentVersionWorkbench;
+  const respond = (status: number) => vi.stubGlobal("fetch", vi.fn(async () => new Response(
+    JSON.stringify(status < 300 ? { state: "active" } : { detail: { code: "agent_release_test_state_changed" } }),
+    { status, headers: { "content-type": "application/json" } },
+  )));
+  const privateRelease = { workspaceId: "ws_1", testState: "passed" as never, releaseNote: null };
+
+  it("tells other views of the Agent once the server accepted a release, never on a refusal (F25)", async () => {
+    const released = vi.fn();
+    const stop = subscribeAgentReleased(released);
+    try {
+      respond(200);
+      await completeAgentVersionRelease("osa_1", workbench, "activate", "key-1");
+      await releasePrivateAgentDraft("osa_2", workbench, { ...privateRelease, idempotencyKey: "key-2" });
+      expect(released.mock.calls).toEqual([["osa_1"], ["osa_2"]]);
+      respond(409);
+      await expect(releasePrivateAgentDraft("osa_3", workbench, { ...privateRelease, idempotencyKey: "key-3" })).rejects.toBeTruthy();
+      expect(released).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
   });
 });

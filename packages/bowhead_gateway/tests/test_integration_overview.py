@@ -49,6 +49,7 @@ async def test_overview_only_marks_enabled_healthy_connections_connected(monkeyp
         {"provider": "feishu", "available": True, "configured": True, "enabled": True, "healthy": True},
         {"provider": "slack", "available": True, "configured": True, "enabled": True, "healthy": True},
         {"provider": "teams", "available": True, "configured": True, "enabled": False, "healthy": False},
+        {"provider": "wecom", "available": False, "configured": False, "enabled": False, "healthy": False},
     ]
 
 

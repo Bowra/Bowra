@@ -37,6 +37,8 @@ RUNTIME_NOTE_PREFIX = "[Bowhead runtime note — not a message from the user.]\n
 # After a helper's result: the final reply waits for the delivery review, with its evidence IDs (Lead only,
 # this Turn only). docs/sprints/answer-written-twice-2026-11-25.
 FINAL_REPLY_REVIEW_NOTE_NAME = "bowhead_final_reply_review_v1"
+# After a save: the run's result files and work files so far (this Turn only). See bowhead_core.run_files.
+RUN_FILES_NOTE_NAME = "bowhead_run_files_v1"
 
 
 def model_messages(messages: list[Message]) -> list[Message]:
@@ -46,7 +48,7 @@ def model_messages(messages: list[Message]) -> list[Message]:
             result.append(replace(message, name=None, content=REJECTED_TOOL_SYNTAX_INSTRUCTION))
         elif message.role == "user" and message.name == RUNTIME_CORRECTION_NOTE_NAME:
             result.append(replace(message, name=None, content=RUNTIME_CORRECTION_PREFIX + message.content))
-        elif message.role == "user" and message.name in {VISUAL_VIEW_NOTE_NAME, FINAL_REPLY_REVIEW_NOTE_NAME}:
+        elif message.role == "user" and message.name in {VISUAL_VIEW_NOTE_NAME, FINAL_REPLY_REVIEW_NOTE_NAME, RUN_FILES_NOTE_NAME}:
             result.append(replace(message, name=None, content=RUNTIME_NOTE_PREFIX + message.content))
         elif message.role == "user" and message.name == OUTPUT_RECOVERY_STATE_NAME:
             instruction = json.loads(message.content)["instruction"]

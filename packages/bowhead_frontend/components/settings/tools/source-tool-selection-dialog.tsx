@@ -26,6 +26,7 @@ import {
   previewSourceImpact,
   TeamToolApiError,
   type ResourceChangeImpact,
+  type SourceToolEntry,
   type SourceToolCatalog,
   type TeamToolSourcePublic,
 } from "@/lib/team-tool-sources-api";
@@ -46,6 +47,18 @@ type Confirm = { impact: ResourceChangeImpact; idempotencyKey: string; selection
 
 /** Show the search box only when scanning the list by eye gets slow. */
 const SEARCH_THRESHOLD = 8;
+const CATEGORIES = ["read", "external_write", "destructive", "unknown"] as const;
+const NOTION_READ_TOOLS = {
+  "notion-search": "choose_tools_notion_search",
+  "notion-fetch": "choose_tools_notion_fetch",
+  "notion-query-data-sources": "choose_tools_notion_query",
+} as const;
+
+function notionReadLabel(item: SourceToolEntry) {
+  return Object.hasOwn(NOTION_READ_TOOLS, item.operation_id)
+    ? NOTION_READ_TOOLS[item.operation_id as keyof typeof NOTION_READ_TOOLS]
+    : undefined;
+}
 
 function errorKey(error: unknown, fallback: ErrorKey): ErrorKey {
   if (error instanceof TeamToolApiError) {
@@ -85,6 +98,7 @@ export function SourceToolSelectionDialog({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number] | "all">("all");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<ErrorKey | null>(null);
@@ -128,10 +142,31 @@ export function SourceToolSelectionDialog({
   const added = selection.filter((id) => !initial.has(id));
   const unchanged = removed.length === 0 && added.length === 0;
   const normalizedQuery = query.trim().toLowerCase();
-  const visible = (catalog?.items ?? []).filter((item) =>
-    !normalizedQuery
-    || item.operation_id.toLowerCase().includes(normalizedQuery)
-    || item.summary.toLowerCase().includes(normalizedQuery));
+  const isMcp = catalog?.kind === "mcp";
+  const isNotion = source.base_url.replace(/\/$/, "") === "https://mcp.notion.com/mcp";
+  const recommended = isNotion ? (catalog?.items ?? []).filter(
+    (item) => item.category === "read" && notionReadLabel(item),
+  ) : [];
+  const visible = (catalog?.items ?? []).filter((item) => {
+    if (category !== "all" && (item.category ?? "unknown") !== category) return false;
+    const label = isNotion ? notionReadLabel(item) : undefined;
+    return !normalizedQuery
+      || item.operation_id.toLowerCase().includes(normalizedQuery)
+      || item.summary.toLowerCase().includes(normalizedQuery)
+      || (label ? t(label).toLowerCase().includes(normalizedQuery) : false);
+  });
+
+  const chooseVisible = (include: boolean) => {
+    setSaveError(null);
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const item of visible) {
+        if (include) next.add(item.operation_id);
+        else next.delete(item.operation_id);
+      }
+      return next;
+    });
+  };
 
   const toggle = (id: string) => {
     setSaveError(null);
@@ -307,6 +342,34 @@ export function SourceToolSelectionDialog({
               />
             </div>
           ) : null}
+          {isMcp ? (
+            <div className="legacy-tools-choose-controls">
+              <select
+                className="ui-input"
+                aria-label={t("choose_tools_filter_category")}
+                value={category}
+                onChange={(event) => setCategory(event.target.value as typeof category)}
+                disabled={saving}
+              >
+                <option value="all">{t("choose_tools_all_categories")}</option>
+                {CATEGORIES.map((value) => <option key={value} value={value}>{t(`category_${value}`)}</option>)}
+              </select>
+              <Button size="sm" disabled={saving || !visible.some((item) => selected.has(item.operation_id))} onClick={() => chooseVisible(false)}>
+                {t("choose_tools_clear_shown")}
+              </Button>
+              <Button size="sm" disabled={saving || (category === "all" && !normalizedQuery) || visible.every((item) => selected.has(item.operation_id))} onClick={() => chooseVisible(true)}>
+                {t("choose_tools_select_shown")}
+              </Button>
+              {recommended.length > 0 && initial.size === 0 ? (
+                <Button size="sm" disabled={saving} onClick={() => {
+                  setSaveError(null);
+                  setSelected(new Set(recommended.map((item) => item.operation_id)));
+                }}>
+                  {t("choose_tools_notion_recommended")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <p className="legacy-tools-choose-count" aria-live="polite">
             {t("choose_tools_count", { selected: selection.length, total: load.catalog.items.length })}
           </p>
@@ -314,6 +377,7 @@ export function SourceToolSelectionDialog({
             {visible.map((item, index) => {
               const checked = selected.has(item.operation_id);
               const inputId = `${idPrefix}-tool-${index}`;
+              const reviewedLabel = isNotion ? notionReadLabel(item) : undefined;
               return (
                 <li key={item.operation_id} className={`legacy-tools-choose-row${checked ? " is-on" : ""}`}>
                   <input
@@ -322,13 +386,17 @@ export function SourceToolSelectionDialog({
                     checked={checked}
                     onChange={() => toggle(item.operation_id)}
                     disabled={saving}
-                    aria-describedby={item.summary ? `${inputId}-desc` : undefined}
                   />
                   <div className="legacy-tools-choose-label">
                     <label htmlFor={inputId} className="legacy-tools-choose-name">
-                      <span translate="no">{item.operation_id}</span>
+                      {reviewedLabel ? t(reviewedLabel) : <span translate="no">{item.operation_id}</span>}
                       {highlighted.has(item.operation_id) ? (
                         <span className="legacy-tools-choose-badge is-new">{t("choose_tools_new_badge")}</span>
+                      ) : null}
+                      {isMcp ? (
+                        <span className={`legacy-tools-choose-badge${item.category === "destructive" || item.category === "external_write" ? " is-write" : ""}`}>
+                          {t(`category_${item.category ?? "unknown"}`)}
+                        </span>
                       ) : null}
                       {item.is_write ? (
                         <span className="legacy-tools-choose-badge is-write">
@@ -336,8 +404,12 @@ export function SourceToolSelectionDialog({
                         </span>
                       ) : null}
                     </label>
-                    {item.summary ? (
-                      <span id={`${inputId}-desc`} className="legacy-tools-choose-desc">{item.summary}</span>
+                    {item.summary || reviewedLabel ? (
+                      <details className="legacy-tools-choose-desc">
+                        <summary>{t("choose_tools_provider_details")}</summary>
+                        {reviewedLabel ? <p translate="no">{item.operation_id}</p> : null}
+                        {item.summary ? <p>{item.summary}</p> : null}
+                      </details>
                     ) : null}
                   </div>
                 </li>

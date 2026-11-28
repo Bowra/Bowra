@@ -50,14 +50,16 @@ def test_a_long_page_is_one_full_screen_and_a_sheet() -> None:
     assert [image["label"] for image in view["images"]] == ["Screen 1", "screens 1-3"]
     # Page numbers let a later view_file bring back each page once (visual_self_check.earlier_views).
     assert [(image.get("page"), image.get("pages")) for image in view["images"]] == [(1, None), (None, [1, 2, 3])]
-    assert view["images"][0]["px"] == [1280, 800]
-    assert view["shown"].startswith("screen 1 at 1280x800 px, then screens 1-3 in 1 sheet")
-    assert view["page_px"] == [400, 250]
+    # Cut at a white band, sent at its own height: rows through a solid dark block are not blank, although they have
+    # few colour changes (a cut inside a purple divider read as an overflowing strip, an observed deployment).
+    assert view["images"][0]["px"] == [1280, 780]
+    assert view["shown"].startswith("screen 1 at 1280x780 px, then screens 1-3 in 1 sheet")
+    assert view["page_px"] == [400, 244]
 
 
 def test_short_page_full_detail_and_blank_capture() -> None:
     single = vv.render_screens_view(_page_png(600), kind="html")
-    assert single["shown"] == "screen 1, each at 1280x800 px" and len(single["images"]) == 1
+    assert single["shown"] == "screen 1, 1280x600 px" and len(single["images"]) == 1
     full = vv.render_screens_view(_page_png(4000), kind="html", pages=[1, 4], detail="full")
     assert [image["label"] for image in full["images"]] == ["Screen 2", "Screen 5"]
     assert [image["page"] for image in full["images"]] == [2, 5]
@@ -83,9 +85,20 @@ def test_screens_end_at_blank_bands_instead_of_every_800_px() -> None:
     png = _content_png([(100, 300), (600, 1000), (1100, 1500)], 1700)
     assert [cut[:2] for cut in vv._screen_cuts(Image.open(io.BytesIO(png)).convert("RGB"))] == [(0, 499), (499, 1050), (1050, 1700)]
     view = vv.render_screens_view(png, kind="html", pages=[0, 1], detail="full")
-    assert view["pages"] == 3 and view["shown"] == "screens 1-2, each at 1280x800 px"
+    assert view["pages"] == 3 and view["shown"] == "screens 1-2, 1280 px wide and 499, 551 px tall"
+    # Each screen at its own height: grey filled up to 800 px read as page whitespace (an observed deployment).
+    assert [image["px"] for image in view["images"]] == [[1280, 499], [1280, 551]]
     first = Image.open(io.BytesIO(base64.b64decode(view["images"][0]["base64"])))
-    assert first.size == (1280, 800) and first.getpixel((640, 700)) == vv.SCREEN_FILL  # filled below the cut
+    assert first.size == (1280, 499)
+    sheet = vv.render_screens_view(png, kind="html")
+    assert sheet["shown"] == "screen 1 at 1280x499 px, then screens 1-3 in 1 sheet, each screen 400 px wide"
+
+
+def test_a_slide_keeps_its_footer_on_its_screen() -> None:
+    # Cut in the tallest band, the empty lower half of a slide, the footer went to the next screen and models moved
+    # footers and reflowed the deck to fit the screens (an observed deployment, findings spike §6).
+    png = _content_png([(100, 300), (700, 720), (760, 1500)], 1600)
+    assert vv._screen_cuts(Image.open(io.BytesIO(png)).convert("RGB"))[0] == (0, 740, False)
 
 
 def test_a_page_without_a_blank_band_is_cut_at_800_px_and_says_so() -> None:
@@ -145,9 +158,67 @@ def _fake_capture(texts: list[str], **facts: Any):
             scroll_height=1700,
             issues=tuple(facts.get("issues", ())),
             external_resources=facts.get("external", False),
+            layout=facts.get("layout"),
         )
 
     return capture, calls
+
+
+def _layout() -> dict[str, Any]:
+    """The measured layout of ``_page_png(1700)``: two blocks, one chart, one finding."""
+    return {
+        "version": 1,
+        "width": 1280,
+        "height": 1700,
+        "blocks": [{"y": 0, "h": 800, "label": "Overview"}, {"y": 800, "h": 900, "label": "Detail"}],
+        "guards": [[40, 160], [340, 460], [640, 760], [940, 1060], [1240, 1360], [1540, 1660]],
+        "elements": [{"kind": "chart", "x": 80, "y": 940, "w": 820, "h": 120, "label": ""}],
+        "findings": [{"kind": "text_overlap", "selector": "", "text": "Q3", "box": {"x": 100, "y": 950, "w": 30, "h": 14}, "other_text": "Q4"}],
+    }
+
+
+async def test_a_saved_page_with_its_layout_names_screens_findings_and_versions(monkeypatch) -> None:
+    capture, _ = _fake_capture(["Total 163.42", "Total 163.43"], layout=_layout())
+    monkeypatch.setattr(hs, "capture", capture)
+    run = vsc.begin_run(TURN, "lead", accepts_images=True)
+    backend = _Backend()
+    await vsc.attach_visual_view({}, _ctx(backend, "call_1"), _artifact(backend, "a1", "report.html", "<p>v1</p>"), kind="html")
+    content = vsc.render_message(run.pending).content
+    assert "  Screen 1: page y 0-800 of 1,700 px; block b1 of 2 ('Overview', page y 0-800)." in content
+    assert "  Screens: 1 = page y 0-800 (b1), 2 = page y 800-1,240 (b2), 3 = page y 1,240-1,700 (b2)." in content
+    assert "  Measured layout of report.html: At page y 950 the text 'Q3' overlaps the text 'Q4'." in content
+    assert "version" not in content.split("\n")[1]  # the first version of a file has no version line
+    run.pending.clear()
+    await vsc.attach_visual_view({}, _ctx(backend, "call_2"), _artifact(backend, "a2", "report.html", "<p>v2</p>"), kind="html")
+    assert "  This is version 2 of report.html rendered in this run." in vsc.render_message(run.pending).content
+
+
+async def test_view_file_shows_an_element_or_a_region_of_an_html_page(monkeypatch) -> None:
+    from bowhead_core import artifact_presentation
+
+    capture, calls = _fake_capture(["Total 163.42"], layout=_layout())
+    monkeypatch.setattr(hs, "capture", capture)
+    backend = _Backend()
+    page = _artifact(backend, "a1", "report.html", "<p>x</p>")
+
+    async def available(_ctx, artifact_id: str, *, produced: bool = False):
+        return page
+
+    monkeypatch.setattr(artifact_presentation, "available_artifact", available)
+    run = vsc.begin_run(TURN, "lead", accepts_images=True)
+    element = await vsc.view_file({"artifact_id": "a1", "element": "e1"}, _ctx(backend, "call_e"))
+    assert element["visual_view"]["shown"] == "element e1 (chart, page y 940-1,060 of 1,700 px), 852x152 px"
+    message = vsc.render_message(run.pending).content
+    assert "- report.html (Tool call call_e): element e1 (chart, page y 940-1,060 of 1,700 px), 852x152 px (image 1)." in message
+    assert "Text smaller than about 10 px" not in message  # a crop is at capture resolution
+    region = await vsc.view_file({"artifact_id": "a1", "region": [0, 0, 640, 400]}, _ctx(backend, "call_r"))
+    assert region["visual_view"]["shown"] == "page region x 0-640, y 0-400 of 1,700 px, 640x400 px" and calls == ["html"]
+    missing = await vsc.view_file({"artifact_id": "a1", "element": "e5"}, _ctx(backend, "call_m"))
+    assert missing["visual_view"]["reason"] == "view_target_invalid"
+    assert missing["visual_view"]["message"].startswith("'e5' is not a ref of this version of the file; its refs are b1-b2, e1")
+    for arguments in ({"element": "e1", "pages": [1]}, {"region": [0, 0, 10]}, {"element": ""}):
+        refused = await vsc.view_file({"artifact_id": "a1", **arguments}, _ctx(backend, "call_x"))
+        assert refused["ok"] is False and refused["error"] == "invalid_arguments"
 
 
 @pytest.mark.parametrize("name", ["Bowhead", "Bowra"])
@@ -212,7 +283,7 @@ async def test_view_file_shows_chosen_screens_of_an_html_file(monkeypatch) -> No
     monkeypatch.setattr(artifact_presentation, "available_artifact", available)
     run = vsc.begin_run(TURN, "lead", accepts_images=True)
     result = await vsc.view_file({"artifact_id": "a1", "pages": [2], "detail": "full"}, _ctx(backend, "call_v"))
-    assert result["visual_view"]["shown"] == "screen 2, each at 1280x800 px" and len(run.pending) == 1
+    assert result["visual_view"]["shown"] == "screen 2, 1280x670 px" and len(run.pending) == 1
     assert len(run.baselines) == 1  # saved in this Turn: the looked-at text is the version last seen
 
 
@@ -231,7 +302,7 @@ async def test_view_file_reuses_the_capture_of_unchanged_content(monkeypatch) ->
     run = vsc.begin_run(TURN, "lead", accepts_images=True)
     await vsc.attach_visual_view({}, _ctx(backend, "call_1"), files["a1"], kind="html")
     viewed = await vsc.view_file({"artifact_id": "a1", "pages": [3], "detail": "full"}, _ctx(backend, "call_v"))
-    assert viewed["visual_view"]["shown"] == "screen 3, each at 1280x800 px" and calls == ["html"]
+    assert viewed["visual_view"]["shown"] == "screen 3, 1280x250 px" and calls == ["html"]
     files["a2"] = _artifact(backend, "a2", "report.html", "<p>v2</p>")
     await vsc.view_file({"artifact_id": "a2"}, _ctx(backend, "call_w"))
     assert calls == ["html", "html"] and len(run.pending) == 3  # changed content is captured again
@@ -271,6 +342,8 @@ async def test_a_declared_fix_of_an_svg_compares_its_text(monkeypatch) -> None:
     assert renamed["presentation_check"] == {"status": "content_changed"}
     assert renamed["content_changes"]["removed_text"] == ["page 1: 营业额(亿元)"] and calls == ["svg"] * 3
     assert len(run.pending) == 3
+    # Through the parse worker an SVG capture is one image, not screens of an HTML page.
+    assert run.pending[0].view["shown"].startswith("the SVG at ") and len(run.pending[0].view["images"]) == 1
 
 
 # ------------------------------------------------------------------ sandbox adapter
@@ -480,6 +553,26 @@ async def test_the_executor_accepts_only_a_result_bound_to_this_capture(tmp_path
     executor, _ = await _executor_reading(tmp_path / "c", failed)
     with pytest.raises(OfficePackageError, match="document_html_time_limit"):
         await executor.view_html("svg", b"<svg/>", TRANSFORM)
+
+    # A sandbox image with the page layout adds layout.json, bound by its digest (visual-geometry tech design §4).
+    layout = json.dumps({"version": 1, "width": 1280, "height": 900, "blocks": [], "guards": [], "elements": [], "findings": []}).encode()
+
+    def with_layout(output: Path, encoded: bytes, inputs, *, written: bytes = layout, **changes: Any) -> None:
+        (output / "layout.json").write_bytes(written)
+        good(output, encoded, inputs, layout_sha256=digest(layout), **changes)
+
+    executor, _ = await _executor_reading(tmp_path / "d", with_layout)
+    assert (await executor.view_html("html", b"<p>x</p>", TRANSFORM)).layout["height"] == 900
+    # A layout that does not match its digest or its shape is dropped; the capture stands.
+    for index, written in enumerate([layout.replace(b"900", b"901"), b"[]"]):
+        executor, _ = await _executor_reading(
+            tmp_path / f"e{index}", lambda output, encoded, inputs, written=written: with_layout(output, encoded, inputs, written=written)
+        )
+        view = await executor.view_html("html", b"<p>x</p>", TRANSFORM)
+        assert view.layout is None and view.png == png
+    executor, _ = await _executor_reading(tmp_path / "f", lambda output, encoded, inputs: good(output, encoded, inputs, layout_sha256=7))
+    with pytest.raises(OfficePackageError, match="document_authoring_output_invalid"):
+        await executor.view_html("html", b"<p>x</p>", TRANSFORM)
 
 
 def test_the_worker_deadline_writes_its_result_and_ends_the_process(monkeypatch, tmp_path) -> None:

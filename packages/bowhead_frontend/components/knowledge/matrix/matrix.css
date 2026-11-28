@@ -224,6 +224,23 @@
 .mx-brow.zero .n { color: var(--c-ink-4); }
 .mx-estimate { display: flex; align-items: baseline; gap: 10px; padding: 12px 0 2px; }
 .mx-estimate .big { font-weight: 700; color: var(--c-ink); }
+/* Step 1 (S3): summary, per-column cost table, facts and the trial option. */
+.mx-run-summary { margin: 0 0 10px; font-size: 0.78125rem; line-height: 1.55; color: var(--c-ink-2); }
+.mx-costtable { width: 100%; border-collapse: collapse; font-size: 0.78125rem; color: var(--c-ink-2); }
+.mx-costtable th, .mx-costtable td { padding: 8px 13px; text-align: left; font-weight: 400; border-bottom: 1px solid var(--c-line-2); }
+.mx-costtable thead th { font-size: var(--fs-xs); color: var(--c-ink-3); background: var(--c-surface-2); }
+.mx-costtable .num { text-align: right; white-space: nowrap; font-family: var(--font-v2-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+.mx-costtable tbody td.num:last-child { font-weight: 700; color: var(--c-ink); }
+.mx-costtable tbody th { overflow-wrap: anywhere; }
+.mx-costtable .tag { color: var(--c-ink-3); font-size: var(--fs-xs); }
+.mx-costtable tr.shared th { color: var(--c-ink-3); }
+.mx-costtable tfoot :is(th, td) { border-bottom: none; font-weight: 600; color: var(--c-ink); }
+.mx-run-note { margin: -4px 0 12px; font-size: var(--fs-sm); line-height: 1.5; color: var(--c-ink-2); }
+.mx-runfacts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 12px; font-size: var(--fs-sm); line-height: 1.5; }
+.mx-runfacts dt { color: var(--c-ink-3); }
+.mx-runfacts dd { margin: 0; color: var(--c-ink-2); overflow-wrap: anywhere; }
+.mx-trialopt { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; font-size: 0.78125rem; color: var(--c-ink); cursor: pointer; }
+@media (pointer: coarse) { .mx-trialopt { min-height: 44px; } }
 
 /* ---------- add-column / edit-column panel ---------- */
 .mx-panel.addcol { width: 420px; }
@@ -276,6 +293,18 @@
 .mx-filepick-row:last-child { border-bottom: none; }
 .mx-filepick-row:hover { background: var(--c-surface-2); }
 .mx-filepick-row .fn { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Step 1 S8: "谁能看到" (Space members / only me) and the file groups an only-me matrix offers. */
+.mx-visibility { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 10px 24px 0; padding: 0; border: 0; min-width: 0; }
+.mx-visibility-legend { grid-column: 1 / -1; padding: 0; margin-bottom: 6px; font-size: 0.75rem; font-weight: 600; color: var(--c-ink-2); }
+.mx-visopt { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); cursor: pointer; }
+.mx-visopt.on { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-tint); }
+.mx-visopt input { margin-top: 2px; }
+.mx-visopt-copy { display: grid; gap: 3px; min-width: 0; }
+.mx-visopt-copy .t { font-size: 0.78125rem; font-weight: 600; color: var(--c-ink); }
+.mx-visopt-copy .d { font-size: 0.71875rem; line-height: 1.5; color: var(--c-ink-3); }
+.mx-filepick-group { padding: 8px 14px 4px; font-size: 0.6875rem; font-weight: 600; color: var(--c-ink-3); background: var(--c-surface-2); border-bottom: 1px solid var(--c-line-2); }
+.mx-filepick-empty { padding: 12px 14px; font-size: 0.75rem; color: var(--c-ink-3); border-bottom: 1px solid var(--c-line-2); }
+.mx-visbadge { display: inline-flex; align-items: center; gap: 4px; flex: none; vertical-align: middle; }
 
 /* ---------- entry cards (empty state) ---------- */
 
@@ -601,3 +630,101 @@
 .mx-empty-explanation { width: 100%; font-size: 0.75rem; color: var(--c-ink-3); line-height: 1.6; }
 .mx-panel-head .col { overflow-wrap: anywhere; }
 @media (pointer: coarse) { .mx-task-summary :is(summary,button) { min-height: 44px; } }
+
+/* ---------- document matrix step 1, S2: manage the matrix ---------- */
+/* Column names show in full over two lines (they were cut to "是…"); longer ones clamp, the tooltip has the question. */
+.mx-colh .cname.mx-question-trigger { white-space: normal; overflow: hidden; }
+.mx-colname { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.25; }
+
+/* Header: breadcrumb over the name, actions on the right (⋯, secondary, primary). */
+.mx-topbar.mx-head { align-items: flex-start; }
+.mx-headcopy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 0 1 auto; }
+.mx-crumb { display: flex; align-items: center; gap: 4px; font-size: 0.71875rem; color: var(--c-ink-3); }
+.mx-crumb-link { background: transparent; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.mx-crumb-link:hover { color: var(--c-ink); text-decoration: underline; text-underline-offset: 2px; }
+.mx-crumb-link:focus-visible, .mx-title-button:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; border-radius: 4px; }
+.mx-titlerow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The name shrinks before the actions do (narrow desktop windows): it ellipsizes inside its button. */
+.mx-head .mx-title { margin: 0; max-width: 24em; padding: 0; flex: 0 1 auto; min-width: 0; }
+.mx-title-button { display: block; max-width: 100%; background: transparent; border: 0; border-radius: 5px; padding: 2px 6px; margin-left: -6px; font: inherit; color: inherit; text-align: start; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-title-button:hover { background: var(--c-surface-2); }
+.mx-title-input { width: min(24em, 50vw); padding: 3px 8px; font-size: 0.9375rem; font-weight: 600; }
+.mx-rename-error { margin-top: 4px; }
+.mx-topbar.mx-head .acts { align-self: center; }
+
+/* Rows: checkbox and ⋯ in the frozen file cell; ⋯ shows on hover, focus and while its menu is open. */
+.mx-rowcheck { flex: none; margin: 0; width: 14px; height: 14px; cursor: pointer; accent-color: var(--c-accent); }
+.mx-filecell .mx-rowmore { flex: none; opacity: 0; }
+.mx-vrow:hover .mx-rowmore, .mx-filecell:focus-within .mx-rowmore, .mx-filecell .mx-rowmore[aria-expanded="true"] { opacity: 1; }
+@media (pointer: coarse) { .mx-filecell .mx-rowmore { opacity: 1; } }
+.mx-grid .gcell.freeze:has(.mx-filecell.is-selected) { background: var(--c-accent-tint); }
+.mx-addrow { display: flex; align-items: center; gap: 6px; width: 100%; padding: 10px 18px; background: var(--c-bg); border: 0; border-top: 1px solid var(--c-line-2); color: var(--c-accent-text, var(--c-accent)); font: inherit; font-size: 0.8125rem; text-align: start; cursor: pointer; flex: 0 0 auto; }
+.mx-addrow:hover { background: var(--c-surface-2); }
+.mx-addrow:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.mx-selbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 18px; background: var(--c-accent-tint); border-bottom: 1px solid var(--c-line); font-size: 0.78125rem; flex: 0 0 auto; }
+.mx-selbar .count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mx-selbar .hint { color: var(--c-ink-3); font-size: 0.71875rem; }
+
+/* Add files dialog (mockup ⑦). */
+.mx-addfiles { display: grid; gap: 10px; }
+.mx-addfiles-search { width: 100%; }
+.mx-addfiles-list { display: grid; gap: 2px; max-height: min(52vh, 420px); overflow: auto; }
+.mx-addfiles-group + .mx-addfiles-group { margin-top: 8px; }
+.mx-addfiles-grouphead { padding: 6px 4px 2px; font-size: 0.6875rem; font-weight: 600; color: var(--c-ink-3); }
+.mx-addfiles-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 6px; cursor: pointer; }
+.mx-addfiles-row:hover { background: var(--c-surface-2); }
+.mx-addfiles-row.is-disabled { cursor: not-allowed; }
+.mx-addfiles-row.is-disabled:hover { background: transparent; }
+.mx-addfiles-row.is-disabled .mx-addfiles-name { color: var(--c-ink-3); }
+.mx-addfiles-icon { flex: none; color: var(--c-ink-3); }
+.mx-addfiles-who { display: flex; flex-direction: column; min-width: 0; }
+.mx-addfiles-name { font-size: 0.8125rem; font-weight: 500; color: var(--c-ink); overflow-wrap: anywhere; }
+.mx-addfiles-sub { font-size: 0.71875rem; color: var(--c-ink-3); }
+.mx-addfiles-state { padding: 14px 4px; font-size: 0.75rem; color: var(--c-ink-3); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mx-addfiles-state p { margin: 0; }
+.mx-addfiles-note { margin: 0; font-size: 0.71875rem; color: var(--c-ink-3); line-height: 1.5; }
+
+/* Matrix list as a table (mockup ③). */
+.mx-list-row { cursor: pointer; }
+.mx-list-name { display: block; color: var(--c-ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.mx-list-name:hover { text-decoration: underline; text-underline-offset: 2px; }
+.mx-list-name:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 3px; }
+.mx-list-sub { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 0.71875rem; color: var(--c-ink-3); }
+.mx-list-sub .status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.mx-list-sub .status.ok { color: var(--c-pos-ink); }
+.mx-list-sub .status.run { color: var(--c-accent-hover); }
+.mx-list-sub .status.err { color: var(--c-err); }
+.mx-list-muted { color: var(--c-ink-3); }
+
+/* ---------- document matrix step 1, S4: review (mockups ④ and ⑧) ---------- */
+/* Toolbar: search, status and value filters, sort; the verified progress sits at the end. */
+.mx-toolbar-wrap { flex: 0 0 auto; border-bottom: 1px solid var(--c-line); background: var(--c-bg); }
+.mx-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 18px; }
+.mx-toolbar .grow { flex: 1; }
+.mx-toolbar .mx-search input { width: 220px; }
+.mx-toolbar--progress { border-bottom: 1px solid var(--c-line); justify-content: flex-end; flex: 0 0 auto; }
+.mx-toolbar-count { display: inline-flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--c-ink-3); font-variant-numeric: tabular-nums; }
+.mx-toolbar-count .mx-viewsrc { margin-top: 0; }
+.mx-toolbar-note { margin: 0; padding: 0 18px 8px; font-size: 0.71875rem; color: var(--c-ink-3); }
+.mx-vfilter { display: inline-flex; align-items: center; }
+.mx-vfilter .kb-filterchip { border-top-right-radius: 0; border-bottom-right-radius: 0; max-width: 18em; }
+.mx-vfilter .kb-filterchip .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-vfilter-x { display: grid; place-items: center; align-self: stretch; width: 26px; border: 0; border-left: 1px solid color-mix(in srgb, var(--c-accent) 25%, transparent); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--c-accent-tint); color: var(--c-accent-hover); cursor: pointer; }
+.mx-vfilter-x:hover { background: color-mix(in srgb, var(--c-accent) 18%, var(--c-accent-tint)); }
+.mx-vfilter-x:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+/* Value filter form: column, condition, value, then the actions. */
+.mx-vfilter-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 18px 10px; font-size: 0.75rem; color: var(--c-ink-2); }
+.mx-vfilter-form .mx-inp { width: auto; min-width: 9em; max-width: 16em; padding: 5px 9px; font-size: 0.78125rem; }
+.mx-vfilter-form .acts { display: inline-flex; gap: 6px; }
+.mx-progress { display: flex; align-items: center; gap: 10px; font-size: 0.75rem; color: var(--c-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mx-bar { width: 160px; height: 6px; border-radius: 3px; background: var(--c-fill-2, var(--c-surface-2)); overflow: hidden; }
+.mx-bar > span { display: block; height: 100%; background: var(--c-pos); }
+/* Side panel history list. */
+.mx-hist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 0.75rem; color: var(--c-ink-3); line-height: 1.5; }
+.mx-hist b { color: var(--c-ink-2); font-weight: 500; }
+.mx-hist-note { margin: 0; font-size: 0.75rem; color: var(--c-ink-3); line-height: 1.5; }
+.mx-hist-note .mx-viewsrc { margin-top: 0; }
+@media (max-width: 640px) {
+  .mx-toolbar .mx-search input { width: 100%; }
+  .mx-bar { width: 96px; }
+}

@@ -1768,6 +1768,8 @@ export interface FileKbStatus {
   parse_progress_pct: number | null;
   parse_stuck: boolean;
   parse_error_code: string | null;
+  /** Knowledge bases on only: the knowledge base the file is in (the Files column names it from the directory). */
+  knowledge_base_id?: string | null;
 }
 
 export interface FileDTO {
@@ -1842,7 +1844,7 @@ export interface ListFilesParams {
   category?: string;
 }
 
-export async function listFiles(p: ListFilesParams = {}): Promise<{
+export async function listFiles(p: ListFilesParams = {}, init?: Pick<RequestInit, "headers" | "signal" | "cache">): Promise<{
   total: number;
   size_total_bytes: number;
   items: FileDTO[];
@@ -1860,7 +1862,8 @@ export async function listFiles(p: ListFilesParams = {}): Promise<{
   if (p.include_deleted) qs.set("include_deleted", "1");
   if (p.in_kb !== undefined) qs.set("in_kb", String(p.in_kb));
   if (p.category) qs.set("category", p.category);
-  const r = await fetch(`/api/v1/files/?${qs.toString()}`);
+  const url = `/api/v1/files/?${qs.toString()}`;
+  const r = await (init ? fetch(url, init) : fetch(url));
   if (!r.ok) throw await readApiError(r);
   const body = (await r.json()) as Partial<{
     total: number;
@@ -1919,17 +1922,29 @@ export async function deleteFile(fileId: string): Promise<void> {
 export async function promoteFileToKb(
   fileId: string,
   scope: "personal" | "space" | "team" = "personal",
+  /** Knowledge bases (FEATURE_KNOWLEDGE_BASES): the target in the scope's home; omitted adds to its default. */
+  knowledgeBaseId?: string | null,
 ): Promise<{ file_id: string; workspace_id?: string | null }> {
   const r = await fetch(`/api/v1/kb/files/from-artifact`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...workspaceHeaders() },
-    body: JSON.stringify({ artifact_id: fileId, scope, knowledge_intent: "add_to_knowledge", action_id: randomUuid() }),
+    body: JSON.stringify({
+      artifact_id: fileId,
+      scope,
+      knowledge_intent: "add_to_knowledge",
+      action_id: randomUuid(),
+      ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
+    }),
   });
   if (!r.ok) {
     // Stable UI error codes: do not expose raw parser reasons or backend 500 text to users.
-    if (r.status === 503 && (await readApiError(r)).code === "kb_embedding_not_configured") {
+    const code = (await readApiError(r)).code;
+    if (r.status === 503 && code === "kb_embedding_not_configured") {
       throw new Error("kb_embedding_not_configured");
     }
+    // Knowledge bases: the target's finite codes (not found, level, home mismatch) and the original in the
+    // Files trash keep their own actionable copy instead of the status fallbacks below.
+    if (code && (code.startsWith("knowledge_base_") || code === "knowledge_source_in_trash")) throw new Error(code);
     if (r.status === 400) throw new Error("space_required");
     if (r.status === 403) throw new Error("forbidden");
     if (r.status === 422) throw new Error("unsupported");
@@ -2025,13 +2040,14 @@ export interface FilePreview {
 }
 export async function fetchFilePreview(
   fileId: string,
-  opts: { mode?: "auto" | "text" | "rows" | "image"; maxRows?: number } = {},
+  opts: { mode?: "auto" | "text" | "rows" | "image"; maxRows?: number; signal?: AbortSignal } = {},
 ): Promise<FilePreview> {
   const params = new URLSearchParams();
   params.set("mode", opts.mode ?? "auto");
   if (opts.maxRows) params.set("max_rows", String(opts.maxRows));
   const r = await fetch(
     `/api/v1/files/${encodeURIComponent(fileId)}/preview?${params}`,
+    { signal: opts.signal, cache: "no-store" },
   );
   if (!r.ok) throw await readApiError(r);
   const preview = (await r.json()) as FilePreview;
@@ -2234,7 +2250,7 @@ export interface UploadValidationIssue {
 }
 
 /** Local prevalidation: size + MIME; return a failure reason or null. */
-export function validateUpload(file: File): UploadValidationIssue | null {
+export function validateUpload(file: Pick<File, "name" | "size" | "type">): UploadValidationIssue | null {
   const t = staticTranslator("api_client.upload");
   const unsupported = (type: string): UploadValidationIssue => ({
     kind: "unsupported",
@@ -2571,6 +2587,10 @@ export interface SessionDetailDTO {
     cost_usd: number;
     tokens_total: number;
     intents: string[] | null;
+    /** `agent_trial`: an Agent Owner's chat with the saved draft (absent on older servers: `normal`). */
+    origin?: string;
+    /** The Agent an `agent_trial` session tries. */
+    trial_agent_id?: string;
   };
   turns: Array<{
     operation_kind?: "context_maintenance" | null;
@@ -2596,6 +2616,7 @@ export interface SessionDetailDTO {
       reference_kind?: "result" | null;
       selected_context?: import("./chart/selected-context").ChartSelectedContext | null;
       presentation_selection?: import("./presentation-selection").PresentationSelection | null;
+      document_selection?: import("./document-selection").DocumentSelection | null;
       bundle_artifact_ids?: string[] | null;
     }>;
     /** chat-hydrate-overhaul: persisted trace steps. Gracefully use [] when absent on legacy turns. */
@@ -3654,7 +3675,7 @@ export interface PublicEntryDTO {
   updated_at: string;
 }
 
-export type IntegrationProviderId = "feishu" | "slack" | "teams";
+export type IntegrationProviderId = "feishu" | "slack" | "teams" | "wecom";
 
 export interface IntegrationOverviewItemDTO {
   provider: IntegrationProviderId;

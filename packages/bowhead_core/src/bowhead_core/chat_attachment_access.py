@@ -129,6 +129,7 @@ async def validate_chat_attachment_access_in_connection(
                 raise ChatAttachmentAccessError("attachment bundle changed")
 
     from bowhead_core.chart.selected_context import selected_facts_in_connection
+    from bowhead_core.document_selection import document_selection
     from bowhead_core.presentation_selection import presentation_selection
 
     for ref in refs:
@@ -137,6 +138,11 @@ async def validate_chat_attachment_access_in_connection(
             presentation_selection(ref)
         except (ValueError, TypeError) as exc:
             raise ChatAttachmentAccessError("presentation_selection_unavailable") from exc
+        # So are a Word paragraph and pages, against the inventory and the kept render (document_selection.py).
+        try:
+            document_selection(ref)
+        except (ValueError, TypeError) as exc:
+            raise ChatAttachmentAccessError("document_selection_unavailable") from exc
 
     for ref in refs:
         if ref.get("selectedContext") is not None:

@@ -12,6 +12,14 @@ Agents verwenden beim nächsten Start den neuesten Inhalt. Ein bereits laufender
 
 Ein Plugin erleichtert die Auswahl von Ressourcen. Ob ein Tool oder Skill tatsächlich ausgeführt werden kann, hängt weiterhin von den aktuellen Berechtigungen und der Verfügbarkeit für die jeweilige Person, den Agent und die Ressource ab.
 
+Wenn Coach verfügbar ist, können Sie im Chat „Füge Notion-Teamwissen zu meinem Recherche-Agenten hinzu“ schreiben. Coach fügt das aktivierte Team-Plugin zum Entwurf Ihres Agenten hinzu. Veröffentlichen Sie den Entwurf im Tab **Veröffentlichen**, um die Änderung zu nutzen. Wenn die Teamverbindung autorisiert oder das Plugin eingerichtet werden muss, übernimmt dies zuerst ein Teamadministrator.
+
+## Antworten aus Notion-Seiten des Teams
+
+Teamverantwortliche und Administratoren können beim Erstellen eines Team-Plugins unter **Mit einer Vorlage beginnen** die Vorlage **Notion-Teamwissen** wählen. Wählen Sie eine Notion-Quelle des Teams. Autorisieren und aktivieren Sie die Quelle unter den Tool-Quellen und importieren Sie die Tools für Suche und Seitenzugriff. Wenn die Quelle Datenbankabfragen anbietet, können Sie dieses Tool ebenfalls importieren. Prüfen Sie die Quelle und die Tools vor dem Speichern. Verwenden Sie ein Notion-Konto, dessen zugängliche Inhalte für die vorgesehenen Teammitglieder bestimmt sind.
+
+Fügen Sie das Plugin Ihrem Agenten hinzu und fragen Sie nach einer Projektentscheidung oder fügen Sie einen Notion-Seitenlink ein. Der Agent verlinkt die Seiten, die seine Antwort stützen. Zum Öffnen eines Links benötigen Sie Zugriff mit Ihrem eigenen Notion-Konto. Wenn die Verbindung endet oder sich Konto oder Workspace ändern, muss ein Administrator die Verbindung und die Tool-Auswahl des Plugins prüfen.
+
 ## Plugins und integrierte Tools ausschalten
 
 - **Plugins**: Jedes Plugin hat einen Schalter **Ich**, der nur für dich gilt; über den Hinweis unten kannst du es rückgängig machen. Teamverantwortliche und Teamadministratoren sehen zusätzlich einen Schalter **Team**. Vor einer teamweiten Änderung zeigt Bowra die betroffenen Agents (auch integrierte) und geplanten Aufgaben; die Änderung gilt ab dem nächsten Lauf. Hat das Team ein Plugin ausgeschaltet, können Mitglieder es nicht für sich wieder einschalten.

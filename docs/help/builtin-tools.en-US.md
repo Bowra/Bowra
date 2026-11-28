@@ -1,12 +1,12 @@
-# Built-in third-party tools
+# Built-in services
 
-Team owners and team administrators can connect the third-party tools that Bowra supports in **Team settings → Tool Sources**. Tavily, Datarc, and Power BI are currently supported; the picker and the list of configured tools show each service's icon so you can tell them apart.
+Team owners and team administrators can connect the third-party services that Bowra supports in **Capability Center → Tools → Manage tool sources → Built-in services**. Tavily, Datarc, and Power BI are currently supported; the picker and the list of configured tools show each service's icon so you can tell them apart.
 
-**Capability Center → Tools** lists operations from enabled connections. Unconfigured or disabled Google Workspace and Power BI connections do not appear there; Google Workspace also requires its deployment feature to be enabled. Administrators can still use **Manage Tool Sources** to configure or re-enable supported connections. Browsing the catalog does not enable a connection or authorize an external account.
+**Capability Center → Tools** lists the Tools Agents can call by origin: built-in Tools grouped by purpose, which owners and administrators can turn on or off for the team one by one (a Tool turned off for the team is unavailable to every Agent, and the Agent and Plugin editors stop offering it; Agents and Plugins that already include it keep it without using it, and it works again once turned back on); system capabilities, which are always on; and external Tools grouped by Tool source and tagged **Writes externally**, **Destructive** or **Unknown risk**, with the reason when one can't be added to Agents. The catalog lists operations from enabled connections only. Unconfigured or disabled Google Workspace and Power BI connections do not appear there; Google Workspace also requires its deployment feature to be enabled. Administrators can still use **Manage tool sources** to configure or re-enable supported connections; when some Tool sources are not turned on, the catalog says how many. Browsing the catalog does not enable a connection or authorize an external account.
 
 ## Tavily
 
-Choose **＋ Add built-in third-party tool**, select Tavily, paste the API key, and choose **Verify and save**. Bowra verifies the key first and then stores it encrypted. After saving, you can edit the key or turn the tool on or off at any time.
+Choose **＋ Add built-in service**, select Tavily, paste the API key, and choose **Verify and save**. Bowra verifies the key first and then stores it encrypted. After saving, you can edit the key or turn the tool on or off at any time.
 
 Once Tavily is enabled, team Agents with web search can use it; when it is disabled, new searches no longer use Tavily. The API key is never shown to team members or Agents.
 
@@ -34,7 +34,7 @@ Every search, read, crawl, and research run uses credits from the team's Tavily 
 
 ## Datarc
 
-Choose **＋ Add built-in third-party tool → Datarc** and enter a configuration name, the Endpoint, and the connection key. The Endpoint is the root address of the Datarc service, for example `https://openapi.datarc.cn`; don't enter a specific API path. After verification succeeds, the key is stored encrypted and the list shows the connection as “Datarc - configuration name”.
+Choose **＋ Add built-in service → Datarc** and enter a configuration name, the Endpoint, and the connection key. The Endpoint is the root address of the Datarc service, for example `https://openapi.datarc.cn`; don't enter a specific API path. After verification succeeds, the key is stored encrypted and the list shows the connection as “Datarc - configuration name”.
 
 A team can add several Datarc connections and assign them separately in Agent tool settings. For example, assign “Datarc - Finance” to a finance Agent and “Datarc - Sales” to a sales Agent. Renaming a connection doesn't remove existing assignments; after a connection is disabled or deleted, Agents don't switch to another connection automatically.
 
@@ -48,7 +48,7 @@ When a workspace name matches several choices, select one of the listed workspac
 
 ## Power BI
 
-Choose **＋ Add built-in third-party tool → Power BI**, name the connection, and enter the Microsoft Entra Tenant ID, Client ID, and client secret. You can provide a workspace ID and semantic model ID, or leave them blank to select an accessible model automatically. Bowra verifies query access before saving. The secret is stored encrypted and is never shown again. A team can add several connections, such as separate finance and sales models.
+Choose **＋ Add built-in service → Power BI**, name the connection, and enter the Microsoft Entra Tenant ID, Client ID, and client secret. You can provide a workspace ID and semantic model ID, or leave them blank to select an accessible model automatically. Bowra verifies query access before saving. The secret is stored encrypted and is never shown again. A team can add several connections, such as separate finance and sales models.
 
 An organization administrator must register the application in Microsoft Entra, create its client secret, allow its service principal's security group to use the Power BI API, add the service principal to the target workspace, and grant Build permission on the semantic model. If verification fails, check the tenant, workspace, model, and Build permission.
 
@@ -84,4 +84,4 @@ When querying data, the actual scope is limited by the connection key, the curre
 
 Connection keys are never shown to team members or Agents. Private deployments can use an internal company Endpoint; SaaS deployments accept only public HTTPS addresses.
 
-A Datarc connection or member lookup failure does not prevent you from starting or continuing unrelated work, such as writing or sending an email. If a task needs Datarc, Bowra explains the data-access problem instead of querying without verified access. If the connection key has expired or been revoked, ask a team administrator to update it in **Team settings → Tool Sources**. Failed account synchronization after sign-in does not invalidate your Bowra login.
+A Datarc connection or member lookup failure does not prevent you from starting or continuing unrelated work, such as writing or sending an email. If a task needs Datarc, Bowra explains the data-access problem instead of querying without verified access. If the connection key has expired or been revoked, ask a team administrator to update it in **Capability Center → Tools → Manage tool sources → Built-in services**. Failed account synchronization after sign-in does not invalidate your Bowra login.

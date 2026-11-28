@@ -9,6 +9,7 @@ import { replayTurnEventRows } from "@/lib/turn-store-replay";
 import { CANVAS_FOCUS_DATA_EVENT } from "@/lib/canvas-workspace-focus";
 import { AgentTrace } from "./AgentTrace";
 import { buildBandModel } from "./running-band-model";
+import { buildRunGroups } from "./run-groups";
 import { stepsToStepViews } from "./step-view";
 import type { StepView } from "./types";
 
@@ -56,9 +57,11 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
   it("omits internal correction history while preserving actual current activity", () => {
     const current = { ...accepted, stepId: "packing", state: "active" as const };
     const records = [query, calculation, correction(), current];
-    const band = buildBandModel({ steps: records });
-    expect(band.history.map((row) => row.key)).toEqual(["query", "calculation"]);
-    expect(band.current).toBeTruthy();
+    // The running card lists the business steps only and says the result is being handed back or checked.
+    const [lead] = buildRunGroups({ steps: records, peerNames: {} });
+    expect(lead.lines.map((line) => line.key)).toEqual(["query", "calculation"]);
+    expect(lead.protocol).toBe(toolName === "review_delivery" ? "review" : "return");
+    expect(buildBandModel({ steps: records }).current).toBeTruthy();
     const original = records.map((record) => record.state);
     expect(original).toEqual(["done", "done", "failed", "active"]);
   });

@@ -71,6 +71,7 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "subagent_return": "spawn",
     "get_current_user": "lookup",
     "send_email": "write",
+    "wecom_notify": "write",
     # Flags a scheduled run for its owner; no numeric result to summarize.
     "routine_notify": "write",
     "google_doc_write": "write",
@@ -288,7 +289,7 @@ def lookup_domain(tool_name: str) -> str:
         return "dataset"
     if tool_name.startswith(("teammcp.", "mcp.", "personalmcp.")):
         return "external"
-    if tool_name in {"send_email", "google_doc_write", "google_slides_write", "google_sheet_write"}:
+    if tool_name in {"send_email", "google_doc_write", "google_slides_write", "google_sheet_write", "wecom_notify"}:
         return "external"
     if tool_name.startswith("kb_"):
         return "kb"

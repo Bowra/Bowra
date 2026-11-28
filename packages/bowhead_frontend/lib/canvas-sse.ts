@@ -43,7 +43,7 @@ export interface CanvasSeqGate {
   maxEvtSeq: number;
 }
 
-export function attachCanvasSSE(es: EventSource, gate?: CanvasSeqGate): () => void {
+export function attachCanvasSSE(es: EventSource, gate?: CanvasSeqGate, turnId?: string): () => void {
   // Single deduplication gate: server replays all canvas events on reconnect; drop previously seen events (evt_seq <= max),
   // eliminating duplicate accumulation from unconditional section_chunk append (F2). No evt_seq (old persisted events
   // before shipment / synthetic events) → allow (fail-open), backed by section_done overwrite + terminal reconciliation.
@@ -116,6 +116,8 @@ export function attachCanvasSSE(es: EventSource, gate?: CanvasSeqGate): () => vo
         patch,
         rev,
         hiddenForChatMode: p.hidden_for_chat_mode === true,
+        // This stream belongs to one Turn: a Turn that only revises earlier sections opens no canvas turn.
+        turnId,
       });
     }],
     ["canvas.section_removed", (e) => {

@@ -23,7 +23,7 @@ DOMAINS = {
         "settings-personal-appearance",
         "user",
         "/settings/appearance/",
-        "Personal color mode, font, text size, density, corners and motion, with resets. "
+        "Personal appearance choices listed by the read contract, including how a running chat is shown, with resets. "
         "Accent, background and palette colors are manual controls on the original appearance page, not Agent changes.",
     ),
     "user_language": ConfigurationDomain(

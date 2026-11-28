@@ -38,6 +38,7 @@ import {
 } from "./share-ui";
 import { CharIcon } from "@/components/char-icon";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
+import { getChatSendErrorMessage } from "@/lib/chat-send-errors";
 
 export interface ShareDialogProps {
   kind: ShareKind | "file";
@@ -163,6 +164,9 @@ export function ShareDialog(props: ShareDialogProps) {
         setErr(null);
       } else if (e instanceof ApiError && e.code === "file_share_invalid_recipient") {
         setErr(fileT("invalid_recipient"));
+      } else if (e instanceof ApiError && e.code === "agent_trial_file_share_unavailable") {
+        // A file made in an Owner draft trial stays the Owner's own (decision TD3).
+        setErr(getChatSendErrorMessage(e.code));
       } else setErr(withHttpFailureReason(t("change_failed_safe"), e));
     }
     finally { setBusy(false); }

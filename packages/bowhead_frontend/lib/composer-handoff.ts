@@ -26,8 +26,18 @@ export const COMPOSER_PREFILL_KEY = "bowhead:composer-prefill";
 export const COMPOSER_ATTACH_KEY = "bowhead:composer-attach";
 export const COMPOSER_AGENT_USE_KEY = "bowhead:composer-agent-use";
 
-/** `text` is an optional request staged after the Agent reference; nothing is sent until the user sends it. */
-export type ComposerAgentUse = { agentId: string; label: string; text?: string };
+/**
+ * `text` is an optional request staged after the Agent reference; nothing is sent until the user sends it.
+ * `trial` opens an Owner draft trial of the Agent's frozen draft (trial-tech-design §7): the destination binds
+ * the candidate directly, without the catalog, which lists released Agents only. Its `candidateKind` says whether
+ * the candidate is the saved draft or the version in review, so the first screen names it before any message.
+ */
+export type ComposerAgentUse = {
+  agentId: string;
+  label: string;
+  text?: string;
+  trial?: { candidateId: string; revisionRef: string; candidateKind?: "draft" | "submitted" };
+};
 
 /** Longest staged request accepted from the handoff key. */
 const MAX_AGENT_USE_TEXT = 8000;
@@ -117,7 +127,28 @@ function parseComposerAgentUse(raw: string): ComposerAgentUse | null {
     if (typeof agent.label !== "string" || !agent.label.trim() || agent.label.length > 160) return null;
     if (agent.text !== undefined && (typeof agent.text !== "string" || agent.text.length > MAX_AGENT_USE_TEXT)) return null;
     const text = typeof agent.text === "string" && agent.text.trim() ? agent.text : undefined;
-    return text === undefined ? { agentId: agent.agentId, label: agent.label } : { agentId: agent.agentId, label: agent.label, text };
+    const trial = agent.trial === undefined ? undefined : parseTrial(agent.trial);
+    if (trial === null) return null;
+    return {
+      agentId: agent.agentId,
+      label: agent.label,
+      ...(text === undefined ? {} : { text }),
+      ...(trial === undefined ? {} : { trial }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseTrial(value: unknown): NonNullable<ComposerAgentUse["trial"]> | null {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const trial = value as Record<string, unknown>;
+    const identity = (item: unknown): item is string => typeof item === "string" && item.length <= 160 && /^[A-Za-z0-9_.:-]+$/.test(item);
+    if (!identity(trial.candidateId) || !identity(trial.revisionRef)) return null;
+    // An unknown or missing kind (an older hand-off) reads as the draft; the first message rechecks it.
+    const candidateKind = trial.candidateKind === "submitted" || trial.candidateKind === "draft" ? trial.candidateKind : undefined;
+    return { candidateId: trial.candidateId, revisionRef: trial.revisionRef, ...(candidateKind ? { candidateKind } : {}) };
   } catch {
     return null;
   }

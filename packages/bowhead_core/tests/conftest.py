@@ -268,6 +268,34 @@ def initialize_migrated_kb_files_database(migrated_kb_files_snapshot):
     return initialize
 
 
+@pytest.fixture(scope="session")
+def migrated_kb_matrix_snapshot(tmp_path_factory):
+    """The ``matrix`` target at the Alembic head (cell history included), for tests that build a KbMatrixStore."""
+    from alembic import command
+    from alembic.config import Config
+
+    from bowhead_core import migrations
+
+    path = tmp_path_factory.mktemp("kb-matrix-schema") / "kb_matrix.db"
+    config = Config()
+    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
+    config.attributes["bowhead_target"] = "matrix"
+    command.upgrade(config, "head")
+    return path
+
+
+@pytest.fixture
+def initialize_migrated_kb_matrix_database(migrated_kb_matrix_snapshot):
+    """Copy the migrated kb_matrix head before a test's KbMatrixStore initializes it."""
+
+    def initialize(path):
+        with sqlite3.connect(migrated_kb_matrix_snapshot) as source, sqlite3.connect(path) as destination:
+            source.backup(destination)
+
+    return initialize
+
+
 @pytest.fixture(autouse=True)
 def _drop_chroma_client_cache():
     """用例结束后清 chromadb 按路径缓存的客户端。

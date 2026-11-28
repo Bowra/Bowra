@@ -1,0 +1,256 @@
+/* The Word editor in the shared shell (docx inline edit design §8; canvas Google 式排列 W1–W10).
+   Tokens only, except the marks drawn on the pages: a page keeps its own colours in every theme, so
+   each mark pairs a colour that holds 3:1 on white with a white ring (as on deck slides). */
+
+/* Stage: the pages stacked vertically, scrolled; thin borders and a 12 px gap (Google Docs). */
+.stage { position: relative; flex: 1; min-height: 0; overflow: auto; background: var(--c-bg); }
+.stage:focus { outline: none; }
+.stage:focus-visible { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.pages { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 24px 48px; box-sizing: border-box; min-width: min-content; }
+/* With room for cards in the right margin, the pages move left to make space (canvas W2). */
+.pages[data-gutter] { align-items: flex-start; padding-left: max(24px, calc(50% - var(--page-width) / 2 - 140px)); padding-right: 288px; }
+.page { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 var(--hairline, 1px) var(--c-separator-strong); }
+.pageCanvas { display: block; width: 100%; height: 100%; }
+.overlay { position: absolute; inset: 0; }
+.stageState { width: min(420px, 90%); margin: 64px auto; }
+
+/* Paragraph hit areas and marks. */
+.hit {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  cursor: text;
+}
+.hit[data-editable] { box-shadow: 0 0 0 1px rgb(23 84 219 / 0.22); }
+.hit:hover { background: rgb(23 84 219 / 0.04); }
+.hit[data-locked] { cursor: default; }
+.hit[data-locked]:hover { background: rgb(0 0 0 / 0.03); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25); }
+.hit[data-pending] { box-shadow: 0 0 0 2px #b45309, 0 0 0 3px #fff; }
+.hit[data-selected] { box-shadow: 0 0 0 2px #1754db, 0 0 0 3px #fff; }
+.hit[data-selected][data-locked] { box-shadow: 0 0 0 2px #5f6b7a, 0 0 0 3px #fff; }
+.hit:focus { outline: none; }
+.hit:focus-visible { box-shadow: 0 0 0 2px #1754db, 0 0 0 4px #fff, 0 0 0 5px #1754db; }
+.number {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: #b45309;
+  color: #fff;
+  box-shadow: 0 0 0 1px #fff;
+  font: 700 11px / 1 var(--font-control);
+  pointer-events: none;
+}
+
+/* The field: hidden while armed (a selection takes typing at once), shown over the paragraph while editing. */
+.field {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: #fff;
+  color: #1a1a1a;
+  box-shadow: 0 0 0 2px #1754db, 0 0 0 3px #fff;
+  font-family: var(--font-control);
+  caret-color: #1754db;
+}
+.field[data-armed] { opacity: 0; pointer-events: none; }
+.painted {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  padding: 0 2px;
+  background: #fff;
+  color: #1a1a1a;
+  font-family: var(--font-control);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+/* An edit that adds a line: a card in the right margin with the new text (canvas W2). */
+.gutterCard {
+  position: absolute;
+  z-index: 2;
+  width: 240px;
+  box-sizing: border-box;
+  padding: 10px 12px 12px;
+  border-radius: var(--r-3, 8px);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline, 1px) var(--c-separator-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.gutterHead { display: flex; align-items: center; gap: 6px; color: var(--c-ink-3); }
+.gutterNote { color: var(--c-ink-3); line-height: 1.5; }
+.gutterLine { position: absolute; z-index: 1; height: 0; border-top: 1px solid rgb(180 83 9 / 0.55); pointer-events: none; }
+
+/* After a save: the new render is on its way (canvas W10). */
+.statusPill {
+  position: sticky;
+  top: 12px;
+  z-index: 4;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill, 999px);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline, 1px) var(--c-separator-strong);
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+
+/* The whole document refuses edits (canvas W8): the pages dim behind the reason. */
+.blocked { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--c-bg); }
+.blocked .pages { opacity: 0.45; }
+.blockedCard {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 48px));
+  box-sizing: border-box;
+  padding: 24px;
+  border-radius: var(--r-4, 12px);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.blockedTitle { margin: 0; font-size: var(--fs-lg, 1rem); font-weight: 650; }
+.blockedTitle:focus { outline: none; }
+.blockedBody { margin: 0; color: var(--c-ink-2); font-size: var(--fs-md); line-height: 1.65; }
+.blockedActions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Outline: headings with their level and page; the current section highlighted. */
+.outline { width: 240px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; background: var(--c-surface); }
+.outlineHead { flex: none; display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 8px 0 16px; }
+.outlineTitle { flex: 1; margin: 0; color: var(--c-ink-3); font-size: var(--fs-sm); font-weight: 600; }
+.outlineList { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 8px; list-style: none; display: flex; flex-direction: column; gap: 1px; }
+.outlineItem {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-ink-2);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+.outlineItem:hover { background: var(--c-fill-1); }
+.outlineItem:focus-visible { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.outlineItem[aria-current="location"] { background: var(--c-accent-soft); color: var(--c-accent-text); font-weight: 600; }
+.outlineItem[data-level="1"] { color: var(--c-ink); font-weight: 600; }
+.outlineText { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outlineDot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c-warn); }
+.outlinePage { flex: none; min-width: 16px; color: var(--c-ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: right; }
+.outlineFoot { flex: none; padding: 8px 16px 10px; box-shadow: inset 0 var(--hairline, 1px) 0 var(--c-separator); color: var(--c-ink-3); font-size: var(--fs-sm); }
+.outlineEmpty { padding: 8px 16px; color: var(--c-ink-3); font-size: var(--fs-sm); }
+
+/* 本页内容 (canvas W6, W7). */
+.items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border-radius: var(--r-3, 8px); box-shadow: inset 0 0 0 var(--hairline, 1px) var(--c-separator-strong); overflow: hidden; }
+.itemRow {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--c-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.items > li + li { box-shadow: inset 0 var(--hairline, 1px) 0 var(--c-separator); }
+.itemRow:hover { background: var(--c-fill-1); }
+.itemRow:focus-visible { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.itemRow[aria-current="true"] { background: var(--c-accent-tint, var(--c-accent-soft)); }
+.itemRow[data-locked] { color: var(--c-ink-3); cursor: default; }
+.itemName { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.itemReason { flex: 1 1 100%; color: var(--c-ink-3); font-size: var(--fs-sm); }
+.itemsHint { margin: 0; color: var(--c-ink-3); font-size: var(--fs-sm); line-height: 1.5; }
+.itemsTitle { margin: 4px 0 0; color: var(--c-ink-2); font-size: var(--fs-sm); font-weight: 600; }
+.panelField { display: flex; flex-direction: column; gap: 6px; }
+.panelArea { min-height: 72px; }
+
+/* Phones (canvas WP1–WP5): the pages as a list, each with 修改第 N 页 and 引用这一页 under it;
+   a tap opens the paragraph's sheet. */
+.phoneRoot { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--c-bg); }
+.phoneBody { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.phoneBody:focus { outline: none; }
+.pages[data-touch] { gap: 20px; padding: 12px 16px 24px; }
+.phonePage { display: flex; flex-direction: column; gap: 8px; }
+.touchHit { position: absolute; z-index: 1; padding: 0; border: 0; border-radius: 2px; background: transparent; -webkit-tap-highlight-color: transparent; }
+.touchHit:focus { outline: none; }
+.touchHit:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 0; }
+.phoneActions { display: flex; gap: 8px; }
+.phoneEditPage { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.phoneEditCount { color: var(--c-ink-2); font-size: var(--fs-sm); font-weight: 400; }
+.phoneReference { flex: none; min-height: 44px; }
+.phoneChanges { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; color: var(--c-ink-2); font-size: var(--fs-sm); line-height: 1.45; }
+.phoneChanges li { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+.phoneChangeNumber {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: var(--r-pill, 999px);
+  display: inline-grid;
+  place-items: center;
+  background: #b45309;
+  color: #fff;
+  font: 700 var(--fs-xs, 11px) / 1 var(--font-control);
+}
+.phoneChanges[data-saved] .phoneChangeNumber { background: var(--c-fill-2); color: var(--c-ink-2); }
+.phoneChangeNote { display: block; color: var(--c-ink-3); }
+.phoneNotice { padding: 12px 16px 0; }
+.phoneBlocked { margin: 16px; padding: 20px; border-radius: var(--r-4, 12px); background: var(--c-surface); box-shadow: 0 0 0 var(--hairline, 1px) var(--c-separator-strong); display: flex; flex-direction: column; gap: 12px; }
+.phoneBlocked .blockedActions { flex-direction: column; }
+.phoneBlocked .blockedActions > :global(button) { min-height: 44px; }
+.phoneSaved { align-self: stretch; position: static; }
+
+/* The sheets (canvas WP2, WP3, WP4a). */
+.sheetBody { display: flex; flex-direction: column; gap: 10px; }
+.sheetWhere { margin: -4px 0 0; color: var(--c-ink-3); font-size: var(--fs-sm); }
+.sheetArea { width: 100%; box-sizing: border-box; min-height: 132px; padding: 10px 12px; resize: none; line-height: 1.55; }
+/* 16 px keeps iOS from zooming into a focused field; the shared control size rule weighs (0,5,0). */
+:global(:root:root) .sheetBody.sheetBody.sheetBody :is(textarea, input) { font-size: 16px; }
+.sheetNote { margin: 0; color: var(--c-warn-ink); font-size: var(--fs-sm); line-height: 1.5; }
+.sheetHint { margin: 0; color: var(--c-ink-3); font-size: var(--fs-sm); line-height: 1.5; }
+.sheetReadOnly { margin: 0; display: flex; gap: 8px; color: var(--c-ink-2); font-size: 0.9375rem; line-height: 1.55; }
+.sheetReadOnly > :first-child { flex: none; margin-top: 2px; color: var(--c-ink-3); }
+.sheetReference { align-self: flex-start; min-height: 44px; }
+.sheetButton { min-height: 44px; }
+.sheetFooter { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sheetFooter > :global(button) { min-height: 44px; }
+.sheetFooterNote { grid-column: 1 / -1; margin: 0; color: var(--c-ink-3); font-size: var(--fs-sm); line-height: 1.5; }
+.sheetBody .itemRow { min-height: 44px; }
+.sheetTitle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }

@@ -8,7 +8,7 @@ The Team owner or administrator manages the connection. Members use its Tools th
 
 1. Create or use a Shopify App in the same Shopify organization that owns your shop. Release its configuration and install it on the shop.
 2. Grant the read permissions needed for your task: products, orders, inventory, locations and online store content. Orders older than 60 days also need approved all-orders access. Customer permissions are unnecessary for this Plugin.
-3. Open **Capability Center → Tools**, choose **Manage tool sources** and **Add built-in third-party tool**, then choose **Shopify** and enter a connection name, the `store.myshopify.com` domain, Client ID and Client secret.
+3. Open **Capability Center → Tools**, choose **Manage tool sources**, then **Add built-in service** on the **Built-in services** tab, then choose **Shopify** and enter a connection name, the `store.myshopify.com` domain, Client ID and Client secret.
 4. Choose **Verify and save**. The application verifies the shop and stores the credentials encrypted. Saved secrets are never displayed.
 5. Open **Capability Center → Plugins → Manage Team Plugins**, choose **Create Plugin**, and under **Start from a template** choose **Shopify analysis · <shop name>**. The form fills in a name, an introduction, that shop's Tools and the Shopify analysis Skill; change anything you need, then save. In the Agent editor, select that Plugin and use the existing validation and publication flow for the Agent.
 

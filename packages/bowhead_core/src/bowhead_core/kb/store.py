@@ -22,6 +22,9 @@ import chromadb
 from chromadb.config import Settings
 
 from bowhead_core.kb.errors import ScopeChangeMigrationError
+from bowhead_core.kb.knowledge_base_access import KnowledgeLevels
+from bowhead_core.kb.knowledge_base_store import default_for_scope
+from bowhead_core.kb.source_location import SourceChunk, chunk_metadata_page
 from bowhead_core.kb.telemetry import emit_audit
 
 if TYPE_CHECKING:
@@ -38,6 +41,33 @@ logger = logging.getLogger(__name__)
 SEARCH_TIMEOUT_S = 3.0
 # Default top_k matches retriever Step 2 (candidate pool before rerank)
 DEFAULT_SEARCH_TOP_K = 20
+
+
+def _without_knowledge_bases(where: dict[str, Any], excluded: tuple[str, ...]) -> dict[str, Any]:
+    """Add ``knowledge_base_id $nin excluded`` to a top-level ``$and`` filter; unchanged when nothing is excluded."""
+    if not excluded:
+        return where
+    return {"$and": [*where["$and"], {"knowledge_base_id": {"$nin": list(excluded)}}]}
+
+
+def _only_knowledge_base(where: dict[str, Any], knowledge_base_id: str | None) -> dict[str, Any]:
+    """Add ``knowledge_base_id == id`` to a top-level ``$and`` filter; unchanged for None."""
+    if not knowledge_base_id:
+        return where
+    return {"$and": [*where["$and"], {"knowledge_base_id": knowledge_base_id}]}
+
+
+def _selected_conditions(scope_conditions: list[dict[str, Any]], home: Any) -> list[dict[str, Any]]:
+    """A home's scope conditions plus its knowledge base selection clause (none when the whole home is selected)."""
+    if home is None:
+        return scope_conditions
+    if home.default:
+        return [*scope_conditions, {"knowledge_base_id": {"$nin": list(home.excluded)}}] if home.excluded else scope_conditions
+    return [*scope_conditions, {"knowledge_base_id": {"$in": list(home.only)}}]
+
+
+def _all_of(conditions: list[dict[str, Any]]) -> dict[str, Any]:
+    return conditions[0] if len(conditions) == 1 else {"$and": conditions}
 
 
 def _sanitize_id(raw: str) -> str:
@@ -279,6 +309,46 @@ class KbStore:
             ]
         }
         team_filter: dict[str, Any] = {"$and": [{"is_active": True}, {"scope": "team"}]}
+        # Knowledge bases (phase 1 §2.2): drop chunks of the named Space/Team knowledge bases the
+        # caller cannot use before the vector window is filled, or a members-only knowledge base
+        # would crowd out readable results. Chunks without the key (written before it existed)
+        # match `$nin`, and every one of them is in a default knowledge base. With nothing to
+        # exclude the clause is left out, so the query is exactly today's. Personal chunks need
+        # no clause: their filter already keeps the caller's own.
+        levels = getattr(ctx, "knowledge_levels", None)
+        known = isinstance(levels, KnowledgeLevels)
+        space_excluded = levels.excluded_in("space", ctx.workspace_id) if known and ctx.workspace_id else ()
+        team_excluded = levels.excluded_in("team", ctx.team_id) if known and ctx.team_id else ()
+        ws_filter = _without_knowledge_bases(ws_filter, space_excluded)
+        workspace_only_filter = _without_knowledge_bases(workspace_only_filter, space_excluded)
+        team_filter = _without_knowledge_bases(team_filter, team_excluded)
+        # One knowledge base's own deep search: its home's scope only, then its chunk key (a named
+        # one) or every key but the home's named ones (a default, whose old chunks carry no key).
+        selected = getattr(ctx, "knowledge_base_search", None)
+        if selected is not None:
+            home_scope = "space" if selected.scope in ("space", "workspace") else selected.scope
+            allowed_scopes = allowed_scopes & {home_scope}
+            if not allowed_scopes:
+                return all_results
+            workspace_only_filter = _only_knowledge_base(_without_knowledge_bases(workspace_only_filter, selected.excluded), selected.only)
+            personal_only_filter = _only_knowledge_base(_without_knowledge_bases(personal_only_filter, selected.excluded), selected.only)
+            team_filter = _only_knowledge_base(_without_knowledge_bases(team_filter, selected.excluded), selected.only)
+        # An Agent's selected knowledge bases: per home, its selected named knowledge bases (`$in`),
+        # or, with the home's default selected, every chunk but those of the home's unselected named
+        # ones (`$nin`), so the default's old chunks without the key still match. Homes with nothing
+        # selected are left out. The SQL post-filter (the file's current knowledge base) stays the authority.
+        selection = getattr(ctx, "knowledge_base_selection", None)
+        if selection is not None:
+            allowed_scopes = allowed_scopes & {home for home in ("personal", "space", "team") if selection.home(home) is not None}
+            if not allowed_scopes:
+                return all_results
+            space_part = _selected_conditions([{"scope": {"$in": ["space", "workspace"]}}], selection.space)
+            personal_part = _selected_conditions([{"scope": "personal"}, {"scope_owner": ctx.user_id}], selection.personal)
+            team_part = _selected_conditions([{"scope": "team"}], selection.team)
+            workspace_only_filter = {"$and": [{"is_active": True}, *space_part]}
+            personal_only_filter = {"$and": [{"is_active": True}, *personal_part]}
+            ws_filter = {"$and": [{"is_active": True}, {"$or": [_all_of(space_part), _all_of(personal_part)]}]}
+            team_filter = {"$and": [{"is_active": True}, *team_part]}
 
         # 0.40.4 Bug 8 step a: ALSO target ws collections where the user
         # has personal-scope chunks (uploaded when active ws was different,
@@ -411,6 +481,27 @@ class KbStore:
         await asyncio.to_thread(coll.delete, where={"file_id": file.file_id})
         return n
 
+    async def set_chunks_knowledge_base(self, file: KbFileDTO, knowledge_base_id: str) -> int:
+        """Write the knowledge base key into every chunk of a file that lacks it or carries another; returns the count.
+
+        A partial metadata update merges the key, so the rest of each chunk's metadata, its text and
+        its embedding stay untouched. It never creates a collection.
+        """
+        coll = await self._file_collection(file)
+        if coll is None:
+            return 0
+        got = await asyncio.to_thread(coll.get, where={"file_id": file.file_id}, include=["metadatas"])
+        metadatas = got.get("metadatas") or []
+        stale = [
+            chunk_id
+            for index, chunk_id in enumerate(got.get("ids") or [])
+            if not isinstance(metadatas[index] if index < len(metadatas) else None, dict)
+            or metadatas[index].get("knowledge_base_id") != knowledge_base_id
+        ]
+        if stale:
+            await asyncio.to_thread(coll.update, ids=stale, metadatas=[{"knowledge_base_id": knowledge_base_id} for _ in stale])
+        return len(stale)
+
     async def count_chunks(self, file: KbFileDTO) -> int:
         """P0-D: parse_done 前 sanity check.
 
@@ -492,6 +583,10 @@ class KbStore:
         return sorted(rows, key=lambda row: row[2].get("chunk_index", 0))
 
     async def get_ordered_chunks_for_file(self, file: KbFileDTO) -> list[tuple[str, str, int]]:
+        return [(c.chunk_id, c.content, c.chunk_index) for c in await self.get_ordered_source_chunks(file)]
+
+    async def get_ordered_source_chunks(self, file: KbFileDTO) -> list[SourceChunk]:
+        """A file's current chunks in ``chunk_index`` order, with the page the loader recorded for each."""
         rows = await self.list_active_chunks(file)
         ordered = []
         for i, (cid, content, metadata) in enumerate(rows):
@@ -499,8 +594,8 @@ class KbStore:
                 index = int(metadata.get("chunk_index", i + 1))
             except (TypeError, ValueError):
                 index = i + 1
-            ordered.append((cid, content, index))
-        return sorted(ordered, key=lambda row: row[2])
+            ordered.append(SourceChunk(cid, content, index, chunk_metadata_page(metadata.get("page"))))
+        return sorted(ordered, key=lambda chunk: chunk.chunk_index)
 
     async def list_active_chunks(self, file: KbFileDTO, *, chunk_id: str | None = None) -> list[tuple[str, str, dict[str, Any]]]:
         """``[(chunk_id, content, metadata)]`` of a file's active chunks (storage order).
@@ -543,8 +638,12 @@ class KbStore:
         new_scope_id: str,
         new_workspace_id: str,
         new_team_id: str,
+        new_knowledge_base_id: str | None = None,
     ) -> int:
         """[P0-O2 + P0-P2] scope 改变跨 collection 物理迁移.
+
+        Chunks get ``new_knowledge_base_id`` as their knowledge base key, or the target scope's
+        default when it is None (today's scope change). Embeddings are copied, never recomputed.
 
         - 同 logical 域 (e.g. ws 内 personal ↔ workspace): in-place metadata update
         - 跨 logical 域 (workspace ↔ team / 跨 ws): fetch chunks (含 embeddings) → 加新 coll → 删旧 coll
@@ -574,6 +673,11 @@ class KbStore:
             return 0
 
         old_metas = chunks.get("metadatas") or []
+        # Today's scope change moves the file to the target scope's default knowledge base.
+        try:
+            knowledge_base = {"knowledge_base_id": new_knowledge_base_id or default_for_scope(new_scope, new_scope_id, new_team_id)}
+        except ValueError:
+            knowledge_base = {}
         new_metas = [
             {
                 **m,
@@ -581,6 +685,7 @@ class KbStore:
                 "scope_owner": new_scope_id,
                 "workspace_id": new_workspace_id,
                 "team_id": new_team_id,
+                **knowledge_base,
             }
             for m in old_metas
         ]

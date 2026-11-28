@@ -2,8 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { parseResourceReference, projectCoachResourceOpen, coachResourceOpens, type CoachResourceOpen } from "./coach-resource-editors";
 import { dispatchToTurnStore } from "./turn-store-dispatch";
-import { agentEditorsToReload, useCoachResourceEditors, type CoachResourceObject } from "./use-coach-resource-editors";
-import type { CoachOperationOpen } from "./coach-operations";
+import { agentEditorForOperationOpen, agentEditorsToReload, openAgentEditorIds, useCoachResourceEditors, type CoachResourceObject } from "./use-coach-resource-editors";
+import type { CoachChangeEffect, CoachOperationOpen } from "./coach-operations";
 
 const pointer = (id = "sk_first", requestId = "a".repeat(32)): CoachResourceOpen => ({ requestId,
   userId: "u_owner", teamId: "team_original", workspaceId: "ws_original", sessionId: "s_original", turnId: "t_resources",
@@ -94,5 +94,54 @@ describe("agentEditorsToReload", () => {
     expect(agentEditorsToReload([operation("osa_1", "r1")], [clean, other], handled)).toEqual([clean]);
     expect(agentEditorsToReload([operation("osa_1", "r1")], [clean, other], handled)).toEqual([]);
     expect(agentEditorsToReload([operation("osa_1", "r2")], [editor("osa_1", true)], handled)).toEqual([]);
+  });
+
+  it("also reloads for a write read from the run record, once per write whichever arrives first", () => {
+    const effect = (agentId: string, proposalId = "acp_1"): CoachChangeEffect => ({
+      turnId: "t_1", callId: "call_1", reportedOk: true, reference: { kind: "agent_change", agent_id: agentId, proposal_id: proposalId },
+    });
+    const clean = editor("osa_1");
+    // Recorded first, then the same write's "open" event: one reload.
+    const handled = new Set<string>();
+    expect(agentEditorsToReload([], [clean], handled, [effect("osa_1")])).toEqual([clean]);
+    expect(agentEditorsToReload([operation("osa_1", "r1")], [clean], handled, [effect("osa_1")])).toEqual([]);
+    // Opened first, then recorded: one reload.
+    const other = new Set<string>();
+    expect(agentEditorsToReload([operation("osa_1", "r1")], [clean], other, [])).toEqual([clean]);
+    expect(agentEditorsToReload([operation("osa_1", "r1")], [clean], other, [effect("osa_1")])).toEqual([]);
+    // A new write reloads again; unsaved input is kept.
+    expect(agentEditorsToReload([operation("osa_1", "r1")], [clean], other, [effect("osa_1"), effect("osa_1", "acp_2")])).toEqual([clean]);
+    expect(agentEditorsToReload([], [editor("osa_1", true)], new Set(), [effect("osa_1", "acp_3")])).toEqual([]);
+  });
+
+  it("names the Agents whose hosted editor is open", () => {
+    const skill = { ...editor("osa_x"), pointer: pointer("sk_1") };
+    expect([...openAgentEditorIds([editor("osa_1"), skill])]).toEqual(["osa_1"]);
+  });
+});
+
+describe("agentEditorForOperationOpen", () => {
+  const open = (reference: CoachOperationOpen["reference"]): CoachOperationOpen => ({
+    source: "live", requestId: "f".repeat(32), turnId: "t_1", userId: "u_1", teamId: "team_1", workspaceId: "ws_1", sessionId: "s_1", reference,
+  });
+
+  it("opens the Agent editor for Coach's draft write with the release bar on, in the open's own scope (F36)", () => {
+    // Mutation: return null for `agent_change` → the old 「操作结果 · 智能体修改提案」 view opens again.
+    const editorOpen = agentEditorForOperationOpen(open({ kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_1" }), true);
+    expect(editorOpen).toEqual({
+      requestId: "f".repeat(32), turnId: "t_1", userId: "u_1", teamId: "team_1", workspaceId: "ws_1", sessionId: "s_1",
+      reference: { kind: "agent", id: "osa_1", revision: "current" }, parent: null,
+    });
+    // The receipt then reads 已在右侧打开.
+    const { result } = renderHook(() => useCoachResourceEditors("scope"));
+    act(() => result.current.open(editorOpen!, true));
+    expect([...openAgentEditorIds(result.current.objects)]).toEqual(["osa_1"]);
+    expect(result.current.selectedKey).toBe(result.current.objects[0].key);
+  });
+
+  it("keeps the operation view with the switch off and for every other kind", () => {
+    expect(agentEditorForOperationOpen(open({ kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_1" }), false)).toBeNull();
+    expect(agentEditorForOperationOpen(open({ kind: "eval_cases", agent_id: "osa_1", proposal_id: "acp_1" }), true)).toBeNull();
+    expect(agentEditorForOperationOpen(open({ kind: "skill_save", operation_id: `csw_${"0".repeat(64)}` }), true)).toBeNull();
   });
 });

@@ -33,9 +33,9 @@ Si la page affiche plutôt « Votre compte est prêt », votre compte a été cr
 1. Sur la page de connexion, choisissez « Mot de passe oublié ? », saisissez l’adresse e-mail avec laquelle vous vous connectez, puis choisissez « Envoyer le lien de réinitialisation ».
 2. Lorsque vous voyez « Consultez votre boîte de réception », ouvrez le lien de l’e-mail. Pour protéger les comptes, la page affiche le même message, que l’adresse soit enregistrée ou non.
 3. Sur « Définir un nouveau mot de passe », saisissez deux fois le nouveau mot de passe et choisissez « Enregistrer le nouveau mot de passe ».
-4. Vous verrez « Mot de passe mis à jour ». Un lien de réinitialisation que vous avez demandé vous-même vous connecte : choisissez alors le bouton « Ouvrir ». Pour un lien créé pour vous par un administrateur, choisissez « Aller à la connexion » et connectez-vous avec le nouveau mot de passe.
+4. Vous verrez « Mot de passe mis à jour ». Après la réinitialisation via le lien reçu par e-mail, votre adresse e-mail est vérifiée automatiquement et vous êtes connecté. Choisissez « Ouvrir » pour continuer. Pour un lien créé pour vous par un administrateur, choisissez « Aller à la connexion » et connectez-vous avec le nouveau mot de passe.
 
-Les liens de réinitialisation ne fonctionnent qu’une fois et expirent. Si vous voyez « Ce lien ne fonctionne plus », choisissez « Demander un nouveau lien de réinitialisation ».
+Les liens de réinitialisation reçus par e-mail sont valables 24 heures. Les liens créés par un administrateur sont à usage unique et expirent. Si vous voyez « Ce lien ne fonctionne plus », choisissez « Demander un nouveau lien de réinitialisation ».
 
 « Impossible d’envoyer des e-mails pour le moment » signifie que votre équipe n’a pas activé l’envoi d’e-mails. Adressez-vous au propriétaire de votre équipe ou à un administrateur : ils peuvent créer pour vous un lien de réinitialisation du mot de passe depuis la page Membres.
 

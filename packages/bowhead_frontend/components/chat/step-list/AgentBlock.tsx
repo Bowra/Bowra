@@ -38,6 +38,8 @@ export interface AgentBlockProps {
   /** Expand now (and whenever this turns true), e.g. while a step inside waits for the user's confirmation.
    *  The user can still collapse it afterwards. */
   forceOpen?: boolean;
+  /** Which agent's block this is (a helper's id), so the style overview can open it to show a step. */
+  agentKey?: string;
   children?: ReactNode;
 }
 
@@ -54,6 +56,7 @@ export function AgentBlock({
   open: openProp,
   forceOpen = false,
   children,
+  agentKey,
 }: AgentBlockProps) {
   const meta = agentMetaFor(agent);
   const label = agentDisplayName(agent, displayName);
@@ -91,7 +94,7 @@ export function AgentBlock({
     status === "run" ? "is-run" : status === "bail" ? "is-bail" : status === "fail" ? "is-fail" : "";
 
   return (
-    <div className={`agb ${meta.cls} ${stClass}`.trim()}>
+    <div className={`agb ${meta.cls} ${stClass}`.trim()} data-agent-key={agentKey}>
       <button
         type="button"
         className="agb-head"

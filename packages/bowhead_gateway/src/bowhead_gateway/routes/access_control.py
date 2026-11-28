@@ -19,7 +19,7 @@ from bowhead_core.subagent_write_boundary import (
     TeamSubagentWriteBoundaryError,
     reject_obsolete_team_subagent_write,
 )
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from bowhead_core import share_service
@@ -28,6 +28,7 @@ from bowhead_gateway.access_context import (
     access_context_to_dict,
     build_access_context_from_request,
 )
+from bowhead_gateway.kb_grant_report import GrantReportDTO, InvalidCursorError, build_grant_report
 from bowhead_gateway.routes.auth import _current_user, _require_team_role_dep, _store
 
 if TYPE_CHECKING:
@@ -88,6 +89,7 @@ class GroupDTO(BaseModel):
     description: str
     status: str
     member_count: int
+    directory_managed: bool = False
     created_by: str | None
     created_at: str
     updated_at: str
@@ -176,6 +178,7 @@ def _group_to_dto(g: Any) -> GroupDTO:
         description=g.description,
         status=g.status,
         member_count=g.member_count,
+        directory_managed=g.directory_managed,
         created_by=g.created_by,
         created_at=g.created_at,
         updated_at=g.updated_at,
@@ -327,11 +330,11 @@ async def _validate_principal(
         await _assert_workspace_in_team(user_store, user.team_id, principal_id)
         return
     if principal_type == "group":
-        if await access_store.get_group(user.team_id, principal_id) is None:
+        group = await access_store.get_group(user.team_id, principal_id)
+        if group is None or group.status != "active":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "group not found")
         return
-    target = await user_store.get_user(principal_id)
-    if target is None or target.team_id != user.team_id or target.status != "active":
+    if not await user_store.filter_active_team_members(user.team_id, {principal_id}):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
 
 
@@ -583,7 +586,10 @@ async def remove_group_member(
     access_store: AccessControlStore = Depends(_access_store),
     user_store: UserStore = Depends(_store),
 ) -> None:
-    removed = await access_store.remove_group_member(user.team_id, group_id, user_id)
+    try:
+        removed = await access_store.remove_group_member(user.team_id, group_id, user_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if not removed:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "group member not found")
     await _audit(
@@ -729,6 +735,41 @@ async def upsert_resource_grant(
             request.app, team_id=user.team_id, kind=resource_kind, resource_id=resource_id, requester_id=body.principal_id, decided_by=user.id
         )
     return _grant_to_dto(grant)
+
+
+def _require_knowledge_bases_enabled() -> None:
+    """With ``FEATURE_KNOWLEDGE_BASES`` off the knowledge base grant report answers like an unknown route."""
+    from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
+
+    if not knowledge_bases_enabled():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+@router.get(
+    "/resource-grants/knowledge-base-report",
+    response_model=GrantReportDTO,
+    dependencies=[Depends(_require_knowledge_bases_enabled)],
+)
+async def knowledge_base_grant_report(
+    request: Request,
+    cursor: str | None = Query(None, max_length=512),
+    limit: int = Query(50, ge=1, le=200),
+    user: User = Depends(_REQUIRE_ACCESS_ADMIN),
+    access_store: AccessControlStore = Depends(_access_store),
+    user_store: UserStore = Depends(_store),
+) -> GrantReportDTO:
+    """Read-only: every ``kb_scope`` and ``kb_file`` grant with its effect today and a member mapping.
+
+    The guard is the grant management guard. Phase 1 keeps applying these grants as extra
+    narrowing (PRD Q10); this route changes nothing.
+    """
+    try:
+        return await build_grant_report(request, user=user, access_store=access_store, user_store=user_store, cursor=cursor, limit=limit)
+    except InvalidCursorError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            {"error": {"code": "grant_report_cursor_invalid", "message": "The page position is no longer valid. Reload the report from the start."}},
+        ) from None
 
 
 @router.get("/resource-grants", response_model=ResourceGrantListDTO)

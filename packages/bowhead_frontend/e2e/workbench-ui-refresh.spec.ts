@@ -33,13 +33,14 @@ async function freezeRunning(page: Page) {
   });
 }
 
-test("running band keeps its three-row structure (40px disclosure bar + two history rows + current row); Stop is not accent-filled", async ({ page }) => {
+test("running band shows a 40px heartbeat bar and its agent groups; Stop is not accent-filled", async ({ page }) => {
   await freezeRunning(page);
   await open(page, "/?scenario=peer");
   const bar = page.locator(".bh-band__bar").first();
   await expect(bar).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".bh-band__hist").first()).toBeVisible();
-  await expect(page.locator(".bh-band__now").first()).toBeVisible();
+  // Chat running state R1.5: one group per agent appearance replaces the fixed rows.
+  await expect(page.locator('[data-testid="run-group"]').first()).toBeVisible();
   // After the first frame the band remounts (Preparing → In Progress); judge its settled height.
   await expect.poll(async () => (await bar.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40);
   expect((await bar.boundingBox())!.height).toBeLessThan(48);

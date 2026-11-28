@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import ArtifactStore
+    from bowhead_core.tool_registry import ToolRegistry
     from bowhead_core.user_store import UserStore
     from fastapi import APIRouter, FastAPI, Request, Response
 
@@ -45,6 +46,10 @@ class BrandingInitializer(Protocol):
     async def __call__(self, app: FastAPI, artifact_store: ArtifactStore) -> None: ...
 
 
+class ToolRegistrar(Protocol):
+    def __call__(self, app: FastAPI, registry: ToolRegistry) -> None: ...
+
+
 @dataclass(frozen=True)
 class GatewayExtensions:
     """The fixed extension contracts required by extracted Business handlers."""
@@ -56,6 +61,7 @@ class GatewayExtensions:
     branding_initializer: BrandingInitializer | None = None
     identity: IdentityAdapter | None = None
     entitlement_initializer: EntitlementInitializer | None = None
+    tool_registrar: ToolRegistrar | None = None
 
 
 def read_build_edition() -> str:

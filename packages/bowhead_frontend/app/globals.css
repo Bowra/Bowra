@@ -11235,10 +11235,12 @@ textarea {
   cursor: pointer;
 }
 .artifact-pdf-page-action:hover { background: var(--c-fill-1); color: var(--c-ink); }
-.artifact-pdf-page-action[data-referenced] { background: var(--c-accent-soft, color-mix(in srgb, var(--c-accent) 10%, transparent)); color: var(--c-accent); }
+.artifact-pdf-page-action[data-referenced] { background: var(--c-accent-soft, color-mix(in srgb, var(--c-accent) 10%, transparent)); color: var(--c-accent-text, var(--c-accent)); }
 .artifact-pdf-page-action:focus-visible { outline: 2px solid var(--c-focus, #1754db); outline-offset: 1px; }
 @media (max-width: 639px) {
   .artifact-pdf-page-action { min-height: 44px; font-size: 0.875rem; }
+  /* The page number is how a phone tells pages apart: 12 px, not the desktop's 10 px. */
+  .artifact-pdf-page figcaption { font-size: 0.75rem; }
 }
 .artifact-document-load-more {
   min-height: 40px;
@@ -22611,8 +22613,9 @@ textarea {
    RunningBand — 1e scrolling band (persistent running disclosure surface)
    Design: Claude Design chat-ux-2026-08/运行带-实现规格.html
    Values checked individually against design; read §3 behavior table before changes.
-   ★ Persistent height 163px is PRD A3 criterion (long-turn full-duration range ≤24px),
-     based on three rows (2 history + 1 current) — do not cut to two to save space.
+   Chat running state (2026-11-25, PRD P1): the body lists agent groups and has no fixed height; the
+     earlier 163px three-row rule is retired. Height stays bounded by folding: a returned helper is one
+     line, a running group shows three finished lines, more than two helpers show one line each.
    ============================================================ */
 .bh-band {
   border: var(--border-w, 1px) solid var(--c-line);
@@ -22689,14 +22692,369 @@ textarea {
   }
 }
 
-/* Top fade: old rows fade moving up. ★ Only whole hist top edge,
-   no per-row opacity animation — retry row is the band's most important signal. */
+/* Card body. Chat running state R1.5: the body lists agent groups and grows with them (P1: no fixed height),
+   so the old top fade for scrolling history rows is gone; nothing scrolls out of the card any more. */
 .bh-band__hist {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 20%);
+}
+/* One group per agent appearance: header (badge + name, task or "第 N 次", step count when compact), then lines. */
+.bh-band__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.bh-band__group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* The 16px badge sits in the rows' 20px glyph column, so the name lines up with the line labels. */
+.bh-band__ghead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 20px;
+  padding-left: 2px;
+}
+.bh-band__gname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-band__gmeta {
+  margin-left: auto;
+  flex: none;
+  padding-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.bh-band__group > .bh-band__foot {
+  padding-left: 28px;
+}
+/* Chat running state R3: the running card's header (disclosure + style switcher) and the three other styles'
+   layout. Appearance is in ui-refresh-workbench.css. */
+.bh-band__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bh-band__head > .bh-band__bar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bh-style-switch {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+}
+.bh-style-switch__opt {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.bh-style {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bh-style__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.bh-style__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.bh-style__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-style__meta {
+  flex: none;
+  margin-left: auto;
+}
+.bh-style__caveat {
+  margin: 0;
+  padding-left: 22px;
+}
+.bh-style__item {
+  display: contents;
+}
+.bh-chips,
+.bh-dots,
+.bh-track__bar {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: 22px;
+}
+.bh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 0;
+  box-sizing: border-box;
+}
+.bh-chip__label,
+.bh-chip__fact {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-chip__fact {
+  max-width: 14em;
+}
+.bh-chip__pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.bh-dots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding-left: 22px;
+}
+.bh-dot {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.bh-dot.is-lead {
+  border-radius: 2px;
+}
+.bh-dot.is-active,
+.bh-dot.is-needs {
+  width: 11px;
+  height: 11px;
+}
+.bh-style__now {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.bh-style__now-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-style__now--large {
+  padding: 8px 10px;
+}
+.bh-track {
+  display: grid;
+  grid-template-columns: minmax(72px, 28%) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.bh-track__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.bh-track__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-track__bar {
+  position: relative;
+  height: 12px;
+}
+.bh-track__slot {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  display: block;
+}
+.bh-seg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  box-sizing: border-box;
+}
+.bh-track__now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: 0;
+  width: 2px;
+}
+.bh-track__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-left: calc(max(72px, 28%) + 8px);
+}
+.ag-trace__style {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ag-trace__switch {
+  align-self: flex-end;
+}
+.ag-trace__overview {
+  padding: 10px 12px;
+}
+.rvs-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.rvs-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.rvs-card__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rvs-card__radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+.rvs-preview {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  height: 72px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.rvs-preview > i,
+.rvs-preview > span > i {
+  display: block;
+}
+.rvs-preview--list > i {
+  height: 6px;
+}
+.rvs-preview--chips > span,
+.rvs-preview--lanes > span {
+  display: flex;
+  gap: 4px;
+}
+.rvs-preview--chips i {
+  width: 34%;
+  height: 12px;
+}
+.rvs-preview--lanes i {
+  width: 9px;
+  height: 9px;
+}
+.rvs-preview--timeline > span {
+  position: relative;
+  height: 8px;
+}
+.rvs-preview--timeline i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+@media (max-width: 640px) {
+  .rvs-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bh-track {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .bh-track__axis {
+    margin-left: 0;
+  }
+}
+
+/* Chat running state R2.6: the one-time reminder beside the collapsed Results rail (appearance in ui-refresh-workbench.css). */
+.v2-results-bubble {
+  position: absolute;
+  top: 12px;
+  right: 54px;
+  z-index: 20;
+}
+/* Chat running state R1.9: Lead's folded text, one line with its first sentence; opens in place. */
+.bh-note {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bh-note__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  min-width: 0;
+}
+.bh-note__glyph {
+  width: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+}
+.bh-note__lab {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bh-note__toggle {
+  margin-left: auto;
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.bh-note__body {
+  padding: 4px 0 6px 28px;
+  min-width: 0;
 }
 .bh-band__row {
   display: flex;
@@ -22743,10 +23101,6 @@ textarea {
   font: 400 0.65625rem var(--font-v2-mono, ui-monospace, Menlo, monospace);
   font-variant-numeric: tabular-nums;
 }
-/* History rows recede by ink step in ui-refresh-workbench.css, not by opacity: opacity took 12px text below 4.5:1. */
-.bh-band__row--h1 .bh-band__glyph {
-  opacity: 0.9;
-}
 
 .bh-band__row--ghost {
   animation: none;
@@ -22757,28 +23111,6 @@ textarea {
   flex: none;
 }
 
-.bh-band__now {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding-top: 6px;
-  margin-top: 3px;
-}
-.bh-band__now-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.bh-band__act {
-  line-height: 1.45;
-  color: var(--c-ink);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .bh-band__foot {
   display: flex;
   align-items: center;
@@ -22847,11 +23179,6 @@ textarea {
    ★ collapse skeleton, **keep band** (existing tests require band remains while answer streams). */
 .bh-band[data-density="single"] .bh-band__hist {
   padding-top: 11px;
-}
-.bh-band[data-density="single"] .bh-band__now {
-  padding-top: 0;
-  margin-top: 0;
-  border-top: 0;
 }
 
 /* ─── Batch 2 §3.1 chart inspection (focus room, design B v2) ───────────────────── */

@@ -162,6 +162,20 @@ async def test_kb_chunk_without_viewer_is_restricted() -> None:
     assert out[ref].display is None
 
 
+@pytest.mark.asyncio
+async def test_kb_chunk_names_its_knowledge_base_only_when_readable() -> None:
+    check, _ = _checker(
+        {
+            "kbf_ok": KbFileAccess(state="readable", file_name="a.pdf", scope="space", space_id="ws_9", knowledge_base_id="kbase_finance"),
+            "kbf_no": KbFileAccess(state="forbidden", knowledge_base_id="kbase_secret"),
+        }
+    )
+    refs = [("kb_chunk", kb_citation_identity("kbf_ok", CHUNK_A)), ("kb_chunk", kb_citation_identity("kbf_no", CHUNK_A))]
+    out = await attribute_refs(refs, scope=_scope(), stores=AttributionStores(kb_file_access=check))
+    assert out[refs[0]].display is not None and out[refs[0]].display.kb_ref["kb_knowledge_base_id"] == "kbase_finance"
+    assert out[refs[1]].display is None
+
+
 def test_identity_roundtrip() -> None:
     assert parse_kb_citation_identity(kb_citation_identity("kbf_1", CHUNK_A)) == ("kbf_1", CHUNK_A)
     assert parse_kb_citation_identity("art_x") is None

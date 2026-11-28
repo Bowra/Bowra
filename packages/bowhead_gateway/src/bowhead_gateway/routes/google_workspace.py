@@ -481,6 +481,8 @@ class KbImportBody(BaseModel):
     scope: KbScopeIn
     scope_id: str = Field(max_length=200)
     use_llm: bool = False
+    # The target knowledge base (FEATURE_KNOWLEDGE_BASES); ignored while the switch is off.
+    knowledge_base_id: str | None = Field(default=None, max_length=64)
 
 
 class _DriveFileError(Exception):
@@ -574,9 +576,11 @@ async def kb_import(body: KbImportBody, request: Request, background_tasks: Back
     Uses the caller's own Google grant and the same authorization and ingestion path as
     the knowledge-base upload. The Google file ID is not stored, so there is no re-import.
     """
-    from bowhead_gateway.routes.kb import _SINGLE_MAX_SIZE, authorize_kb_scope_write, ingest_kb_file_bytes
+    from bowhead_gateway.routes.kb import _SINGLE_MAX_SIZE, authorize_kb_scope_write, ingest_kb_file_bytes, knowledge_base_target
 
-    ctx = await authorize_kb_scope_write(request, user, scope=body.scope, scope_id=body.scope_id)
+    # The target knowledge base, only while knowledge bases are on (otherwise the field is ignored).
+    target = {"knowledge_base_id": body.knowledge_base_id} if knowledge_base_target(body.knowledge_base_id) else {}
+    ctx = await authorize_kb_scope_write(request, user, scope=body.scope, scope_id=body.scope_id, **target)
     store = _store(request)
     tool = await _connection(store, user.team_id)
     if tool is None or tool.status != "enabled":
@@ -608,6 +612,7 @@ async def kb_import(body: KbImportBody, request: Request, background_tasks: Back
                 scope_id=body.scope_id,
                 use_llm=body.use_llm,
                 route="kb_google_import",
+                **target,
             )
             results.append({"file_id": file_id, "name": dto.filename, "ok": True, "kb_file_id": dto.file_id})
         except _DriveFileError as exc:

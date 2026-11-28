@@ -35,6 +35,7 @@ import { useSpaceSelection } from "@/lib/use-space";
 import {
   type KbExtractRowsJobStatus,
   type KbFileDTO,
+  type KbFileListParams,
   type KbFileListResponse,
   type KbListScope,
   type KbScope,
@@ -83,6 +84,15 @@ import { kbFailReason, kbFailRetryable, kbFileSettling, kbFileState } from "@/li
 import { snippetWindow } from "@/lib/kb-snippet";
 import { evictKbChunks } from "@/lib/canvas-pm-adapter/kb-chunk-cache";
 import { KbUploadModal } from "./kb-upload-modal";
+import { KbMoveDialog } from "./bases/kb-move-dialog";
+import { knowledgeBaseContact } from "./bases/kb-page-contact";
+import { useKnowledgeBaseNamer } from "./bases/use-knowledge-bases";
+import { knowledgeBaseHref } from "@/lib/knowledge-base-display";
+import {
+  listKnowledgeBaseFiles,
+  notifyKnowledgeBasesChanged,
+  type KnowledgeBaseDTO,
+} from "@/lib/knowledge-bases-api";
 import {
   Sheet as LucideSheet,
 } from "lucide-react";
@@ -134,10 +144,18 @@ function fmtAgo(iso: string, t: Translator): string {
 // Status column 224px (de-DE "Fehlgeschlagen" + retry + row menu), date 120px ("vor 11 Monaten" on one line); hide the "类型" column at ≤ 1280, since filename color blocks already convey type (design 01b·2c).
 const COLS = "34px 26px minmax(0,1fr) 96px 84px 120px 224px";
 const COLS_NO_TYPE = "34px 26px minmax(0,1fr) 84px 120px 224px";
+// Knowledge base mode: an "Added by" column after the size (no scope column).
+const KB_COLS = "34px 26px minmax(0,1fr) 96px 84px 112px 120px 224px";
+const KB_COLS_NO_TYPE = "34px 26px minmax(0,1fr) 84px 112px 120px 224px";
 const NARROW_QUERY = "(max-width: 640px)";
 const NO_TYPE_QUERY = "(max-width: 1280px)";
 
 type PerRowJobStatus = KbExtractRowsJobStatus;
+
+/** The file scope of a knowledge base's home (uploads into it use this scope). */
+function homeScope(kb: Pick<KnowledgeBaseDTO, "home">): KbScope {
+  return kb.home === "personal" ? "personal" : kb.home === "space" ? "space" : "team";
+}
 
 function IconGridSmall() {
   return (
@@ -153,6 +171,11 @@ function IconGridSmall() {
  * initialSpaceId switches active space only if in your space list, then opens initialFileId drawer
  * (space-file reads depend on current space). Ignore space IDs absent from the list. initialChunkId (chat KB
  * citation "在知识库中打开") pins and highlights that chunk in the drawer.
+ *
+ * knowledgeBase (FEATURE_KNOWLEDGE_BASES, PRD §4.2): knowledge base mode, the Files tab of one knowledge base's page.
+ * The list, deep search and paging read that knowledge base only; there is no scope filter, scope count, scope
+ * preference or scope column, an "Added by" column is added, the view state lives at `/knowledge/base/?id=…`, and
+ * "Move to another knowledge base…" replaces "Change visibility". Without it everything stays as before.
  */
 export function KbFilesManager({
   viewQuery,
@@ -161,6 +184,7 @@ export function KbFilesManager({
   initialScope,
   initialSpaceId,
   uploadRequest,
+  knowledgeBase,
 }: {
   viewQuery?: string;
   initialFileId?: string | null;
@@ -168,8 +192,16 @@ export function KbFilesManager({
   initialScope?: KbListScope | null;
   initialSpaceId?: string | null;
   uploadRequest?: number;
+  knowledgeBase?: KnowledgeBaseDTO;
 } = {}) {
   const t = useTranslations("knowledge_base");
+  const tf = useTranslations("knowledge_bases.files");
+  const namer = useKnowledgeBaseNamer();
+  const kb = knowledgeBase ?? null;
+  const kbId = kb?.id ?? null;
+  const kbMode = kb !== null;
+  // Knowledge base mode keeps the view state on the knowledge base page's own address.
+  const viewPath = kbMode ? "/knowledge/base/" : "/knowledge/";
   const router = useAppRouter();
   const toast = notify;
   const retryErrorToastIds = useRef(new Map<string, string>());
@@ -186,7 +218,8 @@ export function KbFilesManager({
   const spaceName = spaceItems.find((w) => w.id === activeSpaceId)?.name ?? null;
   const narrow = useMediaQuery(NARROW_QUERY);
   const hideTypeCol = useMediaQuery(NO_TYPE_QUERY);
-  const [scope, setScope] = useState<KbListScope>(initialScope ?? "personal");
+  // Knowledge base mode: the scope is fixed to the knowledge base's home (uploads default there).
+  const [scope, setScope] = useState<KbListScope>(kb ? homeScope(kb) : initialScope ?? "personal");
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const [scopeCounts, setScopeCounts] = useState<Record<KbListScope, number | null>>({ all: null, personal: null, space: null, team: null });
@@ -194,16 +227,16 @@ export function KbFilesManager({
   const [allScopes, setAllScopes] = useState<boolean | null>(null);
   // Remembered scope (no scope in the URL): the list waits until the saved choice is known.
   const [scopePrefDone, setScopePrefDone] = useState(false);
-  const scopePrefPending = initialScope == null && !scopePrefDone;
+  const scopePrefPending = !kbMode && initialScope == null && !scopePrefDone;
   // "All" exists only with a server that supports it; otherwise fall back to personal.
   const allUnavailable = allScopes === false;
   const showScopeCol = scope === "all";
-  const baseCols = hideTypeCol ? COLS_NO_TYPE : COLS;
+  const baseCols = kbMode ? (hideTypeCol ? KB_COLS_NO_TYPE : KB_COLS) : hideTypeCol ? COLS_NO_TYPE : COLS;
   const cols = showScopeCol ? baseCols.replace("minmax(0,1fr)", `minmax(0,1fr) ${SCOPE_COL}`) : baseCols;
   // Upload needs a concrete scope; from "All" it defaults to the current space (the dialog lets the user change it).
   const uploadDefault: KbScope = scope === "all" ? (activeSpaceId ? "space" : "personal") : scope;
   // Off-page selections ("select all N"): their names and scopes for the scope dialog.
-  const selectedMetaRef = useRef(new Map<string, { filename: string; scope: KbScope }>());
+  const selectedMetaRef = useRef(new Map<string, { filename: string; scope: KbScope; scope_id: string; uploaded_by: string }>());
 
   // controls
   const [query, setQuery] = useState("");
@@ -245,6 +278,8 @@ export function KbFilesManager({
   const [docTypeIds, setDocTypeIds] = useState<string[] | null>(null);
   const [scopeModal, setScopeModal] = useState<{ targets: ScopeTarget[]; bulk: boolean } | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
+  // Knowledge base mode: "Move to another knowledge base…" (row, bulk bar, drawer).
+  const [moveFiles, setMoveFiles] = useState<Array<{ file_id: string; filename: string }> | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -286,8 +321,8 @@ export function KbFilesManager({
     params.delete("file_id");
     params.delete("chunk_id");
     const qs = params.toString();
-    routerRef.current.replace(qs ? `/knowledge/?${qs}` : "/knowledge/", { scroll: false });
-  }, []);
+    routerRef.current.replace(qs ? `${viewPath}?${qs}` : viewPath, { scroll: false });
+  }, [viewPath]);
 
   const ownNavigation = useRef<string | null>(null);
   const fileTrigger = useRef<HTMLElement | null>(null);
@@ -298,12 +333,13 @@ export function KbFilesManager({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const next = { ...viewState, ...patch };
     const params = writeKbFileView(window.location.search, next);
-    if (next.scope === "space" && activeSpaceId) params.set("space", activeSpaceId);
+    if (kbMode) params.delete("scope");
+    if (!kbMode && next.scope === "space" && activeSpaceId) params.set("space", activeSpaceId);
     else params.delete("space");
     const key = params.toString();
     if (key === new URLSearchParams(window.location.search).toString()) return;
     ownNavigation.current = key;
-    routerRef.current[replace ? "replace" : "push"](`/knowledge/?${key}`, { scroll: false });
+    routerRef.current[replace ? "replace" : "push"](`${viewPath}?${key}`, { scroll: false });
   };
   useEffect(() => {
     if (viewQuery === undefined) return;
@@ -311,7 +347,8 @@ export function KbFilesManager({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const read = readKbFileView(viewQuery);
     // No scope in the URL (e.g. the sidebar "Knowledge" link): keep the current (restored or chosen) scope.
-    const urlScope: KbListScope = read.scope === null
+    // Knowledge base mode never takes a scope from the URL.
+    const urlScope: KbListScope = read.scope === null || kbMode
       ? scopeRef.current
       : read.scope;
     const next: KbFileViewState = { ...read, scope: urlScope };
@@ -409,7 +446,8 @@ export function KbFilesManager({
       cursorKeyRef.current = listKey;
       cursorsRef.current.clear();
     }
-    const cursor = scope === "all" && page > 1 ? cursorsRef.current.get(page) : undefined;
+    // Knowledge base mode pages by offset, and by cursor once a response has issued one.
+    const cursor = (scope === "all" || kbMode) && page > 1 ? cursorsRef.current.get(page) : undefined;
     return {
       scope,
       ...(cursor ? { cursor } : null),
@@ -422,7 +460,14 @@ export function KbFilesManager({
       order_by: ORDER_BY[sortKey] as "uploaded_at" | "filename" | "size_bytes",
       order_dir: sortDir,
     };
-  }, [scope, page, fStatus, fTypes, fDays, deep, query, sortKey, sortDir, activeSpaceId]);
+  }, [scope, page, fStatus, fTypes, fDays, deep, query, sortKey, sortDir, activeSpaceId, kbMode]);
+
+  // The file list: one knowledge base's table in knowledge base mode (no scope), else the scope list.
+  const listFiles = useCallback((params: KbFileListParams): Promise<KbFileListResponse> => {
+    if (!kbId) return fetchKbFiles(params);
+    const { scope: _scope, ...rest } = params;
+    return listKnowledgeBaseFiles(kbId, rest);
+  }, [kbId]);
 
   // load-sequence guard: only the most-recently-dispatched reload commits, so a
   // late poll/refresh response can't overwrite a newer scope/filter/page load.
@@ -446,8 +491,9 @@ export function KbFilesManager({
       setError(null);
       if (deep && query.trim()) {
         // Deep search stays within current scope (PRD FR6.2); API lacks status/type filters, so apply the same list rules locally.
+        // Knowledge base mode searches that knowledge base only.
         const scopeFilter = scope === "all" ? SCOPE_IDS.filter((id) => id !== "space" || activeSpaceId) : [scope];
-        const res = await searchKb(query.trim(), { scope_filter: scopeFilter });
+        const res = await searchKb(query.trim(), kbId ? { knowledge_base_id: kbId } : { scope_filter: scopeFilter });
         const snip = new Map<string, KbSearchResultChunk>();
         for (const c of res.chunks) if (!snip.has(c.file_id)) snip.set(c.file_id, c);
         const dtos = await Promise.all([...snip.keys()].map((id) => getKbFile(id).catch(() => null)));
@@ -475,15 +521,17 @@ export function KbFilesManager({
         const params = buildParams();
         let res: KbFileListResponse;
         try {
-          res = await fetchKbFiles(params);
+          res = await listFiles(params);
         } catch (e) {
           // A stale or foreign cursor is refused (400): drop the cursors and read the page by offset.
           if (!params.cursor || !(e instanceof ApiError) || e.status !== 400) throw e;
           cursorsRef.current.clear();
-          res = await fetchKbFiles({ ...params, cursor: undefined, offset: (page - 1) * PAGE_SIZE });
+          res = await listFiles({ ...params, cursor: undefined, offset: (page - 1) * PAGE_SIZE });
         }
         if (!current()) return;
-        if (scope === "all") {
+        if (kbMode) {
+          if (res.next_cursor) cursorsRef.current.set(page + 1, res.next_cursor);
+        } else if (scope === "all") {
           // A successful scope=all list is itself proof of server support (the count probe may have failed).
           setAllScopes(true);
           if (res.next_cursor) cursorsRef.current.set(page + 1, res.next_cursor);
@@ -501,7 +549,7 @@ export function KbFilesManager({
       if (e instanceof ApiError && e.status === 401) {
         // token expired mid-session → bounce to login (preserve return path)
         if (typeof window !== "undefined") {
-          window.location.replace(appPath(`/login/?next=${encodeURIComponent("/knowledge/")}`));
+          window.location.replace(appPath(`/login/?next=${encodeURIComponent(kbId ? knowledgeBaseHref(kbId) : "/knowledge/")}`));
         }
         return;
       }
@@ -510,7 +558,7 @@ export function KbFilesManager({
     } finally {
       inFlightRef.current -= 1;
     }
-  }, [deep, query, scope, fStatus, fTypes, buildParams, t, fDays, sortKey, sortDir, page, activeSpaceId]);
+  }, [deep, query, scope, fStatus, fTypes, buildParams, t, fDays, sortKey, sortDir, page, activeSpaceId, listFiles, kbId, kbMode]);
 
   // main load on param change (loadSeqRef inside reload guards stale commits)
   useEffect(() => {
@@ -526,6 +574,8 @@ export function KbFilesManager({
   // scope counts (mount + active-space hydration/switch + after mutations via countsTick)
   const [countsTick, setCountsTick] = useState(0);
   useEffect(() => {
+    // Knowledge base mode has no scopes to count (the page header shows the knowledge base's file count).
+    if (kbMode) return;
     let cancelled = false;
     // On cold load, active space is not hydrated into space-storage, so `scope=space` lacks X-Space-Id;
     // Gateway correctly returns 400 (kb.py `_require_workspace_context` guard against cross-scope leaks).
@@ -557,7 +607,7 @@ export function KbFilesManager({
       if (!cancelled) setScopeCounts((prev) => ({ ...prev, ...Object.fromEntries(pairs) }));
     });
     return () => { cancelled = true; };
-  }, [countsTick, activeSpaceId]);
+  }, [countsTick, activeSpaceId, kbMode]);
 
   // auto-poll while any row is parsing (does NOT toggle the loading skeleton)
   useEffect(() => {
@@ -626,7 +676,7 @@ export function KbFilesManager({
   // Two paths after no deep-search hits: change scope (retain keyword / deep search) or turn off deep search and search filenames.
   const clearQuery = () => { if (debounceRef.current) clearTimeout(debounceRef.current); commitView({ query: "", page: 1 }); setQuery(""); setPage(1); setSearchTrigger((n) => n + 1); };
   const searchByName = () => { commitView({ deep: false, page: 1 }); setDeep(false); setPage(1); setSearchTrigger((n) => n + 1); };
-  const openUpload = (s: KbScope) => { if (scope !== "all") changeScope(s); setUploadScope(s); };
+  const openUpload = (s: KbScope) => { if (!kbMode && scope !== "all") changeScope(s); setUploadScope(s); };
   const closeDrawer = () => {
     setDrawerFile(null);
     setDrawerHit(null);
@@ -646,13 +696,21 @@ export function KbFilesManager({
     const params = writeKbFileView(window.location.search, viewState);
     params.set("file_id", f.file_id);
     if (hit) params.set("chunk_id", hit.chunk_id); else params.delete("chunk_id");
-    if (activeSpaceId) params.set("space", activeSpaceId);
+    // Knowledge base mode: the page's address names the knowledge base, not a scope or Space.
+    if (kbMode) params.delete("scope");
+    else if (activeSpaceId) params.set("space", activeSpaceId);
     ownNavigation.current = params.toString();
-    routerRef.current.push(`/knowledge/?${params}`, { scroll: false });
+    routerRef.current.push(`${viewPath}?${params}`, { scroll: false });
   };
 
   /** User-facing scope name: space uses its name (design 02·A), falling back to "空间" if unavailable. */
   const scopeName = (s: KbListScope) => (s === "all" ? t("scope_filter.all") : s === "space" && spaceName ? spaceName : t(`scope_${s}`));
+  // Where the list reads: the knowledge base's name in knowledge base mode, else the scope's name.
+  const listName = (s: KbListScope) => (kb ? namer(kb) : scopeName(s));
+  /** "Added by" cell (knowledge base mode); a neutral fallback when the name is unknown, never the ID. */
+  const addedByCell = (f: KbFileDTO) => f.uploaded_by_name || tf("added_by_unknown");
+  // Knowledge base mode: tell the page and other readers (directory, pickers) that counts changed.
+  const knowledgeBaseChanged = () => { if (kbMode) notifyKnowledgeBasesChanged(); };
   const scopeHintFor = (s: KbListScope) => s === "all"
     ? t("scope_filter.hint_all")
     : s === "personal"
@@ -707,6 +765,8 @@ export function KbFilesManager({
   // scope / filters restore the old scope in the list.
   const refreshAllRef = useRef(refreshAll);
   refreshAllRef.current = refreshAll;
+  const knowledgeBaseChangedRef = useRef(knowledgeBaseChanged);
+  knowledgeBaseChangedRef.current = knowledgeBaseChanged;
 
   // Single-file / ZIP completion selects actual upload scope; combine ZIP per-file callbacks.
   const uploadedRef = useRef<KbFileDTO[]>([]);
@@ -717,8 +777,9 @@ export function KbFilesManager({
       const batch = uploadedRef.current;
       uploadedRef.current = [];
       const targetScope = batch[0].scope;
-      // Scope "All" already lists the new files; stay there.
-      const nextScope: KbListScope = scopeRef.current === "all" ? "all" : targetScope;
+      // Scope "All" already lists the new files; stay there. Knowledge base mode keeps its fixed scope.
+      const nextScope: KbListScope = scopeRef.current === "all" || kbMode ? scopeRef.current : targetScope;
+      knowledgeBaseChanged();
       if (debounceRef.current) clearTimeout(debounceRef.current);
       // Old filters / page may hide newly uploaded files; list effect below refreshes using new conditions.
       setScope(nextScope); setQuery(""); setDeep(false);
@@ -753,8 +814,8 @@ export function KbFilesManager({
     // NOT a refetch (buildParams drops `q` in deep mode → would select the whole scope).
     if (deep) { setSelected(new Set(files.map((f) => f.file_id))); return; }
     try {
-      const res = await fetchKbFiles({ ...buildParams(), cursor: undefined, offset: 0, limit: Math.max(total, 1) });
-      selectedMetaRef.current = new Map(res.files.map((f) => [f.file_id, { filename: f.filename, scope: f.scope }]));
+      const res = await listFiles({ ...buildParams(), cursor: undefined, offset: 0, limit: Math.max(total, 1) });
+      selectedMetaRef.current = new Map(res.files.map((f) => [f.file_id, { filename: f.filename, scope: f.scope, scope_id: f.scope_id, uploaded_by: f.uploaded_by }]));
       setSelected(new Set(res.files.map((f) => f.file_id)));
     } catch { /* ignore */ }
   };
@@ -804,6 +865,7 @@ export function KbFilesManager({
         // This refresh restores files whose deletion failed to the list.
         settle();
         void refreshAllRef.current();
+        knowledgeBaseChangedRef.current();
       }
     };
     pushToast({
@@ -827,9 +889,12 @@ export function KbFilesManager({
       const f = files.find((x) => x.file_id === id) ?? selectedMetaRef.current.get(id);
       // off-page ids (after "select all N") aren't loaded — fall back to current scope.
       return f
-        ? { file_id: id, filename: f.filename, scope: f.scope }
+        ? { file_id: id, filename: f.filename, scope: f.scope, owner_id: f.scope === "personal" ? f.scope_id : f.uploaded_by }
         : { file_id: id, filename: id, scope: uploadDefault };
     });
+  // Knowledge base mode: the files a move names (off-page selections carry their names from "select all N").
+  const moveTargetsFor = (ids: string[]) =>
+    ids.map((id) => ({ file_id: id, filename: (files.find((x) => x.file_id === id) ?? selectedMetaRef.current.get(id))?.filename ?? id }));
 
   // ---- pagination ----
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -848,12 +913,47 @@ export function KbFilesManager({
     return out;
   })();
 
-  const scopeEmpty = (scopeCounts[scope] ?? 0) === 0 && !filtersActive;
+  const scopeEmpty = !kbMode && (scopeCounts[scope] ?? 0) === 0 && !filtersActive;
   const deepActive = deep && query.trim().length > 0;
   // Alternative scope after no deep-search hits: outside space → current space; already in space → personal.
-  const altScope: KbScope | null = scope === "all" ? null : scope !== "space" ? (activeSpaceId ? "space" : null) : "personal";
+  // Knowledge base mode offers no other scope (the directory's deep search covers every knowledge base).
+  const altScope: KbScope | null = kbMode || scope === "all" ? null : scope !== "space" ? (activeSpaceId ? "space" : null) : "personal";
 
   const emptyState = (() => {
+    if (kb && !filtersActive) {
+      // ⑩b: people who can add files get the entry points; others are told whom to ask.
+      const canAdd = kb.can.add_files;
+      const fromFilesHref = `/files/?add_to_kb=${encodeURIComponent(kb.id)}`;
+      return (
+        <div className="kb-empty" data-testid="kb-empty-knowledge-base">
+          <div className="big">{tf("empty_title")}</div>
+          <div className="sub">
+            {canAdd
+              ? tf(kb.home === "personal" ? "empty_editor_body_personal" : "empty_editor_body")
+              : tf("empty_viewer_body", knowledgeBaseContact(kb))}
+          </div>
+          {canAdd && (
+            <div className="kb-empty-acts">
+              <button type="button" className="kb-btn kb-btn-primary" data-testid="kb-empty-add-files" onClick={() => openUpload(homeScope(kb))}>
+                {tf("add_files")}
+              </button>
+              <a
+                className="kb-btn kb-btn-secondary"
+                data-testid="kb-empty-from-files"
+                href={appPath(fromFilesHref)}
+                onClick={(e) => {
+                  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  router.push(fromFilesHref);
+                }}
+              >
+                {tf("pick_from_files")}
+              </a>
+            </div>
+          )}
+        </div>
+      );
+    }
     if (scopeEmpty) {
       if (scope === "all") {
         return (
@@ -911,7 +1011,7 @@ export function KbFilesManager({
     if (deepActive) {
       return (
         <div className="kb-empty" data-testid="kb-empty-deep">
-          <div className="big">{t("files_view.deep_empty_title", { scope: scopeName(scope) })}</div>
+          <div className="big">{t("files_view.deep_empty_title", { scope: listName(scope) })}</div>
           <div className="sub">{t("files_view.deep_empty_sub")}</div>
           <div className="kb-empty-acts">
             {altScope && (
@@ -974,7 +1074,7 @@ export function KbFilesManager({
         sortDir={sortDir}
         narrow={narrow}
         deepSummary={deepActive && !loading && !error && files.length > 0
-          ? t("files_view.deep_count", { scope: scopeName(scope), n: files.length })
+          ? t("files_view.deep_count", { scope: listName(scope), n: files.length })
           : null}
         onQuery={onQuery}
         onClearQuery={clearQuery}
@@ -986,8 +1086,8 @@ export function KbFilesManager({
         onSetSort={setSort}
         onClear={clearFilters}
         onUpload={uploadRequest === undefined ? () => setUploadScope(uploadDefault) : undefined}
-        scopeFilter={<KbScopeFilter scope={scope} options={scopeOptions} onSelect={changeScope} />}
-        scopeSheet={{ scope, options: scopeOptions, onSelect: changeScope }}
+        scopeFilter={kbMode ? undefined : <KbScopeFilter scope={scope} options={scopeOptions} onSelect={changeScope} />}
+        scopeSheet={kbMode ? undefined : { scope, options: scopeOptions, onSelect: changeScope }}
         resultCount={loading || error ? null : total}
         onClearStatus={clearStatus}
         onClearType={clearType}
@@ -1019,9 +1119,22 @@ export function KbFilesManager({
           >
             <IconGridSmall /> {t("manager.bulk.open_as_matrix")}
           </button>
-          <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" onClick={() => setDocTypeIds([...selected])}><IconTag /> {t("manager.bulk.bind_doctype")}</button>
-          <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" onClick={() => setScopeModal({ targets: targetsFor([...selected]), bulk: true })}><IconFolder /> {t("manager.bulk.change_scope")}</button>
-          <button type="button" className="kb-btn kb-btn-danger kb-btn-sm" onClick={() => setDeleteIds([...selected])}><IconTrash /> {t("manager.bulk.delete")}</button>
+          {kb ? (
+            // Knowledge base mode: people who can only use it keep "Open as matrix"; the writes need edit (PRD §3).
+            kb.can.add_files ? (
+              <>
+                <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" onClick={() => setDocTypeIds([...selected])}><IconTag /> {t("manager.bulk.bind_doctype")}</button>
+                <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" data-testid="kb-bulk-move" onClick={() => setMoveFiles(moveTargetsFor([...selected]))}><IconFolder /> {tf("move")}</button>
+                <button type="button" className="kb-btn kb-btn-danger kb-btn-sm" onClick={() => setDeleteIds([...selected])}><IconTrash /> {t("manager.bulk.delete")}</button>
+              </>
+            ) : null
+          ) : (
+            <>
+              <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" onClick={() => setDocTypeIds([...selected])}><IconTag /> {t("manager.bulk.bind_doctype")}</button>
+              <button type="button" className="kb-btn kb-btn-secondary kb-btn-sm" onClick={() => setScopeModal({ targets: targetsFor([...selected]), bulk: true })}><IconFolder /> {t("manager.bulk.change_scope")}</button>
+              <button type="button" className="kb-btn kb-btn-danger kb-btn-sm" onClick={() => setDeleteIds([...selected])}><IconTrash /> {t("manager.bulk.delete")}</button>
+            </>
+          )}
           <span className="vsep" />
           <button type="button" className="kb-btn kb-btn-ghost kb-btn-sm" onClick={() => setSelected(new Set())}>{t("manager.bulk.clear")}</button>
         </div>
@@ -1063,7 +1176,7 @@ export function KbFilesManager({
                   <span className="nm">{f.filename}</span>
                   <span className="mt">
                     {hitText && <span className="loc" data-testid="kb-hit-loc">{hitText}</span>}
-                    {showScopeCol ? `${scopeCell(f)} · ` : null}{formatBytes(f.size_bytes)} · {fmtAgo(f.uploaded_at, t)}
+                    {showScopeCol ? `${scopeCell(f)} · ` : null}{kbMode ? `${addedByCell(f)} · ` : null}{formatBytes(f.size_bytes)} · {fmtAgo(f.uploaded_at, t)}
                   </span>
                 </span>
                 <span className="st">
@@ -1091,6 +1204,7 @@ export function KbFilesManager({
             {showScopeCol && <div className="kb-th" data-testid="kb-col-scope">{t("col_scope")}</div>}
             {!hideTypeCol && <div className="kb-th" data-testid="kb-col-type">{t("manager.col_type")}</div>}
             <SortableTh label={t("col_size")} k="sizeMB" sortKey={sortKey} sortDir={sortDir} onSort={headerSort} />
+            {kbMode && <div className="kb-th" data-testid="kb-col-added-by">{tf("col_added_by")}</div>}
             <SortableTh label={t("col_uploaded_at")} k="uploadedAt" sortKey={sortKey} sortDir={sortDir} onSort={headerSort} />
             <div className="kb-th kb-th-end">{t("col_status")}</div>
           </div>
@@ -1105,6 +1219,13 @@ export function KbFilesManager({
                 showType={!hideTypeCol}
                 scopeLabel={showScopeCol ? scopeCell(f) : undefined}
                 scopeTitle={showScopeCol ? drawerScopeLabel(f) : undefined}
+                addedBy={kbMode ? addedByCell(f) : undefined}
+                kbMenu={kbMode ? {
+                  moveLabel: tf("move"),
+                  moveReason: tf("move_reason"),
+                  deleteReason: tf("delete_reason"),
+                  onMove: () => { setMenuFor(null); setMoveFiles(moveTargetsFor([f.file_id])); },
+                } : undefined}
                 selected={selected.has(f.file_id)}
                 hit={deep ? hits[f.file_id] : undefined}
                 query={deep ? query.trim() : ""}
@@ -1187,9 +1308,25 @@ export function KbFilesManager({
           </div>
         </DialogShell>
       )}
+      {moveFiles && kb && (
+        <KbMoveDialog
+          files={moveFiles}
+          currentKnowledgeBaseId={kb.id}
+          onClose={() => setMoveFiles(null)}
+          onMoved={({ failedIds }) => {
+            // Chat source-card original-text cache is per file; refetch with the new knowledge base's access.
+            moveFiles.forEach((x) => evictKbChunks(x.file_id));
+            setMoveFiles(null);
+            setSelected(new Set(failedIds));
+            void refreshAll();
+            knowledgeBaseChanged();
+          }}
+        />
+      )}
       {uploadScope && (
         <KbUploadModal
           defaultScope={uploadScope}
+          defaultKnowledgeBaseId={kb?.id}
           onClose={() => setUploadScope(null)}
           onUploaded={(dto) => { setUploadScope(null); handleUploaded(dto); }}
         />
@@ -1206,8 +1343,13 @@ export function KbFilesManager({
           onRetry={drawerLive.can_delete && kbFailRetryable(kbFailReason(drawerLive)) ? () => void doReparse(drawerLive) : undefined}
           onUseInChat={canUseInChat(drawerLive) ? () => sendToChat(drawerLive) : undefined}
           // Scope-change / template-binding dialogs share drawer layer; close drawer before opening to avoid dialogs beneath it.
-          onChangeScope={drawerLive.can_change_scope && me
+          onChangeScope={!kbMode && drawerLive.can_change_scope && me
             ? () => { const f = drawerLive; closeDrawer(); setScopeModal({ targets: targetsFor([f.file_id]), bulk: false }); }
+            : undefined}
+          // Knowledge base mode: "Move to another knowledge base…" replaces the scope change (the drawer
+          // disables it with the reason while the file may not be moved).
+          onMove={kbMode
+            ? () => { const f = drawerLive; closeDrawer(); setMoveFiles([{ file_id: f.file_id, filename: f.filename }]); }
             : undefined}
           onBindTemplate={me ? () => { const f = drawerLive; closeDrawer(); setDocTypeIds([f.file_id]); } : undefined}
           onDeleted={() => {
@@ -1217,6 +1359,7 @@ export function KbFilesManager({
             setFiles((fs) => fs.filter((f) => f.file_id !== gone.file_id));
             toast("success", t("toast.deleted_one", { name: gone.filename }));
             void refreshAll();
+            knowledgeBaseChanged();
           }}
         />
       )}
@@ -1256,6 +1399,10 @@ function Row(props: {
   /** Scope column cell (scope "All"); absent = no column. */
   scopeLabel?: string;
   scopeTitle?: string;
+  /** "Added by" column cell (knowledge base mode); absent = no column. */
+  addedBy?: string;
+  /** Knowledge base mode row menu: "Move to another knowledge base…" and level-based reasons. */
+  kbMenu?: KbRowMenuKnowledgeBase;
   selected: boolean;
   hit?: KbSearchResultChunk;
   query: string;
@@ -1323,6 +1470,7 @@ function Row(props: {
       {props.scopeLabel !== undefined && <div className="kb-cell kb-scope-cell" title={props.scopeTitle}>{props.scopeLabel}</div>}
       {props.showType && <div className="kb-cell kb-num">{tm.label}</div>}
       <div className="kb-cell kb-num">{formatBytes(f.size_bytes)}</div>
+      {props.addedBy !== undefined && <div className="kb-cell kb-added-by-cell" title={props.addedBy} data-testid="kb-added-by">{props.addedBy}</div>}
       <div className="kb-cell kb-num kb-date-cell" title={formatShortDateTime(f.uploaded_at, locale)}>{fmtAgo(f.uploaded_at, t)}</div>
       <div className="kb-cell kb-status-cell">
         <span className="kb-status-slot" onClick={(e) => e.stopPropagation()}>{pill}</span>
@@ -1336,10 +1484,18 @@ function Row(props: {
           onChangeScope={props.onChangeScope}
           onReparse={props.onReparse}
           onDelete={props.onDelete}
+          kbMenu={props.kbMenu}
         />
       </div>
     </div>
   );
+}
+
+interface KbRowMenuKnowledgeBase {
+  moveLabel: string;
+  moveReason: string;
+  deleteReason: string;
+  onMove: () => void;
 }
 
 /**
@@ -1349,7 +1505,7 @@ function Row(props: {
  * useMenu handles keyboard, Esc, outside clicks and focus restoration.
  */
 function KbRowMenu({
-  t, f, open, onOpenChange, onOpen, onBindDocType, onChangeScope, onReparse, onDelete,
+  t, f, open, onOpenChange, onOpen, onBindDocType, onChangeScope, onReparse, onDelete, kbMenu,
 }: {
   t: Translator;
   f: KbFileDTO;
@@ -1360,6 +1516,8 @@ function KbRowMenu({
   onChangeScope: () => void;
   onReparse: () => void;
   onDelete: () => void;
+  /** Knowledge base mode: "Move to another knowledge base…" instead of "Change visibility". */
+  kbMenu?: KbRowMenuKnowledgeBase;
 }) {
   // Keep closeOnScroll off (see 6528df29f); close when the entire row scrolls outside list visibility, avoiding viewport-edge menu clamping.
   const menu = useMenu({ open, onOpenChange, placement: "bottom-end", offset: 4, closeWhenAnchorHidden: true });
@@ -1387,13 +1545,23 @@ function KbRowMenu({
         >
           <KbRowMenuItem onSelect={onOpen} icon={<IconFolder />} label={t("manager.row_menu.details")} />
           <KbRowMenuItem onSelect={onBindDocType} icon={<IconTag />} label={t("manager.row_menu.bind_doctype")} />
-          <KbRowMenuItem
-            onSelect={onChangeScope}
-            disabled={!f.can_change_scope}
-            reason={t(`manager.row_menu.change_scope_reason${kbScopeReasonSuffix(f.scope)}`)}
-            icon={<IconFolder />}
-            label={t("manager.row_menu.change_scope")}
-          />
+          {kbMenu ? (
+            <KbRowMenuItem
+              onSelect={kbMenu.onMove}
+              disabled={!f.can_change_scope}
+              reason={kbMenu.moveReason}
+              icon={<IconFolder />}
+              label={kbMenu.moveLabel}
+            />
+          ) : (
+            <KbRowMenuItem
+              onSelect={onChangeScope}
+              disabled={!f.can_change_scope}
+              reason={t(`manager.row_menu.change_scope_reason${kbScopeReasonSuffix(f.scope)}`)}
+              icon={<IconFolder />}
+              label={t("manager.row_menu.change_scope")}
+            />
+          )}
           {canReparse && (
             // Behavior batch A: reparse executes directly without deleting data; no red warning (only data-deleting items are dangerous).
             <KbRowMenuItem
@@ -1408,7 +1576,7 @@ function KbRowMenu({
           <KbRowMenuItem
             onSelect={onDelete}
             disabled={!f.can_delete}
-            reason={t(`manager.row_menu.delete_reason${kbScopeReasonSuffix(f.scope)}`)}
+            reason={kbMenu ? kbMenu.deleteReason : t(`manager.row_menu.delete_reason${kbScopeReasonSuffix(f.scope)}`)}
             danger={f.can_delete}
             icon={<IconTrash />}
             label={f.can_delete ? withConfirmEllipsis(t("manager.row_menu.delete")) : t("manager.row_menu.delete")}

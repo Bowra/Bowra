@@ -1,10 +1,10 @@
-# Outils tiers intégrés
+# Services intégrés
 
-Les propriétaires et administrateurs d’équipe peuvent connecter les services pris en charge dans **Paramètres de l’équipe → Sources d’outils**. Tavily, Datarc et Power BI sont disponibles. Leur icône apparaît dans le sélecteur et la liste des outils configurés pour les distinguer.
+Les propriétaires et administrateurs d’équipe peuvent connecter les services pris en charge dans **Centre de capacités → Outils → Gérer les sources d’outils → Services intégrés**. Tavily, Datarc et Power BI sont disponibles. Leur icône apparaît dans le sélecteur et la liste des outils configurés pour les distinguer.
 
 ## Tavily
 
-Choisissez **＋ Ajouter un outil tiers intégré**, sélectionnez Tavily, collez la clé API, puis **Vérifier et enregistrer**. Bowra vérifie la clé avant de la conserver chiffrée. Vous pouvez ensuite la modifier ou activer et désactiver l’outil.
+Choisissez **＋ Ajouter un service intégré**, sélectionnez Tavily, collez la clé API, puis **Vérifier et enregistrer**. Bowra vérifie la clé avant de la conserver chiffrée. Vous pouvez ensuite la modifier ou activer et désactiver l’outil.
 
 Les Agents d’équipe disposant de la recherche web peuvent utiliser Tavily lorsqu’il est activé. Sa désactivation empêche les nouvelles recherches de l’utiliser. La clé API n’est jamais affichée aux membres ni aux Agents.
 
@@ -32,7 +32,7 @@ Chaque recherche, lecture, exploration ou recherche approfondie consomme les cr�
 
 ## Datarc
 
-Choisissez **＋ Ajouter un outil tiers intégré → Datarc** et saisissez un nom de configuration, l’adresse du service et la clé de connexion. L’adresse doit être la racine du service, par exemple `https://openapi.datarc.cn`, sans chemin d’API particulier. Après vérification, la clé est conservée chiffrée et la liste affiche « Datarc - nom de configuration ».
+Choisissez **＋ Ajouter un service intégré → Datarc** et saisissez un nom de configuration, l’adresse du service et la clé de connexion. L’adresse doit être la racine du service, par exemple `https://openapi.datarc.cn`, sans chemin d’API particulier. Après vérification, la clé est conservée chiffrée et la liste affiche « Datarc - nom de configuration ».
 
 Une équipe peut avoir plusieurs connexions attribuées séparément aux Agents, par exemple « Datarc - Finance » et « Datarc - Sales ». Renommer une connexion conserve les affectations. Désactiver ou supprimer une connexion ne fait pas basculer automatiquement les Agents vers une autre.
 
@@ -44,7 +44,7 @@ Selon les autorisations, la connexion fournit **Lister les espaces de travail**,
 
 ## Power BI
 
-Choisissez **＋ Ajouter un outil tiers intégré → Power BI**, nommez la connexion et renseignez l’identifiant du locataire Microsoft Entra, l’identifiant client et son secret. Vous pouvez indiquer l’espace de travail et le modèle sémantique ou laisser ces champs vides pour une sélection automatique parmi les modèles accessibles. Bowra vérifie l’accès aux requêtes avant l’enregistrement. Le secret est conservé chiffré et n’est jamais réaffiché. Plusieurs connexions sont possibles, notamment pour séparer finance et ventes.
+Choisissez **＋ Ajouter un service intégré → Power BI**, nommez la connexion et renseignez l’identifiant du locataire Microsoft Entra, l’identifiant client et son secret. Vous pouvez indiquer l’espace de travail et le modèle sémantique ou laisser ces champs vides pour une sélection automatique parmi les modèles accessibles. Bowra vérifie l’accès aux requêtes avant l’enregistrement. Le secret est conservé chiffré et n’est jamais réaffiché. Plusieurs connexions sont possibles, notamment pour séparer finance et ventes.
 
 Un administrateur de l’organisation doit enregistrer l’application dans Microsoft Entra, créer le secret, autoriser le groupe de sécurité du principal de service à utiliser l’API Power BI, ajouter ce principal à l’espace de travail et accorder l’autorisation de création (Build) sur le modèle sémantique. Si la vérification échoue, contrôlez locataire, espace, modèle et autorisation Build.
 

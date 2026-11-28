@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -174,6 +175,8 @@ _SOURCE_TO_KIND: dict[str, str] = {
     "consultant_deck": "deliverable",
     # A person's in-place edit of a PowerPoint deliverable or upload (pptx-inline-edit design §6.4).
     "presentation_edit": "deliverable",
+    # A person's in-place edit of a Word deliverable or upload (docx inline edit design §7.2).
+    "document_edit": "deliverable",
     # ZIP bundle roots are user-owned inputs in Files, but Results filters the
     # grouping carrier itself and presents only session-bound input children.
     "kb_bundle_upload": "user_upload",
@@ -490,6 +493,11 @@ VERSION_TARGET_REASONS = frozenset(
 #: ``producer_kind`` of a version a person saved by editing a deck in place. It has no Turn;
 #: the gateway pins it to the session of the file it edited (pptx-inline-edit design §6.5).
 PRESENTATION_USER_EDIT_PRODUCER = "presentation_user_edit"
+#: The same for a Word document edited in place (docx inline edit design §7.2).
+DOCUMENT_USER_EDIT_PRODUCER = "document_user_edit"
+#: Every producer of a version a person saved in an in-browser editor: no Turn, pinned to its session.
+USER_EDIT_PRODUCERS = (PRESENTATION_USER_EDIT_PRODUCER, DOCUMENT_USER_EDIT_PRODUCER)
+_USER_EDIT_PRODUCERS_SQL = ", ".join(f"'{producer}'" for producer in USER_EDIT_PRODUCERS)
 
 
 def version_session_sql(alias: str, *, pins: bool) -> str:
@@ -504,7 +512,7 @@ def version_session_sql(alias: str, *, pins: bool) -> str:
         return turn
     return (
         f"COALESCE({turn}, "
-        f"CASE WHEN {alias}.created_by_turn IS NULL AND COALESCE({alias}.producer_kind, '') = '{PRESENTATION_USER_EDIT_PRODUCER}' "
+        f"CASE WHEN {alias}.created_by_turn IS NULL AND COALESCE({alias}.producer_kind, '') IN ({_USER_EDIT_PRODUCERS_SQL}) "
         f"THEN (SELECT vsa.session_id FROM session_attachments vsa WHERE vsa.artifact_id = {alias}.id ORDER BY vsa.pinned_at ASC LIMIT 1) END)"
     )
 
@@ -666,7 +674,7 @@ class ArtifactBackend(Protocol):
         self,
         *,
         aid: str,
-        content: bytes,
+        content: bytes | IO[bytes],
         filename: str,
         mime: str,
     ) -> str:
@@ -892,7 +900,7 @@ class LocalBackend:
         self,
         *,
         aid: str,
-        content: bytes,
+        content: bytes | IO[bytes],
         filename: str,
         mime: str,
     ) -> str:
@@ -902,7 +910,21 @@ class LocalBackend:
             path.parent.mkdir(parents=True, exist_ok=True)
         else:
             path = self.root_dir / f"{aid}_{filename}"
-        path.write_bytes(content)
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+
+            def copy_stream() -> None:
+                with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".tmp-", delete=False) as temporary:
+                    temporary_path = Path(temporary.name)
+                    try:
+                        shutil.copyfileobj(content, temporary, length=1024 * 1024)
+                        temporary.flush()
+                        temporary_path.replace(path)
+                    finally:
+                        temporary_path.unlink(missing_ok=True)
+
+            await anyio.to_thread.run_sync(copy_stream)
         return str(path.resolve())
 
     async def read(self, path: str) -> bytes:
@@ -1196,7 +1218,7 @@ class S3Backend:
         self,
         *,
         aid: str,
-        content: bytes,
+        content: bytes | IO[bytes],
         filename: str,
         mime: str,
     ) -> str:
@@ -2017,7 +2039,8 @@ class ArtifactStore:
     async def put_bytes(
         self,
         *,
-        content: bytes,
+        content: bytes | IO[bytes],
+        content_size: int | None = None,
         filename: str,
         mime: str,
         created_by: str | None,
@@ -2060,7 +2083,16 @@ class ArtifactStore:
         ``created_by`` is required (no default) so every writer decides who owns the
         artifact: the run's accountable user, or ``None`` only when there is none. An
         owner-less artifact stays readable in its Space but nobody may mutate it.
+
+        Stream callers supply the measured byte count and a seekable file positioned
+        at the start. The caller keeps it open until this method returns.
         """
+        if isinstance(content, bytes):
+            size = len(content)
+        elif content_size is not None and content_size >= 0:
+            size = content_size
+        else:
+            raise ValueError("A file stream requires its measured size")
         if bind_chat_upload and (source != "upload" or not created_by):
             raise ValueError("Chat uploads require an upload source and an accountable user")
         aid = f"art_{uuid4().hex[:12]}"
@@ -2081,7 +2113,7 @@ class ArtifactStore:
             target = await self.check_version_target(
                 version_of_target, user_id=created_by, session_id=session_id, workspace_id=workspace_id, mime=mime, kind=_kind
             )
-            if await self._same_run_identical_version(target, content=content, filename=filename, created_by_turn=created_by_turn):
+            if await self._same_run_identical_version(target, content=content, size=size, filename=filename, created_by_turn=created_by_turn):
                 # Regression check M3: a run that saves the same bytes again keeps its own version
                 # instead of adding a duplicate the user would see as another version.
                 logger.info("artifact_store.put_bytes: same-run save matches %s; no new version", target.id)
@@ -2118,7 +2150,7 @@ class ArtifactStore:
             id=aid,
             filename=filename,
             mime=mime,
-            size=len(content),
+            size=size,
             source=source,
             path=path,
             canvas_id=canvas_id,
@@ -2184,6 +2216,8 @@ class ArtifactStore:
                     mime=mime,
                     kind=_kind,
                 )
+                if not art.derived_from:
+                    art.derived_from = await _lineage_source(db, art.lineage_id, exclude=aid)
             columns = "id,filename,mime,size,source,path,canvas_id,created_by,created_at"
             values = (
                 art.id,
@@ -2346,20 +2380,39 @@ class ArtifactStore:
             raise VersionTargetRefused("version_target_not_found")
         return target
 
-    async def _same_run_identical_version(self, target: Artifact, *, content: bytes, filename: str, created_by_turn: str | None) -> bool:
+    async def _same_run_identical_version(
+        self, target: Artifact, *, content: bytes | IO[bytes], size: int, filename: str, created_by_turn: str | None
+    ) -> bool:
         """Whether ``target`` is a version this same Turn wrote with exactly these bytes and name.
 
         Only the run's own version qualifies: identical bytes from an earlier Turn still become
         a version, so the Turn's delivery facts stay true. Size and name are compared before
         any read; a failed read is treated as different.
         """
-        if not created_by_turn or target.created_by_turn != created_by_turn or target.size != len(content) or target.filename != filename:
+        if not created_by_turn or target.created_by_turn != created_by_turn or target.size != size or target.filename != filename:
             return False
         try:
-            return await self.open_read(target) == content
+            if isinstance(content, bytes):
+                return await self.open_read(target) == content
+            digest = await anyio.to_thread.run_sync(hashlib.file_digest, content, "sha256")
+            return await self.hash_artifact(target) == digest.hexdigest()
         except Exception:
             logger.warning("artifact_store.same_run_version_read_failed art=%s", target.id, exc_info=True)
             return False
+        finally:
+            if not isinstance(content, bytes):
+                await anyio.to_thread.run_sync(content.seek, 0)
+
+    async def hash_artifact(self, artifact: Artifact) -> str:
+        """Verify the recorded length and hash the original bytes in bounded chunks."""
+        digest = hashlib.sha256()
+        size = 0
+        async for chunk in self.backend.iter_range(artifact.path, start=0, end=artifact.size + 1, chunk_size=1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+        if size != artifact.size:
+            raise ArtifactReadLimitError("artifact_size_mismatch")
+        return digest.hexdigest()
 
     async def session_pins_supported(self) -> bool:
         """Whether session pins are reachable from the file-records connection (see ``_session_pins_visible``)."""
@@ -2706,7 +2759,7 @@ class ArtifactStore:
             members = (
                 "a.id IN (SELECT ta.id FROM artifacts ta JOIN turns t ON t.id = ta.created_by_turn WHERE t.session_id = ? "
                 "UNION ALL SELECT sa.artifact_id FROM session_attachments sa JOIN artifacts ua ON ua.id = sa.artifact_id "
-                f"WHERE sa.session_id = ? AND ua.created_by_turn IS NULL AND ua.producer_kind = '{PRESENTATION_USER_EDIT_PRODUCER}')"
+                f"WHERE sa.session_id = ? AND ua.created_by_turn IS NULL AND ua.producer_kind IN ({_USER_EDIT_PRODUCERS_SQL}))"
             )
             member_params: tuple[object, ...] = (session_id, session_id)
         else:
@@ -2940,7 +2993,7 @@ class ArtifactStore:
         *,
         created_by: str | None,
         aid: str,
-        content: bytes,
+        content: bytes | IO[bytes],
         filename: str,
         mime: str,
         reserved: bool = False,
@@ -3744,6 +3797,7 @@ class ArtifactStore:
         direction: Literal["next", "previous"] = "next",
         limit: int = 50,
         lineage_key: str | None = None,
+        turn_id: str | None = None,
     ) -> ResultsArtifactQueryPage:
         """Return exact counts plus a mixed-direction keyset artifact page.
 
@@ -3751,6 +3805,8 @@ class ArtifactStore:
         the entry shows the latest matching version, keyed ``artifact:<first version id>``
         and ordered by the file's earliest matching version, so a new version never moves it.
         ``lineage_key`` returns only that file's entry (with its true position).
+        ``turn_id`` keeps only versions that Turn saved (chat running state R2.3), so a file shows its newest
+        version from that Turn.
 
         Membership, deletion, internal visibility and snapshot high-water are
         applied before count/search/windowing.  This method intentionally has
@@ -3830,6 +3886,8 @@ class ArtifactStore:
                 "filter_primary_rank = 1 AND filter_secondary_rank = 2",
             )
         order_asc = "search_rank,primary_rank,main_rank,direct_rank,secondary_rank,sort_created_at DESC,stable_key"
+        turn_sql = " AND a.created_by_turn = ?" if turn_id else ""
+        turn_params: list[object] = [turn_id] if turn_id else []
         base_sql = (
             scope_sql
             + f"""
@@ -3852,6 +3910,7 @@ class ArtifactStore:
               {owner_sql}
               AND NOT {internal_sql}
               {high_water_sql}
+              {turn_sql}
         ), projected AS MATERIALIZED (
             SELECT authorized.*, {projection_sql}
             FROM authorized
@@ -3881,6 +3940,7 @@ class ArtifactStore:
             *owner_params,
             *internal_params,
             *high_water_params,
+            *turn_params,
             normalized_query,
             normalized_query,
             normalized_query,
@@ -4075,6 +4135,7 @@ class ArtifactStore:
         direct_report_artifact_ids: Sequence[str] = (),
         relation_search_artifact_ids: Sequence[str] = (),
         report_direct_only: bool = False,
+        turn_id: str | None = None,
     ) -> int:
         """Count matching files with a live version strictly newer than a snapshot (a new version counts once)."""
 
@@ -4160,6 +4221,7 @@ class ArtifactStore:
               {owner_sql}
               AND NOT {internal_sql}
               {newer_sql}
+              {" AND a.created_by_turn = ?" if turn_id else ""}
         )
         SELECT COUNT(DISTINCT lineage_root) FROM projected WHERE {" AND ".join(filters)}
         """
@@ -4172,6 +4234,7 @@ class ArtifactStore:
             *owner_params,
             *internal_params,
             *newer_params,
+            *([turn_id] if turn_id else []),
         ]
         async with _open_db(self.db_path) as db:
             await self._register_results_sql_functions(db)
@@ -4610,8 +4673,33 @@ class ArtifactStore:
         logger.info("artifact_store.versions_pruned count=%d", cur.rowcount or 0)
         return cur.rowcount or 0
 
-    async def _prune_candidates(self, db: aiosqlite.Connection, lineage_roots: Sequence[str] | None) -> list[str]:
+    async def versions_pruned_by_next_version(self, artifact_id: str) -> list[tuple[str, int]]:
+        """Older versions (ID, number) that pruning removes once one more version of this file is saved.
+
+        A dry run of the same rules with a version added on top, before the cross-database KB
+        check: the deck editor says which version will go before the person saves (pptx inline
+        edit design §13.7). A running or paused Turn only delays pruning, so it is not applied.
+        """
+        if not await self.versions_supported():
+            return []
+        async with _open_db(self.db_path) as db:
+            async with db.execute("SELECT COALESCE(lineage_id, id) FROM artifacts WHERE id = ?", (artifact_id,)) as cur:
+                row = await cur.fetchone()
+            if row is None:
+                return []
+            ids = await self._prune_candidates(db, [str(row[0])], next_version=True)
+            if not ids:
+                return []
+            ph = ",".join("?" for _ in ids)
+            async with db.execute(f"SELECT id, COALESCE(version_no, 1) FROM artifacts WHERE id IN ({ph})", tuple(ids)) as cur:  # noqa: S608 — placeholders only
+                found = [(str(item[0]), int(item[1])) for item in await cur.fetchall()]
+        return sorted(found, key=lambda item: item[1])
+
+    async def _prune_candidates(self, db: aiosqlite.Connection, lineage_roots: Sequence[str] | None, *, next_version: bool = False) -> list[str]:
         """Same-run drafts and versions beyond the newest three, minus every version in use.
+
+        ``next_version`` adds a version on top of each file (saved outside a Turn) and ignores the
+        running-Turn deferral, for ``versions_pruned_by_next_version``.
 
         - The latest live version is never a candidate.
         - A draft is a version that a later version from the same Turn superseded. It never
@@ -4660,6 +4748,9 @@ class ArtifactStore:
                 started_in.update((str(row[0]), row[1]) for row in await roots_cursor.fetchall())
         candidates: list[str] = []
         for root, versions in files.items():
+            if next_version:
+                # The version about to be saved: the newest, from no Turn, never a candidate.
+                versions.append(("", max(number for _, number, _ in versions) + 1, None))
             versions.sort(key=lambda version: version[1], reverse=True)
             # A purged first row falls back to the oldest live version.
             first_turn = started_in.get(root, versions[-1][2])
@@ -4688,7 +4779,7 @@ class ArtifactStore:
         grant_sql = (
             "EXISTS (SELECT 1 FROM resource_grants g WHERE g.resource_kind = 'artifact' AND g.resource_id = artifacts.id AND g.revoked_at IS NULL)"
         )
-        active_sql, active_params = await self._session_turn_active_sql(db, "artifacts")
+        active_sql, active_params = ("0", ()) if next_version else await self._session_turn_active_sql(db, "artifacts")
         unprotected: list[str] = []
         for start in range(0, len(candidates), 500):
             chunk = candidates[start : start + 500]
@@ -4960,6 +5051,7 @@ class ArtifactStore:
             "rows_removed": result.rows_removed,
             "files_removed": result.files_removed,
             "files_failed": result.files_failed,
+            "bytes_reclaimed": result.bytes_reclaimed,
             "pins_skipped": pins_skipped,
         }
 
@@ -5202,6 +5294,26 @@ def _same_file(alias: str, key: str) -> str:
     as `+alias.created_by` so that, without table statistics, the owner index does not win.
     """
     return f"({alias}.lineage_id = {key} OR ({alias}.lineage_id IS NULL AND {alias}.id = {key}))"
+
+
+async def _lineage_source(db: aiosqlite.Connection, root: str | None, *, exclude: str) -> str | None:
+    """The live file this lineage was made from (the earliest ``derived_from`` among its versions).
+
+    A new version carries it, so the link outlives pruning: only three versions are kept, and the
+    first one, which recorded the source, is pruned with the fourth save. An upload then stopped
+    offering its edited copy in the deck editor (pptx dogfood, an observed deployment).
+    """
+    if not root:
+        return None
+    async with db.execute(
+        "SELECT a.derived_from FROM artifacts a WHERE (a.id=? OR a.lineage_id=?) AND a.derived_from IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM artifacts s WHERE s.id = a.derived_from AND s.deleted_at IS NULL) "
+        "ORDER BY COALESCE(a.version_no, 1) LIMIT 1",
+        (root, root),
+    ) as cur:
+        row = await cur.fetchone()
+    source = str(row[0]) if row and row[0] else None
+    return source if source != exclude else None
 
 
 async def _latest_live_version(db: aiosqlite.Connection, root: str) -> str | None:

@@ -19,7 +19,7 @@ from bowhead_router.retry import retry_observer_scope
 from bowhead_router.types import LLMChunk, LLMRequest, Message, TokenUsage
 from bowhead_router.usage import LLMUsageRecord, usage_context
 
-from bowhead_router import AgentBinding, Router
+from bowhead_router import AgentBinding, InvocationOutcomeUnknownError, Router
 
 _OPENAI = "https://api.openai.com/v1"
 _ANTHROPIC = "https://api.anthropic.example.com"
@@ -363,3 +363,40 @@ async def test_only_a_transport_interrupted_attempt_is_not_charged(transport: bo
     assert _text(chunks) == ["Partial", "<restart>", "Done"]
     # A provider-reported failure keeps today's accounting of the usage it reported.
     assert [(record.tokens_input, record.tokens_output) for record in usage] == ([] if transport else [(11, 0)]) + [(11, 2)]
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_service_unavailable_exhausts_primary_before_using_fallback() -> None:
+    primary = respx.post(_URLS["openai"]).respond(503)
+    fallback = respx.post(_URLS["anthropic"]).mock(return_value=_completed("anthropic", "Done"))
+    router, registry = _router(("primary", "openai"), ("fallback", "anthropic"))
+    gate, observer, usage = _Gate(), _Observer(), []
+    try:
+        chunks = await _collect(router, allow_restart=True, gate=gate, observer=observer, usage=usage)
+    finally:
+        await registry.close_all()
+    assert _text(chunks) == ["Done"]
+    assert (primary.call_count, fallback.call_count) == (2, 1)
+    assert observer.outcomes()[:2] == [["not_applied:provider_http_service_unavailable/v1"]] * 2
+    assert len(usage) == 1 and usage[0].provider == "fallback"
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_status_in_stream_error_is_not_an_http_rejection() -> None:
+    primary = respx.post(_URLS["openai"]).respond(
+        200,
+        headers={"content-type": "text/event-stream"},
+        text='data: {"error":{"status":503,"message":"Unavailable"}}\n\n',
+    )
+    fallback = respx.post(_URLS["anthropic"]).mock(return_value=_completed("anthropic", "Done"))
+    router, registry = _router(("primary", "openai"), ("fallback", "anthropic"))
+    gate, observer, usage = _Gate(), _Observer(), []
+    try:
+        with pytest.raises(InvocationOutcomeUnknownError):
+            await _collect(router, allow_restart=True, gate=gate, observer=observer, usage=usage)
+    finally:
+        await registry.close_all()
+    assert (primary.call_count, fallback.call_count) == (1, 0)
+    assert observer.outcomes() == [["unknown:provider_response_unclassified"]]

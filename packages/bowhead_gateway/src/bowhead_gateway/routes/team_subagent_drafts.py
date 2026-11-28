@@ -845,8 +845,10 @@ async def _review_update(
         dependency = await draft_dependency_preflight(request, user, draft, definition, catalog.fingerprint)
         effective_tools = dependency["effective_tool_refs"]
         catalog_fingerprint = dependency["fingerprint"]
+        # Tools a selected Plugin brings are not new picks: one the team turned off stays (the Turn drops it).
+        plugin_brought = tuple(set(effective_tools) - set(body.selected_tool_refs))
         try:
-            validate_catalog_tool_refs(tuple(effective_tools), catalog=catalog, require_selectable=True)
+            validate_catalog_tool_refs(tuple(effective_tools), catalog=catalog, require_selectable=True, existing_tool_refs=plugin_brought)
             dependency_status = "passed"
         except TeamSubagentValidationError:
             dependency_status = "blocked"
@@ -867,6 +869,7 @@ async def _review_update(
             reserved_names=reserved_team_subagent_names(),
             operation="create",
             allow_empty_tools=text_only or has_resource_selection(body.definition),
+            existing_tool_refs=plugin_brought,
         )
         existing = await request.app.state.user_store.get_team_subagent_by_name(
             user.team_id,
@@ -1503,11 +1506,13 @@ async def create_from_draft(
             "subagent_catalog_changed",
             current_catalog_fingerprint=dependency["fingerprint"],
         )
+    plugin_brought = tuple(set(dependency["effective_tool_refs"]) - set(tool_refs))
     try:
         validate_catalog_tool_refs(
             dependency["effective_tool_refs"],
             catalog=catalog,
             require_selectable=True,
+            existing_tool_refs=plugin_brought,
         )
         validate_candidate(
             TeamSubagentDefinitionCandidate(
@@ -1532,6 +1537,7 @@ async def create_from_draft(
                 resolve_subagent_authoring_capabilities(user.team_id).text_only
                 and any(warning.get("code") == TEXT_ONLY_CONFIRMATION for warning in draft.warnings)
             ),
+            existing_tool_refs=plugin_brought,
         )
     except TeamSubagentValidationError as exc:
         raise _error(422, exc.code, field=exc.field) from exc

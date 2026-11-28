@@ -589,16 +589,62 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
             "enum": ["complete", "partial"],
             "description": "Use partial whenever a required result is missing or unverified, even if every Tool succeeded. Explaining the gap does not fulfill it. Disclose what is missing and any needed material in the answer. Optional caveats alone do not make delivery partial. Use delivery_review to record unfulfilled requirements; never invent failed calls.",
         }
+    review_properties: dict[str, Any] = {
+        "requirements": {"type": "array", "description": _DELIVERY_SCOPE_GUIDANCE, "items": item},
+        "issues": {"type": "array", "items": issue},
+    }
+    review_required = ["requirements", "issues"]
+    if schema.name == LeadDeliveryReview.name:
+        # Chat running state slice 2 (R2.4): only Lead decides what the reader sees first.
+        review_properties[OPEN_FOR_READER_FIELD] = {"type": "string", "description": _OPEN_FOR_READER_DESCRIPTION}
+        review_required.append(OPEN_FOR_READER_FIELD)
     properties["delivery_review"] = {
         "type": "object",
         "description": "After a failed call or when required work remains unfulfilled, review the current task and confirmed scope against delivered results. Account for every failed call. Successful delivery needs successful call IDs; explicit negative tests need known failure call IDs with expected_outcome failure. Without a failed call, record the missing requirement as unfulfilled with issues empty. Do not replay confirmed writes.",
-        "properties": {
-            "requirements": {"type": "array", "description": _DELIVERY_SCOPE_GUIDANCE, "items": item},
-            "issues": {"type": "array", "items": issue},
-        },
-        "required": ["requirements", "issues"],
+        "properties": review_properties,
+        "required": review_required,
     }
     return replace(schema, input_schema=definition)
+
+
+#: The Lead's choice of the one delivered file the interface opens for the reader (chat running state slice 2).
+OPEN_FOR_READER_FIELD = "open_for_reader"
+#: The wording replayed in the results-open spike (docs/sprints/chat-running-state-2026-11-24/results-open-spike.md,
+#: variant E): flash named the right file in 26 of 40 replays and never a wrong one.
+_OPEN_FOR_READER_DESCRIPTION = (
+    "Artifact ID of the one file the reader should see first: it opens in the Results panel beside the chat when "
+    "the Turn ends. Use an empty string when no file should open. This choice does not change which files appear "
+    "as file cards under the answer or stay in Results."
+)
+#: Told to Lead when a supplied value cannot be used; it names the field and the effect, never the value.
+OPEN_FOR_READER_DROPPED_FACT = "open_for_reader was not a delivered file of this Turn; nothing will open."
+
+
+async def normalized_open_for_reader(value: Any, ctx: Any) -> tuple[str, bool]:
+    """The delivered file to open, and whether a supplied value was dropped.
+
+    Missing, null or empty opens nothing and drops nothing. An older version of a delivered file becomes that
+    lineage's newest version in this Turn. Anything that is not a delivered file of this Turn (a work file, a draft
+    nobody delivered, an unknown ID) is dropped. The review is never refused for this field.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "", False
+    wanted = value.strip()
+    store = getattr(ctx, "artifact_store", None)
+    turn_id = getattr(ctx, "turn_id", None)
+    if store is None or not turn_id:
+        return "", True
+    try:
+        delivered = [art for art in await store.list_deliverables_for_turn(turn_id) if getattr(art, "kind", "") == "deliverable"]
+    except Exception:  # noqa: BLE001 — an optional choice never blocks the review.
+        return "", True
+    chosen = next((art for art in delivered if art.id == wanted), None)
+    if chosen is None:
+        return "", True
+    root = getattr(chosen, "lineage_id", None) or chosen.id
+    lineage = [art for art in delivered if (getattr(art, "lineage_id", None) or art.id) == root]
+    newest = max(lineage, key=lambda art: getattr(art, "version_no", None) or 1)
+    return newest.id, False
 
 
 async def _require_evidence_scope(ctx: Any) -> None:
@@ -753,6 +799,7 @@ class LeadDeliveryReview:
             if not isinstance(payload, dict) or set(payload) != {"delivery_review"} or not isinstance(payload["delivery_review"], dict):
                 return refuse(f"Call {self.name} with only payload.delivery_review as a JSON object.")
             payload = copy.deepcopy(payload)
+            opened, opened_dropped = await normalized_open_for_reader(payload["delivery_review"].pop(OPEN_FOR_READER_FIELD, None), ctx)
             failure = review_terminal_payload(
                 payload,
                 invocations,
@@ -766,10 +813,12 @@ class LeadDeliveryReview:
                     self.guidance_given = True
                 return failure
             self.payload = payload
+            self.payload[OPEN_FOR_READER_FIELD] = opened
             self.call_ids = self._business_ids(invocations)
             return {
                 "ok": True,
                 "reviewed_completion": payload.get("completion", "complete"),
+                **({OPEN_FOR_READER_FIELD: OPEN_FOR_READER_DROPPED_FACT} if opened_dropped else {}),
                 "instruction": self._reply_instruction(
                     "Answer the user in ordinary prose. "
                     + _DELIVERY_REPLY_GUIDANCE

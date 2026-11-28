@@ -2,7 +2,7 @@
 
 Use a published Agent that is shared with you from the Agent directory. Hiring adds it to your personal working set; it does not make you the Agent author or grant extra data access.
 
-In the sidebar, choose **Agents → Marketplace** to find Agents. Choose **Agents → My Agents** to manage them. Its main tabs are **Hired by me**, **Created by me**, **Shared with me**, **Archived**, and **Team governance** when authorized. Each tab has its own address that you can bookmark or reopen; browser Back and Forward return between views. Clicking **Agents** opens **Hired by me**.
+In the sidebar, choose **Agents → Marketplace** to find Agents. Choose **Agents → My Agents** to manage them. Its main tabs are **Hired by me**, **Created by me**, **Shared with me**, **Archived**, and **Team approvals** when authorized. Each tab has its own address that you can bookmark or reopen; browser Back and Forward return between views. Clicking **Agents** opens **Hired by me**.
 
 ## Hire an Agent
 

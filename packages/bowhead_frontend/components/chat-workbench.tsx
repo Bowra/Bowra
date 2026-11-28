@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 
 import { useStickToBottom } from "@/lib/use-stick-to-bottom";
-import { useResultsNewIndicator } from "@/lib/results-new-indicator";
+import { reportStateKey, useResultsNewIndicator } from "@/lib/results-new-indicator";
 import {
   backslashKeyOnLayout,
   hasOpenOverlay,
@@ -45,6 +45,7 @@ import { ReportView, type ReportViewHandle } from "./canvas/report-view";
 import { SteerMessage, formatSteerTime } from "./chat/step-list/SteerMessage";
 import { TurnStream } from "./chat/turn-stream";
 import { V2Composer } from "./chat/v2-composer";
+import { AgentTrialBand } from "./chat/agent-trial-chat";
 import { ComposerRecoveryNotice } from "./chat/composer-recovery-notice";
 import { ToolConfirmationNoticeSlot } from "./chat/tool-confirmation/ToolConfirmationNotice";
 import { PinnedAttachmentsStrip } from "./pinned-attachments";
@@ -94,12 +95,15 @@ import clsx from "clsx";
 import {
   CANVAS_FOCUS_DATA_EVENT,
   CANVAS_OPEN_RESULT_EVENT,
+  RESULTS_TURN_FILES_EVENT,
+  type ResultsTurnFilesDetail,
   requestCanvasDataFocus,
   type CanvasFocusDataDetail,
   type CanvasOpenResultDetail,
 } from "@/lib/canvas-workspace-focus";
 import { dismissToast, toast } from "@/lib/use-toast";
-import { MAX_REFERENCED_SLIDES, type SlideToggleOutcome } from "@/lib/presentation-selection";
+import { canonicalizeDocumentSelection, type DocumentSelection } from "@/lib/document-selection";
+import { canonicalizePresentationSelection, MAX_REFERENCED_SLIDES, type PresentationSelection, type SlideToggleOutcome } from "@/lib/presentation-selection";
 import { useCopyDiagnosticsToastAction } from "@/components/error-notice";
 import { reportHeaderActionFailedKey } from "@/lib/report-header-errors";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -151,7 +155,9 @@ import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors"
 import { trackResultsWorkspace } from "@/lib/results-workspace-metrics";
 import { track } from "@/lib/metrics";
 import type { ExportFmt } from "@/lib/use-canvas-export";
-import { terminalAutoOpenArtifact } from "@/lib/results-terminal-reconciliation";
+import { openForReader, readResultsOpen, writeResultsOpen } from "@/lib/results-open-state";
+import type { ResultsFiltersDTO } from "@/lib/results-api";
+import { ResultsTurnBubble } from "@/components/results-turn-bubble";
 import {
   projectResultsWorkspace,
   projectResultsDTO,
@@ -475,6 +481,11 @@ interface Props {
   /** Tab title for the open session (its display title); the canvas title when absent. */
   documentTitle?: string | null;
   creationPanelOpen?: boolean;
+  /**
+   * Each increase shows the open editor again: beside the chat on a wide screen, full screen on a narrow one
+   * (the Owner draft trial's 编辑草稿 after the chat was brought back).
+   */
+  creationPanelRevealRequest?: number;
   creationPanelTitle?: string;
   /** Number of open Canvas objects; the mobile pane switch reads “Results · N” (C1 narrow navigation). */
   creationPanelCount?: number;
@@ -561,7 +572,7 @@ interface Props {
 
 // Batch3/c3 (discovery C15): rename FE shell Workspace→ChatWorkbench to avoid a name collision;
 // this chat/canvas split shell is unrelated to tenant Space, the fourth of five meanings of the overloaded term.
-export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, onCancel, stopRequested = false, onSteer, onReplay, replayRestoresDraft = false, lastReferenceDocument = null, readOnly, reportOnly = false, startMaximized = false, onSolidify, onSolidifySession, prefillAttachments = null, prefillText = null, onPrefillConsumed, composerSubmitRequest, prefillInputDocument = null, onPrefillInputDocumentConsumed, submissionRecoveryPending = false, submissionRecoveryVariant = "submission", submissionRecoveryAllowAbandon = true, submissionRecoveryLocked = false, draftControlRef, composerRevealRequest = null, onComposerRevealConsumed, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", onRetryRecoveredSubmission, onAbandonRecoveredSubmission, configDrawer, configDrawerOpen = false, creationPanel, creationPanelOpen = false, creationPanelTitle, creationPanelCount, onShowCreationPanel, homePane, canvasObjectOpener, canvasObjectTabs, canvasObjectList, resultsRevealRequest = 0, onCanvasInteraction, documentResultsRefresh = null, documentTitle = null }: Props) {
+export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, onCancel, stopRequested = false, onSteer, onReplay, replayRestoresDraft = false, lastReferenceDocument = null, readOnly, reportOnly = false, startMaximized = false, onSolidify, onSolidifySession, prefillAttachments = null, prefillText = null, onPrefillConsumed, composerSubmitRequest, prefillInputDocument = null, onPrefillInputDocumentConsumed, submissionRecoveryPending = false, submissionRecoveryVariant = "submission", submissionRecoveryAllowAbandon = true, submissionRecoveryLocked = false, draftControlRef, composerRevealRequest = null, onComposerRevealConsumed, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", onRetryRecoveredSubmission, onAbandonRecoveredSubmission, configDrawer, configDrawerOpen = false, creationPanel, creationPanelOpen = false, creationPanelRevealRequest = 0, creationPanelTitle, creationPanelCount, onShowCreationPanel, homePane, canvasObjectOpener, canvasObjectTabs, canvasObjectList, resultsRevealRequest = 0, onCanvasInteraction, documentResultsRefresh = null, documentTitle = null }: Props) {
   const t = useTranslations("canvas");
   const copyDiagnosticsAction = useCopyDiagnosticsToastAction();
   const tCreateAgent = useTranslations("create_subagent");
@@ -739,7 +750,6 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const previousResultsNavigatorPinnedRef = useRef(false);
   const previousResultsSessionRef = useRef(reportSessionId);
   const previousRunnerRunningRef = useRef(false);
-  const turnBaselineKeysRef = useRef<Set<string>>(new Set());
   const baselineTurnIdRef = useRef<string | null>(null);
   const terminalPaneClosedAtStartRef = useRef(false);
   const resultsClosedDuringTurnRef = useRef(false);
@@ -748,11 +758,20 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const activeResultsSessionRef = useRef(resultsArtifactSessionId);
   const refreshedExportJobRef = useRef<string | null>(null);
   activeResultsSessionRef.current = resultsArtifactSessionId;
+  // Chat running state R2.4/R2.7: the conversation whose open/closed choice Results restores and records.
+  const resultsOpenSessionRef = useRef(runner.sessionId);
+  resultsOpenSessionRef.current = runner.sessionId;
+  // R2.6: the final payload of a Turn whose new results wait behind the closed strip; the reminder reads it once.
+  const [resultsBubblePayload, setResultsBubblePayload] = useState<unknown>(null);
+  const dismissResultsBubble = useCallback(() => setResultsBubblePayload(null), []);
+  useEffect(() => setResultsBubblePayload(null), [runner.sessionId]);
   // ⑧ (bug 0708): the Report/Data/Code tab body is a ternary that UNMOUNTS
   // ReportView on tab switch, and .v2-ws-right-body's scrollTop collapses to 0
   // under the shorter Data content — so "打开数据" → back-to-Report loses the
   // reader's scroll position. Save scrollTop while on Report, restore on return.
   const reportBodyRef = useRef<HTMLDivElement | null>(null);
+  // Chat running state R2.2: the report section a chat report card asked to open at, until the report shows it.
+  const [reportSectionTarget, setReportSectionTarget] = useState<{ sectionId: string; request: number } | null>(null);
   const reportScrollTopRef = useRef(0);
   // WP1 export loop: shared hook (start/poll/timeout/retry) + export-record drawer
   const exportCtl = useCanvasExport();
@@ -836,7 +855,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // Feishu 07.06 #26: shared read-only reports have no conversation → initially maximize the report (canvas),
   // otherwise an empty conversation strip remains at left and the report is not full-width.
   const [panelMode, setPanelMode] = useState<"split" | "chat" | "canvas">(
-    reportOnly || startMaximized ? "canvas" : "split",
+    // R2.7: a conversation opens with Results as the reader last left it there; closed without a record.
+    () => (reportOnly || startMaximized ? "canvas" : readResultsOpen(runner.sessionId) === "open" ? "split" : "chat"),
   );
   const canvasMaximized = panelMode === "canvas";
   // Batch 1-b (tech-design-batch1b §4.3 decision): collapsed canvas (panelMode="chat") has a canvas column with
@@ -853,6 +873,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       );
     }
   }, [creationPanelOpen]);
+  useEffect(() => {
+    if (!creationPanelRevealRequest) return;
+    setPanelMode((mode) => (window.matchMedia(DESKTOP_SPLIT_QUERY).matches ? (mode === "chat" ? "split" : mode) : "canvas"));
+  }, [creationPanelRevealRequest]);
   useEffect(() => {
     const captureClickSource = (event: MouseEvent) => {
       const source = event.target instanceof Element
@@ -977,6 +1001,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     setResultsOpenedByUser(next.opened);
     setTab(next.tab);
     if (next.revealPane) {
+      writeResultsOpen(resultsOpenSessionRef.current, "open");
       // Explicit object navigation is user intent. Without a report surface,
       // open Results directly rather than leaving an empty split column.
       setPanelMode((mode) => (
@@ -1219,9 +1244,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         ?? workspace?.querySelector<HTMLButtonElement>(".v2-ws-mobile-tab:last-child");
     target?.focus({ preventScroll: true });
   }, [Boolean(creationPanel), Boolean(canvasObjectOpener)]);
-  // P3: when the canvas underneath changes (session switch, or a turn that opens a NEW report),
-  // snap back to split so a freshly hydrated/generated report is never left hidden behind a
-  // collapsed edge (review P1). canvas.canvasId is stable across appends to the same report.
+  // When the canvas underneath changes (session switch, or a turn that opens a new report), restore the reader's
+  // last choice for this conversation. Chat running state R2.5/R2.7: a report never opens Results by itself; with no
+  // record Results stays closed and its strip counts what is new. canvas.canvasId is stable across appends.
   useEffect(() => {
     // An admitted editor owns opening its pane; report hydration must not hide it on compact screens.
     const closingEditor = hadCreationPanel.current && !creationPanel;
@@ -1232,8 +1257,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     // remains false → retain the 46px left `对话` reopen strip + maximize/close buttons, allowing return to conversation anytime.
     const explicitResult = parseResultsRoute(new URL(window.location.href).searchParams).explicit;
     const compactResult = explicitResult && !window.matchMedia?.(DESKTOP_SPLIT_QUERY).matches;
-    setPanelMode(reportOnly || startMaximized || compactResult ? "canvas" : "split");
-  }, [canvas.canvasId, reportOnly, startMaximized, Boolean(creationPanel)]);
+    if (reportOnly || startMaximized || compactResult) {
+      setPanelMode("canvas");
+      return;
+    }
+    setPanelMode(explicitResult || readResultsOpen(runner.sessionId) === "open" ? "split" : "chat");
+  }, [canvas.canvasId, reportOnly, startMaximized, Boolean(creationPanel), runner.sessionId]);
   useEffect(() => {
     const applyLocation = (expectedReportEntryId: string | null = null) => {
       const currentUrl = new URL(window.location.href);
@@ -1469,6 +1498,12 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       const detail = (event as CustomEvent<CanvasOpenResultDetail>).detail;
       if (detail?.target) {
         setReportReturnContext(null);
+        if (detail.target.type === "report" && detail.target.sectionId) {
+          // The section wins over the saved reading position of the report.
+          reportScrollTopRef.current = 0;
+          const sectionId = detail.target.sectionId;
+          setReportSectionTarget((current) => ({ sectionId, request: (current?.request ?? 0) + 1 }));
+        }
         const openingContext = captureResultsOpeningContext(detail.entryPoint);
         trackResultsWorkspace({
           action: "cross_link_opened",
@@ -1594,6 +1629,29 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     apply();
     return () => cancelAnimationFrame(raf);
   }, [selectedTab]);
+  // Chat running state R2.2: scroll the report to the section a chat report card named, once it has rendered.
+  // Sections render asynchronously (charts, late hydration), so look for it over a few frames; give up quietly
+  // after about a second, leaving the report at its top.
+  useLayoutEffect(() => {
+    if (!reportSectionTarget || selectedTab !== "report" || panelMode === "chat") return;
+    const { sectionId } = reportSectionTarget;
+    const selector = `[data-section-id="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(sectionId) : sectionId}"]`;
+    let raf = 0;
+    let frames = 0;
+    const find = () => {
+      const target = reportBodyRef.current?.querySelector<HTMLElement>(selector);
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+        setReportSectionTarget(null);
+        return;
+      }
+      frames += 1;
+      if (frames < 60 && typeof requestAnimationFrame === "function") raf = requestAnimationFrame(find);
+      else setReportSectionTarget(null);
+    };
+    find();
+    return () => cancelAnimationFrame(raf);
+  }, [reportSectionTarget, selectedTab, panelMode]);
   // ⑧: a new report/session resets the saved offset, so switching sessions and then
   // toggling Data→Report doesn't restore the previous report's scroll position.
   useEffect(() => {
@@ -1674,9 +1732,13 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     ],
     [consumedComposerPrefillKeys, prefillAttachments, replayAttachmentPrefills, resultReferencePrefills],
   );
+  // While `homePane` stands in for the conversation (an editor open before the first message), the home composer in
+  // it takes the page's prefill and this workbench's own composer isn't mounted. Latching the text here as well put
+  // the already sent question back into the conversation's composer once it mounted (2026-11-27 dogfood F28).
+  const homePaneShown = Boolean(homePane);
   useEffect(() => {
-    if (prefillText?.trim()) setComposerPrefill(prefillText);
-  }, [prefillText]);
+    if (prefillText?.trim() && !homePaneShown) setComposerPrefill(prefillText);
+  }, [homePaneShown, prefillText]);
   useEffect(() => {
     restoredPrefillPendingRef.current = null;
     setRestoredDraftNotice(null);
@@ -1818,9 +1880,18 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     artifactId: string,
     signal: AbortSignal,
   ): Promise<void> => {
-    const located = await completeResults.locate(`artifact:${artifactId}`);
+    // A request that a newer one or a scope change replaced says nothing about the file: ask again
+    // (bounded) instead of showing 「找不到该成果」. On 116 (1.7.76) that view appeared once right after
+    // a deck save and survived Retry until a reload; only a server "not found" may show it.
+    let outcome = await completeResults.locateResult(`artifact:${artifactId}`);
+    for (let attempt = 1; outcome.reason === "superseded" && attempt < LOCATE_ATTEMPTS && !signal.aborted; attempt += 1) {
+      outcome = await completeResults.locateResult(`artifact:${artifactId}`);
+    }
     if (signal.aborted) return;
+    const located = outcome.item;
     if (!located) {
+      // The reason stays in the console so the next occurrence names its cause.
+      console.info("[results] focused result not located", { artifactId, reason: outcome.reason });
       setFailedResultLocateKey(artifactId);
       return;
     }
@@ -1839,7 +1910,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     } catch {
       if (!signal.aborted) setFailedResultLocateKey(artifactId);
     }
-  }, [completeResults.locate, resultsArtifactScope, resultsArtifactSessionId]);
+  }, [completeResults.locateResult, resultsArtifactScope, resultsArtifactSessionId]);
   const selectedArtifactKnown = !dataFocusArtifactId
     || Boolean(resultArtifactsForViewer?.some((item) => item.id === dataFocusArtifactId));
   const explorerOwnsSelectedArtifact = explorerOwnsArtifactSelection({
@@ -1889,8 +1960,13 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       return;
     }
     setFailedResultLocateKey(null);
-    void locateFocusedArtifact(dataFocusArtifactId, new AbortController().signal);
+    // Retry reloads the list first, as a page reload would, then locates the file.
+    const artifactId = dataFocusArtifactId;
+    void completeResults.refreshBase().finally(() => {
+      void locateFocusedArtifact(artifactId, new AbortController().signal);
+    });
   }, [
+    completeResults.refreshBase,
     completeResultsActive,
     dataFocusArtifactId,
     locateFocusedArtifact,
@@ -1950,6 +2026,11 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     resultsCapabilities.scaleNav,
     resultsSurface,
   ]);
+  // A deck saved in the editor: put the new version in the Results catalog while the person is still
+  // editing, so leaving the editor opens it without a locate round trip that can be lost (116, 1.7.76).
+  const prefetchSavedPresentation = useCallback((artifactId: string) => {
+    if (completeResultsActive) void completeResults.locateResult(`artifact:${artifactId}`);
+  }, [completeResults.locateResult, completeResultsActive]);
   // A saved deck edit (or a move to its newer version) opens that version once Results lists it.
   const openEditedPresentation = useCallback((artifactId: string, then?: () => void) => {
     void refreshWorkspaceArtifacts("presentation-edited").finally(() => {
@@ -1974,14 +2055,19 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   }, [documentResultsRefresh, resultsWorkspaceEnabled, reportOnly, resultsArtifactSessionId,
     authSession?.me?.id, authSession?.me?.team_id, authSession?.me?.auth_session_generation, draftPersistenceScope, refreshWorkspaceArtifacts]);
   const hasBrowsableResources = resultItems.length > 0;
-  // Discovery offers an entry; only real content or an explicit user action opens Results.
-  const hasResultsPane = hasCanvas || resultsOpenedByUser || resultsRevealRequest > 0;
+  // Discovery offers an entry; only real content or an explicit user action opens Results. Chat running state R2.6:
+  // any result of the conversation keeps the strip, closed or open as the reader left it.
+  const hasResultsPane = hasCanvas || hasBrowsableResources || resultsOpenedByUser || resultsRevealRequest > 0;
   const hasRightPane = hasResultsPane || creationPanelOpen;
   // Config copilot placement: float inside the visible right results column (scrim covers only results, leaving conversation visible);
   // otherwise enter document flow as the second column. Desktop keeps one split host even without results.
   // Manually opened results host the floating drawer, avoiding a third column.
   const splitBranchActive = isDesktop;
   const resultsPaneVisible = hasResultsPane && panelMode !== "chat";
+  // R2.6: the reminder belongs to the closed strip; once Results opens it has done its job.
+  useEffect(() => {
+    if (resultsPaneVisible) setResultsBubblePayload(null);
+  }, [resultsPaneVisible]);
   // P2 batch 4: an open results canvas asks the sidebar for its icon rail; the sidebar honours it below 1280
   // (lib/sidebar-state.ts).
   useRequestSidebarAutoCompact(splitBranchActive && resultsPaneVisible);
@@ -1992,22 +2078,31 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     onCanvasInteraction?.();
     resultsInteractionEpochRef.current += 1;
     if (runner.running) resultsClosedDuringTurnRef.current = true;
+    writeResultsOpen(resultsOpenSessionRef.current, "closed");
     setReportReturnContext(null);
     reportReturnFocusRef.current = null;
     pendingReportReturnRef.current = false;
     pendingReportReturnFocusRef.current = null;
     setPanelMode("chat");
   }, [runner.running, onCanvasInteraction]);
+  const reopenResultsPane = useCallback(() => {
+    resultsInteractionEpochRef.current += 1;
+    writeResultsOpen(resultsOpenSessionRef.current, "open");
+    setResultsOpenedByUser(true);
+    setPanelMode("split");
+    if (resultsWorkspaceEnabled) trackResultsWorkspace({ action: "pane_opened", entryPoint: "header" });
+  }, [resultsWorkspaceEnabled]);
   // Workbench Spec §10: new results while results are hidden show a dot on the mobile `成果` switch and desktop restore strip;
   // clear after viewing (opening results / switching to `成果`).
-  const resultsNewIds = useMemo(
-    () => [
-      ...reportSections.map((section) => `section:${section.id}`),
-      ...resultItems.map((item) => `result:${item.key}`),
-    ],
-    [reportSections, resultItems],
-  );
-  const resultsHasNew = useResultsNewIndicator({
+  // Chat running state R2.6: the strip counts new results the way Results lists them, the report as one item.
+  const resultsNewIds = useMemo(() => {
+    const report = reportStateKey(reportSections as unknown as { id: string; rev?: number }[]);
+    return [
+      ...(report ? [report] : []),
+      ...resultItems.filter((item) => !item.key.startsWith("report:")).map((item) => `result:${item.key}`),
+    ];
+  }, [reportSections, resultItems]);
+  const resultsNewCount = useResultsNewIndicator({
     enabled: !reportOnly && !creationPanelOpen,
     // Same conversation identity as the report: use canvas identity when a new runner's session ID arrives after the canvas.
     sessionId: reportSessionId,
@@ -2015,6 +2110,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     visible: isDesktop ? resultsPaneVisible : panelMode === "canvas",
     running: runner.running,
   });
+  const resultsHasNew = resultsNewCount > 0;
   // Workbench Spec §9: ⌘⇧\ / Ctrl+Shift+\ maximizes results; pressing again restores. Only desktop split
   // (≥1024, results column present) supports it; shared read-only has no conversation to return to. Yield to open dialogs, nonmodal overlays, or menus.
   // Esc does not restore (reserved for overlays).
@@ -2173,7 +2269,13 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // A deck element referenced from the editor: one reference per file, carrying the element (design §6.9).
   // 「引用这一页」 is a toggle: the Composer holds each deck file's page set (design §13.6), and reports
   // it back so every page button shows 「已引用」 for exactly the pages that will be sent.
-  const [slideToggleRequest, setSlideToggleRequest] = useState<{ file: AttachmentRef; page: number; nonce: number } | null>(null);
+  const [slideToggleRequest, setSlideToggleRequest] = useState<{
+    file: AttachmentRef;
+    page: number;
+    nonce: number;
+    selection?: PresentationSelection | null;
+    documentSelection?: DocumentSelection | null;
+  } | null>(null);
   const slideToggleNonceRef = useRef(0);
   const pagesToastRef = useRef<string | null>(null);
   const [referencedSlides, setReferencedSlides] = useState<Record<string, number[]>>({});
@@ -2191,27 +2293,73 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     referencedSlidesRef.current = { ...referencedSlidesRef.current, [file.fileId]: next };
     slideToggleNonceRef.current += 1;
     setSlideToggleRequest({ file, page, nonce: slideToggleNonceRef.current });
+    if (!isDesktop) {
+      // Phones stay on Results so that several pages can be picked; one toast, kept current (also on a removal),
+      // leads to the chat, and goes when no page is left.
+      if (pagesToastRef.current) dismissToast(pagesToastRef.current);
+      pagesToastRef.current = next.length
+        ? toast({ kind: "info", text: viewerT("pages_referenced", { count: next.length }), action: { label: viewerT("go_to_chat"), onAction: () => setChartFollowupReveal((count) => count + 1) } })
+        : null;
+    }
     if (!present) {
-      if (!isDesktop) {
-        // Phones stay on Results so that several pages can be picked; one toast, kept current, leads to the chat.
-        if (pagesToastRef.current) dismissToast(pagesToastRef.current);
-        pagesToastRef.current = toast({ kind: "info", text: viewerT("pages_referenced", { count: next.length }), action: { label: viewerT("go_to_chat"), onAction: () => setChartFollowupReveal((count) => count + 1) } });
-      } else if (!options?.stay) {
+      if (isDesktop && !options?.stay) {
         // A maximized Results pane makes room for the Composer; focus stays on the page buttons.
         setPanelMode((mode) => (mode === "canvas" ? "split" : mode));
       }
     }
     return present ? "removed" : "added";
   }, [isDesktop, viewerT]);
-  const referencePresentationElement = useCallback((reference: AttachmentRef, options?: { quiet?: boolean }) => {
+  const referencePresentationElement = useCallback((reference: AttachmentRef, options?: { quiet?: boolean; stay?: boolean }) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
+    if (options?.stay) {
+      // From the editor: like 「引用这一页」, the reference goes into the Composer and editing goes on (design §13.7).
+      // One reference per file, so an element replaces the file's pages; the toast says which, with an undo.
+      const replaced = referencedSlidesRef.current[reference.fileId] ?? [];
+      referencedSlidesRef.current = { ...referencedSlidesRef.current, [reference.fileId]: [] };
+      slideToggleNonceRef.current += 1;
+      // A Word paragraph (docx inline edit design §7.4) travels as documentSelection; a deck element as presentationSelection.
+      const document = reference.documentSelection;
+      setSlideToggleRequest(document
+        ? { file: reference, page: 0, nonce: slideToggleNonceRef.current, documentSelection: document }
+        : { file: reference, page: 0, nonce: slideToggleNonceRef.current, selection: reference.presentationSelection ?? null });
+      if (pagesToastRef.current) dismissToast(pagesToastRef.current);
+      pagesToastRef.current = null;
+      const selection = reference.presentationSelection;
+      const name = selection?.version === 1 ? selection.elementName ?? "" : document?.version === 1 ? document.paragraphName ?? "" : "";
+      const restore = replaced.length
+        ? canonicalizePresentationSelection({ version: 2, artifactId: reference.fileId, slides: replaced.map((slideIndex) => ({ slideIndex })) })
+        : null;
+      const restoreDocument = document && replaced.length
+        ? canonicalizeDocumentSelection({ version: 2, artifactId: reference.fileId, pages: replaced.map((page) => ({ page })) })
+        : null;
+      const goToChat = isDesktop ? undefined : { label: viewerT("go_to_chat"), onAction: () => setChartFollowupReveal((count) => count + 1) };
+      if (document ? restoreDocument : restore) {
+        toast({
+          kind: "info",
+          text: viewerT("element_replaced_pages", { name, pages: replaced.join(viewerT("page_list_separator")) }),
+          action: {
+            label: viewerT("undo"),
+            onAction: () => {
+              referencedSlidesRef.current = { ...referencedSlidesRef.current, [reference.fileId]: replaced };
+              slideToggleNonceRef.current += 1;
+              setSlideToggleRequest(document
+                ? { file: reference, page: 0, nonce: slideToggleNonceRef.current, documentSelection: restoreDocument }
+                : { file: reference, page: 0, nonce: slideToggleNonceRef.current, selection: restore });
+            },
+          },
+        });
+      } else {
+        toast({ kind: "info", text: resultsT("referenced_in_chat"), ...(goToChat ? { action: goToChat } : {}) });
+      }
+      return;
+    }
     setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId)
       ? current.map((ref) => (ref.fileId === reference.fileId ? reference : ref))
       : [...current, reference]);
     setChartFollowupReveal((count) => count + 1);
     // A page's 「引用这一页」 confirms on its own button; the toast would cover the Results header.
     if (!options?.quiet) toast({ kind: "info", text: resultsT("referenced_in_chat") });
-  }, [readOnly, reportOnly, resultsT, runner.sessionId]);
+  }, [isDesktop, readOnly, reportOnly, resultsT, runner.sessionId, viewerT]);
   const referenceArtifactInChat = useCallback((artifact: ArtifactItem) => {
     if (readOnly || reportOnly || !runner.sessionId) return;
     setResultReferencePrefills((current) => [
@@ -2316,9 +2464,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     );
     if (startsNewTurn) {
       baselineTurnIdRef.current = runner.turnId;
-      turnBaselineKeysRef.current = new Set(
-        (resultArtifactsForViewer ?? []).map((artifact) => artifact.id),
-      );
+      setResultsBubblePayload(null);
       terminalPaneClosedAtStartRef.current =
         panelMode === "chat" || !hasResultsPane;
       resultsClosedDuringTurnRef.current = false;
@@ -2334,36 +2480,48 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     handledTerminalTurnIdRef.current = terminalTurnId;
     const terminalSessionId = resultsArtifactSessionId;
     const interactionEpoch = resultsInteractionEpochRef.current;
+    // Chat running state R2.4: Results opens by itself only on the one file Lead's delivery review named
+    // (`lead.final.payload.open_for_reader`, checked against the answer's files by the backend), on desktop, when it
+    // was closed as the Turn started and the reader did not close it during the Turn. Anything else opens nothing;
+    // the strip counts what is new.
+    const terminalPayload = runner.finalPayload;
+    const chosenFile = isDesktop ? openForReader(terminalPayload) : null;
+    const closedAtEnd = panelMode === "chat" || !hasResultsPane;
     const canSurfaceAfterRefresh =
-      terminalPaneClosedAtStartRef.current
+      chosenFile !== null
+      && terminalPaneClosedAtStartRef.current
       && !resultsClosedDuringTurnRef.current
-      && (panelMode === "chat" || !hasResultsPane);
+      && closedAtEnd;
 
     void refreshWorkspaceArtifacts("turn-terminal").then((snapshot) => {
       if (
         activeResultsSessionRef.current !== terminalSessionId
-        || !canSurfaceAfterRefresh
-        || resultsClosedDuringTurnRef.current
         || resultsInteractionEpochRef.current !== interactionEpoch
       ) return;
-      const candidate = terminalAutoOpenArtifact(
-        turnBaselineKeysRef.current,
-        snapshot,
-        terminalTurnId,
-      );
-      if (!candidate) return;
-      navigateToResult({
-        type: "artifact",
-        artifactId: candidate.id,
-        mode: "preview",
-      }, "replace");
+      if (
+        canSurfaceAfterRefresh
+        && !resultsClosedDuringTurnRef.current
+        && chosenFile
+        && snapshot.some((item) => item.id === chosenFile)
+      ) {
+        navigateToResult({
+          type: "artifact",
+          artifactId: chosenFile,
+          mode: "preview",
+        }, "replace");
+        return;
+      }
+      // R2.6: nothing opened; one reminder beside the closed strip says what this Turn added (desktop only). An open
+      // Results already shows it.
+      if (isDesktop && closedAtEnd && terminalPayload) setResultsBubblePayload(terminalPayload);
     });
   }, [
     hasResultsPane,
+    isDesktop,
     navigateToResult,
     panelMode,
     refreshWorkspaceArtifacts,
-    resultArtifactsForViewer,
+    runner.finalPayload,
     resultsArtifactSessionId,
     resultsWorkspaceEnabled,
     runner.running,
@@ -2617,7 +2775,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     resultsRouteUnavailable,
     selectedResult?.objectType,
   ]);
-  const browseAllResults = useCallback((query: string) => {
+  const browseAllResults = useCallback((query: string, filters?: Partial<ResultsFiltersDTO>) => {
     if (!reportSessionId) {
       closeResultsNavigator();
       return;
@@ -2654,6 +2812,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       ...baseExplorer,
       query: normalizedQuery,
       focus_key: selectedResultKey,
+      ...(filters ? { filters: { ...baseExplorer.filters, ...filters } } : {}),
     };
     const navigation = createResultsNavigationState({
       ...expected,
@@ -2682,6 +2841,22 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     resultsQuickOpeningContext,
     selectedResultKey,
   ]);
+  // Chat running state R2.3: a Turn's work-file line opens Results listing only that Turn's files. Without the
+  // Results list (no scale navigation) it opens Results as it is.
+  useEffect(() => {
+    const onTurnFiles = (event: Event) => {
+      const turnId = (event as CustomEvent<ResultsTurnFilesDetail>).detail?.turnId;
+      if (!turnId) return;
+      resultsInteractionEpochRef.current += 1;
+      writeResultsOpen(resultsOpenSessionRef.current, "open");
+      setResultsOpenedByUser(true);
+      if (resultsCapabilities.scaleNav && reportSessionId) browseAllResults("", { turn_id: turnId });
+      setPanelMode((mode) => (isDesktop ? (mode === "chat" ? "split" : mode) : "canvas"));
+      if (resultsWorkspaceEnabled) trackResultsWorkspace({ action: "pane_opened", entryPoint: "chat" });
+    };
+    window.addEventListener(RESULTS_TURN_FILES_EVENT, onTurnFiles);
+    return () => window.removeEventListener(RESULTS_TURN_FILES_EVENT, onTurnFiles);
+  }, [browseAllResults, isDesktop, reportSessionId, resultsCapabilities.scaleNav, resultsWorkspaceEnabled]);
   const replaceResultsExplorerState = useCallback((
     update: (current: ResultsHistoryStateV1) => ResultsHistoryStateV1,
   ) => {
@@ -3075,6 +3250,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const chatPane = homePane ? <div className="v2-ws-left home-work-page-content">{homePane}</div> : (
       <div ref={chatColumnRef} className="v2-ws-left" style={hasRightPane && canvasMaximized ? { display: "none" } : undefined}>
         <div className="v2-ws-left-body">
+          {/* Owner draft trial: the band stays above the scrolling conversation (nothing in ordinary chats). */}
+          <AgentTrialBand />
           {/* chat-ux-2026-08 batch C: viewport following attaches to the **scroll container**.
               scrollRef → .v2-messages (the actual scrolling layer)
               contentRef → .v2-messages-inner (ResizeObserver watches its height,
@@ -3864,6 +4041,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       onOpenFailed={recordResultOpenFailure}
       presentationEdit={!readOnly && !reportOnly && runner.sessionId && resultsWorkspaceEnabled ? {
         agentRunning: Boolean(runner.running),
+        onSaved: prefetchSavedPresentation,
         onOpenVersion: openEditedPresentation,
         onReferenceElement: referencePresentationElement,
         onToggleSlide: togglePresentationSlide,
@@ -4270,16 +4448,22 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
         canvas={retainedCanvasPane}
         onSnapCanvas={() => setPanelMode("canvas")}
         onSnapChat={closeResultsPane}
-        onReopen={() => {
-          resultsInteractionEpochRef.current += 1;
-          setResultsOpenedByUser(true);
-          setPanelMode("split");
-          if (resultsWorkspaceEnabled) trackResultsWorkspace({ action: "pane_opened", entryPoint: "header" });
-        }}
+        onReopen={reopenResultsPane}
         soloCanvas={reportOnly}
         canvasLabel={canvasPaneLabel}
         showCanvasReopen={Boolean(canvasObjectOpener) || Boolean(creationPanel) || (hasRightPane && (!resultsWorkspaceEnabled || hasBrowsableResources))}
         canvasHasNew={resultsHasNew}
+        canvasNewCount={resultsNewCount}
+        canvasReopenAside={resultsBubblePayload !== null && !resultsPaneVisible ? (
+          <ResultsTurnBubble
+            finalPayload={resultsBubblePayload}
+            onView={() => {
+              dismissResultsBubble();
+              reopenResultsPane();
+            }}
+            onDismiss={dismissResultsBubble}
+          />
+        ) : null}
       />
       {columnDrawerOpen ? configDrawer?.("column") : !isDesktop && configDrawerOpen ? configDrawer?.("sheet") : null}
     </div>
@@ -4379,6 +4563,9 @@ function WorkbenchMenuItem({
     </button>
   );
 }
+
+/** Times a superseded locate of the focused result is asked again before it counts as not found. */
+const LOCATE_ATTEMPTS = 3;
 
 type WorkbenchSection = CanvasState["sections"][number];
 type WorkbenchCodeSection = Extract<WorkbenchSection, { kind: "code_block" }>;

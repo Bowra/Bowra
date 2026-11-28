@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { rememberResultsOpen } from "./_results-open";
 
 import { mockAuthedApp } from "./_app-mocks";
 
@@ -18,6 +19,7 @@ const EXTRA = { id: "sec_wb_more", kind: "narrative", markdown: "补充：华南
 async function open(page: Page, width = 1440) {
   await page.setViewportSize({ width, height: 900 });
   await mockAuthedApp(page);
+  await rememberResultsOpen(page, [SESSION]);
   await page.goto(`/?session=${SESSION}`);
   await expect(page.locator("textarea").first()).toBeVisible({ timeout: 15_000 });
   // Composer locked until draft read completes (attachments unavailable); wait until editable.
@@ -158,7 +160,7 @@ test.describe("「成果」有新内容的圆点", () => {
     await open(page, 412);
     // Local record exists for this session (zero seen) → all later Results count as new content.
     await page.evaluate((sid) => {
-      localStorage.setItem("bowhead.results_seen.v1", JSON.stringify({ [sid]: { seen: [], at: Date.now() } }));
+      localStorage.setItem("bowhead.results_seen.v2", JSON.stringify({ [sid]: { seen: [], at: Date.now() } }));
     }, SESSION);
     await reloadSession(page);
     await hydrate(page, SECTIONS);
@@ -209,7 +211,7 @@ test.describe("「成果」有新内容的圆点", () => {
     await expect(page.getByRole("tab", { name: /成果/ })).toHaveAccessibleName("成果");
   });
 
-  test("desktop 1440: new results while the results column is closed show a dot and screen-reader note on the restore bar; cleared on reopen", async ({ page }) => {
+  test("desktop 1440: new results while the results column is closed show their count and a screen-reader note on the restore bar; cleared on reopen", async ({ page }) => {
     await open(page);
     await hydrate(page, SECTIONS);
     await expect(page.getByRole("separator")).toBeVisible();
@@ -219,8 +221,10 @@ test.describe("「成果」有新内容的圆点", () => {
     await expect(edge).not.toHaveAttribute("data-has-new", "1");
     await hydrate(page, [...SECTIONS, EXTRA]);
     await expect(edge).toHaveAttribute("data-has-new", "1");
-    await expect(edge).toHaveAccessibleName(/有新内容/);
-    expect(await hitsItself(edge.locator(".v2-ws-new-dot"))).toBe(true);
+    // Chat running state R2.6: the count of new results replaces the dot.
+    await expect(edge).toHaveAccessibleName(/有 1 项新内容/);
+    await expect(edge.locator(".v2-ws-new-count")).toHaveText("1");
+    expect(await hitsItself(edge.locator(".v2-ws-new-count"))).toBe(true);
     await edge.click();
     await expect(page.getByRole("separator")).toBeVisible();
     await page.locator(".r-actions .v2-icon-btn").nth(1).click();

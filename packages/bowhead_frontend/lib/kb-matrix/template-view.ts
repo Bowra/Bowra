@@ -174,6 +174,7 @@ export function buildCell(rec: KbRecordDTO, fname: string, extractedAt: string):
     sourceExcerpt: pf.source_snippet || undefined,
     chunkId: pf.chunk_id,
     page: pf.source_page,
+    chunkIndex: pf.chunk_index,
     confidence: pf.confidence,
     extractedAt,
     edited: rec.edited_by_user.includes(fname),

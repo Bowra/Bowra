@@ -833,7 +833,7 @@ async def _recover_web_resolution_work(
         resume_turn_id = req.turn_id
     resumed = None
     if action == "turn_resume":
-        resumed = await resume_turn(request_id, request, response, clarify)
+        resumed = await resume_for_user(request_id, request, response, clarify, user_id=req.user_id)
     return ResolveResultDTO(
         ok=True,
         request_id=request_id,
@@ -975,16 +975,26 @@ async def resolve_one(
     response: Response,
     clarify: ClarificationStore = Depends(_clarify_store),
 ) -> ResolveResultDTO:
-    """Resolve the selected candidate and emit the durable result.
+    return await resolve_for_user(request_id, payload, request, response, clarify, user_id=_current_user_id(request))
 
-    P0 #2: 校验 req 属于当前用户; 跨用户 resolve 拒.
-    """
+
+async def resolve_for_user(
+    request_id: str,
+    payload: ResolveRequest,
+    request: Request,
+    response: Response,
+    clarify: ClarificationStore,
+    *,
+    user_id: str,
+    team_id: str | None = None,
+) -> ResolveResultDTO:
+    """Resolve and resume using the principal authenticated by the calling surface."""
     resolution_owner = f"web_{uuid4().hex}"
     # Peek without changing status, then validate ownership.
     pre = await clarify.get(request_id)
     if not pre:
         raise rule_clarification_http_error(404, "clarification_not_found")
-    cur_uid = _current_user_id(request)
+    cur_uid = user_id
     if pre.user_id != cur_uid:
         raise rule_clarification_http_error(404, "clarification_not_found")
     await _require_clarification_lifecycle(
@@ -1114,12 +1124,7 @@ async def resolve_one(
                 nested_error=True,
             ) from exc
         if _replay_action == "turn_resume":
-            replay_resume = await resume_turn(
-                request_id,
-                request,
-                response,
-                clarify,
-            )
+            replay_resume = await resume_for_user(request_id, request, response, clarify, user_id=cur_uid)
         return ResolveResultDTO(
             ok=True,
             request_id=request_id,
@@ -1171,8 +1176,8 @@ async def resolve_one(
         # Retain resume_turn's same-criterion gate for direct /resume_turn calls, resolved replay, and a race where
         # another session exhausts the balance after this admission.
         credit_store = getattr(request.app.state, "user_store", None)
-        credit_team_id = None
-        if credit_store is not None:
+        credit_team_id = team_id
+        if credit_team_id is None and credit_store is not None:
             credit_user = await credit_store.get_user(cur_uid)
             credit_team_id = getattr(credit_user, "team_id", None)
         credit_denial = await check_credit_admission(
@@ -1266,13 +1271,7 @@ async def resolve_one(
             # seconds and misreporting a successful resolve as not-ready.
             resolved_during_wait = await clarify.get(request_id)
             if resolved_during_wait is not None and resolved_during_wait.status == "resolved":
-                return await resolve_one(
-                    request_id,
-                    payload,
-                    request,
-                    response,
-                    clarify,
-                )
+                return await resolve_for_user(request_id, payload, request, response, clarify, user_id=cur_uid, team_id=team_id)
             raise rule_clarification_http_error(
                 409,
                 "clarification_resume_not_ready",
@@ -1499,13 +1498,7 @@ async def resolve_one(
         # A concurrent request won the pending→resolved CAS. Re-enter the
         # resolved replay path so only its canonical values and outbox facts
         # drive side effects, event repair, response, and resume.
-        return await resolve_one(
-            request_id,
-            payload,
-            request,
-            response,
-            clarify,
-        )
+        return await resolve_for_user(request_id, payload, request, response, clarify, user_id=cur_uid, team_id=team_id)
 
     values = list(req.chosen_values or ([req.chosen_value] if req.chosen_value else []))
     primary = req.chosen_value or (values[0] if values else "")
@@ -1885,12 +1878,7 @@ async def resolve_one(
         # request open until spawn_resume_turn has published and claimed its
         # generation lease; clients never have to bridge a lossy resolve→resume
         # two-request gap.
-        resume_result = await resume_turn(
-            request_id,
-            request,
-            response,
-            clarify,
-        )
+        resume_result = await resume_for_user(request_id, request, response, clarify, user_id=cur_uid)
 
     return ResolveResultDTO(
         ok=True,
@@ -2214,25 +2202,15 @@ async def resume_turn(
     response: Response,
     clarify: ClarificationStore = Depends(_clarify_store),
 ) -> ResumeTurnResultDTO:
-    """Resume a paused turn after user resolved its clarification.
+    return await resume_for_user(request_id, request, response, clarify, user_id=_current_user_id(request))
 
-    Phase 4C step 4: reconstructs TurnRequest from ClarificationRequest.resume_context,
-    keeps the same turn_id (Option A: same-turn-resume), injects resume_glossary
-    (token → chosen_value) so Lead skips the same HITL on second pass.
 
-    Validation:
-    - clarification exists + user owns it
-    - status == "resolved" (otherwise nothing to resume)
-    - resume_context present (sentinel emitted by Lead snapshotted it)
-
-    Returns turn_id + stream_url — FE opens EventSource on stream_url to receive
-    continuation events (turn_log_store replays past events + bus subscription
-    yields new ones, dedupe by (event_type, occurred_at)).
-    """
+async def resume_for_user(request_id: str, request: Request, response: Response, clarify: ClarificationStore, *, user_id: str) -> ResumeTurnResultDTO:
+    """Resume the stored generation for the authenticated owner."""
     pre = await clarify.get(request_id)
     if not pre:
         raise rule_clarification_http_error(404, "clarification_not_found")
-    cur_uid = _current_user_id(request)
+    cur_uid = user_id
     if pre.user_id != cur_uid:
         raise rule_clarification_http_error(404, "clarification_not_found")
     await _require_clarification_lifecycle(
@@ -2631,7 +2609,7 @@ async def resume_turn(
             # omitting this makes resumed Lead propose tell Web users "请到网页端" (same BUG2 shape).
             # Scheduled entry always False by discipline (types.py: Feishu/scheduled/plans stay False);
             # resume must not add a configuration-copilot channel absent from the first half.
-            config_lite_supported=_sched_job is None,
+            config_lite_supported=_sched_job is None and not getattr(getattr(request, "state", None), "im_clarification", False),
             # The same scheduled run continues: it can still alert its owner after the answer.
             scheduled_run=_resumed_scheduled_run(_sched_job, turn_id=pre.turn_id, session_id=rc_session_id),
         )

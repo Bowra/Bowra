@@ -7,6 +7,8 @@
  * - Each entry: scope-label prefix (scopeColumnId looks up name) + progress/ETA + Cancel (only
  *   run.canCancel, server authority, FR-34) + failed terminal View failures.
  * - Never render single_cell runs (FR-12b inline execution + Toast; server excludes, filter defensively again).
+ * - Step 1 (S3): a trial run's label starts with "试跑 N 份文件"; a finished run whose automatic retry was skipped
+ *   for a provider outage says so and points to rerunning the failed cells later.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -71,12 +73,21 @@ export function RunBanners(props: RunBannersProps) {
   );
 }
 
-/** Scope → banner prefix (§4.5 mapping); unknown/absent (old backend in image rollback window) → no prefix. */
+/** Scope → banner prefix (§4.5 mapping), with the trial first; unknown/absent (old backend in image rollback window) → no prefix. */
 function scopeLabel(run: MatrixRunVM, columns: MatrixColumnVM[], t: ReturnType<typeof useTranslations>): string | null {
+  const base = baseScopeLabel(run, columns, t);
+  if (!run.trial) return base;
+  const trial = t("run_scope_label_trial", { n: run.trialFiles ?? 0 });
+  return base ? `${trial} · ${base}` : trial;
+}
+
+function baseScopeLabel(run: MatrixRunVM, columns: MatrixColumnVM[], t: ReturnType<typeof useTranslations>): string | null {
   const name = run.scopeColumnId ? (columns.find((c) => c.columnId === run.scopeColumnId)?.name ?? "") : "";
   switch (run.scopeKind) {
     case "all_pending":
       return t("run_scope_label_all_pending");
+    case "failed":
+      return t("run_scope_label_failed");
     case "column":
       return t("run_scope_label_column", { name });
     case "force_all":
@@ -182,7 +193,11 @@ function SingleRunBanner({
     return (
       <div className="mx-runbanner done" data-testid="kb-matrix-runbanner">
         <span className="ic"><IcCheck s={15} /></span>
-        <span>{prefix}{t("banner_cancelled", { done: run.cellsDone })}</span>
+        <span>
+          {prefix}
+          {/* Step 1 S8: another member's run stopped because the creator made the matrix private. */}
+          {t(run.errorCode === "matrix_became_private" ? "banner_cancelled_private" : "banner_cancelled", { done: run.cellsDone })}
+        </span>
       </div>
     );
   }
@@ -194,6 +209,7 @@ function SingleRunBanner({
         {prefix}
         {t.rich("banner_done", { n: run.cellsDone, b: (chunks) => <b>{chunks}</b> })}
         {run.cellsFailed > 0 && <> · {t("banner_done_failed", { n: run.cellsFailed })}</>}
+        {run.cellsFailed > 0 && run.errorCode === "provider_outage" && <> · {t("banner_done_outage")}</>}
       </span>
       {run.cellsFailed > 0 && (
         <button type="button" className="link" style={{ marginLeft: "auto" }} onClick={() => onViewFailed(run.runId)}>

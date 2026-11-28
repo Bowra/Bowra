@@ -144,7 +144,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
     // ① The band exists and prominently shows this peer's terminal state (red row + persistent count).
     const band = container.querySelector('[data-testid="running-band"]')!;
     expect(band).toBeTruthy();
-    expect(band.querySelector('[data-row-kind="peer"].is-fail')).toBeTruthy();
+    expect(band.querySelector('[data-row-kind="group-end"].is-fail')).toBeTruthy();
     expect(band.querySelector('[data-testid="running-band-peer-fail"]')).toBeTruthy();
     // The running main surface cannot show the English/long reason (a known cost of band takeover, documented explicitly).
     expect(container.textContent).not.toContain("peer_errors.execution_failed");
@@ -178,7 +178,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
       <TurnContainer runner={runner({ turnId, user: "查询", running: true })} />,
     );
     const band = container.querySelector('[data-testid="running-band"]')!;
-    expect(band.querySelector('[data-row-kind="peer"].is-fail')).toBeTruthy();
+    expect(band.querySelector('[data-row-kind="group-end"].is-fail')).toBeTruthy();
     expect(band.querySelector('[data-testid="running-band-peer-fail"]')).toBeTruthy();
   });
 
@@ -214,16 +214,11 @@ describe("1e 带 · 与既有披露面的边界", () => {
     expect(band).toBeTruthy();
     expect(container.textContent).toContain("我先看下数据结构……");
 
-    // ★ Order is also contractual: the design places prose **above** the band (1e's `.disc` is the column's last element).
-    //   Mutation: move <RunningBand> back before <BeatStream> → this test must fail.
-    //   Asserting only that both exist is insufficient; that let the prior version put the band above prose unnoticed.
-    const prose = Array.from(container.querySelectorAll("p, div")).find(
-      (n) => n.textContent === "我先看下数据结构……",
-    );
-    expect(prose).toBeTruthy();
-    expect(
-      Boolean(prose!.compareDocumentPosition(band!) & Node.DOCUMENT_POSITION_FOLLOWING),
-    ).toBe(true);
+    // Chat running state R1.9: the prose a step followed is a note inside the band (its place in time), not text
+    //   above it. Mutation: stop folding (leave the segment in the text flow) → the note is missing; this fails.
+    const note = band!.querySelector('[data-row-kind="note"]');
+    expect(note?.textContent).toContain("我先看下数据结构……");
+    expect(container.querySelectorAll(".lead-narrative-md")).toHaveLength(0);
   });
 
   /**
@@ -391,7 +386,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
     fireEvent.click(
       container.querySelector('[data-testid="running-band-bar"]') as HTMLElement,
     );
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
     const failedStep = container.querySelector<HTMLButtonElement>(".stp.is-fail .stp-head")!;
     expect(failedStep.getAttribute("aria-expanded")).toBe("false");
@@ -415,15 +410,15 @@ describe("1e 带 · 与既有披露面的边界", () => {
     const bar = () => container.querySelector('[data-testid="running-band-bar"]') as HTMLElement;
 
     // Collapsed: three rows present, trace absent.
-    expect(container.querySelector(".bh-band__now")).toBeTruthy();
+    expect(container.querySelector(".bh-band__hist")).toBeTruthy();
     expect(container.querySelector('[data-placement="band-slot"]')).toBeNull();
 
     fireEvent.click(bar());   // Expand
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-placement="band-slot"]')).toBeTruthy();
 
     fireEvent.click(bar());   // ★ Click again = return to the band
-    expect(container.querySelector(".bh-band__now")).toBeTruthy();
+    expect(container.querySelector(".bh-band__hist")).toBeTruthy();
     expect(container.querySelector('[data-placement="band-slot"]')).toBeNull();
   });
 
@@ -459,7 +454,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
       <TurnContainer runner={runner({ turnId, user: "查询", running: true })} />,
     );
     fireEvent.click(container.querySelector('[data-testid="running-band-bar"]') as HTMLElement);
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelectorAll(".bh-band__row")).toHaveLength(0);
     // The disclosure strip remains, now offering collapse.
     const bar = container.querySelector('[data-testid="running-band-bar"]') as HTMLElement;
@@ -481,14 +476,14 @@ describe("1e 带 · 与既有披露面的边界", () => {
     );
     // Yielding = **three rows** give way to full trace; the disclosure strip remains as the collapse control (one control, two states).
     // 2026-08-15: expansion was a one-way door; users could never return to the band afterward (user-reported).
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
 
     // Two more steps arrive; new progress must not replace the trace with the band.
     startStep(turnId, "s2");
     startStep(turnId, "s3");
     rerender(<TurnContainer runner={runner({ turnId, user: "查询", running: true })} />);
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
   });
 
@@ -567,7 +562,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
     );
     // Yielding = **three rows** give way to full trace; the disclosure strip remains as the collapse control (one control, two states).
     // 2026-08-15: expansion was a one-way door; users could never return to the band afterward (user-reported).
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
 
     applyCardCreated({ turnId: "t-second" });
@@ -601,7 +596,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
 
     // Only an actual click yields the band (the sole entry point).
     fireEvent.click(bar);
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
   });
 

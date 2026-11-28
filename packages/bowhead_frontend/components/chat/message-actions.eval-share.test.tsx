@@ -66,13 +66,13 @@ describe("MessageActions — share with the owner as an eval case", () => {
     vi.mocked(setTurnEvalShare).mockResolvedValueOnce({ kind: "turn_eval_share", schema_version: 1, turn_id: "t_1", shared: true });
     mount("t_1");
     await openMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "分享给负责人做评测用例" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "分享给所有者做评测用例" }));
     await waitFor(() => expect(setTurnEvalShare).toHaveBeenCalledWith("t_1", true));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith({ kind: "success", text: expect.stringContaining("销售分析 的负责人") }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ kind: "success", text: expect.stringContaining("销售分析 的所有者") }));
 
     vi.mocked(setTurnEvalShare).mockResolvedValueOnce({ kind: "turn_eval_share", schema_version: 1, turn_id: "t_1", shared: false });
     await openMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "取消分享给负责人" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "取消分享给所有者" }));
     await waitFor(() => expect(setTurnEvalShare).toHaveBeenLastCalledWith("t_1", false));
     await waitFor(() => expect(toast).toHaveBeenLastCalledWith({ kind: "success", text: expect.stringContaining("已经用它起草的用例会留在") }));
   });
@@ -81,7 +81,7 @@ describe("MessageActions — share with the owner as an eval case", () => {
     vi.mocked(setTurnEvalShare).mockRejectedValueOnce(new ApiError(404, "turn_eval_share_unavailable", { code: "turn_eval_share_unavailable" }));
     mount("t_1");
     await openMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "分享给负责人做评测用例" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "分享给所有者做评测用例" }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ kind: "error", text: expect.stringContaining("对话已删除") }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "更多操作" })).toBeNull());
   });

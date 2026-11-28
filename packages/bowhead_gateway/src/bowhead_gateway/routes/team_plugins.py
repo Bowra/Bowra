@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from bowhead_core.subagent_authoring_catalog import TOOL_DISABLED_BY_TEAM
 from bowhead_core.team_plugin_store import TeamPluginError, TeamPluginStore, skill_grant_identity
 from bowhead_core.user_store import User, UserStore
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -50,7 +51,9 @@ def _error(exc: Exception) -> HTTPException:
     raise exc
 
 
-async def _check_resources(body: PluginBody, request: Request, user: User, store: UserStore) -> list[dict[str, Any]]:
+async def _check_resources(
+    body: PluginBody, request: Request, user: User, store: UserStore, *, saved_tool_refs: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
     """Check the selection against the authoring catalog and return the Skill grants to store.
 
     Skills follow their latest approved revision (agent-skill-gates D2), so a
@@ -59,12 +62,20 @@ async def _check_resources(body: PluginBody, request: Request, user: User, store
     """
     # Reuse exactly the catalog Agent authors use. Team plugins cannot
     # contain private Skills or tools unavailable for Agent selection.
+    from bowhead_core.notion_knowledge import NOTION_KNOWLEDGE_SKILL, NOTION_RESEARCH_OPERATIONS
+
     from bowhead_gateway.routes.agents import agent_authoring_catalog
 
     catalog = await agent_authoring_catalog(request, Response(), user, store)
     selectable_tools = {str(tool["stable_ref"]) for tool in catalog["tools"] if tool["selectable"]}
-    if any(ref not in selectable_tools for ref in body.tool_refs):
-        raise _coded_error(422, "capability_tool_unavailable")
+    # A built-in Tool the team turned off stays in a Plugin that already has it; it is never a new pick.
+    turned_off = set(catalog.get("team_disabled_tools", ()))
+    for ref in body.tool_refs:
+        if ref in turned_off:
+            if ref not in saved_tool_refs:
+                raise _coded_error(422, TOOL_DISABLED_BY_TEAM)
+        elif ref not in selectable_tools:
+            raise _coded_error(422, "capability_tool_unavailable")
     selectable_skills = {skill_grant_identity(skill["grant"]): skill["grant"] for skill in catalog["skills"] if skill["source_kind"] != "user"}
     grants: list[dict[str, Any]] = []
     for grant in body.skill_grants:
@@ -72,6 +83,14 @@ async def _check_resources(body: PluginBody, request: Request, user: User, store
         if current is None:
             raise _coded_error(422, "capability_skill_unavailable")
         grants.append(dict(current))
+    if any(grant["skill_ref"]["id"] == f"builtin:{NOTION_KNOWLEDGE_SKILL}" for grant in grants):
+        by_source: dict[str, set[str]] = {}
+        for tool in catalog["tools"]:
+            ref = tool["stable_ref"]
+            if ref in body.tool_refs and ".notion_knowledge_" in ref and tool.get("connection_id"):
+                by_source.setdefault(tool["connection_id"], set()).add(tool["operation_id"])
+        if len(by_source) != 1 or not set(NOTION_RESEARCH_OPERATIONS[:2]) <= next(iter(by_source.values())):
+            raise _coded_error(422, "capability_tool_unavailable")
     return grants
 
 
@@ -111,7 +130,9 @@ async def create_plugin(
 async def update_plugin(
     capability_id: str, body: PluginUpdateBody, request: Request, user: User = Depends(require_team_admin), store: UserStore = Depends(_store)
 ) -> dict[str, Any]:
-    skill_grants = await _check_resources(body, request, user, store)
+    current = await TeamPluginStore(store.db_path).get(user.team_id, capability_id)
+    saved = frozenset(str(ref) for ref in (current or {}).get("tool_refs", ()))
+    skill_grants = await _check_resources(body, request, user, store, saved_tool_refs=saved)
     try:
         return await TeamPluginStore(store.db_path).update(
             team_id=user.team_id,

@@ -16,6 +16,8 @@ Under **Active sessions**, review the latest recorded activity for each listed d
 
 Choose system, light or dark mode, then adjust color, background, font, text size, density, corners or motion. The page shows the effective appearance and whether a setting comes from you, the team or the product. Clear a personal choice to inherit the default. **Clear personal appearance** clears the personal theme and reading preferences. Chart style and chart accessibility options have their own controls. [Choose or publish a chart style](chart-styles.en-US.md)
 
+**Run view** sets how a running conversation shows what its agents are doing: List (the default), Chips, Lanes or Timeline. A choice saves to your account at once. Picking a view on a conversation's running card changes the same setting, so it applies in any browser or device. It changes only what you see, not the answers or outputs.
+
 ## Export
 
 Open the report itself and choose **Export**, under **More** on a narrow screen. Select the format offered for that report. The personal Export page explains the options. To fill a specific uploaded PowerPoint, send it as a template in Chat. [Fill or update a PowerPoint template](powerpoint-templates.en-US.md)

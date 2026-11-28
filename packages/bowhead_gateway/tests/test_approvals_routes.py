@@ -590,6 +590,8 @@ async def test_approve_executor_uses_team_datarc_context(app_ctx) -> None:
     ctx = captured["ctx"]
     assert ctx.active_datarc_project == "dp_approval_route"
     assert ctx.datarc is scoped_datarc
+    assert ctx.datarc_binding.client is scoped_datarc
+    assert ctx.datarc_binding.revision == "revision_one"
     assert ctx.datarc is not global_datarc
     assert ctx.vector_client is vector_client
     assert ctx.session_id == "s"

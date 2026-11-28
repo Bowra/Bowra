@@ -29,7 +29,126 @@ The knowledge base page has four kinds of content; click one to switch. They are
 
 **Add knowledge** in the page header works from any view; it switches to Files and opens the upload window.
 
+When knowledge bases are enabled, the four tabs become **Knowledge bases / Document matrix / Extraction tables / Templates**; see the next section.
+
+## Organize and share material in knowledge bases
+
+Administrators are rolling this feature out gradually. When knowledge bases are enabled, the first tab on the Knowledge page is **Knowledge bases**. Without that tab, the page works as the other sections of this article describe.
+
+When it is enabled, material is organized in named knowledge bases. Each knowledge base has a name, a description, a place where it lives, who can use it and a member list; except for the Space and Team default knowledge bases, it also has an owner. A file belongs to exactly one knowledge base; to put it somewhere else, move it to another knowledge base.
+
+### Where a knowledge base lives
+
+- **My**: only you can use it, in all of your Spaces. Everyone has a **My knowledge**, and you can create more to organize your own material. My knowledge bases can't be shared; to share material, move the files to a Space or Team knowledge base.
+- **Current Space**: used only in this Space's conversations, Agents and document matrices. Every Space has a knowledge base named after the Space.
+- **Team**: usable in every Space of the Team. Every Team has a **Team knowledge base**.
+
+My knowledge, the knowledge base named after the Space and the Team knowledge base are default knowledge bases created by the system and marked **Default**. They can't be renamed, given another description, deleted or transferred, and who can use them is fixed: Space members can edit a Space's default knowledge base (viewers can only use it), and everyone in the Team can use the Team knowledge base. People who can manage them can still give individual people more rights on the member list, for example to let a member add files to the Team knowledge base.
+
+As before, document matrices accept files from Space and Team knowledge bases only, not from My knowledge bases. Once your administrator enables matrices visible to only you, your own such matrices also accept files from your My knowledge bases; see “Matrices visible to only you”.
+
+### Who can use it, and the three access levels
+
+You can use a knowledge base because its **Who can use it** setting includes you, because you are on its member list, or because you are one of its automatic managers. When several apply, the highest level counts.
+
+- **Who can use it**: a My knowledge base is only for you. A Space knowledge base is either **Members only** (only the people on the list) or **All Space members**; for the latter, you also choose whether Space members can use or edit it by default. A Team knowledge base is either **Members only** or **Everyone in the Team** (use only).
+- **Member list**: you can add people and groups; a Team knowledge base can also list Spaces, meaning the members of that Space. A Space knowledge base accepts only members of that Space; to share material across Spaces, create a Team knowledge base. When someone leaves a Space, their entries on that Space's knowledge bases stop applying, and apply again if they rejoin.
+- **Automatic managers**: Space admins can manage every knowledge base in their Space. The Team owner and Team admins can manage every Team knowledge base and, once they join a Space, that Space's default knowledge base. Automatic managers can't be removed from the list. The Team owner and Team admins don't see a Space's members-only knowledge bases because of their Team role.
+
+The three access levels:
+
+- **Can use**: search and cite in conversations, Agents and document matrices; view, preview and download files; check sources.
+- **Can edit**: also add files, remove or delete the files they added, maintain those files' descriptions and categories, and retry their parsing.
+- **Can manage**: also manage all files, the member list, who can use it, and the name and description.
+
+The owner is the one manager accountable for the knowledge base and can't be removed from the list; Space and Team default knowledge bases have no owner and are managed by their automatic managers. Only the owner and automatic managers can transfer ownership or delete the knowledge base. Space viewers can at most use Space knowledge bases: they can search, view and download, but not add or delete files.
+
+### Find knowledge bases and files
+
+The **Knowledge bases** tab lists the knowledge bases you can use, grouped under My, the current Space and Team. Each row shows the name, description, who can use it, your level, the number of files (with failed files flagged) and the last update. The Team index notice still appears above the list, with the same rules.
+
+- Type in the search box to find knowledge bases or files by name. Different knowledge bases can have the same name; use their group and description to tell them apart.
+- Turn on **Deep search** and press Enter to search content across every knowledge base you can use. The results are a file table with an extra **Knowledge base** column showing where each file is.
+- The **⋯** menu at the end of a row offers **Share** (**Who has access** if you can't manage it), **Settings** and **Delete knowledge base**, depending on your level.
+
+The page header has **New knowledge base** and **Add files** (called **Add knowledge** when knowledge bases are not enabled). Extraction tables and their results are both under **Extraction tables**; **Templates** holds only document matrix templates.
+
+### Create a knowledge base
+
+1. On the Knowledge page, click **New knowledge base**.
+2. Enter a name. The description is optional, but say what the material is about: the assistant uses it to decide when to search.
+3. Choose where it lives: My, the current Space or Team. Places you can't choose are still listed, with the reason. Everyone can create in My; Space admins and Space members can create in the Space, viewers can't; only the Team owner and Team admins can create in the Team.
+4. Choose who can use it. The options depend on where it lives; with **All Space members**, the default is use. Click **Create**.
+
+The new, empty knowledge base opens, and you can add files right away or choose them from Files.
+
+### A knowledge base's page
+
+Click a knowledge base's name to open its page. The header shows where it lives, its name and description, who can use it, your level and the last update. If you can edit it, you see **Add files**; if you can manage it, you see **Share**, and everyone else sees **Who has access**.
+
+The page has its own address, which you can bookmark or send to colleagues. Opening the address grants no access: people without access see "This knowledge base can't be found", exactly as for a knowledge base that doesn't exist.
+
+The page has three tabs:
+
+- **Files**: the files in this knowledge base. They work as described under "Find files" and "File details" below: search by name, deep search, filter by status, type and date, sort, page through, and select several files for bulk actions. There is no Scope filter or Scope column, and there is an **Added by** column.
+- **Members**: the "Who can use it" group shows who can use it, the Space members' default level and where it can be used. The list below shows each member's level and source (owner, automatic, added directly, group or Space). The three levels are explained at the bottom.
+- **Settings**: the name, the description, the owner (**Transfer ownership…**) and **Delete knowledge base…**.
+
+When a knowledge base has no files yet, people who can edit it see ways to add files or choose them from Files, and others see whom they can ask. If you can only use it, **Add files** and **Share** are not shown, and the page says whom to contact when material needs to be added or changed.
+
+### Share and manage members
+
+If you can manage a knowledge base, click **Share**:
+
+1. Under "Who can use it", choose the audience.
+2. Under "Add members or Spaces", search by name for people, groups or Spaces (only Team knowledge bases can list Spaces), choose a level and click **Add**.
+3. In the list, change someone's level or remove them. Removing shows a message with **Undo** that stays for at least 8 seconds.
+
+Changes apply immediately; the next search follows them. The bottom of the dialog says how many people can use it, how many of them can edit and how many can manage. **Copy link** copies the knowledge base's address only and gives no one access.
+
+Everyone else can open **Who has access** to see the same information without changing it. My knowledge bases can't be shared.
+
+### Rename, transfer and delete
+
+- **Rename or change the description**: people who can manage it change them under **Settings** and save.
+- **Transfer ownership**: the owner or an automatic manager can transfer ownership to someone who can already manage the knowledge base. The previous owner keeps managing it while they still qualify. Default and My knowledge bases can't be transferred.
+- **Delete the knowledge base**: the owner or an automatic manager clicks **Delete knowledge base…**; the confirmation shows how many files it holds. After deletion, those files leave knowledge and are no longer searched, and their originals stay in Files. Default knowledge bases can't be deleted. If some files can't leave, the knowledge base is kept and the message explains why.
+
+### Add files
+
+When you click **Add files** on a knowledge base's page, **Add to** in the upload window defaults to that knowledge base; from the list of knowledge bases, it defaults to the current Space's default knowledge base. The choices are grouped under My, the current Space and Team. Knowledge bases you can't add files to are listed but can't be chosen, with the reason. The embedding model check, supported formats and sizes, ZIP, Google Drive, cancelling and error explanations are the same as under "Upload files" below.
+
+### Move files to another knowledge base
+
+1. In a file's details, click **Move to another knowledge base…**, or select files on the **Files** tab and choose **Move to another knowledge base…**.
+2. Choose the target. The list is grouped under My, Space and Team and shows who can use each one; you can only choose knowledge bases you can edit.
+3. The window then says how many people gain access and how many lose it after the move. Click **Move** to confirm.
+
+To move a file you added, you need to be able to edit the knowledge base it is in; to move someone else's file, you need to be able to manage it. The original, its versions, citations, document matrices and extraction results are all kept, and access is then computed from the new knowledge base. People who lose access no longer see the file's name or content, and citations show them a restricted source.
+
+### Add from Files or from a conversation
+
+On **Library → Files**, **Add to knowledge base** now asks for a knowledge base (with the same rules as **Add to** above) instead of a scope. **View in knowledge base** opens the knowledge base the file is in, with the file selected.
+
+When you ask the assistant in a conversation to add a file to knowledge, say which knowledge base. If you don't, or if you can't edit that knowledge base, the assistant asks you before adding anything.
+
+### File details and citations
+
+In file details, the visibility is replaced by **Knowledge base** (a link to it) and **Who has access** (a one-line summary, with **View members** to open its Members tab). **Change visibility** is replaced by **Move to another knowledge base…**. Everything else stays the same.
+
+Conversations search every knowledge base you can use in the current Space: your My knowledge bases, the current Space's knowledge bases and the Team knowledge bases. You don't choose a knowledge base in the conversation. Citation cards and report sources follow the same rules as before, and people without access see only a restricted source. **Open in knowledge base** opens the knowledge base the file is in, with the file selected. Global search's Knowledge group likewise lists only files from knowledge bases you can use.
+
+### Notices and phones
+
+- The first time you open the Knowledge page after knowledge bases are enabled, a one-time notice says your material was organized by its old scopes: personal files are in My knowledge, Space files in the knowledge base named after the Space and Team files in the Team knowledge base. Who can see what has not changed.
+- Space viewers also see a notice that they can now only use Space knowledge bases and can no longer add or delete files in them; they can ask a Space admin when needed.
+- On a phone, the list of knowledge bases and the file table become rows, header buttons wrap, and tabs scroll sideways. Share and dialogs with several fields open from the bottom of the screen.
+
+If an administrator later turns this feature off again, files in knowledge bases created in a Space or the Team can't be searched or opened until it is turned back on. Files in default knowledge bases and in My knowledge bases stay available.
+
 ## Choose who can see a file
+
+When knowledge bases are enabled, you choose a knowledge base under **Add to** when you upload instead, and that knowledge base decides who can see the file; see the previous section.
 
 Pick a visibility scope when you upload:
 
@@ -38,6 +157,8 @@ Pick a visibility scope when you upload:
 - **Team**: everyone in the team can search it. Only team administrators can upload to the team scope.
 
 Being an administrator of one Space does not grant Team-wide upload permission. Ask a Team administrator to add Team knowledge.
+
+Viewers of a Space can read and search its knowledge but cannot add files to it, or change or delete files in it, including files they added earlier. Their personal files are not affected. To add material, ask a Space administrator to change your role.
 
 ## Upload files
 
@@ -58,6 +179,8 @@ On **Library → Files**, the **Knowledge base** column shows where each file st
 - **Suggested for knowledge base** or **Not added**: click **Add to knowledge base**, choose who can search it (Personal, the current space, or Team), and confirm. After it's added, **View progress** in the message takes you straight to the file.
 
 Adding a file to the knowledge base doesn't move or copy it. It stays in Files.
+
+When knowledge bases are enabled, **Add to knowledge base** asks for a knowledge base and **View in knowledge base** opens the knowledge base the file is in; see "Add from Files or from a conversation" above.
 
 The **Add to knowledge base** window checks for an active Team embedding model before you confirm. If it is missing, follow the same configuration guidance as in the upload window above; the file remains in Files.
 
@@ -89,6 +212,8 @@ When a file fails, follow the message:
 
 ## Find files
 
+When knowledge bases are enabled, the actions below happen on the **Files** tab of each knowledge base's page, which has no Scope filter. To search across knowledge bases, use the search and deep search on the list of knowledge bases.
+
 - Use the scope above the list to switch between Personal, Space, and Team. The scope is the **Scope** filter in the toolbar (on a phone, under **Filters**). Space shows the current space name, with a short note on who can search that scope.
 - With the **Scope** filter, if there is an **All** option, it lists the personal, current space, and team files you can search at once, and the **Scope** column in the table shows where each file belongs. The page remembers the scope you chose last time; the first time, it shows the current space.
 - Type in the search box to find files by name.
@@ -105,14 +230,16 @@ When the page remembers the address this way, the list also supports full keyboa
 
 ## File details
 
+When knowledge bases are enabled, see "File details and citations" above for what changes in the details.
+
 Click a file in the list to open its details: status, visibility, uploader, upload time, and size.
 
-- When a file is available, click **Use in chat** to start a new chat with the file attached. This option is offered for files you uploaded in the current space; other files are still searched automatically in chats.
+- To add a shared document to the conversation you are writing, choose **+ → Choose from Library → Team materials** or **Current Space**. The selected version is copied to your draft as an attachment. You can also ask the assistant to search the knowledge base. In a file's details, **Use in chat** starts a new chat for files you uploaded in the current Space.
 - If a file has been cited in chats, the number of citations appears under its name.
 - When you open a file from deep search results, the matching passage is shown first and highlighted.
 - In a document matrix, **View source** on a cell opens the file details right on the page with the cited passage shown first; close it to return to the matrix.
 - A file that is still processing shows its progress; you can close the details and processing continues. If processing failed, the details explain why and you can **Retry** right there.
-- If you have permission, you can also change visibility, extract the file to a table, or delete the file from the details.
+- If you have permission, you can also change visibility, extract the file to a table, or delete the file from the details. Changing the visibility of a file someone else added asks for a reason of at least 10 characters.
 - If the preview can't be opened, the details explain why. When **Retry Preview** is shown, you can retry without closing the details. If the file content can be read but can't be displayed right now, you can download the original instead. If you don't have access or the file is no longer reachable, check your access or contact the person who manages the file.
 
 ## Check a file's source and restore the original
@@ -145,21 +272,94 @@ Earlier matrix values and citations are not recalculated automatically when a so
 
 1. Click **Document matrix**, then **New matrix**, and pick the files to include. You can also select several files under Files and click **Open as matrix**.
 2. Add a question column (for example "What is the contract amount?"), choose the answer type, and run it. Each row is a file, and each cell is that file's answer to the question.
-3. Click a cell to see the answer and its source. You can edit the answer or mark it as checked; **View source** opens the file details on the same page with that passage first.
+3. Click a cell to see the answer and its source. You can edit the answer or mark it as checked; **View source** opens the file details on the same page with that passage first. The source line also says where the passage is: the page for PDFs and presentations, and the paragraph for Word, Excel, Markdown and other files without fixed pages. No location is shown when the quoted text is not found in the file. Cells from earlier runs may still show a page estimated by AI; rerun them to locate the page in the source.
 4. Runs use credits based on document length; you see an estimate before a run starts.
+
+By default, a matrix can have up to 20 columns and 500 files; if you go over, the message shows the actual limit and the current count. A column name cannot be empty or repeat another column's name in the same matrix; names that differ only in leading or trailing spaces, or in full-width and half-width characters, count as the same name.
+
+The **Document matrix** list shows one matrix per row, with where its rows come from, files × columns, the last run and who created it. Click a matrix name to open it.
+
+### Change a matrix after you create it
+
+Do this on a computer; on a phone you can only view a matrix.
+
+- **Add files**: click **Add files** below the table and search by file name. Files are grouped under "This Space" and "Team". Files already in the matrix, personal files and files still being processed are listed with the reason they can't be added; personal files can only go into matrices visible to only you (your administrator enables them; see “Matrices visible to only you” below), where you can check them like any other file. You can add up to 100 files at a time. New files appear at the end of the table as "Not run"; **Run** then processes only cells that haven't run or have failed, and existing results are kept.
+- **Remove files**: point at a file's row and choose **⋯** → **Remove from Matrix…**, or select several rows and click **Remove from matrix**, up to 100 at a time. The confirmation says how many cells are deleted and how many of them were edited by hand or verified. The files stay in the knowledge base and can be added again later; runs in progress skip removed files.
+- **Rename**: click the matrix name at the top, or choose **⋯** → **Rename**. Type the new name and press Enter to save, or press Esc to keep the current name. The name can't be empty.
+- **Delete the matrix**: choose **⋯** → **Delete Matrix…**. The confirmation says how many cells' results are deleted; runs in progress stop, and credits already used are not refunded. The files themselves aren't affected.
+
+Space members can add files, rename the matrix and remove files with no edited or verified cells. Removing files with edited or verified cells, and deleting the matrix, takes the matrix creator, a Space admin or a Team admin. You can also undo those edits and verifications in the cells first, then remove the files.
+
+### Matrices visible to only you
+
+Your administrator turns this feature on step by step. Once it's on, the step where you click **Create** for a new matrix asks **Who can see it**:
+
+- **Space members** (the default): as before, members of the current Space see the matrix in the list and on Home and can open it; each row still follows their own access to the file.
+- **Only me**: only you can see and use the matrix, not even Space or Team admins. Your personal files are added to the files you can choose, and the list and the top of the matrix page show **Only me**.
+
+For an existing matrix, its creator chooses **⋯** → **Make Visible to Only Me** or **Make Visible to Space Members** on a computer and confirms.
+
+- When you make it visible to only you, the confirmation names the members who edited or verified cells or ran the matrix: their edits and verifications stay, but they can no longer open it. While other members' runs are still in progress you can't change it; wait until they finish. If a column has a source discovery purpose, set it to "None" first.
+- To make it visible to Space members, the matrix can't hold personal files. The message lists them; remove them from the matrix and try again.
+- Matrices visible to only you can't have a source discovery purpose, and saving one as a template can't include personal files; the message lists the files to remove first. Their runs count toward the Space's limit of runs at the same time.
+- When you delete your account, your matrices visible to only you are deleted with their cells, runs and history; matrices visible to Space members stay.
+- If your administrator later turns the feature off, existing matrices visible to only you stay visible to you only and keep their personal files, but you can no longer create them or change who can see a matrix.
+
+### Run and rerun
+
+**Run** processes every unfinished cell, meaning cells that haven't run or have failed; existing results are not rerun. Click **▾** next to **Run** to choose what to run; the first three items show how many cells they cover:
+
+- **Run Unfinished Only**: the same as clicking **Run**.
+- **Rerun Stale Only**: cells whose result is out of date because the column's question changed or the file has a new version.
+- **Rerun Failed Only**: only the failed cells.
+- **Try on 3 Files First…**: only the first 3 files that still have unfinished cells. Check the results and adjust the questions if needed before you run the rest. The task summary marks this run as a trial.
+- **Rerun All…**: extracts every cell again but keeps verified and hand-edited cells; the menu says how many it keeps. To rerun a verified cell, undo the verification first, or open the cell and click **Rerun cell**.
+
+**Run This Column** and **Rerun Whole Column…** in a column header's menu work the same way for that column.
+
+Before a run starts, the confirmation shows:
+
+- How many cells each column runs and its estimated credits. Reading the documents is shared by the columns and has its own line. A cross-checked column reads every file again, which often makes it the largest cost; the confirmation says so.
+- The total, your balance, the estimated time (you can leave the page while it runs) and the longest file's share of the estimate.
+- **Try on N files first**: when checked, only the first few files run and the cost shown is the trial's.
+
+In an open cell, **Rerun cell** and **Retry cell** show about how many credits they use. A single-cell rerun starts right away without a confirmation and replaces a hand-edited or verified value.
+
+Cells that fail because of a timeout, a temporary model service error or an interruption are retried once automatically before the run ends, after a wait of half a minute to a minute. Failed attempts use no credits, and a successful retry is charged as usual. If most calls fail, which points to a temporary model service outage, nothing is retried automatically and the task summary says why; try **Rerun Failed Only** again later. Cells whose model output couldn't be read have already used credits and are not retried automatically; rerun them yourself.
+
+### Check the results
+
+The toolbar above the table helps you check the AI's answers cell by cell:
+
+- **Verified x / y**, on the right of the toolbar, shows how many of the cells you can view are verified.
+- **Search in table** finds rows by file name or answer.
+- **Status** shows only rows with cells that are Not Verified, Edited, Low Confidence, Cross-Check Mismatch, Failed or Stale. Low Confidence means a confidence below 70%, or an answer whose quoted source text can't be found in the file; Cross-Check Mismatch means the two extractions of a cross-checked column differ.
+- **Add filter** filters by the values of one column. Text and option columns offer "is" and "contains"; number columns offer "is", "greater than" and "less than", and date columns "is", "after" and "before"; every column offers "is empty". Click a filter to change or remove it.
+- **Sort** orders the rows by file name or by any column; rows without a value come last.
+- Search, filters and sort are written into the page address, so going back or reloading keeps them, and a colleague who opens the link sees the same view. Click **Clear filter** or press Esc to show every row again. Rows of files you can't view are hidden while you filter.
+
+**Mark Column Verified…** in a column header's menu marks every finished, current cell in that column as verified at once, hand-edited cells included; unfinished, failed and stale cells are not marked. The confirmation says how many cells are marked, and rows hidden by the filters are included. When it's done, the message says which cells were not marked and why.
+
+When you open a cell, the side panel shows the column's full question at the top. Below it, **History** lists the latest 50 entries: who edited the value, kept it as text, verified it or removed the verification, and when; and when the AI extracted, reran or retried it. History records what was done, not the cell's earlier values; changes made before this feature was available have no history. Removing a file from the matrix also removes its cells' history.
+
+Marking a column verified takes a Space member; viewers can see the progress, filters, sort and history. On a phone, only the progress is shown.
+
+### Export to Excel
+
+Click **Export to Excel** at the top of the matrix to download it as an Excel workbook named after the matrix, with sheet names and headings in your interface language. **Answers** has one row per file and one column per question; numbers, dates and yes/no answers are real spreadsheet values you can sort, filter and add up, verified answers are green, and answers edited by hand that aren't verified yet are yellow. **Sources** has one row per cell with the file, the column and its question, the answer, its status, the AI's confidence, the page or paragraph when known, and the quoted source text. **About** shows the matrix name, when and by whom it was exported, how many cells were hidden, and what each status means. The file holds only what you can see in the matrix: files you can't view are listed as "(No access)" without their values. Text is always saved as text, so content that looks like a formula isn't run, and content longer than 32,000 characters is cut and marked "(truncated)". Every Space role, viewers included, can export; do it on a computer, as phones don't show the button. The file shows the matrix as it was when you exported it and doesn't update later.
 
 ### Read the statuses in a matrix
 
 - **Not run**: the question hasn't been processed yet.
 - **Processing**: the task is in progress.
-- **Failed**: open the cell to see why, then decide whether to retry.
+- **Failed**: open the cell to see why, then decide whether to retry. Temporary failures such as timeouts were already retried once automatically.
 - **No value extracted**: the question was processed but no result was extracted. Check the source text; this doesn't prove the answer is missing from the file.
 
-A matrix groups its tasks in one task summary; expand **Run history** to see each task. Reopening a finished matrix doesn't show old success messages again. If something failed, the summary keeps the number of items to handle; expand it and choose **View failed**. For long column names, click or focus the column header with the keyboard to read the full question; the full question also appears when you open a cell. On a phone, tap a cell to see its details and close them to return to the matrix.
+A matrix groups its tasks in one task summary; expand **Run history** to see each task. Reopening a finished matrix doesn't show old success messages again. If something failed, the summary keeps the number of items to handle; expand it and choose **View failed**, which sets the toolbar's Status to Failed. Column headers show the full column name over two lines; point at, click or focus a header with the keyboard to read its full question. The full question also appears when you open a cell. On a phone, tap a cell to see its details and close them to return to the matrix.
 
 After you switch spaces, the matrix checks your access in the current space again. If the matrix isn't available in that space, go back to the list and choose another matrix, or switch back to the original space; once access is restored, click **Retry**.
 
-A set of question columns you use often can be **saved as a template** from the matrix column settings, then brought in with **Use as matrix** under Templates to add all the columns at once. Templates you create can be sent to the team library with **Publish to team library**, so members of other spaces in your team can use **Copy to my space**. Only the question columns are published; files and answers never leave your space.
+A set of question columns you use often can be saved with **Save as template** at the top of the matrix, then brought in with **Use as matrix** under Templates to add all the columns at once. Templates you create can be sent to the team library with **Publish to team library**, so members of other spaces in your team can use **Copy to my space**. Only the question columns are published; files and answers never leave your space.
 
 ## Turn fields in your files into a table with extraction tables
 
@@ -167,10 +367,12 @@ When you have a set of similar files (for example monthly income statements or c
 
 1. In the knowledge base, click **Templates**, then **New template**, and choose **Extraction table (extract on upload)**. Describe the fields in a sentence, review them, and save.
 2. Click **Extract to table** in the file details or in the list's more menu, and answer "Which table should this file be extracted to?". You can also select several files and extract them together. When uploading an Excel file, you can pick the table under "Extraction table" right away.
-3. When extraction finishes, open **Extracted results**. Every cell links back to the source text.
+3. When extraction finishes, open **Extracted results**. Every cell links back to the source text, and its location is shown the same way as in a document matrix.
 4. To stop extracting a file, choose **Don't extract** under **Extract to table**. The file stays available to full-text search.
 
-Extraction is queued within a daily quota, so it can take a while when there are many files. "Template" only means a reusable set of question columns in a matrix: save a matrix as a template, then apply it to a new matrix.
+You only see extracted results for files you can read, so results from other members' personal files never appear in the knowledge base or in chat.
+
+Extraction is queued within a daily quota, so it can take a while when there are many files. The **Templates** view holds two kinds of items: templates are reusable sets of question columns for a matrix (save a matrix as a template, then apply it to a new matrix); extraction tables are sets of fields extracted automatically on upload, with their results under **Extracted results**. When knowledge bases are enabled, extraction tables and their results are both under **Extraction tables**, where **New extraction table** creates one, and **Templates** holds only matrix templates.
 
 ## See sources in answers and reports
 

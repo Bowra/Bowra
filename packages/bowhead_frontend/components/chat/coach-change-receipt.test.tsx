@@ -3,11 +3,14 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
+import { ApiError } from "@/lib/api-client";
 import { projectCoachOperationOpen, readCoachOperation } from "@/lib/coach-operations";
 import { requestCoachOperationOpen } from "@/lib/coach-operation-requests";
 import { CoachChangeReceipts } from "./coach-change-receipt";
 import { CoachReceiptScopeContext } from "@/lib/coach-receipt-scope";
 import { dispatchToTurnStore } from "@/lib/turn-store-dispatch";
+import { setAgentReleaseBarCapabilityForTest } from "@/lib/use-agent-release-bar-capability";
+import { CoachOpenAgentEditorsContext } from "@/lib/use-coach-resource-editors";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => navigation }));
@@ -87,4 +90,92 @@ it("does not eagerly read historical case receipts and keeps other-session refer
   expect(readCoachOperation).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "查看建议" }));
   await vi.waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/agents/manage/created/?agent_id=osa_1&section=evaluate"));
+});
+
+describe("Coach draft receipts read from the run record (release bar switch on)", () => {
+  const SCOPE = { userId: "u_1", teamId: "team_1", workspaceId: "ws_1", sessionId: "s_1" };
+  const reference = (proposalId: string) => ({ kind: "agent_change" as const, agent_id: "osa_1", proposal_id: proposalId });
+  const recordWrites = (turnId: string, proposalIds: string[]) => dispatchToTurnStore("tool_result", {
+    result_meta: { coach_operations: { schema_version: 1, truncated: false, receipts: proposalIds.map((proposalId, index) => ({
+      call_id: `call_${index}`, tool_name: "agent_change_propose", operation_ref: reference(proposalId), reported_ok: true,
+    })) } },
+  }, "live", turnId);
+  const written = (proposalId: string, paths: string[]) => ({
+    operation_ref: reference(proposalId),
+    domain_result: { effect: "draft_updated", released: false, changed_paths: paths, proposal: { base_document: { listing: { display_name: "门店周报" } } } },
+  });
+  const render = (turnId: string, open: ReadonlySet<string> = new Set()) => renderIntl(
+    <CoachReceiptScopeContext.Provider value={SCOPE}>
+      <CoachOpenAgentEditorsContext.Provider value={open}>
+        <CoachChangeReceipts turnId={turnId} sessionId="s_1" current />
+      </CoachOpenAgentEditorsContext.Provider>
+    </CoachReceiptScopeContext.Provider>,
+  );
+
+  afterEach(() => setAgentReleaseBarCapabilityForTest(null));
+
+  it("names the Agent and every field Coach wrote in the Turn, without an open event or 还没发布", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    recordWrites("t_record", ["acp_r1", "acp_r2"]);
+    vi.mocked(readCoachOperation).mockImplementation(async (ref) => ref.kind === "agent_change" && ref.proposal_id === "acp_r1"
+      ? written("acp_r1", ["/definition/system_prompt"])
+      : written("acp_r2", ["/definition/system_prompt", "/definition/tool_refs"]));
+    render("t_record");
+
+    expect(await screen.findByText("已写进草稿 · 门店周报 · 工作说明、工具 2 项")).toBeVisible();
+    expect(screen.getByRole("group", { name: "Coach 写进草稿的修改" })).toBeVisible();
+    expect(screen.queryByText(/还没发布/)).toBeNull();
+    expect(readCoachOperation).toHaveBeenCalledWith(reference("acp_r1"), "ws_1", "s_1", expect.any(AbortSignal), "team_1");
+    fireEvent.click(screen.getByRole("button", { name: "在画布查看" }));
+    expect(requestCoachOperationOpen).toHaveBeenCalledWith({ turnId: "t_record", reference: reference("acp_r2") });
+    const manage = screen.getByRole("link", { name: "去管理页测试和发布" });
+    expect(manage.getAttribute("href")).toContain("/agents/manage/?agent_id=osa_1");
+    fireEvent.click(manage);
+    expect(navigation.push).toHaveBeenCalledWith("/agents/manage/?agent_id=osa_1");
+  });
+
+  it("only says the editor is open on the right while it is", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    recordWrites("t_open", ["acp_o1"]);
+    vi.mocked(readCoachOperation).mockResolvedValue(written("acp_o1", ["/definition/system_prompt"]));
+    render("t_open", new Set(["osa_1"]));
+
+    expect(await screen.findByText("已写进草稿 · 门店周报 · 工作说明 1 项 · 已在右侧打开")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "在画布查看" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "去管理页测试和发布" })).toBeNull();
+  });
+
+  it("keeps only the first words when the read answers coach_operation_unavailable", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    recordWrites("t_gone", ["acp_g1"]);
+    vi.mocked(readCoachOperation).mockRejectedValue(new ApiError(404, "unavailable", { code: "coach_operation_unavailable" }));
+    render("t_gone");
+
+    await vi.waitFor(() => expect(readCoachOperation).toHaveBeenCalled());
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "在画布查看" })).toBeNull());
+    expect(screen.getByText("修改智能体草稿")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "去管理页测试和发布" })).toBeNull();
+  });
+
+  it("shows one row when an open event repeats a recorded write, and keeps an older Turn's open-only row", async () => {
+    setAgentReleaseBarCapabilityForTest(true);
+    recordWrites("t_both", ["acp_1"]);
+    open("t_both", "c".repeat(32));
+    open("t_old_open", "d".repeat(32));
+    vi.mocked(readCoachOperation).mockResolvedValue(written("acp_1", ["/definition/system_prompt"]));
+    render("t_both");
+    expect(await screen.findByText("已写进草稿 · 门店周报 · 工作说明 1 项")).toBeVisible();
+    expect(screen.queryByText("已改到草稿 · 1 处")).toBeNull();
+    cleanup();
+    render("t_old_open");
+    expect(await screen.findByText("已改到草稿 · 1 处")).toBeVisible();
+  });
+
+  it("renders no recorded row with the switch off", async () => {
+    setAgentReleaseBarCapabilityForTest(false);
+    recordWrites("t_off", ["acp_f1"]);
+    render("t_off");
+    expect(screen.queryByRole("group", { name: "Coach 写进草稿的修改" })).toBeNull();
+    expect(readCoachOperation).not.toHaveBeenCalled();
+  });
 });

@@ -98,7 +98,10 @@ async def get_team_operations_report(
                 "COALESCE(SUM(CASE WHEN reason='turn' THEN tokens_output ELSE 0 END),0) AS output_tokens, "
                 "COALESCE(SUM(CASE WHEN reason!='turn' THEN tokens_input+tokens_output ELSE 0 END),0) AS background_tokens "
                 "FROM llm_usage_events WHERE team_id=? "
-                "AND datetime(created_at)>=datetime(?) AND datetime(created_at)<datetime(?)",
+                "AND datetime(created_at)>=datetime(?) AND datetime(created_at)<datetime(?) "
+                # An Owner draft trial is charged to its Owner but is not team usage (trial-tech-design §5).
+                "AND NOT EXISTS (SELECT 1 FROM turns t JOIN sessions s ON s.id=t.session_id "
+                "WHERE t.id=llm_usage_events.turn_id AND s.origin='agent_trial')",
                 (team_id, start, end),
             ) as cur:
                 usage = await cur.fetchone()

@@ -60,6 +60,11 @@ describe("Results namespaced history state", () => {
 
     expect(readResultsNavigationState(state, expected)).toEqual(navigation);
     expect(readResultsExplorerState(state, expected)).toEqual(explorer);
+    // Chat running state R2.3: a Turn filter survives the history entry; a malformed one is dropped.
+    const turnExplorer = { ...explorer, filters: { ...explorer.filters, turn_id: "t_1" } };
+    expect(readResultsExplorerState(withResultsHistoryState({}, navigation, turnExplorer), expected)?.filters.turn_id).toBe("t_1");
+    const badTurn = { ...explorer, filters: { ...explorer.filters, turn_id: 7 as unknown as string } };
+    expect(readResultsExplorerState(withResultsHistoryState({}, navigation, badTurn), expected)?.filters).toEqual(explorer.filters);
     expect(readResultsNavigationState(state, {
       sessionId: "s_other",
       scope: "session",

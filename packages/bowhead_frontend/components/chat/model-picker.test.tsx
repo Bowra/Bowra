@@ -20,6 +20,7 @@ vi.mock("next-intl", () => ({
       no_providers_hint_manage: "Add a model connection in Team settings",
       team_default: "Team default",
       stale_selection: "Selection is no longer available",
+      manage: "Manage models…",
     };
     return messages[key] ?? key;
   },
@@ -29,6 +30,9 @@ const sessionMock = vi.hoisted(() => ({ role: "member" as string }));
 vi.mock("@/lib/auth/auth-session-context", () => ({
   useOptionalAuthSession: () => ({ me: { team_role: sessionMock.role } }),
 }));
+
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => routerMock }));
 
 vi.mock("@/lib/api", () => ({
   getUserSettings: apiMocks.getUserSettings,
@@ -291,5 +295,24 @@ describe("ModelPicker menu behaviour", () => {
 
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(fallbackRef.current));
+  });
+});
+
+describe("ModelPicker route to model settings", () => {
+  it("offers team owners and administrators a way to manage models", async () => {
+    sessionMock.role = "owner";
+    render(<ModelPicker />);
+    fireEvent.click(await screen.findByRole("button", { name: /gpt-4\.1-mini/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage models…" }));
+    expect(routerMock.push).toHaveBeenCalledWith("/team/settings/models/");
+    sessionMock.role = "member";
+  });
+
+  it("does not offer it to members", async () => {
+    sessionMock.role = "member";
+    render(<ModelPicker />);
+    fireEvent.click(await screen.findByRole("button", { name: /gpt-4\.1-mini/ }));
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "Manage models…" })).toBeNull();
   });
 });

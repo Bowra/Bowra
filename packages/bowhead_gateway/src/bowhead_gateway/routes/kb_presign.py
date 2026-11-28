@@ -63,7 +63,9 @@ from bowhead_gateway.routes.kb import (
     _require_workspace_context,
     _resolve_kb_mime,
     _supports_kb_document_name,
+    knowledge_write_error,
     reparse_file,
+    require_knowledge_base_target,
 )
 from bowhead_gateway.skill_import_landing import finish_bundle_import, inventory_bundle_for_kb
 
@@ -90,6 +92,8 @@ class KbPresignRequest(BaseModel):
     doc_type_id: str | None = None
     use_llm: bool = False
     checksum_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    # The target knowledge base (FEATURE_KNOWLEDGE_BASES); ignored while the switch is off.
+    knowledge_base_id: str | None = Field(default=None, max_length=64)
 
 
 class KbPresignResponse(BaseModel):
@@ -178,7 +182,8 @@ async def kb_presign_single(
     # ACL at presign — tech-design §5.1b
     if body.scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4.
-    if not KbPermission.can_write_to_scope(body.scope, body.scope_id, ctx, ctx.role):
+    target = await require_knowledge_base_target(request, ctx, scope=body.scope, scope_id=body.scope_id, knowledge_base_id=body.knowledge_base_id)
+    if not KbPermission.can_write_to_scope(body.scope, body.scope_id, ctx, ctx.role, knowledge_base_id=target):
         emit_audit(
             "kb_presign.scope_write_denied",
             {
@@ -272,24 +277,28 @@ async def kb_presign_single(
     # kb_files row separate — files_store has its own DB.
     # Phase 1.4b review P0 #3: create row with initial_parse_status atomically
     # so a crash between INSERT + UPDATE can't leave the row stuck in 'pending'.
-    from bowhead_core.kb.ingestion import KnowledgeAction
+    from bowhead_core.kb.ingestion import KnowledgeAction, KnowledgeWriteError
 
-    kbf_id, _, _ = await files_store.create_admitted(
-        action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
-        source_fingerprint=aid,
-        artifact_id=aid,
-        filename=safe_name,
-        mime_type=body.mime,
-        size_bytes=body.size_bytes,
-        scope=body.scope,
-        scope_id=body.scope_id,
-        workspace_id=workspace_id,
-        team_id=ctx.team_id,
-        uploaded_by=user.id,
-        use_llm_marker=body.use_llm,
-        doc_type_id=body.doc_type_id,
-        initial_parse_status="awaiting_upload",
-    )
+    try:
+        kbf_id, _, _ = await files_store.create_admitted(
+            action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+            source_fingerprint=aid,
+            knowledge_base_id=target,
+            artifact_id=aid,
+            filename=safe_name,
+            mime_type=body.mime,
+            size_bytes=body.size_bytes,
+            scope=body.scope,
+            scope_id=body.scope_id,
+            workspace_id=workspace_id,
+            team_id=ctx.team_id,
+            uploaded_by=user.id,
+            use_llm_marker=body.use_llm,
+            doc_type_id=body.doc_type_id,
+            initial_parse_status="awaiting_upload",
+        )
+    except KnowledgeWriteError as exc:
+        raise knowledge_write_error(exc) from None
 
     emit_audit(
         "kb_presign.issued",
@@ -351,7 +360,8 @@ async def kb_presign_confirm(
     # Re-check ACL — membership could have changed between presign and confirm
     if dto.scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4.
-    if not KbPermission.can_write_to_scope(dto.scope, dto.scope_id, ctx, ctx.role):
+    # The knowledge base chosen at presign needs edit now too (a named one is refused while the switch is off).
+    if not KbPermission.can_write_to_scope(dto.scope, dto.scope_id, ctx, ctx.role, knowledge_base_id=dto.knowledge_base_id):
         emit_audit(
             "kb_presign.scope_revoked_at_confirm",
             {
@@ -548,6 +558,8 @@ class KbBundlePresignRequest(BaseModel):
     scope_id: str = Field(min_length=1)
     use_llm: bool = False
     checksum_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    # The target knowledge base (FEATURE_KNOWLEDGE_BASES): every file of the bundle joins it.
+    knowledge_base_id: str | None = Field(default=None, max_length=64)
 
 
 class KbBundlePresignResponse(BaseModel):
@@ -590,7 +602,8 @@ async def kb_presign_bundle(
     ctx = await _make_scope_context_checked(user, request)
     if body.scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4.
-    if not KbPermission.can_write_to_scope(body.scope, body.scope_id, ctx, ctx.role):
+    target = await require_knowledge_base_target(request, ctx, scope=body.scope, scope_id=body.scope_id, knowledge_base_id=body.knowledge_base_id)
+    if not KbPermission.can_write_to_scope(body.scope, body.scope_id, ctx, ctx.role, knowledge_base_id=target):
         emit_audit(
             "kb_presign_bundle.scope_write_denied",
             {
@@ -675,24 +688,28 @@ async def kb_presign_bundle(
             raise
 
     # Bundle marker kb_files row — carries scope/scope_id for confirm ACL check
-    from bowhead_core.kb.ingestion import KnowledgeAction
+    from bowhead_core.kb.ingestion import KnowledgeAction, KnowledgeWriteError
 
-    kbf_id, _, _ = await files_store.create_admitted(
-        action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
-        source_fingerprint=aid,
-        artifact_id=aid,
-        filename=safe_name,
-        mime_type=body.mime,
-        size_bytes=body.size_bytes,
-        scope=body.scope,
-        scope_id=body.scope_id,
-        workspace_id=workspace_id,
-        team_id=ctx.team_id,
-        uploaded_by=user.id,
-        use_llm_marker=body.use_llm,
-        doc_type_id=None,
-        initial_parse_status="awaiting_upload",
-    )
+    try:
+        kbf_id, _, _ = await files_store.create_admitted(
+            action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+            source_fingerprint=aid,
+            knowledge_base_id=target,
+            artifact_id=aid,
+            filename=safe_name,
+            mime_type=body.mime,
+            size_bytes=body.size_bytes,
+            scope=body.scope,
+            scope_id=body.scope_id,
+            workspace_id=workspace_id,
+            team_id=ctx.team_id,
+            uploaded_by=user.id,
+            use_llm_marker=body.use_llm,
+            doc_type_id=None,
+            initial_parse_status="awaiting_upload",
+        )
+    except KnowledgeWriteError as exc:
+        raise knowledge_write_error(exc) from None
 
     emit_audit(
         "kb_presign_bundle.issued",
@@ -762,7 +779,7 @@ async def kb_presign_bundle_confirm(
         # Personal bundles also retain their upload Space when the browser switches.
         workspace_id=marker.workspace_id if marker.scope != "team" else None,
     )
-    if not KbPermission.can_write_to_scope(marker.scope, marker.scope_id, ctx, ctx.role):
+    if not KbPermission.can_write_to_scope(marker.scope, marker.scope_id, ctx, ctx.role, knowledge_base_id=marker.knowledge_base_id):
         emit_audit(
             "kb_presign_bundle.scope_revoked_at_confirm",
             {
@@ -1042,13 +1059,17 @@ async def kb_presign_bundle_confirm(
                     current_ctx = await _make_scope_context_checked(
                         user, request, workspace_id=marker.workspace_id if marker.scope != "team" else None
                     )
-                    if not KbPermission.can_write_to_scope(marker.scope, marker.scope_id, current_ctx, current_ctx.role):
+                    if not KbPermission.can_write_to_scope(
+                        marker.scope, marker.scope_id, current_ctx, current_ctx.role, knowledge_base_id=marker.knowledge_base_id
+                    ):
                         raise _kb_error(403, "kb_scope_access_denied")
                     await _require_kb_scope_grant(request, current_ctx, scope=marker.scope, scope_id=marker.scope_id, permission="write")
                     child_id, _, _ = await files_store.create_admitted(
                         parent_file_id=file_id,
                         action=KnowledgeAction(f"bundle:{artifact_id}:{art.id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
                         source_fingerprint=art.id,
+                        # The files join the knowledge base the marker joined at presign.
+                        knowledge_base_id=marker.knowledge_base_id,
                         artifact_id=art.id,
                         filename=display_name,
                         mime_type=detected_mime,

@@ -1,4 +1,5 @@
 import { apiFetch, readApiError } from "./api-client";
+import { publishAgentReleased } from "./agent-release-events";
 import { randomUuid } from "./random-id";
 import { withoutSkillOperationTools } from "./agent-tool-selection";
 
@@ -447,6 +448,11 @@ export interface AgentAuthoringCatalog {
   model_policy: AgentAuthoringModelPolicy;
   primary_capabilities: AgentAuthoringPrimaryCapability[];
   tools: AgentAuthoringTool[];
+  /**
+   * Built-in Tools the team turned off. They are not in `tools`; an Agent or Plugin that already selected one
+   * keeps it unchanged (the run leaves it out), so pickers neither list it nor report it as unavailable.
+   */
+  team_disabled_tools?: string[];
   skills: AgentAuthoringSkill[];
   /** Built-in Plugin selection follows Capability Center permissions. */
   plugins?: AgentAuthoringPluginSection;
@@ -751,6 +757,33 @@ export interface AgentVersionWorkbench {
    * release superseded it. There is no reviewer note, only the reason code. Absent on older servers.
    */
   latest_decision?: AgentVersionLatestDecision | null;
+  /**
+   * The current Owner's latest trials of the saved draft (测试用例 › 试用记录), newest first, at most 10; empty for
+   * everyone else and absent on servers before the Owner draft trial.
+   */
+  recent_trials?: AgentRecentTrial[];
+}
+
+/** A released version, as a trial names the release its draft became. */
+export interface AgentTrialRelease {
+  release_id: string;
+  release_sequence: number;
+}
+
+export interface AgentRecentTrial {
+  session_id: string;
+  first_question: string;
+  last_message_at: string;
+  turn_count: number;
+  /** The frozen drafts this trial used, in the order it first used them. */
+  drafts_used: Array<{
+    candidate_id: string;
+    candidate_kind: "draft" | "submitted";
+    frozen_at: string;
+    released_as: AgentTrialRelease | null;
+  }>;
+  /** The trial ended: the draft it used last was released as this version. */
+  released_as: AgentTrialRelease | null;
 }
 
 export interface AgentVersionLatestDecision {
@@ -2181,14 +2214,25 @@ export function getAgentVersionWorkbench(agentId: string) {
   );
 }
 
-export function createAgentCoachProposal(agentId: string, goal: string, idempotencyKey: string) {
+/**
+ * One Coach drafting call without a chat. `sourceRef` tags the request (AI 优化 uses `ai_optimize:…`) and comes
+ * back on the proposal; resending the same key and body replays the request instead of drafting again.
+ */
+export function createAgentCoachProposal(agentId: string, goal: string, idempotencyKey: string, sourceRef?: string) {
   return json<AgentChangeProposal>(
     `/api/v1/agents/${encodeURIComponent(agentId)}/change-proposals/coach`,
     {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ goal, evidence_excerpts: [] }),
+      body: JSON.stringify({ goal, evidence_excerpts: [], ...(sourceRef ? { source_ref: sourceRef } : {}) }),
     },
+  );
+}
+
+/** One change proposal, in any status (the workbench lists only open ones and those with pending cases). */
+export function getAgentChangeProposal(agentId: string, proposalId: string) {
+  return json<AgentChangeProposal>(
+    `/api/v1/agents/${encodeURIComponent(agentId)}/change-proposals/${encodeURIComponent(proposalId)}`,
   );
 }
 
@@ -2454,7 +2498,7 @@ export function completeAgentVersionRelease(
   const plan = workbench.active_plan_identity;
   const snapshot = workbench.active_snapshot_identity;
   if (!candidate || !plan || !snapshot) throw new Error("agent_eval_identity_missing");
-  return json<AgentPublicationResult>(
+  return announceRelease(agentId, json<AgentPublicationResult>(
     `/api/v1/agents/${encodeURIComponent(agentId)}/release-candidates/${encodeURIComponent(candidate.candidate_id)}/${action}`,
     {
       method: "POST",
@@ -2471,7 +2515,15 @@ export function completeAgentVersionRelease(
         ...(releaseNote ? { release_note: releaseNote } : {}),
       }),
     },
-  );
+  ));
+}
+
+/** Tell other views of the Agent on this page (the trial chat) once the server accepted a release or submission. */
+function announceRelease<T>(agentId: string, request: Promise<T>): Promise<T> {
+  return request.then((value) => {
+    publishAgentReleased(agentId);
+    return value;
+  });
 }
 
 /**
@@ -2485,7 +2537,7 @@ export function releasePrivateAgentDraft(
   options: { workspaceId: string; testState: AgentReleaseTestState; releaseNote: string | null; idempotencyKey: string },
 ) {
   const draft = workbench.next_draft_identity;
-  return json<AgentPublicationResult>(`/api/v1/agents/${encodeURIComponent(agentId)}/releases`, {
+  return announceRelease(agentId, json<AgentPublicationResult>(`/api/v1/agents/${encodeURIComponent(agentId)}/releases`, {
     method: "POST",
     headers: { "Idempotency-Key": options.idempotencyKey },
     body: JSON.stringify({
@@ -2495,7 +2547,7 @@ export function releasePrivateAgentDraft(
       expected_test_state: options.testState,
       ...(options.releaseNote ? { release_note: options.releaseNote } : {}),
     }),
-  });
+  }));
 }
 
 export interface AgentVersionTestResult {
@@ -2665,4 +2717,9 @@ export function getAgentKnowledgeSources(agentId: string, query: string, selecte
   const params = new URLSearchParams({ q: query, offset: String(offset), limit: "20" });
   selected.forEach((id) => params.append("selected", id));
   return json<import("./agent-knowledge-sources").KnowledgeSourceCatalog>(`/api/v1/agents/${encodeURIComponent(agentId)}/knowledge-sources?${params}`, { signal });
+}
+
+/** The selected-knowledge-base picker (FEATURE_KNOWLEDGE_BASES): what the editor can use across their Spaces, grouped. */
+export function getAgentKnowledgeBaseSources(agentId: string, signal?: AbortSignal) {
+  return json<import("./agent-knowledge-sources").KnowledgeBaseSourceCatalog>(`/api/v1/agents/${encodeURIComponent(agentId)}/knowledge-base-sources`, { signal });
 }

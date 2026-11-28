@@ -10,9 +10,10 @@ import {
 import { usePathname } from "next/navigation";
 import { AGENT_MANAGEMENT_VIEWS, agentManagementHref, agentManagementViewForPath, withAgentReturnView } from "@/lib/agent-navigation";
 import { CapabilityLink } from "@/components/capabilities/capability-link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { DialogShell } from "@/components/ui/dialog";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useListDate } from "@/components/ui/list-time";
 import { PageTabs } from "@/components/shell/page-frame";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
@@ -39,10 +40,29 @@ import { useAppRouter } from "@/lib/use-app-router";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import { useSpaceSelection } from "@/lib/use-space";
 import { handoffAgentToNewChat } from "@/lib/composer-handoff";
-import { listManualSubagentDrafts, listSubagentDrafts, SubagentDraftApiError, type SubagentDraftListItem } from "@/lib/subagent-drafts-api";
+import {
+  discardSubagentDraft,
+  getManualSubagentDraft,
+  getSubagentDraft,
+  listManualSubagentDrafts,
+  listSubagentDrafts,
+  SubagentDraftApiError,
+  type SubagentDraftListItem,
+} from "@/lib/subagent-drafts-api";
+import {
+  archivedCreatedCount,
+  CREATED_SEARCH_ROW_CAP,
+  createdAgentRows,
+  createdQueryActive,
+  DEFAULT_CREATED_QUERY,
+  splitHiredRows,
+  type CreatedListQuery,
+} from "@/lib/agent-management-list";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
 import { agentArtworkStyle } from "./agent-artwork";
 import { agentMark } from "./agent-mark";
 import { AgentReleaseInbox } from "./agent-release-inbox";
+import { CreatedDraftRows, CreatedListControls, ManagedAgentRow, UnavailableHiredRow, type ManagedRowHost } from "./agent-management-rows";
 import { AgentRolePreferencesPanel } from "./agent-role-preferences";
 import { AgentTeamTagGovernance } from "./agent-team-tag-governance";
 import { AgentPageHeader } from "./agent-page-frame";
@@ -110,6 +130,11 @@ export function AgentManagement() {
   const requestedView = agentManagementViewForPath(pathname ?? (typeof window === "undefined" ? "" : window.location.pathname));
   const router = useAppRouter();
   const t = useTranslations("agents_marketplace");
+  const tList = useTranslations("agent_list_v2");
+  const locale = useLocale();
+  // FEATURE_AGENT_RELEASE_BAR: the redesigned rows, groups and 团队审批 label (slices 2-5 tech design §5).
+  const listV2 = useAgentReleaseBarCapability();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const listDate = useListDate();
   const canDirectUse = useOptionalAuthSession()?.me?.capabilities?.composer?.agent_start_use === true;
   const canResumeDrafts = useOptionalAuthSession()?.me?.capabilities?.subagent_authoring?.authoring === true;
@@ -143,6 +168,12 @@ export function AgentManagement() {
   const [draftsFailure, setDraftsFailure] = useState<unknown>(null);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [rosterVersion, setRosterVersion] = useState(0);
+  const [manualDraftIds, setManualDraftIds] = useState<ReadonlySet<string>>(new Set());
+  const [draftBusyId, setDraftBusyId] = useState<string | null>(null);
+  const [createdQuery, setCreatedQuery] = useState<CreatedListQuery>(DEFAULT_CREATED_QUERY);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchLoadRef = useRef(false);
+  const searchLoadFailedRef = useRef(false);
   const refreshSequence = useRef(0);
   const previewSequence = useRef(0);
   const dialogTriggerRef = useRef<HTMLElement | null>(null);
@@ -183,6 +214,8 @@ export function AgentManagement() {
       setItems((current) => options.append
         ? [...new Map([...current, ...result.items].map((item) => [item.agent_id, item])).values()]
         : result.items);
+      // A replaced first page drops the pages a search loaded; the search loads them again.
+      if (!options.append) searchLoadFailedRef.current = false;
       setTotalCount((current) => result.total_count ?? (
         options.append ? current + result.items.length : result.items.length
       ));
@@ -222,6 +255,7 @@ export function AgentManagement() {
   useEffect(() => {
     setView(requestedView);
     setActiveDialog(null);
+    setCreatedQuery(DEFAULT_CREATED_QUERY);
     previewSequence.current += 1;
   }, [requestedView]);
   useEffect(() => { void refresh(view); }, [refresh, view]);
@@ -241,7 +275,11 @@ export function AgentManagement() {
     ]).then(([conversationDrafts, manualDrafts]) => {
       const items = [...conversationDrafts, ...manualDrafts]
         .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
-      if (!cancelled) { setDrafts(items); setDraftsError(null); }
+      if (!cancelled) {
+        setDrafts(items);
+        setManualDraftIds(new Set(manualDrafts.map((draft) => draft.draft_id)));
+        setDraftsError(null);
+      }
     }).catch((cause: unknown) => {
       if (cancelled) return;
       // During an upgrade the draft store answers 503; say so calmly instead of alerting.
@@ -263,6 +301,72 @@ export function AgentManagement() {
     });
     return () => { cancelled = true; };
   }, [visibleViews.team]);
+
+  // Decision SD2: search, filter and sort first load the remaining pages through the cursor, at most 500 rows.
+  const searchActive = listV2 && view === "created" && createdQueryActive(createdQuery);
+  useEffect(() => {
+    if (!searchActive || !nextCursor || loading || validating || loadingMore) return;
+    if (searchLoadRef.current || searchLoadFailedRef.current || items.length >= CREATED_SEARCH_ROW_CAP) return;
+    searchLoadRef.current = true;
+    const sequence = refreshSequence.current;
+    const requestView = viewRef.current;
+    setSearchLoading(true);
+    void (async () => {
+      let cursor: string | null = nextCursor;
+      let count = items.length;
+      try {
+        while (cursor && count < CREATED_SEARCH_ROW_CAP) {
+          const result = await listManagedAgents(requestView, { cursor, limit: 100 });
+          if (refreshSequence.current !== sequence || viewRef.current !== requestView) return;
+          setItems((current) => [...new Map([...current, ...result.items].map((item) => [item.agent_id, item])).values()]);
+          loadedAdditionalPageRef.current = true;
+          count += result.items.length;
+          cursor = result.next_cursor ?? null;
+          setNextCursor(cursor);
+        }
+      } catch (cause) {
+        if (refreshSequence.current !== sequence) return;
+        searchLoadFailedRef.current = true;
+        setError(withHttpFailureReason(t("load_failed"), cause, { read: true }));
+      } finally {
+        searchLoadRef.current = false;
+        setSearchLoading(false);
+      }
+    })();
+  }, [searchActive, nextCursor, loading, validating, loadingMore, items.length, t]);
+
+  const deleteDraft = async (draft: SubagentDraftListItem, trigger: HTMLElement) => {
+    const name = draft.title || t("drafts_untitled");
+    const confirmed = await confirm({
+      title: tList("draft_delete_title", { name }),
+      description: tList("draft_delete_body"),
+      confirmLabel: tList("draft_delete_confirm"),
+      returnFocusRef: { current: trigger },
+    });
+    if (!confirmed) return;
+    setStatusMessage("");
+    setDraftBusyId(draft.draft_id);
+    try {
+      // A manual draft lives in a Space: its read and delete name that Space (the list read it there).
+      const context = manualDraftIds.has(draft.draft_id) && teamId && manualDraftSpaceId
+        ? { teamId, workspaceId: manualDraftSpaceId } : null;
+      if (manualDraftIds.has(draft.draft_id) && !context) {
+        throw new SubagentDraftApiError(400, "subagent_draft_context_required", "The draft's Space is not resolved");
+      }
+      const etag = context
+        ? (await getManualSubagentDraft(draft.draft_id, context)).etag
+        : (await getSubagentDraft(draft.draft_id)).etag;
+      await discardSubagentDraft(draft.draft_id, etag, context ?? undefined);
+      setDrafts((current) => current.filter((entry) => entry.draft_id !== draft.draft_id));
+      setStatusMessage(tList("draft_deleted", { name }));
+      window.setTimeout(() => listHeadingRef.current?.focus(), 0);
+    } catch (cause) {
+      const conflict = cause instanceof SubagentDraftApiError && cause.status === 409;
+      setError(withHttpFailureReason(tList(conflict ? "draft_delete_conflict" : "draft_delete_failed", { name }), cause));
+    } finally {
+      setDraftBusyId(null);
+    }
+  };
 
   const changeView = (next: AgentManagementView) => {
     if (pendingId !== null || next === viewRef.current) return;
@@ -309,6 +413,9 @@ export function AgentManagement() {
       const refreshed = await refresh(viewRef.current, { preserve: true, mutationSucceeded: true });
       setRosterVersion((current) => current + 1);
       if (refreshed && resetsPagination) announceFirstPageReset();
+      else setStatusMessage(tList(status === "disabled" ? "status_paused" : "status_enabled", { name: displayName(item) }));
+      // The row moves between 在用 and 现在用不了; keep keyboard focus on it instead of dropping it to the page.
+      window.setTimeout(() => focusMovedRow(item.agent_id), 0);
     } catch (cause) {
       setError(withHttpFailureReason(t("action_failed"), cause));
     } finally {
@@ -432,6 +539,86 @@ export function AgentManagement() {
     }
   };
 
+  const emptyState = (
+    <div className="am-empty"><h3>{t(`empty_${view}_title`)}</h3><p>{t(`empty_${view}_body`)}</p>{view === "hired" || view === "shared" ? <a className="settings-button settings-button--primary settings-button--md" href={appPath("/agents/marketplace/")} onClick={(event) => navigate(event, "/agents/marketplace/")}>{t("find_agents")}</a> : null}</div>
+  );
+  const rowHost: ManagedRowHost = {
+    view,
+    pending: pendingId !== null,
+    canDirectUse,
+    onNavigate: navigate,
+    onStartUse: (item) => handoffAgentToNewChat({ agentId: item.agent_id, label: displayName(item) }),
+    onHire: (item) => void hire(item),
+    onSetStatus: (item, status) => void setStatus(item, status),
+    onUnhire: (item, trigger) => void previewUnhire(item, trigger),
+    onRetry: () => void refresh(view, { preserve: true }),
+  };
+  const skeleton = [0, 1, 2].map((value) => <div key={value} className="am-management-row am-skeleton" />);
+  // The announced count matches the visible heading: 我创建的 leaves archived Agents out and follows search and filter.
+  const v2ListCount = listV2 && view === "created"
+    ? (!nextCursor || searchActive ? createdAgentRows(items, createdQuery, { name: displayName, summary, locale }).length : Math.max(0, totalCount - archivedCreatedCount(items)))
+    : totalCount;
+
+  const renderListV2 = () => {
+    const busy = loading || validating || loadingMore || searchLoading;
+    if (view === "created") {
+      const rows = createdAgentRows(items, createdQuery, { name: displayName, summary, locale });
+      const archived = archivedCreatedCount(items);
+      const complete = !nextCursor;
+      const capped = searchActive && Boolean(nextCursor) && items.length >= CREATED_SEARCH_ROW_CAP;
+      return <>
+        {canResumeDrafts && !draftsLoading && !draftsError && drafts.length > 0
+          ? <CreatedDraftRows drafts={drafts} busyDraftId={draftBusyId} onNavigate={navigate} onDelete={(draft, trigger) => void deleteDraft(draft, trigger)} />
+          : null}
+        <CreatedListControls value={createdQuery} onChange={setCreatedQuery} />
+        <p className="am-list-v2-note" role="status">
+          {searchActive && searchLoading ? tList("search_loading") : capped ? tList("search_capped", { count: CREATED_SEARCH_ROW_CAP }) : ""}
+        </p>
+        <section className="am-management-list am-list-v2-group" aria-labelledby="am-list-v2-created" aria-busy={busy}>
+          <h2 id="am-list-v2-created" ref={listHeadingRef} tabIndex={-1}>
+            {tList("created_heading")}{complete || searchActive ? <span> · {rows.length}</span> : null}
+          </h2>
+          {loading ? skeleton : rows.length ? rows.map((item) => <ManagedAgentRow key={item.agent_id} item={item} host={rowHost} />)
+            : loaded && !error ? (searchActive ? <p className="am-list-v2-empty">{tList("no_match")}</p>
+              : archived ? <p className="am-list-v2-empty">{tList("created_none_active")}</p> : emptyState) : null}
+          {archived ? (
+            <p className="am-list-v2-pointer">
+              {tList.rich(complete ? "archived_pointer" : "archived_pointer_some", {
+                count: archived,
+                link: (chunks) => <a href={appPath(agentManagementHref("archived"))} onClick={(event) => navigate(event, agentManagementHref("archived"))}>{chunks}</a>,
+              })}
+            </p>
+          ) : null}
+        </section>
+      </>;
+    }
+    if (view === "hired") {
+      const groups = splitHiredRows(items);
+      return <>
+        <section className="am-management-list am-list-v2-group" aria-labelledby="am-list-v2-active" aria-busy={busy}>
+          <h2 id="am-list-v2-active" ref={listHeadingRef} tabIndex={-1}>{tList("hired_active_heading")}{loading ? null : <span> · {groups.active.length}</span>}</h2>
+          {loading ? skeleton : groups.active.length ? groups.active.map((item) => <ManagedAgentRow key={item.agent_id} item={item} host={rowHost} />)
+            : loaded && !error ? (groups.unavailable.length ? <p className="am-list-v2-empty">{tList("hired_active_empty")}</p> : emptyState) : null}
+        </section>
+        {!loading && groups.unavailable.length ? (
+          <details className="am-list-v2-folded">
+            <summary>{tList("hired_unavailable_heading")} <span>· {groups.unavailable.length}</span></summary>
+            <div className="am-management-list">
+              {groups.unavailable.map((item) => <UnavailableHiredRow key={item.agent_id} item={item} host={rowHost} />)}
+            </div>
+          </details>
+        ) : null}
+      </>;
+    }
+    const rows = items.filter(isCatalogItem);
+    return (
+      <section className="am-management-list am-list-v2-group" aria-labelledby="am-list-v2-shared" aria-busy={busy}>
+        <h2 id="am-list-v2-shared" ref={listHeadingRef} tabIndex={-1}>{t("view_shared")}{loading ? null : <span> · {totalCount}</span>}</h2>
+        {loading ? skeleton : rows.length ? rows.map((item) => <ManagedAgentRow key={item.agent_id} item={item} host={rowHost} />) : loaded && !error ? emptyState : null}
+      </section>
+    );
+  };
+
   return (
     <div className="am-page am-manage-page">
       <div className="am-page-content" inert={activeDialog !== null ? true : undefined}>
@@ -441,7 +628,7 @@ export function AgentManagement() {
           label={t("manage_views")}
           items={VIEWS.filter((value) => visibleViews[value]).map((value) => ({
             key: value,
-            label: t(`view_${value}`),
+            label: listV2 && value === "team" ? tList("view_team") : t(`view_${value}`),
             href: agentManagementHref(value),
             current: value === view,
             count: value === "team" && reviewCount ? reviewCount : undefined,
@@ -451,7 +638,7 @@ export function AgentManagement() {
       </div>
       {view === "created" && canResumeDrafts && draftsError === "failed" ? <p role="alert">{withHttpFailureReason(t("drafts_load_failed"), draftsFailure, { read: true })}</p> : null}
       {view === "created" && canResumeDrafts && draftsError === "unavailable" ? <p role="status">{t("drafts_unavailable")}</p> : null}
-      {view === "created" && canResumeDrafts && !draftsLoading && !draftsError && drafts.length > 0 ? (
+      {!listV2 && view === "created" && canResumeDrafts && !draftsLoading && !draftsError && drafts.length > 0 ? (
         <section className="am-management-context" aria-labelledby="am-resume-drafts-title">
           <div>
             <span>{t("drafts_eyebrow")}</span>
@@ -479,7 +666,12 @@ export function AgentManagement() {
       <p className="sr-only" role="status" aria-live="polite">{statusMessage}</p>
       {view === "team" ? <AgentReleaseInbox totalCount={reviewCount} /> : null}
       {view === "team" ? <AgentTeamTagGovernance /> : null}
-      <section className="am-management-context" aria-labelledby="am-management-context-title">
+      {listV2 ? (
+        <p className="sr-only" aria-live="polite">
+          {loading ? t("view_loading") : validating ? t("view_result_count_updating", { count: v2ListCount })
+            : searchActive ? tList("search_result_count", { count: v2ListCount }) : t("view_result_count", { count: v2ListCount })}
+        </p>
+      ) : <section className="am-management-context" aria-labelledby="am-management-context-title">
         <div>
           <span>{t(`view_${view}_eyebrow` as never)}</span>
           <h2 id="am-management-context-title">{t(`view_${view}_title` as never)}</h2>
@@ -492,9 +684,9 @@ export function AgentManagement() {
               ? t("view_result_count_updating", { count: totalCount })
               : t("view_result_count", { count: totalCount })}
         </strong>
-      </section>
-      <section className="am-management-list" aria-busy={loading || validating || loadingMore}>
-        <h2 ref={listHeadingRef} className="sr-only" tabIndex={-1}>{t(`view_${view}`)}</h2>
+      </section>}
+      {listV2 && (view === "created" || view === "hired" || view === "shared") ? renderListV2() : <section className="am-management-list" aria-busy={loading || validating || loadingMore}>
+        <h2 ref={listHeadingRef} className="sr-only" tabIndex={-1}>{listV2 && view === "team" ? tList("view_team") : t(`view_${view}`)}</h2>
         {loading ? [0, 1, 2].map((value) => <div key={value} className="am-management-row am-skeleton" />) : items.length ? items.map((item) => !isCatalogItem(item) ? (
           <article className="am-management-row" key={item.agent_id}>
             <CapabilityLink className="am-management-identity" href={withAgentReturnView(`/agents/manage/?agent_id=${encodeURIComponent(item.agent_id)}`, view)}>
@@ -578,9 +770,9 @@ export function AgentManagement() {
               ) : null}
             </div>
           </article>
-        )) : loaded && !error ? <div className="am-empty"><h3>{t(`empty_${view}_title`)}</h3><p>{t(`empty_${view}_body`)}</p>{view === "hired" || view === "shared" ? <a className="settings-button settings-button--primary settings-button--md" href={appPath("/agents/marketplace/")} onClick={(event) => navigate(event, "/agents/marketplace/")}>{t("find_agents")}</a> : null}</div> : null}
-      </section>
-      {nextCursor && !loading ? <div className="am-load-more"><button type="button" disabled={loadingMore || pendingId !== null} onClick={() => void refresh(viewRef.current, { append: true, cursor: nextCursor })}>{loadingMore ? t("loading_more") : t("load_more")}</button></div> : null}
+        )) : loaded && !error ? emptyState : null}
+      </section>}
+      {nextCursor && !loading && !searchActive ? <div className="am-load-more"><button type="button" disabled={loadingMore || pendingId !== null} onClick={() => void refresh(viewRef.current, { append: true, cursor: nextCursor })}>{loadingMore ? t("loading_more") : t("load_more")}</button></div> : null}
       {/* Below the Agent list, and only once a role has two verified candidates (design §7.5). */}
       {view === "hired" && loaded ? <AgentRolePreferencesPanel rosterVersion={rosterVersion} /> : null}
       </div>
@@ -639,8 +831,19 @@ export function AgentManagement() {
           </footer>
         </DialogShell>
       ) : null}
+      {confirmDialog}
     </div>
   );
+}
+
+/** After 停用 / 重新启用 the row re-renders in another group: open a folded group and focus the row's first action. */
+function focusMovedRow(agentId: string): void {
+  const row = Array.from(document.querySelectorAll<HTMLElement>(".am-management-row[data-agent-id]"))
+    .find((element) => element.dataset.agentId === agentId);
+  if (!row) return;
+  const folded = row.closest("details");
+  if (folded && !folded.open) folded.open = true;
+  row.querySelector<HTMLElement>(".am-management-actions button:not([disabled])")?.focus();
 }
 
 /** Management-row “⋯” trigger; fall back to page main if not found. */

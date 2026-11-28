@@ -77,6 +77,15 @@ export interface MeUser {
     agent_eval_alignment?: boolean;
     /** FEATURE_AGENT_RELEASE_BAR: the Agent workbench shows the release bar. */
     agent_release_bar?: boolean;
+    /** FEATURE_DOCX_INLINE_EDIT: Word page previews and in-browser Word editing. */
+    file_library?: boolean;
+    docx_inline_edit?: boolean;
+    /** FEATURE_KNOWLEDGE_BASES: named knowledge bases, their members and moves (frontend in slice 4). */
+    knowledge_bases?: boolean;
+    /** FEATURE_KB_MATRIX_PRIVATE: document matrices visible to only their creator (document matrix step 1, S8). */
+    kb_matrix_private?: boolean;
+    /** FEATURE_AGENT_DRAFT_TRIAL_V1: an Agent's Owner can chat with the saved draft (试用草稿). */
+    agent_draft_trial?: boolean;
     /** The notification center is on (`BOWHEAD_NOTIFICATION_CENTER`): shows the Notifications help. */
     notification_reach?: boolean;
     /** The notification center is on: scheduled runs may flag results; the task form offers "only when flagged". */

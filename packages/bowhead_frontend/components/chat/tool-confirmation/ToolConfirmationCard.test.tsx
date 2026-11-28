@@ -33,6 +33,7 @@ vi.mock("@/lib/tool-confirmation-api", () => ({
 }));
 
 import { ToolConfirmationCard, ToolConfirmationRecord } from "./ToolConfirmationCard";
+import { AgentTrialChatContext } from "../agent-trial-chat";
 
 const T = "t_card";
 
@@ -153,6 +154,19 @@ describe("ToolConfirmationCard for the requester", () => {
       "teamToolConfirmation.approveOnce",
       "teamToolConfirmation.approveSession",
     ]);
+  });
+
+  it("says a trial still really runs the action, only inside an Owner draft trial", async () => {
+    const view = render(<ToolConfirmationCard confirmation={confirmation()} agentName="Trace Agent" />);
+    expect(await screen.findByText("contact-123")).toBeInTheDocument();
+    expect(screen.queryByText("agent_trial.confirm_trial_line")).toBeNull();
+    view.unmount();
+    render(
+      <AgentTrialChatContext.Provider value={{ agentId: "osa_1", agentName: "Trace Agent" } as never}>
+        <ToolConfirmationCard confirmation={confirmation()} agentName="Trace Agent" />
+      </AgentTrialChatContext.Provider>,
+    );
+    expect(await screen.findByText("agent_trial.confirm_trial_line")).toBeInTheDocument();
   });
 
   it("does not take focus when it appears", async () => {

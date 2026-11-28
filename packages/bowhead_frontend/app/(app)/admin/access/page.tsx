@@ -3,7 +3,10 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { KnowledgeGrantReport } from "@/components/admin/access/knowledge-grant-report";
 import { AccessField as Field, RESOURCE_KINDS, ResourceGrantForm, permissionsForResource } from "@/components/admin/access/resource-grant-form";
+import { useKnowledgeBasesEnabled } from "@/components/knowledge/bases/use-knowledge-bases";
+import { DirectoryProvisioning } from "@/edition/directory-provisioning";
 import { AdminShell } from "@/components/admin-shell";
 import { ErrorDiagnosticsInline, type ShownError, shownError } from "@/components/error-notice";
 import { AdminRouteState } from "@/components/shell/AdminRouteState";
@@ -125,6 +128,8 @@ export default function AdminAccessPage() {
     }
   };
   const auth = useAuthRedirect({ requireTeamAdmin: true });
+  // Knowledge bases (FEATURE_KNOWLEDGE_BASES): the read-only knowledge base grant report; off, the page is today's.
+  const knowledgeBases = useKnowledgeBasesEnabled();
 
   const [groups, setGroups] = useState<AccessGroup[]>([]);
   const [grants, setGrants] = useState<ResourceGrant[]>([]);
@@ -332,7 +337,7 @@ export default function AdminAccessPage() {
               <h2 ref={membersHeadingRef} tabIndex={-1}>{t("members")}</h2>
               <span>{selectedGroup ? selectedGroup.name : "-"}</span>
             </div>
-            <form className="access-form" onSubmit={onAddMember}>
+            {selectedGroup?.directory_managed ? <p>{t("directory_managed")}</p> : <form className="access-form" onSubmit={onAddMember}>
               <Field label={t("user_id")}>
                 <input
                   required
@@ -352,7 +357,7 @@ export default function AdminAccessPage() {
                 </select>
               </Field>
               <button type="submit" className={BUTTON_CLASS} disabled={!selectedGroup}>{t("add")}</button>
-            </form>
+            </form>}
             <div className="access-table-wrap ui-table-frame">
               {listLayout ? (
                 <ListRows label={t("members")} className="access-list-rows">
@@ -362,7 +367,7 @@ export default function AdminAccessPage() {
                       title={m.email || shortId(m.user_id)}
                       subtitle={m.display_name || m.user_id}
                       status={<span className="access-role-badge">{t(m.role === "manager" ? "role_manager" : "role_member")}</span>}
-                      actions={
+                      actions={!selectedGroup?.directory_managed &&
                         <RowActionsMenu
                           label={t("more_actions_for", { name: m.email || shortId(m.user_id) })}
                           actions={[{
@@ -394,7 +399,7 @@ export default function AdminAccessPage() {
                       </td>
                       <td>{t(m.role === "manager" ? "role_manager" : "role_member")}</td>
                       <td className="ui-table-actions">
-                        <RowActionsMenu
+                        {!selectedGroup?.directory_managed && <RowActionsMenu
                           label={t("more_actions_for", { name: m.email || shortId(m.user_id) })}
                           actions={[{
                             id: "remove",
@@ -402,7 +407,7 @@ export default function AdminAccessPage() {
                             danger: true,
                             onSelect: () => setPendingRemoval({ userId: m.user_id, name: m.email || shortId(m.user_id) }),
                           }]}
-                        />
+                        />}
                       </td>
                     </tr>
                   ))}
@@ -413,6 +418,8 @@ export default function AdminAccessPage() {
             </div>
           </div>
         </section>
+
+        {auth.me && <DirectoryProvisioning key={auth.me.team_id} teamId={auth.me.team_id} onPublished={reload} />}
 
         <section className="access-panel access-wide">
           <div className="access-panel-head">
@@ -495,6 +502,8 @@ export default function AdminAccessPage() {
             )}
           </div>
         </section>
+
+        {knowledgeBases ? <KnowledgeGrantReport refreshKey={refreshTick} /> : null}
 
         <section className="access-panel access-wide">
           <div className="access-panel-head">

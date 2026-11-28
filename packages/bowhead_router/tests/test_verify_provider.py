@@ -911,11 +911,15 @@ async def test_web_search_probe_supports_dashscope_native(monkeypatch):
     def handler(request: httpx2.Request) -> httpx2.Response:
         seen["url"] = str(request.url)
         seen["body"] = json.loads(request.content)
+        # DashScope returns `search_info` only in the message format; otherwise output is {finish_reason, text}
+        # (observed on 116, see bowhead_core.web_search). A probe without it read a working search as failed.
+        if seen["body"]["parameters"].get("result_format") != "message":
+            return httpx2.Response(200, json={"output": {"finish_reason": "stop", "text": "OpenAI: https://www.openai.com/"}})
         return httpx2.Response(
             200,
             json={
                 "output": {
-                    "text": "OpenAI: https://www.openai.com/",
+                    "choices": [{"message": {"role": "assistant", "content": "OpenAI [ref_1]"}}],
                     "search_info": {
                         "search_results": [
                             {

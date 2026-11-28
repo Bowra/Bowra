@@ -40,12 +40,14 @@ def _make_ctx(
     workspace_id: str = "ws_42",
     team_id: str = "team_5",
     role: str = "user",
+    space_viewer: bool = False,
 ) -> ScopeContext:
     return ScopeContext(
         user_id=user_id,
         workspace_id=workspace_id,
         team_id=team_id,
         role=role,  # type: ignore[arg-type]
+        space_viewer=space_viewer,
     )
 
 
@@ -236,3 +238,29 @@ def test_can_change_scope_requires_can_delete() -> None:
     ctx = _make_ctx(user_id="user_b", workspace_id="ws_42", role="user")  # Ordinary user, not uploader.
     # can_delete=False → can_change_scope=False
     assert not KbPermission.can_change_scope(file, ctx, "personal", "user_b")
+
+
+# ─── Space viewer is read-only for Space knowledge ─────────────────
+
+
+def test_space_viewer_reads_but_cannot_write_space_files() -> None:
+    ctx = _make_ctx(user_id="user_v", space_viewer=True)
+    own_upload = _make_file(scope="space", scope_id="ws_42", uploaded_by="user_v")
+    assert KbPermission.can_read(own_upload, ctx)
+    assert not KbPermission.can_write_to_scope("space", "ws_42", ctx, ctx.role)
+    assert not KbPermission.can_delete(own_upload, ctx, ctx.role)
+    assert not KbPermission.can_change_scope(own_upload, ctx, "personal", "user_v")
+
+
+def test_space_viewer_keeps_personal_files() -> None:
+    ctx = _make_ctx(user_id="user_v", space_viewer=True)
+    mine = _make_file(scope="personal", scope_id="user_v", uploaded_by="user_v")
+    assert KbPermission.can_write_to_scope("personal", "user_v", ctx, ctx.role)
+    assert KbPermission.can_delete(mine, ctx, ctx.role)
+
+
+def test_team_admin_viewing_a_space_keeps_team_admin_rights() -> None:
+    ctx = _make_ctx(user_id="user_t", role="team_admin", space_viewer=True)
+    other = _make_file(scope="space", scope_id="ws_42", uploaded_by="user_x")
+    assert KbPermission.can_write_to_scope("space", "ws_42", ctx, ctx.role)
+    assert KbPermission.can_delete(other, ctx, ctx.role)

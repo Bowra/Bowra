@@ -32,7 +32,8 @@ export type ResultsRoute =
     };
 
 export type ResultsRouteTarget =
-  | { type: "report" }
+  // `sectionId` scrolls the opened report to that section (chat running state R2.2); it is not part of the URL.
+  | { type: "report"; sectionId?: string }
   | { type: "artifact"; artifactId: string; mode?: ResultsViewerMode }
   | { type: "code" };
 

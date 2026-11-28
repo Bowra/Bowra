@@ -29,6 +29,7 @@ from bowhead_core.audit_actions import AuditAction
 from bowhead_core.mcp_prompt_cache import (
     validate_mcp_prompt_cache as _validate_prompt_cache,
 )
+from bowhead_core.n8n_workflows import is_n8n_source, n8n_workflow_tools_enabled
 from bowhead_core.openapi_tool_source import (
     OpenApiOp,
     mcp_entry,
@@ -401,32 +402,65 @@ def _public(
         "prompts_count": len(src.prompts_schema or []),
         "op_count": len(src.selected_op_ids or []),  # PROD-2: the real N imported operations (FE success count)
         "impact_guard_enabled": resource_impact_guard_enabled(),
+        # The source card offers "n8n workflows" (approve workflows as derived tools) for these.
+        "n8n_workflows": n8n_workflow_tools_enabled() and is_n8n_source(src.kind, src.base_url, src.tools_schema),
         "created_at": src.created_at,
         "updated_at": src.updated_at,
     }
     if src.auth_type == "oauth":
-        value["oauth_sign_in_ended"] = _oauth_sign_in_ended(src)
+        from bowhead_core.mcp_oauth import oauth_has_grant, oauth_sign_in_ended, oauth_workspace_name
+
+        auth = _oauth_auth(src)
+        value["oauth_authorized"] = oauth_has_grant(auth)
+        value["oauth_sign_in_ended"] = oauth_sign_in_ended(auth)
+        value["oauth_workspace_name"] = oauth_workspace_name(auth)
     if usage_summary is not None:
         value["usage_summary"] = usage_summary
     return value
 
 
-def _oauth_sign_in_ended(src: TeamToolSource) -> bool:
-    """True when the provider refused to renew this source's sign-in (shown on its card)."""
+def _oauth_auth(src: TeamToolSource) -> dict[str, Any] | None:
     from bowhead_core.llm_config_crypto import decrypt_llm_config
-    from bowhead_core.mcp_oauth import oauth_sign_in_ended
 
     if not src.auth_ref:
-        return False
+        return None
     try:
-        return oauth_sign_in_ended(decrypt_llm_config(src.auth_ref))
-    except Exception:  # noqa: BLE001 - an unreadable credential is reported elsewhere; the card stays as it was
-        return False
+        return decrypt_llm_config(src.auth_ref)
+    except Exception:  # noqa: BLE001 - do not present unreadable credentials as an authorization
+        return None
+
+
+def _oauth_sign_in_ended(src: TeamToolSource) -> bool:
+    from bowhead_core.mcp_oauth import oauth_sign_in_ended
+
+    return oauth_sign_in_ended(_oauth_auth(src))
+
+
+def _validate_oauth_patch(
+    src: TeamToolSource,
+    *,
+    status: str | None,
+    selected_op_ids: list[str] | None,
+    auth_type: str | None,
+) -> None:
+    if src.auth_type != "oauth":
+        return
+    if auth_type is not None and not src.selected_op_ids:
+        raise HTTPException(422, "save a tool selection before changing authentication")
+    if status != "enabled":
+        return
+    if not (selected_op_ids if selected_op_ids is not None else src.selected_op_ids):
+        raise HTTPException(422, "save a tool selection before enabling this source")
+    from bowhead_core.mcp_oauth import oauth_has_grant, oauth_sign_in_ended
+
+    auth = _oauth_auth(src)
+    if not oauth_has_grant(auth) or oauth_sign_in_ended(auth):
+        raise HTTPException(422, "authorize the source before enabling it")
 
 
 def _operation_stable_ref(src: TeamToolSource, operation_id: str) -> str | None:
     selected = set(src.selected_op_ids or [])
-    if selected and operation_id not in selected:
+    if (selected or src.auth_type == "oauth") and operation_id not in selected:
         return None
     if src.kind == "openapi":
         try:
@@ -514,7 +548,7 @@ def _canonical_patch_command(src: TeamToolSource, proposed: dict[str, Any]) -> d
         if not isinstance(raw_overrides, dict):
             raise HTTPException(422, "tool_overrides must be an object")
         selected = set(change.get("selected_op_ids", src.selected_op_ids or []))
-        if not selected:
+        if not selected and src.auth_type != "oauth":
             # Legacy small sources may store [] to mean "all".  Canonicalising
             # an override against an empty set would silently drop the request,
             # so expand that sentinel exactly as the runtime loader does.
@@ -531,7 +565,7 @@ def _patch_is_protected(src: TeamToolSource, command: dict[str, Any]) -> bool:
         return True
     if "selected_op_ids" in change:
         current_selected = set(src.selected_op_ids or [])
-        if not current_selected:
+        if not current_selected and src.auth_type != "oauth":
             current_selected = _all_operation_ids(src)
         return bool(current_selected - set(change["selected_op_ids"]))
     return False
@@ -698,6 +732,12 @@ async def _protected_patch_source(
                 command=command,
                 resource_state=_source_state(current),
                 dependency_impact=dependency_impact,
+            )
+            _validate_oauth_patch(
+                current,
+                status=change.get("status"),
+                selected_op_ids=change.get("selected_op_ids"),
+                auth_type=change.get("auth_type"),
             )
             sets: list[str] = []
             params: list[Any] = []
@@ -1240,10 +1280,10 @@ async def create_source(
     if body.kind == "mcp":
         # WP2: a remote MCP source stores the enumerate cache (from /preview); no OpenAPI spec.
         is_oauth = body.auth_type == "oauth"
-        tools = body.tools_schema or []
+        tools = [] if is_oauth else body.tools_schema or []
         if body.prompts_schema and not _mcp_prompt_reference_enabled():
             raise HTTPException(422, "MCP Prompt references are not enabled")
-        prompts = _validate_mcp_prompt_cache(body.prompts_schema)
+        prompts = [] if is_oauth else _validate_mcp_prompt_cache(body.prompts_schema)
         all_ids = [str(t.get("name")) for t in tools if t.get("name")]
         # WP2b-3: an OAuth source may be created with NO tools yet — a real OAuth server refuses an
         # unauthenticated tools/list, so we can't enumerate at create; the /oauth/callback re-enumerates
@@ -1273,6 +1313,7 @@ async def create_source(
             # oauth is marked at create so the FE shows "needs authorization"; the token/client_info
             # arrive later via the authorize flow (auth_ref stays NULL → runtime fails closed until then).
             auth_type="oauth" if is_oauth else "none",
+            status="disabled" if is_oauth else "enabled",
             visibility=body.visibility,
             created_by=user.id,
             created_at=_now(),
@@ -1503,13 +1544,19 @@ async def list_source_tools(
             items = []
     else:
         items = _mcp_tools_as_ops(src.tools_schema or [], src.id)
+        records = (await load_team_tool_categories(store.db_path, src.team_id)).get(src.id, {}) if team_tool_confirmation_enabled() else {}
+        tools = {str(tool.get("name")): tool for tool in src.tools_schema}
+        for item in items:
+            name = item["operation_id"]
+            meta = tools[name]
+            item["category"] = effective_admin_category(meta, records.get(name)) or annotation_category(meta)
     explicit = set(src.selected_op_ids or [])
-    # [] is the legacy "every tool" selection: every listed tool is imported.
+    imports_all = not explicit and src.auth_type != "oauth"
     for item in items:
-        item["imported"] = not explicit or item["operation_id"] in explicit
+        item["imported"] = imports_all or item["operation_id"] in explicit
     return {
         "kind": src.kind,
-        "imports_all": not explicit,
+        "imports_all": imports_all,
         "items": items,
         "updated_at": src.updated_at,
     }
@@ -1546,7 +1593,7 @@ async def _tool_categories_view(store: UserStore, src: TeamToolSource) -> dict[s
             {
                 "name": name,
                 "description": str(meta.get("description") or "")[:_MAX_TOOL_DESC],
-                "imported": not explicit or name in explicit,
+                "imported": (not explicit and src.auth_type != "oauth") or name in explicit,
                 "annotation_category": marked,
                 "confirmed_category": confirmed,
                 "effective_category": confirmed or marked,
@@ -1765,6 +1812,7 @@ async def patch_source(
             # Reject on patch regardless of spec size (to expose nothing, disable the source instead).
             raise HTTPException(422, "select at least one operation (to expose nothing, disable the source)")
         _require_distinct_tool_names(src.id, body.selected_op_ids)
+    _validate_oauth_patch(src, status=body.status, selected_op_ids=body.selected_op_ids, auth_type=body.auth_type)
     # effective selected set for the override sanitiser (review L2): the new selection if patching,
     # else the stored one — but a stored EMPTY selection means "empty ⇒ all ops" (create convenience),
     # so treat it as the full kind-safe id set rather than ∅ (else every override would be dropped).
@@ -1772,7 +1820,7 @@ async def patch_source(
     if body.tool_overrides is not None:
         if body.selected_op_ids is not None:
             effective_selected = set(body.selected_op_ids)
-        elif src.selected_op_ids:
+        elif src.selected_op_ids or src.auth_type == "oauth":
             effective_selected = set(src.selected_op_ids)
         elif src.kind == "openapi":
             effective_selected = set(_validate_spec_and_ops(src.openapi_spec_json or "{}"))
@@ -1818,33 +1866,29 @@ async def patch_source(
                 reg.invalidate_source(user.team_id, source_id)
         return result
 
-    # ── AUTH first (tools WP1b/P1-1): rotating/removing creds can raise 503 (Fernet unset); doing it
-    # before the meta write means a failure leaves the source fully unchanged (no half-apply), and we
-    # invalidate the per-(team,source) auth cache so the OLD/leaked creds stop being served immediately. ──
-    if body.auth_type is not None:
+    if any(value is not None for value in (body.name, body.selected_op_ids, overrides, body.status, body.auth_type)):
         try:
-            await store.update_team_tool_source_auth(
+            written_revision = await store.update_team_tool_source_meta(
                 user.team_id,
                 source_id,
+                name=body.name,
+                selected_op_ids=body.selected_op_ids,
+                tool_overrides=overrides,
+                status=body.status,
                 auth_type=body.auth_type,
-                auth=body.auth or {},
+                auth=body.auth,
+                expected_updated_at=src.updated_at,
             )
         except RuntimeError as e:
             raise HTTPException(503, str(e)) from e
+        if written_revision is None:
+            raise HTTPException(409, detail={"error": {"code": "resource_impact_stale"}})
+    if body.auth_type is not None:
         reg = getattr(request.app.state, "tool_auth_registry", None)
         if reg is not None:
             with contextlib.suppress(Exception):
                 reg.invalidate_source(user.team_id, source_id)
 
-    if any(v is not None for v in (body.name, body.selected_op_ids, overrides, body.status)):
-        await store.update_team_tool_source_meta(
-            user.team_id,
-            source_id,
-            name=body.name,
-            selected_op_ids=body.selected_op_ids,
-            tool_overrides=overrides,
-            status=body.status,
-        )
     got = await store.get_team_tool_source(user.team_id, source_id)
     if got is None:
         raise HTTPException(404, "source not found")
@@ -2162,7 +2206,7 @@ async def _enumerate_refresh_candidate(
     old_names = [str(tool.get("name")) for tool in (src.tools_schema or []) if tool.get("name")]
     old_set = set(old_names)
     explicit_selection = list(src.selected_op_ids or [])
-    effective_selection = explicit_selection or old_names
+    effective_selection = explicit_selection if src.auth_type == "oauth" else explicit_selection or old_names
     selected_dropped = [name for name in effective_selection if name not in new_set]
     surviving = [name for name in explicit_selection if name in new_set]
     # [] is the legacy "all" sentinel.  For an explicit selection where every
@@ -2170,7 +2214,11 @@ async def _enumerate_refresh_candidate(
     # accidentally exposing every unrelated tool that remains.
     new_selected = explicit_selection
     new_status = src.status
-    if explicit_selection and surviving:
+    if src.auth_type == "oauth":
+        new_selected = surviving
+        if not surviving:
+            new_status = "disabled"
+    elif explicit_selection and surviving:
         new_selected = surviving
     elif explicit_selection and not surviving:
         new_status = "disabled"
@@ -2182,7 +2230,7 @@ async def _enumerate_refresh_candidate(
         "changed": _changed_tools(
             src.tools_schema or [],
             tools,
-            set(explicit_selection) if explicit_selection else None,
+            set(explicit_selection) if explicit_selection or src.auth_type == "oauth" else None,
         ),
         "selected_dropped": selected_dropped,
         "selected_op_ids": new_selected,
@@ -2557,14 +2605,22 @@ async def refresh_source(
             "note": "OpenAPI sources are frozen at create; nothing to refresh",
         }
     candidate = await _enumerate_refresh_candidate(request, src)
-    await store.update_team_tool_source_meta(
+    current = await store.get_team_tool_source(user.team_id, source_id)
+    if current is None:
+        raise HTTPException(404, "source not found")
+    if _source_state(current) != _source_state(src):
+        raise HTTPException(409, detail={"error": {"code": "resource_impact_stale"}})
+    written_revision = await store.update_team_tool_source_meta(
         user.team_id,
         source_id,
         tools_schema=candidate["tools_schema"],
         prompts_schema=candidate.get("prompts_schema"),
         selected_op_ids=candidate["selected_op_ids"],
         status=candidate["status"],
+        expected_updated_at=current.updated_at,
     )
+    if written_revision is None:
+        raise HTTPException(409, detail={"error": {"code": "resource_impact_stale"}})
     return {
         "kind": "mcp",
         "added": candidate["added"],
@@ -2626,7 +2682,7 @@ async def oauth_authorize(
     except PublicEntryRequiredError as exc:
         raise HTTPException(409, public_entry_required_detail()) from exc
     redirect_uri = public_app_url_for_base(public_context.base_url, _OAUTH_CALLBACK_PATH)
-    from bowhead_core.mcp_oauth import FernetTokenStorage, begin_mcp_oauth
+    from bowhead_core.mcp_oauth import FernetTokenStorage, McpOAuthRegistrationRefused, begin_mcp_oauth
     from mcp.client.auth.oauth2 import PKCEParameters
 
     pkce = PKCEParameters.generate()  # verifier stays SERVER-SIDE (pending record); only the S256 challenge travels
@@ -2640,6 +2696,9 @@ async def oauth_authorize(
             state=state,
             code_challenge=pkce.code_challenge,
         )
+    except McpOAuthRegistrationRefused as exc:
+        code = "team_mcp_oauth_callback_rejected" if exc.code == "invalid_redirect_uri" else "team_mcp_oauth_registration_rejected"
+        raise HTTPException(422, detail={"error": {"code": code}}) from exc
     except ValueError as e:
         raise HTTPException(422, f"oauth begin failed: {scrub(str(e))}") from e
     except Exception as e:
@@ -2691,25 +2750,27 @@ async def oauth_callback(
 
     from bowhead_gateway.public_url import oauth_return_path
 
-    def _back(status: str, source_id: str = "") -> RedirectResponse:
+    def _back(status: str, source_id: str = "", reason: str = "") -> RedirectResponse:
         params = {"oauth": status}
         if source_id:
             params["source"] = source_id
+        if reason:
+            params["reason"] = reason
         return RedirectResponse(url=oauth_return_path(f"/settings/tools?{urlencode(params)}", callback_path=_OAUTH_CALLBACK_PATH), status_code=303)
 
     if not state:
-        return _back("error")
+        return _back("error", reason="expired")
     try:
         rec = await store.take_mcp_oauth_pending(state)  # single-use; None if unknown / expired / replayed (CSRF)
     except Exception:  # review P3: a DB error must fail closed to the error-redirect, never 500
         return _back("error")
     if rec is None:
-        return _back("error")
+        return _back("error", reason="expired")
     from bowhead_gateway.public_url import restore_oauth_public_access_context
 
     restore_oauth_public_access_context(str(rec["redirect_uri"]), callback_path=_OAUTH_CALLBACK_PATH)
     if error or not code:
-        return _back("error", str(rec["source_id"]))
+        return _back("error", str(rec["source_id"]), "denied" if error == "access_denied" else "provider")
     team_id = str(rec["team_id"])
     source_id = str(rec["source_id"])
     from bowhead_core.mcp_oauth import FernetTokenStorage, exchange_mcp_oauth_code
@@ -2734,6 +2795,7 @@ async def oauth_callback(
     # Best-effort metadata refresh after the token is durable. Tool and Prompt
     # discovery are isolated: an optional prompts/list failure must not discard a
     # successful tools/list result or turn an authorized source into an empty shell.
+    discovery_reason = "discovery_failed"
     with contextlib.suppress(Exception):
         from bowhead_core.openapi_tool_source import (
             enumerate_remote_mcp_prompts,
@@ -2751,29 +2813,20 @@ async def oauth_callback(
                     timeout=8.0,
                     auth=provider,
                 )
-                if tools:
-                    # review P1: populate selected_op_ids EXPLICITLY — leaving it [] makes the loader's
-                    # empty⇒all sentinel expose every enumerated tool with op_count reporting 0 (silent, and
-                    # it bypasses the _LARGE_SPEC_OPS curation cap static sources are forced through). First
-                    # authorization ⇒ expose all enumerated names explicitly (honest op_count, editable);
-                    # a re-authorization preserves the admin's prior curated selection (survivors only).
-                    # (Enforcing the large-source curation cap for OAuth is deferred to the tool-picker UI.)
-                    new_names = [str(t.get("name")) for t in tools if t.get("name")]
-                    prev = list(src.selected_op_ids or [])
-                    kept = [s for s in prev if s in set(new_names)]
-                    selected = kept if prev else new_names
-                    meta: dict[str, Any] = {"tools_schema": tools}
-                    if selected:  # never store [] — that IS the empty⇒all sentinel; leave stale if nothing survives
-                        meta["selected_op_ids"] = selected
-                    stored_revision = await store.update_team_tool_source_meta(
-                        team_id,
-                        source_id,
-                        **meta,
-                        expected_updated_at=expected_revision,
-                    )
-                    # A concurrent admin refresh owns the newer snapshot. Make
-                    # the later Prompt write's CAS miss instead of overwriting it.
-                    expected_revision = stored_revision or "oauth_metadata_stale"
+                available_names = {str(tool["name"]) for tool in tools if tool.get("name")}
+                selected = [name for name in src.selected_op_ids if name in available_names]
+                stored_revision = await store.update_team_tool_source_meta(
+                    team_id,
+                    source_id,
+                    tools_schema=tools,
+                    selected_op_ids=selected,
+                    status=src.status if selected else "disabled",
+                    expected_updated_at=expected_revision,
+                )
+                # A concurrent update owns the newer snapshot, including the Prompt cache.
+                expected_revision = stored_revision or "oauth_metadata_stale"
+                if stored_revision:
+                    discovery_reason = "" if available_names else "no_tools"
             if _mcp_prompt_reference_enabled():
                 with contextlib.suppress(Exception):
                     prompts = _validate_prompt_cache(
@@ -2801,4 +2854,4 @@ async def oauth_callback(
             scope="team",
             payload={"changed": ["oauth_authorized"]},
         )
-    return _back("success", source_id)
+    return _back("success", source_id, discovery_reason)

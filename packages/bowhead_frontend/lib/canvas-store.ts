@@ -74,6 +74,8 @@ export interface CanvasState {
    *  sections (including other turns), so `selectStreamProgress` always returns **false** "第 N / M 节".
    *  Only actual onOutlineReady makes denominator current turn's skeleton count. */
   outlineReady: boolean;
+  /** Chat running state R2.1: earlier sections one Turn revised, for its live report card. */
+  turnPatched: { turnId: string; sectionIds: string[] } | null;
 }
 
 const initial: CanvasState = {
@@ -96,6 +98,7 @@ const initial: CanvasState = {
   bufferedLeadSectionIds: new Set(),
   skeletonStartIdx: 0,
   outlineReady: false,
+  turnPatched: null,
 };
 
 type Listener = () => void;
@@ -155,6 +158,7 @@ export function onCanvasOpened(p: { canvas_id: string; session_id: string; title
       title: p.title ?? s.title ?? null,
       status: "opened",
       sections: isSameCanvas ? s.sections : [],
+      turnPatched: isSameCanvas ? s.turnPatched : null,
       errors: [],
       // Mark current skeleton starting index (used later by onSectionAdded)
       skeletonStartIdx: isSameCanvas ? s.sections.length : 0,
@@ -241,6 +245,8 @@ export function onSectionPatched(p: {
   rev?: number;
   /** The section was delivered in chat: update it in place, never insert it into Canvas. */
   hiddenForChatMode?: boolean;
+  /** The Turn whose stream carried the edit; absent for REST edits and replays without one. */
+  turnId?: string;
 }): void {
   setState((s) => {
     // report-streaming B: patch **is** final streamed-section draft (writer finishes → backend completes
@@ -260,11 +266,19 @@ export function onSectionPatched(p: {
       next[idx] = {
         ...next[idx], ...p.patch, ...(p.rev !== undefined ? { rev: p.rev } : {}),
       } as ReportSection;
+      // Chat running state R2.1: an earlier section this Turn revised counts on the live report card.
+      const ownTurn = (s.sections[idx] as unknown as { turn_id?: string }).turn_id;
+      const prior = p.turnId && s.turnPatched?.turnId === p.turnId ? s.turnPatched.sectionIds : [];
+      const revised = Boolean(p.turnId)
+        && ownTurn !== p.turnId
+        && !p.hiddenForChatMode
+        && !prior.includes(p.section_id);
       return {
         ...s,
         sections: next,
         streamingSectionIds: nextStreaming,
         currentlyStreamingSectionId: nextCurrent,
+        ...(revised ? { turnPatched: { turnId: p.turnId!, sectionIds: [...prior, p.section_id] } } : {}),
       };
     }
     // A chat-delivered section is hidden from Canvas; its chat figure takes the
@@ -663,6 +677,51 @@ export function selectComposeStarted(s: CanvasState, turnId: string | null): boo
     if (x.turn_id !== turnId) return false;
     return x.kind === "eyebrow" || x.kind === "h1" || x.kind === "meta" || x.kind === "kpi_row";
   });
+}
+
+/**
+ * Chat running state R2.1 — the live report card while a Turn runs: the report sections it added (their `turn_id`)
+ * and the earlier ones it revised, counted as the finished card counts `report_changes` (sections and charts apart,
+ * the report's frame left out). Returns a JSON string, "" when nothing changed: callers use
+ * `useSyncExternalStore`, which compares with Object.is, and parse it with `liveReportChangesOf`.
+ */
+export function selectTurnReportChangesKey(s: CanvasState, turnId: string | null): string {
+  if (!turnId) return "";
+  const revised = new Set(s.turnPatched?.turnId === turnId ? s.turnPatched.sectionIds : []);
+  const added: { section_id: string; kind: string; title: string }[] = [];
+  const updated: { section_id: string; kind: string; title: string }[] = [];
+  for (const section of selectReportSurfaceSections(s)) {
+    const x = section as unknown as { id?: string; kind?: string; turn_id?: string; superseded?: boolean };
+    if (!x.id || !x.kind || x.superseded || x.kind === "sql_block") continue;
+    const entry = { section_id: x.id, kind: x.kind, title: liveSectionTitle(section) };
+    if (x.turn_id === turnId) added.push(entry);
+    else if (revised.has(x.id)) updated.push(entry);
+  }
+  return added.length + updated.length > 0 ? JSON.stringify({ added, updated }) : "";
+}
+
+/** A section's outline title as the backend's `_outline_title` reads it: its title, an h1's text, a chapter's heading. */
+function liveSectionTitle(section: ReportSection): string {
+  const x = section as unknown as { kind?: string; title?: unknown; text?: unknown; markdown?: unknown };
+  if (typeof x.title === "string" && x.title.trim()) return x.title.trim();
+  if (x.kind === "h1" && typeof x.text === "string") return x.text.trim();
+  if (x.kind === "narrative" && typeof x.markdown === "string") {
+    const heading = x.markdown.split("\n").find((line) => line.startsWith("## "));
+    if (heading) return heading.slice(3).trim();
+  }
+  return "";
+}
+
+/**
+ * The report's title as Results names it (`_report_title`): its first live h1, then the canvas title. Report Turns
+ * composed from a helper's payload leave the canvas title empty and carry the title in the h1.
+ */
+export function selectReportTitle(s: CanvasState): string {
+  for (const section of selectVisibleSections(s)) {
+    const x = section as unknown as { kind?: string; text?: unknown; superseded?: boolean };
+    if (x.kind === "h1" && !x.superseded && typeof x.text === "string" && x.text.trim()) return x.text.trim();
+  }
+  return (s.title ?? "").trim();
 }
 
 /** report-streaming D3 — classified counts of current turn's delivered sections.

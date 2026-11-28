@@ -164,7 +164,7 @@ async def test_normal_tool_context_resolve_unaffected(http, app_ctx, monkeypatch
             execution_generation=2,
         )
 
-    monkeypatch.setattr(clarification_routes, "resume_turn", _resume_stub)
+    monkeypatch.setattr(clarification_routes, "resume_for_user", _resume_stub)
 
     class _ReadySessionStore:
         async def is_turn_resume_ready(self, _turn_id: str) -> bool:

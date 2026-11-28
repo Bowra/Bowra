@@ -12,6 +12,13 @@ type AgentResourceRef = {
   version: string;
 } & (
   | { source_kind: "team"; assignment_id: string; release_id: string }
+  // Owner draft trial: the frozen release candidate replaces the assignment and release.
+  | {
+      source_kind: "team";
+      trial_candidate_id: string;
+      assignment_id?: null;
+      release_id?: null;
+    }
   | { source_kind: "system"; assignment_id?: null; release_id?: null }
 );
 type McpBinding = {
@@ -158,7 +165,9 @@ function parseResource(raw: unknown): ResourceRef {
       r.kind === "capability"
         ? ["kind", "id", "version"]
         : ["kind", "source_kind", "id", "version"],
-      r.kind === "agent" ? ["assignment_id", "release_id"] : [],
+      r.kind === "agent"
+        ? ["assignment_id", "release_id", "trial_candidate_id"]
+        : [],
     );
     string(r.id, 512, IDENTITY);
     if (r.kind === "capability") {
@@ -173,11 +182,19 @@ function parseResource(raw: unknown): ResourceRef {
       if (r.kind === "skill") {
         if (!["builtin", "team", "user"].includes(r.source_kind as string))
           fail("reference_invalid_source_kind");
+      } else if (r.source_kind === "team" && r.trial_candidate_id != null) {
+        string(r.trial_candidate_id, 512, IDENTITY);
+        if (r.assignment_id != null || r.release_id != null)
+          fail("reference_agent_trial_fields_conflict");
       } else if (r.source_kind === "team") {
         string(r.assignment_id, 512, IDENTITY);
         string(r.release_id, 512, IDENTITY);
       } else if (r.source_kind === "system") {
-        if (r.assignment_id != null || r.release_id != null)
+        if (
+          r.assignment_id != null ||
+          r.release_id != null ||
+          r.trial_candidate_id != null
+        )
           fail("reference_system_agent_has_team_fields");
       } else fail("reference_invalid_source_kind");
     }

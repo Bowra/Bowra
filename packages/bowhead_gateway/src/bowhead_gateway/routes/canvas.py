@@ -76,6 +76,7 @@ from bowhead_gateway.access_context import (
 from bowhead_gateway.artifact_representations import (
     ArtifactRepresentationDTO,
     RepresentationRequest,
+    build_document_view,
     build_presentation_view,
     build_representation,
     representation_error,
@@ -324,6 +325,18 @@ def _can_preview_mime(mime: str) -> bool:
     return mime in _PREVIEWABLE_MIMES
 
 
+async def _report_share_viewer(request: Request, user_store: Any, user_id: str) -> Any:
+    from bowhead_gateway.routes.auth import _resolve_current_team
+
+    viewer = await user_store.get_user(user_id)
+    if viewer is None:
+        return None
+    viewer = await _resolve_current_team(request, viewer, user_store)
+    if not await user_store.filter_active_team_members(viewer.team_id, {user_id}):
+        return None
+    return viewer
+
+
 async def _can_read_canvas(request: Request, canvas: Any) -> bool:
     """content-permissions S5 读通路（tech-design §4.3）：owner 短路 ∨ report read grant。
 
@@ -335,6 +348,7 @@ async def _can_read_canvas(request: Request, canvas: Any) -> bool:
     viewer_id = _user_id(request)
     is_owner = canvas.user_id == viewer_id
     allowed = is_owner
+    viewer = _UNSET_USER
     if not allowed:
         try:
             from bowhead_core.share_service import (
@@ -348,7 +362,7 @@ async def _can_read_canvas(request: Request, canvas: Any) -> bool:
             user_store = getattr(request.app.state, "user_store", None)
             if access is None or user_store is None:
                 return False
-            viewer = await user_store.get_user(viewer_id)
+            viewer = await _report_share_viewer(request, user_store, viewer_id)
             if viewer is None or not viewer.team_id:
                 return False
             if not await user_store.workspace_in_team(
@@ -375,6 +389,7 @@ async def _can_read_canvas(request: Request, canvas: Any) -> bool:
             operation=SpaceOperation.READ_HISTORY,
             # Share recipients gain access without space membership -> batch 4 (§4.4).
             enforce_space_membership=is_owner,
+            user=viewer,
         )
     except HTTPException as exc:
         if is_space_authorization_denial(space_denial_code(exc)):
@@ -1169,9 +1184,10 @@ async def get_report_artifact_representation(
     _user_id(request)  # Authenticate before reading report/closure/object existence.
     try:
         art = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
-        if representation == "pptx-pdf":
+        if representation in ("pptx-pdf", "docx-pdf"):
             service = getattr(request.app.state, "document_service", None)
-            view = await build_presentation_view(
+            build_view = build_presentation_view if representation == "pptx-pdf" else build_document_view
+            view = await build_view(
                 _artifact_store(request), art, getattr(service, "executor", None), getattr(request.app.state, "presentation_previews", None)
             )
             current = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
@@ -1940,7 +1956,7 @@ async def _annotate_owned_audience(request: Request, user_id: str, items: list) 
         user_store = getattr(request.app.state, "user_store", None)
         if access is None or user_store is None:
             return
-        viewer = await user_store.get_user(user_id)
+        viewer = await _report_share_viewer(request, user_store, user_id)
         if viewer is None or not viewer.team_id:
             return
         grants = await access.list_resource_grants(viewer.team_id, resource_kind="report")
@@ -1966,7 +1982,7 @@ async def _shared_report_session_ids(request: Request, user_id: str) -> frozense
         user_store = getattr(request.app.state, "user_store", None)
         if access is None or user_store is None:
             return frozenset()
-        viewer = await user_store.get_user(user_id)
+        viewer = await _report_share_viewer(request, user_store, user_id)
         if viewer is None or not viewer.team_id:
             return frozenset()
         return await grants_for_viewer(

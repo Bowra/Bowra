@@ -157,13 +157,14 @@ async def _seed_user(
     email: str,
     team_id: str = "team_activation",
     owner: bool = False,
+    email_verified: bool = True,
 ) -> None:
     async with aiosqlite.connect(store.db_path) as db:
         await db.execute(
             "INSERT INTO users(id,team_id,email,email_verified,password_hash,tier,"
             "credit_balance,credit_quota,status,created_at) "
-            "VALUES (?,?,?,1,?,'pro',0,0,'active',?)",
-            (user_id, team_id, email, hash_password("OldPassw0rd!"), _now()),
+            "VALUES (?,?,?,?,?,'pro',0,0,'active',?)",
+            (user_id, team_id, email, email_verified, hash_password("OldPassw0rd!"), _now()),
         )
         await db.execute(
             "INSERT INTO team_members(id,user_id,team_id,role,status,created_at) VALUES (?,?,?,'member','active',?)",
@@ -533,7 +534,7 @@ async def test_matching_trusted_oauth_activates_same_invitation_transaction(
 
 
 @pytest.mark.asyncio
-async def test_self_service_reset_uses_explicit_flow_with_invite_activation_enabled(
+async def test_self_service_email_reset_verifies_email_with_invite_activation_enabled(
     client: TestClient,
     store: UserStore,
     monkeypatch: pytest.MonkeyPatch,
@@ -543,6 +544,7 @@ async def test_self_service_reset_uses_explicit_flow_with_invite_activation_enab
         store,
         user_id="usr_self_service",
         email="self-service@example.com",
+        email_verified=False,
     )
     before = await store.get_user("usr_self_service")
     assert before is not None
@@ -577,6 +579,9 @@ async def test_self_service_reset_uses_explicit_flow_with_invite_activation_enab
         headers=JSON_HEADERS,
     )
     assert requested.status_code == 200, requested.text
+    pending = await store.get_user("usr_self_service")
+    assert pending is not None
+    assert not pending.email_verified
     assert len(action_paths) == 1
     query = parse_qs(urlparse(action_paths[0]).query)
     assert query["flow"] == ["self_service"]
@@ -591,11 +596,23 @@ async def test_self_service_reset_uses_explicit_flow_with_invite_activation_enab
     user = await store.get_user("usr_self_service")
     assert user is not None
     assert verify_password("NewPassw0rd!", user.password_hash)
+    assert user.email_verified
     assert user.pwd_version == before.pwd_version + 1
     assert user.session_token_version == before.session_token_version + 1
     assert completed.json()["token"]
     assert client.cookies.get("bowhead_jwt")
     assert client.cookies.get("bowhead_refresh")
+
+    repeated = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": raw_token, "new_password": "An0therPassw0rd!"},
+        headers=JSON_HEADERS,
+    )
+    assert repeated.status_code == 200, repeated.text
+    user = await store.get_user("usr_self_service")
+    assert user is not None
+    assert user.email_verified
+    assert verify_password("An0therPassw0rd!", user.password_hash)
 
 
 @pytest.mark.asyncio
@@ -727,6 +744,7 @@ async def test_admin_recovery_is_one_shot_and_revokes_old_sessions(
         store,
         user_id="usr_target",
         email="target@example.com",
+        email_verified=False,
     )
     if not has_password:
         async with aiosqlite.connect(store.db_path) as db:
@@ -786,6 +804,7 @@ async def test_admin_recovery_is_one_shot_and_revokes_old_sessions(
     assert target is not None
     assert not verify_password("OldPassw0rd!", target.password_hash)
     assert verify_password("NewPassw0rd!", target.password_hash)
+    assert not target.email_verified
     assert target.pwd_version == 2
 
     replay = client.post(
@@ -945,6 +964,35 @@ async def test_credential_recovery_store_error_does_not_leak_internal_reason(
         "code": "credential_recovery_not_allowed",
     }
     assert "sensitive" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_reset_without_email_delivery_claim_only_updates_password(
+    client: TestClient,
+    store: UserStore,
+) -> None:
+    await _seed_team(store)
+    await _seed_user(
+        store,
+        user_id="usr_legacy_reset",
+        email="legacy-reset@example.com",
+        email_verified=False,
+    )
+    token = jwt.encode(
+        {"sub": "usr_legacy_reset", "purpose": "password_reset", "exp": int(time.time()) + 3600},
+        SECRET,
+        algorithm="HS256",
+    )
+    completed = client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "new_password": "NewPassw0rd!"},
+        headers=JSON_HEADERS,
+    )
+    assert completed.status_code == 200, completed.text
+    user = await store.get_user("usr_legacy_reset")
+    assert user is not None
+    assert verify_password("NewPassw0rd!", user.password_hash)
+    assert not user.email_verified
 
 
 def test_legacy_reset_rejects_invalid_token_with_structured_code(

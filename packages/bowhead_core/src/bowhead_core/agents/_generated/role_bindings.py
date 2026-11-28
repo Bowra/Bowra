@@ -119,5 +119,6 @@ _PARADIGM_V2_ROLE_MAP: dict[str, frozenset[str]] = {
     "web_fetch": frozenset({"analyst", "lead"}),
     "web_map": frozenset({"analyst"}),
     "web_search": frozenset({"analyst", "lead"}),
+    "wecom_notify": frozenset({"lead"}),
     "write_report": frozenset({"analyst"}),
 }

@@ -38,7 +38,8 @@ _MAX_FILE_NAMES = 10
 # Delivered files named with their identifiers (docs/sprints/result-lookup-2026-11-15, FR20). A shortened
 # result keeps lists of up to 30 items, so this many survive history hygiene.
 _MAX_DELIVERED = 30
-_DELIVERED_KINDS = frozenset({"deliverable", "deck_preview"})
+# Kinds the user gets as result files (the Results "deliverables" group, plus deck previews).
+_DELIVERED_KINDS = frozenset({"deliverable", "canvas_export", "deck_preview"})
 
 __all__ = [
     "DeliverableLedger",
@@ -70,6 +71,9 @@ class DeliverableLedger:
     A name alone cannot be revised: ``revise_files`` takes identifiers. Later Turns read
     this pair from the helper result after history hygiene has shortened it.
     """
+
+    undelivered: tuple[tuple[str, str], ...] = ()
+    """Identifier and name of each file this Turn saved but did not deliver (work files, undelivered drafts)."""
 
     reused_files: int = 0
     reused_file_names: tuple[str, ...] = ()
@@ -196,6 +200,7 @@ async def build_deliverable_ledger(
     files = 0
     file_names: tuple[str, ...] = ()
     delivered: tuple[tuple[str, str], ...] = ()
+    undelivered: tuple[tuple[str, str], ...] = ()
     reused_names: list[str] = []
     reused_verified = True
     files_verified = artifact_store is not None
@@ -216,6 +221,16 @@ async def build_deliverable_ledger(
                 (str(a.id), str(a.filename).strip())
                 for a in delivs
                 if getattr(a, "kind", None) in _DELIVERED_KINDS and getattr(a, "id", None) and str(getattr(a, "filename", "") or "").strip()
+            )[:_MAX_DELIVERED]
+            # Chat running state R2.8: what was saved but not delivered, so Lead can present a file it meant to hand
+            # over. A fact only; nothing here decides what Lead delivers.
+            undelivered = tuple(
+                (str(a.id), str(a.filename).strip())
+                for a in delivs
+                if getattr(a, "kind", None) not in _DELIVERED_KINDS
+                and getattr(a, "kind", None) != "deck_preview"
+                and getattr(a, "id", None)
+                and str(getattr(a, "filename", "") or "").strip()
             )[:_MAX_DELIVERED]
         except Exception as e:  # noqa: BLE001 — best-effort
             files_verified = False
@@ -274,6 +289,7 @@ async def build_deliverable_ledger(
         files=files,
         file_names=file_names,
         delivered=delivered,
+        undelivered=undelivered,
         reused_files=len(reused_names),
         reused_file_names=tuple(reused_names[:_MAX_FILE_NAMES]),
         reused_files_verified=reused_verified,
@@ -306,10 +322,14 @@ def produced_facts(ledger: DeliverableLedger) -> dict[str, Any]:
             "memories": ledger.memories_verified,
         },
     }
-    if ledger.files_verified and ledger.delivered:
+    if ledger.files_verified:
         # Names alone cannot be revised later. The pair survives when history hygiene shortens this result,
-        # where a bare identifier list did not say which file an identifier was.
+        # where a bare identifier list did not say which file an identifier was. Present even when empty: on 116
+        # a helper kept its deck as a work file, and Lead, seeing the deck among the registered names and no
+        # delivered list, told the user the file was ready (pptx dogfood, labeling spike 2026-11-26).
         facts["delivered_files"] = [{"artifact_id": identity, "name": name} for identity, name in ledger.delivered]
+    if ledger.files_verified and ledger.undelivered:
+        facts["undelivered_files"] = [{"artifact_id": identity, "name": name} for identity, name in ledger.undelivered]
     return facts
 
 
@@ -317,24 +337,30 @@ def produced_facts(ledger: DeliverableLedger) -> dict[str, Any]:
 # read the helper's text. Replayed on an observed execution with a false "PPTX 也已生成，可直接下载" added to the
 # helper's answer, Lead repeated the false file in 5 of 8 calls with the ledger facts alone, in 0 of 20 with the
 # Chinese note and in 1 of 12 with the English one (docs/sprints/delivery-check-without-patterns-2026-11-24).
+# The note named produced.file_names, which also lists work and analysis files; it now names the delivered list.
+# Replayed on the case where every saved deck was a work file, Lead said the file was not delivered in 4 of 6
+# calls with this wording, against 1 of 6 with the old one.
 _FILES_NOTE = {
     "en-US": (
-        "produced.file_names lists the files registered in this Turn; only these reach the user. A file that the helper's "
-        "answer above mentions but that is not in produced.file_names was not delivered, and the user cannot get it."
+        "Only the files in produced.delivered_files reach the user as result files. produced.undelivered_files were saved in this "
+        "Turn as work or analysis files and are not shown to the user as result files. A file that the helper's answer above "
+        "mentions but that is not in produced.delivered_files was not delivered as a result file, and the user cannot get it."
     ),
     "zh-CN": (
-        "本轮登记成功、用户能下载的文件只有 produced.file_names 里的这些。"
-        "上面 subagent 的话里提到、但不在 produced.file_names 里的文件，没有交付，用户拿不到。"
+        "本轮作为结果文件交给用户的只有 produced.delivered_files 里的这些。produced.undelivered_files 里是本轮保存的工作文件或分析文件，"
+        "不会作为结果文件显示给用户。上面 subagent 的话里提到、但不在 produced.delivered_files 里的文件，没有作为结果文件交付，用户拿不到。"
     ),
     "de-DE": (
-        "produced.file_names listet die in diesem Durchgang registrierten Dateien; nur diese erreichen den Nutzer. "
-        "Eine Datei, die die Antwort des Helfers oben erwähnt, die aber nicht in produced.file_names steht, "
-        "wurde nicht geliefert, und der Nutzer kann sie nicht erhalten."
+        "Nur die Dateien in produced.delivered_files erreichen den Nutzer als Ergebnisdateien. produced.undelivered_files wurden "
+        "in diesem Durchgang als Arbeits- oder Analysedateien gespeichert und werden dem Nutzer nicht als Ergebnisdateien angezeigt. "
+        "Eine Datei, die die Antwort des Helfers oben erwähnt, die aber nicht in produced.delivered_files steht, wurde nicht als "
+        "Ergebnisdatei geliefert, und der Nutzer kann sie nicht erhalten."
     ),
     "fr-FR": (
-        "produced.file_names liste les fichiers enregistrés pendant ce tour ; seuls ceux-ci parviennent à l’utilisateur. "
-        "Un fichier que la réponse de l’assistant ci-dessus mentionne mais qui ne figure pas dans produced.file_names "
-        "n’a pas été livré, et l’utilisateur ne peut pas l’obtenir."
+        "Seuls les fichiers de produced.delivered_files parviennent à l’utilisateur comme fichiers de résultat. "
+        "produced.undelivered_files ont été enregistrés pendant ce tour comme fichiers de travail ou d’analyse et ne sont pas "
+        "affichés à l’utilisateur comme fichiers de résultat. Un fichier que la réponse de l’assistant ci-dessus mentionne mais qui "
+        "ne figure pas dans produced.delivered_files n’a pas été livré comme fichier de résultat, et l’utilisateur ne peut pas l’obtenir."
     ),
 }
 _REUSED_FILES_NOTE = {

@@ -12,7 +12,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from bowhead_core.artifact_store import PRESENTATION_USER_EDIT_PRODUCER, Artifact, ArtifactStore, VersionTargetRefused
+from bowhead_core.artifact_store import PRESENTATION_USER_EDIT_PRODUCER, USER_EDIT_PRODUCERS, Artifact, ArtifactStore, VersionTargetRefused
 from bowhead_core.documents.authoring_protocol import MAX_FILE
 from bowhead_core.presentation_edit import MAX_EDITS, edited_filename, is_presentation
 from bowhead_core.results_read_model import artifact_kind
@@ -71,7 +71,7 @@ async def latest_version_facts(app: Any, store: ArtifactStore, latest_id: str | 
         "artifact_id": latest.id,
         "version_no": latest.version_no or 1,
         "created_at": latest.created_at,
-        "produced_by": "user" if (latest.producer_kind or "") == PRESENTATION_USER_EDIT_PRODUCER else "agent",
+        "produced_by": "user" if (latest.producer_kind or "") in USER_EDIT_PRODUCERS else "agent",
         "request_excerpt": None,
     }
     session_store = getattr(app.state, "session_store", None)
@@ -123,24 +123,33 @@ def _child_failure(reason: str, artifact_id: str, kind: str) -> HTTPException:
     return edit_error(status.HTTP_503_SERVICE_UNAVAILABLE, "parse_unavailable", reason=reason, diagnostic_id=reference)
 
 
-async def edited_copies(store: ArtifactStore, *, session_id: str, user_id: str, upload_id: str) -> list[dict[str, Any]]:
+async def edited_copies(
+    store: ArtifactStore, *, session_id: str, user_id: str, upload_id: str, edit_source: str = "presentation_edit"
+) -> list[dict[str, Any]]:
     """Files this person already made by editing an upload, newest first (design §6.4).
 
     The editor offers them before a second save would split the person's work across files.
     Each entry is the newest live version of a file whose first version records the upload.
     A helper's revised copy of the upload records it too (pptx dogfood 2026-11-25), and its
-    newest version may come from either producer.
+    newest version may come from either producer. ``edit_source`` is the editor's own source
+    (``document_edit`` for Word, docx inline edit design §7.2).
     """
-    rows, _ = await store.find_session_results(session_id=session_id, user_id=user_id, sources=["presentation_edit", "python_sandbox"], limit=50)
+    rows, _ = await store.find_session_results(session_id=session_id, user_id=user_id, sources=[edit_source, "python_sandbox"], limit=50)
     copies: list[dict[str, Any]] = []
     for row in rows:
-        root = row if row.lineage_root == row.id else await store.get(row.lineage_root)
-        if root is not None and root.derived_from == upload_id:
-            copies.append({"artifact_id": row.id, "filename": row.filename, "version_no": row.version_no or 1})
+        # The newest version carries the upload (versions inherit it); a lineage saved before that only
+        # has it on its first version, which may already be pruned, so read that one even if deleted.
+        root = row if row.lineage_root == row.id else await store.get(row.lineage_root, include_deleted=True)
+        if row.derived_from == upload_id or (root is not None and root.derived_from == upload_id):
+            # Who made the copy, so the editor names it truly: a helper's copy is not the person's edit.
+            made_by = "you" if (root.source if root is not None else row.source) == edit_source else "ai"
+            copies.append({"artifact_id": row.id, "filename": row.filename, "version_no": row.version_no or 1, "made_by": made_by})
     return copies
 
 
-async def inventory(store: ArtifactStore, target: EditTarget, *, session_id: str = "", user_id: str = "", language: str = "zh-CN") -> dict[str, Any]:
+async def inventory(
+    store: ArtifactStore, target: EditTarget, *, session_id: str = "", user_id: str = "", language: str = "zh-CN", app: Any = None
+) -> dict[str, Any]:
     from bowhead_core.presentation_deck import DeckUnavailable, deck_inventory
 
     art = target.artifact
@@ -156,6 +165,15 @@ async def inventory(store: ArtifactStore, target: EditTarget, *, session_id: str
         "file": {"filename": art.filename, "mime": art.mime, "size": art.size},
         **cached,
     }
+    if target.mode == "version" and app is not None:
+        # Which older versions the save will push out of the kept three, so the editor can say so
+        # before saving (design §13.7). Optional: the editor works without it.
+        from bowhead_gateway.file_versions_pruning import versions_dropped_by_next_save
+
+        try:
+            result["drops_on_save"] = await versions_dropped_by_next_save(app, art.id)
+        except Exception:
+            logger.warning("presentation_edit.drops_on_save_unavailable artifact=%s", art.id, exc_info=True)
     if target.mode == "new_file":
         result["new_filename"] = edited_filename(art.filename, language)
         if session_id and user_id:

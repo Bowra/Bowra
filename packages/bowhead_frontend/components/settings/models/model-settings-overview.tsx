@@ -16,6 +16,7 @@ import {
   Spinner,
 } from "@/components/icons";
 import type { LlmReadiness, LlmReadinessRow } from "@/lib/llm-config-api";
+import { appPath } from "@/lib/base-path";
 import { formatDateTime } from "@/lib/locale";
 import { useListDate } from "@/components/ui/list-time";
 import {
@@ -34,14 +35,46 @@ export interface AssignmentSummaryRow {
   mode: "specified" | "follow" | "automatic" | "off" | "missing";
 }
 
+/** Knowledge-base roles a model reaches through `kb.active`, with the capabilities readiness requires of each. */
+export const KNOWLEDGE_BASE_ROLE_CAPABILITIES = {
+  embed: ["embed"],
+  rerank: ["rerank"],
+  vision: ["vision"],
+  row_extractor: ["chat", "tool"],
+  source_description: ["chat"],
+} as const;
+export type KnowledgeBaseRole = keyof typeof KNOWLEDGE_BASE_ROLE_CAPABILITIES;
+/** Where a connection's model is used outside its catalog (design: connection-purposes-design.md, 2026-11-25). */
+export type ConnectionUseRole = KnowledgeBaseRole | "image" | "search";
+export interface ConnectionUse { modelId: string; role: ConnectionUseRole }
+
+export function isKnowledgeBaseRole(role: string): role is KnowledgeBaseRole {
+  return Object.hasOwn(KNOWLEDGE_BASE_ROLE_CAPABILITIES, role);
+}
+
+/** Overview message key naming a use. */
+export function connectionUseLabelKey(role: ConnectionUseRole): string {
+  return role === "image" ? "external_media_image_generation" : role === "search" ? "external_web_search" : `role_${role}`;
+}
+
+/** A link to the page where a use is changed: the path for the anchor, and the in-app navigation. */
+export interface ConnectionUseLink { href: string; open: () => void }
+
+type OverviewCapabilityFact = { capability: string; state: string; observedAt?: string | null };
+
 export interface ModelSettingsOverviewProvider {
   providerId?: string;
   runtimeKey: string;
   displayName: string;
   type: string;
   endpoint: string;
+  /** Distinct models the connection serves: catalog, knowledge base, image and search. */
   modelCount: number;
-  models?: Array<{ id: string; capabilities: Array<{ capability: string; state: string; observedAt?: string | null }> }>;
+  models?: Array<{ id: string; capabilities: OverviewCapabilityFact[]; alsoUsedFor?: ConnectionUseRole[] }>;
+  /** Knowledge-base models outside the catalog. */
+  knowledgeBase?: Array<{ id: string; roles: KnowledgeBaseRole[]; capabilities: OverviewCapabilityFact[] }>;
+  /** Image-generation and web-search models outside the catalog. */
+  external?: Array<{ id: string; kind: "image" | "search" }>;
   fingerprint?: string | null;
   authType?: "bearer" | "api_key" | "secret_header" | "none";
 }
@@ -282,6 +315,11 @@ export function ModelSettingsOverview({
   onConnectBowra,
   onEditProvider,
   onVerifyProvider,
+  onVerifyCapability,
+  externalTargets,
+  externalTests,
+  onTestExternal,
+  useLinks,
   onRetryReadiness,
   onVerify,
   onVerifyItem,
@@ -309,6 +347,14 @@ export function ModelSettingsOverview({
   onConnectBowra?: () => void;
   onEditProvider: (runtimeKey: string) => void;
   onVerifyProvider?: (runtimeKey: string) => void;
+  /** Verify one capability that needs it, from its label on the connection list. */
+  onVerifyCapability?: (runtimeKey: string, modelId: string, capability: string) => void;
+  /** Saved image-generation / web-search model and connection, for 外部能力. */
+  externalTargets?: Partial<Record<"image" | "search", { model: string; connection: string }>>;
+  externalTests?: Partial<Record<"image" | "search", { state: "running" | "passed" | "failed"; reason?: string }>>;
+  onTestExternal?: (kind: "image" | "search") => void;
+  /** Where a connection's knowledge-base and external uses are changed. */
+  useLinks?: { assignments: ConnectionUseLink; external: ConnectionUseLink };
   onRetryReadiness: () => void;
   onVerify: () => void;
   /** Verify one item only (absent = batch verification only). */
@@ -324,6 +370,32 @@ export function ModelSettingsOverview({
   const tConnect = useTranslations("settings.models.connect");
   const tProviderType = useTranslations("settings.llm.provider_types");
   const listDate = useListDate();
+  const locale = useLocale();
+  const listOf = (items: string[]) => new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
+  const useLabels = (roles: readonly ConnectionUseRole[]) => listOf([...new Set(roles)].map((role) => t(connectionUseLabelKey(role))));
+  const capabilityLabel = (runtimeKey: string, modelId: string, { capability, state, observedAt }: OverviewCapabilityFact) => {
+    // A pass keeps its date: it stays valid until the connection changes (2026-11-25).
+    const verifiedAt = (state === "verified" || state === "aged") ? listDate(observedAt) : null;
+    const label = <>{t(`capability_${capability}`)} · {t(`fact_${FACT_STATES.has(state) ? state : "unknown"}`)}{verifiedAt ? ` · ${verifiedAt.label}` : null}</>;
+    // A state that asks for action says why and verifies just this item (walk W2).
+    const reason = state === "stale" || state === "failed" || state === "unknown" ? t(`fact_reason_${state}`) : null;
+    return reason && onVerifyCapability
+      ? <button type="button" className={`overview-state fact-${state} is-action`} key={capability} title={reason} aria-label={`${modelId} ${t(`capability_${capability}`)}: ${reason}`}
+        disabled={configurationActionsDisabled} onClick={() => onVerifyCapability(runtimeKey, modelId, capability)}>{label}</button>
+      : <span className={`overview-state fact-${state}`} key={capability} title={verifiedAt?.title}>{label}</span>;
+  };
+  const useLink = (link: ConnectionUseLink | undefined, labelKey: string) => link
+    ? <a className="overview-uses-link" href={appPath(link.href)} onClick={(event) => { event.preventDefault(); link.open(); }}>{t(labelKey)}</a>
+    : null;
+  const externalState = (runtimeKey: string, model: { id: string; kind: "image" | "search" }) => {
+    const target = externalTargets?.[model.kind];
+    if (target?.model !== model.id || target.connection !== runtimeKey) return null;
+    const test = externalTests?.[model.kind];
+    if (test?.state === "running") return <span className="overview-state fact-unknown">{t("external_test_running")}</span>;
+    if (test?.state === "passed") return <span className="overview-state fact-verified">{t("external_test_passed")}</span>;
+    if (test?.state === "failed") return <span className="overview-state fact-failed" title={test.reason}>{t("external_test_failed", { reason: test.reason || "" })}</span>;
+    return <span className="overview-state fact-unknown">{t("uses_untested")}</span>;
+  };
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const items = evidenceItems(readiness);
@@ -377,7 +449,14 @@ export function ModelSettingsOverview({
           <span>
             {attentionSummary(t, attentionBreakdown(items))}
             {" — "}
-            <a className="rd-link" href="#mset-overview-evidence" onClick={() => setDetailsOpen(true)}>{t("evidence_jump")}</a>
+            <a className="rd-link" href="#mset-overview-evidence" onClick={(event) => {
+              setDetailsOpen(true);
+              if (!assignments) return;
+              // The summary table has no Verify buttons; the per-item ones sit in the details (walk W7).
+              event.preventDefault();
+              window.requestAnimationFrame(() => document.getElementById("assignment-verification-details")
+                ?.scrollIntoView({ block: "start", behavior: "smooth" }));
+            }}>{t("evidence_jump")}</a>
           </span>
         </p>
       ) : null}
@@ -424,16 +503,31 @@ export function ModelSettingsOverview({
                     <small>{t("model_count", { count: provider.modelCount })}</small>
                   </div>
                   <code translate="no">{safeOverviewEndpoint(provider.endpoint)}</code>
+                  {/* Everything the connection serves, grouped by where it is used (design W4); group names show only
+                      when there is more than the catalog. */}
+                  {provider.models?.length && (provider.knowledgeBase?.length || provider.external?.length)
+                    ? <div className="overview-uses-head"><span className="overview-uses-label">{t("uses_catalog")}</span></div> : null}
                   {provider.models?.map((model) => <div className="overview-model-capabilities" key={model.id}>
                     <span>{model.id}</span>
-                    {model.capabilities.map(({ capability, state, observedAt }) => {
-                      // A pass keeps its date: it stays valid until the connection changes (2026-11-25).
-                      const verifiedAt = (state === "verified" || state === "aged") ? listDate(observedAt) : null;
-                      return <span className={`overview-state fact-${state}`} key={capability} title={verifiedAt?.title}>
-                        {t(`capability_${capability}`)} · {t(`fact_${FACT_STATES.has(state) ? state : "unknown"}`)}{verifiedAt ? ` · ${verifiedAt.label}` : null}
-                      </span>;
-                    })}
+                    {model.capabilities.map((fact) => capabilityLabel(provider.runtimeKey, model.id, fact))}
+                    {model.alsoUsedFor?.length ? <small className="overview-uses-roles">{t("uses_also", { roles: useLabels(model.alsoUsedFor) })}</small> : null}
                   </div>)}
+                  {provider.knowledgeBase?.length ? <div className="overview-uses-group">
+                    <div className="overview-uses-head"><span className="overview-uses-label">{t("uses_knowledge_base")}</span>{useLink(useLinks?.assignments, "uses_open_assignments")}</div>
+                    {provider.knowledgeBase.map((model) => <div className="overview-model-capabilities" key={model.id}>
+                      <span>{model.id}</span>
+                      <small className="overview-uses-roles">{useLabels(model.roles)}</small>
+                      {model.capabilities.map((fact) => capabilityLabel(provider.runtimeKey, model.id, fact))}
+                    </div>)}
+                  </div> : null}
+                  {provider.external?.length ? <div className="overview-uses-group">
+                    <div className="overview-uses-head"><span className="overview-uses-label">{t("external_title")}</span>{useLink(useLinks?.external, "uses_open_external")}</div>
+                    {provider.external.map((model) => <div className="overview-model-capabilities" key={`${model.kind}:${model.id}`}>
+                      <span>{model.id}</span>
+                      <small className="overview-uses-roles">{useLabels([model.kind])}</small>
+                      {externalState(provider.runtimeKey, model)}
+                    </div>)}
+                  </div> : null}
                 </div>
                 <div className="overview-provider-secret">
                   <span>{provider.authType === "none" ? tConnect("auth_type") : t("secret")}</span>
@@ -442,7 +536,7 @@ export function ModelSettingsOverview({
                     : <code translate="no">{provider.fingerprint || t("secret_saved")}</code>}
                 </div>
                 <div className="overview-connection-actions">
-                {onVerifyProvider && provider.models?.some((model) => model.capabilities.length > 0) ? <button type="button" className="btn sec sm" disabled={configurationActionsDisabled} onClick={() => onVerifyProvider(provider.runtimeKey)}>{t("verify_one")}</button> : null}
+                {onVerifyProvider && [...(provider.models || []), ...(provider.knowledgeBase || [])].some((model) => model.capabilities.length > 0) ? <button type="button" className="btn sec sm" disabled={configurationActionsDisabled} onClick={() => onVerifyProvider(provider.runtimeKey)}>{t("verify_one")}</button> : null}
                 <button
                   type="button"
                   className="btn sec sm"
@@ -566,29 +660,41 @@ export function ModelSettingsOverview({
         </div>
       </section> : null}
 
-      {section === "external" ? <section className="overview-section overview-external" aria-labelledby="mset-overview-external">
-        <div className="overview-section-head">
-          <div>
-            {!section ? <span className="overview-section-index">03</span> : null}
-            <h2 id="mset-overview-external">{t("external_title")}</h2>
-            <p>{t("external_body")}</p>
-          </div>
-        </div>
+      {section === "external" ? <section className="overview-section overview-external" aria-label={t("external_title")}>
+        {/* The page heading already says 外部能力 (walk W8). */}
         <div className="overview-external-rows">
           {([
-            ["media_image_generation", imageConfigured, onConfigureImage],
-            ["web_search", searchConfigured, onConfigureSearch],
-          ] as const).map(([kind, configured, onConfigure]) => (
-            <div key={kind}>
-              <span>{t(`external_${kind}`)}</span>
-              <span className="overview-external-action">
-                <b className={configured ? "is-configured" : ""}>{t(configured ? "external_status_configured" : "external_status_unavailable")}</b>
-                <button type="button" className="btn sec sm" disabled={configurationActionsDisabled || !onConfigure} onClick={onConfigure}>
-                  {t(configured ? "external_edit" : "external_configure")}
-                </button>
-              </span>
-            </div>
-          ))}
+            ["media_image_generation", "image", imageConfigured, onConfigureImage],
+            ["web_search", "search", searchConfigured, onConfigureSearch],
+          ] as const).map(([kind, shortKind, configured, onConfigure]) => {
+            const target = externalTargets?.[shortKind];
+            const test = externalTests?.[shortKind];
+            return (
+              <div key={kind}>
+                <span className="overview-external-name">
+                  <span>{t(`external_${kind}`)}</span>
+                  {/* Which model and connection serve it (walk W10). */}
+                  {target ? <small translate="no">{target.model} · {target.connection}</small> : null}
+                  {test ? <small className={`overview-external-test is-${test.state}`} role="status">
+                    {test.state === "running" ? t("external_test_running")
+                      : test.state === "passed" ? t("external_test_passed")
+                        : t("external_test_failed", { reason: test.reason || "" })}
+                  </small> : null}
+                </span>
+                <span className="overview-external-action">
+                  <b className={configured ? "is-configured" : ""}>{t(configured ? "external_status_configured" : "external_status_unavailable")}</b>
+                  {configured && target && onTestExternal ? (
+                    <button type="button" className="btn sec sm" disabled={configurationActionsDisabled || test?.state === "running"} onClick={() => onTestExternal(shortKind)}>
+                      {t("external_test")}
+                    </button>
+                  ) : null}
+                  <button type="button" className="btn sec sm" disabled={configurationActionsDisabled || !onConfigure} onClick={onConfigure}>
+                    {t(configured ? "external_edit" : "external_configure")}
+                  </button>
+                </span>
+              </div>
+            );
+          })}
         </div>
       </section> : null}
       {section === "index" ? <section className="overview-section overview-external" aria-label={t("kb_reindex")}>

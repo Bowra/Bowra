@@ -67,6 +67,8 @@ import {
 } from "@/lib/clarification-tombstone";
 import type { ReasonCode } from "@/lib/error-messages";
 import { extractInlineArtifacts } from "@/lib/inline-artifacts";
+import { answerExtrasOf, type AnswerExtras } from "@/lib/answer-extras";
+import { LiveTurnOutputs } from "./step-list/LiveTurnOutputs";
 import { extractTurnOutputs } from "@/lib/turn-outputs";
 import {
   acknowledgePlanEdit,
@@ -139,6 +141,7 @@ import {
   stripInternalMarkers,
 } from "./step-list/LeadNarrative";
 import { MessageActions } from "./message-actions";
+import { TrialAnswerActions, TrialAnswerLabel, TrialDraftDivider } from "./agent-trial-chat";
 import { ContinueAction, continueTargets } from "./continue-action";
 import { TurnRunningProvider } from "./step-list/turn-running";
 import { NetworkBanner } from "./step-list/NetworkBanner";
@@ -151,6 +154,7 @@ import { stepsToStepViews } from "./step-list/step-view";
 import { AgentTrace } from "./step-list/AgentTrace";
 import { PendingToolConfirmations } from "./tool-confirmation/PendingToolConfirmations";
 import { CollaborationTraceProvider } from "./step-list/collaboration-trace-state";
+import { FoldedNotesProvider, foldNarrative } from "./step-list/folded-notes";
 import { ContextActivityProvider, useContextActivities } from "./step-list/ContextActivity";
 import { StepRecoveryProvider } from "./step-list/step-recovery";
 import { StepSummary } from "./step-list/StepSummary";
@@ -429,6 +433,8 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
     () => extractInlineArtifacts(runner.finalPayload, turnStoreState?.steps),
     [runner.finalPayload, turnStoreState?.steps],
   );
+  // Chat running state R2.2, R2.3: the report card (instead of the appended pointer sentence) and the work-file line.
+  const answerExtras = useMemo(() => answerExtrasOf(runner.finalPayload, runner.turnId ?? null), [runner.finalPayload, runner.turnId]);
 
   // D10: id of a clarification the user has just answered. We hide the card
   // optimistically on answer instead of waiting for the resolve + resume round-trip
@@ -908,8 +914,17 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
   // the first step below the band, or live order is answer → band while replay is execution process →
   // answer, yielding two display orders for the same event set.
   // Pre-dispatch prose remains above the band (the segment meant by design 1e's prose-above-band rule).
+  // Chat running state R1.9: Lead's text followed by a later step folds into the running view as a note (band and
+  // trace, via FoldedNotesProvider) instead of staying in the text flow and vanishing at the end. The open segment
+  // and the final segment stay in the flow under the existing dedup and superseded rules.
+  const liveFold = foldNarrative(turnStoreState?.beats ?? [], collectStepViews(runner, turnStoreState), {
+    // Same precedent as BeatStream's dedup: the runner's text is the final answer only once the Turn ended.
+    hasAnswer: !runner.running && Boolean(runner.answer),
+    superseded: turnStoreState?.narrativeSuperseded === true,
+    repeatsAnswer: (beat) => computeNarrativeDedupSegIds([beat], runner.answer ?? "").has(beat.segId),
+  });
   const liveBeatSplit = splitBeatsAroundBand(
-    turnStoreState?.beats ?? [],
+    (turnStoreState?.beats ?? []).filter((beat) => !liveFold.folded.has(beat)),
     bandSlotOwnsDisclosure,
   );
 
@@ -1623,6 +1638,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
               byline** carries its time (server times, see lib/turn-user-time.ts), avoiding duplicate
               timestamps on separators. */}
           {i > 0 ? <div className="bh-turn-sep" role="separator" /> : null}
+          {i > 0 ? <TrialDraftDivider previousTurnId={archivedTurns[i - 1].turnId} turnId={a.turnId} settled /> : null}
         <ArchivedTurnView
           archived={a}
           onEffectDisclosure={runner.updateEffectDisclosure}
@@ -1655,6 +1671,9 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
       {archivedTurns.length > 0 && hasCurrentTurn ? (
         <div className="bh-turn-sep" role="separator" />
       ) : null}
+      {archivedTurns.length > 0 && hasCurrentTurn ? (
+        <TrialDraftDivider previousTurnId={archivedTurns[archivedTurns.length - 1].turnId} turnId={runner.turnId} settled={!runner.running} />
+      ) : null}
 
       {(standalonePicker && clarification) || (!hasCurrentTurn && answeredSummary) ? (
         // Picker attached to the last archived turn (a follow-up clarification on a turn that already
@@ -1677,6 +1696,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
       {hasCurrentTurn ? (
         <TurnRunningProvider running={runner.running} bandOwnsLiveStatus={bandMode}>
         <CollaborationTraceProvider turnId={runner.turnId ?? ""}>
+        <FoldedNotesProvider notes={liveFold.notes}>
         <ContextActivityProvider turnId={runner.turnId ?? ""}>
         <StepRecoveryProvider turnId={runner.turnId ?? ""}>
         <div
@@ -1708,6 +1728,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
           />
 
           <BotByline time={turnTimeText} />
+          <TrialAnswerLabel turnId={runner.turnId} settled={!runner.running} />
 
           {runner.turnId === "t_rho_historical_1" ? (
             <button
@@ -1771,6 +1792,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
                 clarification={clarification}
                 clarificationSlot={clarificationSlot}
                 inlineArtifacts={inlineArtifacts}
+                answerExtras={answerExtras}
                 turnStoreState={turnStoreState}
                 onApprovePlan={approvePlanFromCard}
                 onViewReportPlan={onViewReportPlan}
@@ -1809,6 +1831,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
                   peerDisplayNames={turnStoreState?.peerDisplayNames}
                   peerTerminalById={turnStoreState?.peerTerminalById}
                   peerProse={turnStoreState?.peerProse}
+                  peerTasks={turnStoreState?.peerTasks}
                   elapsedKey={elapsedAnchorKey}
                   transport={runner.transportRef?.current ?? null}
                   agentProgress={runner.agentProgress ?? null}
@@ -1861,12 +1884,16 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
                     answerText={(b) => answerTextFromBeat(b, runner)}
                     answerStreaming={runner.running}
                     inlineArtifacts={inlineArtifacts}
+                    answerExtras={answerExtras}
                     keyPrefix="below-band-"
                     ariaLabel={tr("step_list_aria")}
                   />
                 </ChatSourcesProvider>
               </CitationsProvider>
             ) : null}
+            {/* Chat running state R2.1: files, the report card and work files as they are saved; the answer's own
+                cards replace them when the Turn ends. */}
+            {runner.running ? <LiveTurnOutputs steps={turnStoreState?.steps} turnId={runner.turnId ?? null} /> : null}
           </div>
 
           {turnComplete && <ChatAnswerCard key={elapsedAnchorKey} payload={runner.finalPayload} generation={runner.executionGeneration} />}
@@ -1980,6 +2007,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
               turnId={runner.turnId}
             />
           ) : null}
+          {turnComplete ? <TrialAnswerActions turnId={runner.turnId} question={runner.user ?? ""} /> : null}
 
           {turnComplete && onContinue && runner.operationKind !== "context_maintenance" ? (
             <ContinueAction
@@ -1997,6 +2025,7 @@ export function TurnContainer({ runner, clarificationDraftScope = null, onSend, 
         </div>
         </StepRecoveryProvider>
         </ContextActivityProvider>
+        </FoldedNotesProvider>
         </CollaborationTraceProvider>
         </TurnRunningProvider>
       ) : null}
@@ -2111,6 +2140,7 @@ interface BeatStreamProps {
   /** The pending card or its settled row (built once by TurnContainer). */
   clarificationSlot: React.ReactNode;
   inlineArtifacts: import("./step-list/ChatBubbleNew").ChatInlineArtifact[];
+  answerExtras?: AnswerExtras | null;
   turnStoreState: TurnState | undefined;
   /** p0-followup F1 — failed step retry / skip / ack handlers. */
   /** Planning Mode — approve / view-report for an inline plan card. */
@@ -2191,6 +2221,7 @@ interface TurnBeatFlowProps {
   answerText: (b: Extract<TurnBeat, { kind: "answer" }>) => string;
   answerStreaming: boolean;
   inlineArtifacts: import("./step-list/ChatBubbleNew").ChatInlineArtifact[];
+  answerExtras?: AnswerExtras | null;
   renderPlan?: (planId: string) => React.ReactNode;
   /** Config copilot batch 0.5: lightweight confirmation beat (both live/archived, like plans). */
   renderLite?: (proposalId: string) => React.ReactNode;
@@ -2267,6 +2298,7 @@ function TurnBeatFlow({
   answerText,
   answerStreaming,
   inlineArtifacts,
+  answerExtras,
   renderPlan,
   renderLite,
   renderDraft,
@@ -2341,6 +2373,7 @@ function TurnBeatFlow({
           text={answerText(b)}
           isStreaming={answerStreaming}
           artifacts={inlineArtifacts}
+          extras={answerExtras}
         />,
       );
     } else if (b.kind === "plan" && renderPlan) {
@@ -2371,6 +2404,7 @@ function TurnBeatFlow({
         text={fallbackAnswerText}
         isStreaming={answerStreaming}
         artifacts={inlineArtifacts}
+        extras={answerExtras}
       />,
     );
   }
@@ -2392,6 +2426,7 @@ function BeatStream({
   clarification,
   clarificationSlot,
   inlineArtifacts,
+  answerExtras,
   turnStoreState,
   onApprovePlan,
   onViewReportPlan,
@@ -2576,6 +2611,7 @@ function BeatStream({
             text={runner.answer}
             isStreaming={runner.running}
             artifacts={inlineArtifacts}
+            extras={answerExtras}
           />
         ) : null}
       </>
@@ -2672,6 +2708,7 @@ function BeatStream({
         answerText={(b) => answerTextFromBeat(b, runner)}
         answerStreaming={runner.running}
         inlineArtifacts={inlineArtifacts}
+        answerExtras={answerExtras}
         renderPlan={(planId) => (
           // See buildPlanFirstTurnIndex: render a plan only on first appearance, aligning live with replay.
           planAllowed && !planAllowed(planId) ? null : (
@@ -2702,6 +2739,7 @@ function BeatStream({
           text={runner.answer}
           isStreaming={runner.running}
           artifacts={inlineArtifacts}
+          extras={answerExtras}
         />
       ) : null}
     </>
@@ -3011,6 +3049,7 @@ function ArchivedTurnView({
     () => extractInlineArtifacts(archived.finalPayload, storeState?.steps),
     [archived.finalPayload, storeState?.steps],
   );
+  const answerExtras = useMemo(() => answerExtrasOf(archived.finalPayload, archived.turnId), [archived.finalPayload, archived.turnId]);
   // Turn visibility FR12: a live Turn remounts here on done(completed), so the finished line reads the same counts.
   const turnOutputs = useMemo(() => extractTurnOutputs(archived.finalPayload), [archived.finalPayload]);
 
@@ -3020,6 +3059,14 @@ function ArchivedTurnView({
   // archived.beats stays as the snapshot fallback for pre-r3 archived turns
   // that were captured before the replay wire landed.
   const beats = (storeState?.beats ?? archived.beats ?? []) as TurnBeat[];
+  // R1.9: the same fold as the live Turn, so a finished Turn shows Lead's interim text as notes in its trace.
+  const archivedSuperseded = getTurnSnapshot(archived.turnId ?? "")?.narrativeSuperseded === true;
+  const archivedFold = foldNarrative(beats, steps, {
+    hasAnswer: Boolean(archived.answer),
+    superseded: archivedSuperseded,
+    repeatsAnswer: (beat) => computeNarrativeDedupSegIds([beat], archived.answer ?? "").has(beat.segId),
+  });
+  const flowBeats = archivedFold.folded.size > 0 ? beats.filter((beat) => !archivedFold.folded.has(beat)) : beats;
 
   // Historical turns default to folded. The one exception is an explicit
   // inspection made while this same turn was still live: done(completed)
@@ -3061,9 +3108,9 @@ function ArchivedTurnView({
   // 0.40.1 #1 — dedup narrative beats whose prose is a prefix of the
   // archived answer text (parity with live BeatStream).
   const suppressedArchivedSegIds = computeNarrativeDedupSegIds(
-    beats,
+    flowBeats,
     archived.answer ?? "",
-    getTurnSnapshot(archived.turnId ?? "")?.narrativeSuperseded === true,
+    archivedSuperseded,
   );
 
   // chat-polish-r3 Phase 1.5 — legacy traceSteps fallback retired.
@@ -3079,6 +3126,7 @@ function ArchivedTurnView({
         text={archived.answer}
         isStreaming={false}
         artifacts={inlineArtifacts}
+        extras={answerExtras}
       />
     ) : null;
 
@@ -3153,6 +3201,7 @@ function ArchivedTurnView({
     <CitationsProvider citations={archived.citations}>
     <ChatSourcesProvider sources={chatSourcesFromPayload(archived.finalPayload)}>
     <CollaborationTraceProvider turnId={archived.turnId ?? ""}>
+    <FoldedNotesProvider notes={archivedFold.notes}>
     <ContextActivityProvider turnId={archived.turnId ?? ""}>
     <StepRecoveryProvider turnId={archived.turnId ?? ""}>
     <div
@@ -3181,6 +3230,8 @@ function ArchivedTurnView({
       />
 
       <BotByline time={turnTimeText} />
+      {/* Owner draft trial: which frozen draft answered (the same attribution live, stored and replayed). */}
+      <TrialAnswerLabel turnId={archived.turnId} settled />
 
       {/* Like live BeatStream: explicit planning mode failed to produce a plan; still acknowledge it after archiving
           (live and archived must match, CLAUDE.md's chat invariant). */}
@@ -3210,7 +3261,7 @@ function ArchivedTurnView({
           shared renderer's renderPlan restores them (reconcileOnMount). */}
       {beats.length > 0 ? (
         <TurnBeatFlow
-          beats={beats}
+          beats={flowBeats}
           stepViews={hideArchivedTrace ? [] : steps}
           peerNames={storeState?.peerNames}
           peerDisplayNames={storeState?.peerDisplayNames}
@@ -3226,6 +3277,7 @@ function ArchivedTurnView({
           answerText={(b) => b.text ?? archived.answer ?? ""}
           answerStreaming={false}
           inlineArtifacts={inlineArtifacts}
+          answerExtras={answerExtras}
           renderPlan={(planId) => (
             // See TurnContainer's buildPlanFirstTurnIndex: render a plan only in its first-appearance turn.
             planAllowed && !planAllowed(planId) ? null : (
@@ -3339,6 +3391,7 @@ function ArchivedTurnView({
           turnId={archived.turnId}
         />
       ) : null}
+      {archivedComplete ? <TrialAnswerActions turnId={archived.turnId} question={archived.user ?? ""} /> : null}
 
       {onSolidify && archived.turnId && archivedComplete && steps.length > 0 ? (
         <div style={{ display: "flex", marginTop: 12 }}>
@@ -3349,6 +3402,7 @@ function ArchivedTurnView({
     </div>
     </StepRecoveryProvider>
     </ContextActivityProvider>
+    </FoldedNotesProvider>
     </CollaborationTraceProvider>
     </ChatSourcesProvider>
     </CitationsProvider>
@@ -3681,6 +3735,7 @@ function UserAttachmentStrip({ refs }: { refs: AttachmentRef[] }) {
           mime: r.mime || "",
           ...(r.selectedContext ? { selectedContext: r.selectedContext } : {}),
           ...(r.presentationSelection ? { presentationSelection: r.presentationSelection } : {}),
+          ...(r.documentSelection ? { documentSelection: r.documentSelection } : {}),
           status: "done",
           downloadUrl: appPath(`/api/v1/files/${r.fileId}`),
         };

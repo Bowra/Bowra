@@ -40,6 +40,10 @@ interface SplitPaneProps {
   showCanvasReopen?: boolean;
   /** Unseen new results while Results is collapsed → dot on reopen rail, screen-reader name announces new content. */
   canvasHasNew?: boolean;
+  /** How many results are new behind the collapsed Results rail (chat running state R2.6). */
+  canvasNewCount?: number;
+  /** Shown beside the collapsed Results rail, e.g. the reminder of what a Turn added (chat running state R2.6). */
+  canvasReopenAside?: React.ReactNode;
 }
 
 /**
@@ -57,7 +61,7 @@ interface SplitPaneProps {
  * Drag clamps the chat width to px mins and persists the fraction; dragging a pane past its min
  * snaps to the single-pane state via the callbacks.
  */
-export function SplitPane({ mode, chat, canvas, onSnapCanvas, onSnapChat, onReopen, soloCanvas = false, canvasLabel, showCanvasReopen = true, canvasHasNew = false, layout = "desktop" }: SplitPaneProps) {
+export function SplitPane({ mode, chat, canvas, onSnapCanvas, onSnapChat, onReopen, soloCanvas = false, canvasLabel, showCanvasReopen = true, canvasHasNew = false, canvasNewCount = 0, canvasReopenAside = null, layout = "desktop" }: SplitPaneProps) {
   const t = useTranslations("split_pane");
   const compact = layout === "compact";
   const areaRef = useRef<HTMLDivElement>(null);
@@ -209,8 +213,9 @@ export function SplitPane({ mode, chat, canvas, onSnapCanvas, onSnapChat, onReop
         {canvas}
       </div>
       {!compact && mode === "chat" && showCanvasReopen
-        ? <CollapsedEdge side="canvas" onClick={onReopen} label={canvasLabel} hasNew={canvasHasNew} />
+        ? <CollapsedEdge side="canvas" onClick={onReopen} label={canvasLabel} hasNew={canvasHasNew} newCount={canvasNewCount} />
         : null}
+      {!compact && mode === "chat" && showCanvasReopen ? canvasReopenAside : null}
     </div>
   );
 }
@@ -225,17 +230,22 @@ function CollapsedEdge({
   onClick,
   label: labelOverride,
   hasNew = false,
+  newCount = 0,
 }: {
   side: "chat" | "canvas";
   onClick: () => void;
   label?: string;
   /** Unseen new results behind this rail. */
   hasNew?: boolean;
+  /** How many results are new (chat running state R2.6); the rail shows the number instead of a dot. */
+  newCount?: number;
 }) {
   const t = useTranslations("split_pane");
   const label = labelOverride ?? (side === "chat" ? t("label_chat") : t("label_canvas"));
   const chevron = side === "chat" ? "›" : "‹"; // points toward the pane that will expand
-  const reopenLabel = hasNew ? t("reopen_has_new", { label }) : t("reopen", { label });
+  const reopenLabel = newCount > 0
+    ? t("reopen_new_count", { label, count: newCount })
+    : hasNew ? t("reopen_has_new", { label }) : t("reopen", { label });
   return (
     <button
       type="button"
@@ -249,7 +259,9 @@ function CollapsedEdge({
         <CharIcon ch={chevron} aria-hidden />
       </span>
       <span className="v2-ws-edge-label">{label}</span>
-      {hasNew ? <span className="v2-ws-new-dot" aria-hidden /> : null}
+      {newCount > 0
+        ? <span className="v2-ws-new-count" aria-hidden>{newCount > 99 ? "99+" : newCount}</span>
+        : hasNew ? <span className="v2-ws-new-dot" aria-hidden /> : null}
     </button>
   );
 }

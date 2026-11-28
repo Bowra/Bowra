@@ -23,6 +23,30 @@ exact current live release. It preserves existing edits and returns the current
 baseline, not a recovery receipt for an earlier save. Legacy baseline import stays
 in the original Owner flow. Never edit the released version directly.
 
+## Add an enabled Team Plugin
+
+Treat “install Notion on my research Agent” as a request to add a Team Plugin to
+that Agent. Search `kind="capability"` by name and read the unique matching
+reference with `agent_resource_get`. If more than one Plugin or owned Agent
+matches, ask the user to choose. Use only an active same-Team Plugin whose exact
+read returns `can_select=true`. If the Plugin is missing or its dependencies are
+unavailable, ask the user to have a Team administrator check the Plugin and its
+Tool Source. A Notion administrator uses Team Tool Sources for OAuth and the
+read-only tool selection. If the user personally disabled the Plugin, point them
+to its Me switch in Capability Center. Never turn anything on for this request.
+
+Resolve the Agent as above. Check the current draft, or its live definition if
+there is no draft. If the Plugin is already selected, report where it is selected
+without writing. If a draft is needed, open it from the exact live release and
+read back the new draft before editing. Append the Plugin's exact ID to the existing
+`/definition/capability_ids` array and leave all other selections and fields alone.
+Validate the one-field change, then call
+`agent_change_propose` in the same Turn with the exact Plugin reference and
+Agent target in `resource_context`. Set `source_operation` to null. The user's
+explicit request to add it authorizes this draft edit. Report the saved draft and
+its normal release action. For a selected creation draft, use the existing
+suggestion flow and report that it awaits the user's adoption.
+
 ## Existing Agent writes
 
 `agent_change_validate` checks JSON Patch operations and atomic groups against the

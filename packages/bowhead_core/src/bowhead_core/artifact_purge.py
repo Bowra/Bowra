@@ -15,6 +15,7 @@ import aiosqlite
 import structlog
 
 from bowhead_core.artifact_store import _open_db
+from bowhead_core.artifact_views import delete_views
 from bowhead_core.documents.retention import active_ref_sql
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
@@ -48,6 +49,7 @@ class PurgeClaim:
 
     artifact_id: str
     path: str
+    size: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class PurgeResult:
     rows_removed: int = 0
     files_removed: int = 0
     files_failed: int = 0
+    bytes_reclaimed: int = 0
 
 
 async def claim_artifact_purge(
@@ -82,9 +85,11 @@ async def claim_artifact_purge(
         if existing is not None:
             if existing[3] is not None or (user_id is not None and existing[2] != user_id):
                 return None
-            return PurgeClaim(str(existing[0]), str(existing[1]))
+            async with db.execute("SELECT size FROM artifacts WHERE id=?", (artifact_id,)) as cur:
+                size_row = await cur.fetchone()
+            return PurgeClaim(str(existing[0]), str(existing[1]), int(size_row[0]) if size_row else 0)
         async with db.execute(
-            "SELECT id,path FROM artifacts WHERE id=? AND deleted_at IS NOT NULL "
+            "SELECT id,path,size FROM artifacts WHERE id=? AND deleted_at IS NOT NULL "
             "AND (? IS NULL OR created_by=?) AND (? IS NULL OR deleted_at<?) "
             f"AND NOT {SNAPSHOT_PIN_SQL} AND NOT {await active_ref_sql(db)} "
             "AND NOT EXISTS(SELECT 1 FROM artifacts other WHERE other.path=artifacts.path AND other.id<>artifacts.id)",
@@ -93,12 +98,16 @@ async def claim_artifact_purge(
             row = await cur.fetchone()
         if row is None:
             return None
+        from bowhead_core.file_retention import auto_purge_allowed
+
+        if not await auto_purge_allowed(db, db_path, artifact_id):
+            return None
         await db.execute(
             "INSERT INTO artifact_purge_claims(artifact_id,path,created_by,claimed_at) SELECT id,path,created_by,? FROM artifacts WHERE id=?",
             (_now(), artifact_id),
         )
         await db.commit()
-        return PurgeClaim(str(row[0]), str(row[1]))
+        return PurgeClaim(str(row[0]), str(row[1]), int(row[2]))
 
 
 async def _complete_purge(db_path: str, claim: PurgeClaim) -> int:
@@ -151,19 +160,27 @@ async def purge_artifacts(
     cutoff: str | None = None,
 ) -> PurgeResult:
     """Delete exact claimed keys; failures keep the durable recovery work item."""
-    removed = files = failed = 0
+    removed = files = failed = reclaimed = 0
     for artifact_id in dict.fromkeys(artifact_ids):
         claim = await claim_artifact_purge(db_path, artifact_id=artifact_id, user_id=user_id, cutoff=cutoff)
         if claim is None:
             continue
+        acknowledged_bytes = 0
         try:
-            await backend.delete(claim.path)
-            files += 1
-        except FileNotFoundError:
-            pass  # Confirmed absence is an idempotent successful storage result.
+            try:
+                await backend.delete(claim.path)
+                files += 1
+                acknowledged_bytes = claim.size
+            except FileNotFoundError:
+                pass  # Confirmed absence is an idempotent successful storage result.
+            # Kept renders hold the file's content too; they go before the row (docx design §5.2).
+            await delete_views(backend, artifact_id)
         except Exception as exc:  # noqa: BLE001 - next artifact may still be collectible
             failed += 1
             log.warning("artifact.purge_storage_failed", artifact_id=artifact_id, error_type=type(exc).__name__)
             continue
-        removed += await _complete_purge(db_path, claim)
-    return PurgeResult(rows_removed=removed, files_removed=files, files_failed=failed)
+        completed = await _complete_purge(db_path, claim)
+        removed += completed
+        if completed:
+            reclaimed += acknowledged_bytes
+    return PurgeResult(rows_removed=removed, files_removed=files, files_failed=failed, bytes_reclaimed=reclaimed)

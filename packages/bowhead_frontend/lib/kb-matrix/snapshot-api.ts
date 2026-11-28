@@ -12,7 +12,16 @@ import { coalesceRequest } from "@/lib/coalesce-request";
 import { spaceHeader } from "@/lib/space-storage";
 
 import { matrixJsonOrThrow as jsonOrThrow } from "./api-error";
-import type { MatrixCellVM, MatrixColumnVM, MatrixRowVM, MatrixRunVM, MatrixSnapshot } from "./types";
+import type {
+  MatrixCellEventKind,
+  MatrixCellLastEvent,
+  MatrixCellVM,
+  MatrixColumnVM,
+  MatrixRowVM,
+  MatrixRunVM,
+  MatrixSnapshot,
+  MatrixVisibility,
+} from "./types";
 import { cellKey } from "./types";
 
 // ─── wire shapes（gateway §7.5）────────────────────────────
@@ -26,6 +35,8 @@ interface WireVariant {
   source_excerpt?: string | null;
   chunk_id?: string | null;
   page?: number | null;
+  /** Step 1 S7: position of the quoted chunk; absent on cells written before it. */
+  chunk_index?: number | null;
   /** M3: cross-verification agreement rate (wrap passthrough, only on cross_verify columns). */
   self_consistency_agree?: number | null;
   [k: string]: unknown;
@@ -44,6 +55,31 @@ interface WireCell {
   current_source?: { state: string } | null;
   prompt_version: number;
   seq: number;
+  /** Step 1 (S4): the latest change; absent from older backends and unreadable rows. */
+  last_event?: WireCellLastEvent | null;
+}
+
+export interface WireCellLastEvent {
+  kind: string;
+  actor_name: string | null;
+  at: string;
+}
+
+const CELL_EVENT_KINDS: ReadonlySet<string> = new Set([
+  "edited",
+  "kept_as_text",
+  "edit_reverted",
+  "verified",
+  "verify_reverted",
+  "ai_value",
+  "edit_superseded",
+  "auto_retried",
+]);
+
+/** Wire event → VM; an unknown kind (a newer backend) is dropped rather than shown wrongly. */
+export function buildLastEventFromWire(w: WireCellLastEvent | null | undefined): MatrixCellLastEvent | undefined {
+  if (!w || !CELL_EVENT_KINDS.has(w.kind)) return undefined;
+  return { kind: w.kind as MatrixCellEventKind, actorName: w.actor_name ?? null, at: w.at };
 }
 
 interface WireRun {
@@ -58,17 +94,30 @@ interface WireRun {
   eta_s: number;
   initiated_by: string;
   can_cancel?: boolean;
+  /** Step 1 (S3): a run limited to a few rows, and how many. */
+  trial?: boolean | null;
+  trial_files?: number | null;
 }
 
 interface WireFullSnapshot {
+  /** Step 1 S6 (absent from older backends). */
+  kind?: "full";
+  /** Step 1 S6: what this projection holds that a delta cannot carry; absent from older backends. */
+  projection_digest?: string | null;
   matrix: {
     matrix_id: string;
     name: string;
     can_edit: boolean;
+    /** Creator or Space/Team admin (absent from older backends: treated as false). */
+    can_manage?: boolean;
     seq: number;
     structure_seq: number;
     poll_ms: number;
     template_doc_type_id?: string | null;
+    /** Step 1 S8 (absent from older backends: a Space matrix). */
+    visibility?: MatrixVisibility;
+    /** The caller created the matrix and only-me matrices are enabled (absent: false). */
+    can_change_visibility?: boolean;
   };
   columns: WireColumn[];
   rows: Array<{ file_id: string; file_name: string; missing: boolean; file_version: number }>;
@@ -91,8 +140,13 @@ export interface WireColumn {
   navigation_role?: "none" | "description" | "topics";
 }
 
+/** Step 1 S6: cells written after since_seq in rows the viewer can read; absent rows/columns are unchanged. */
 interface WireDelta {
+  kind?: "delta";
   seq: number;
+  structure_seq?: number;
+  /** Equals the digest the poll sent (the server answers in full otherwise). */
+  projection_digest?: string | null;
   cells: Record<string, WireCell>;
   runs?: WireRun[] | null;
   run: WireRun | null;
@@ -107,7 +161,11 @@ export interface MatrixListItem {
   statusSummary: { done: number; failed: number; needs_review: number; running: number; queued: number };
   lastRunAt: string | null;
   createdBy: string;
+  /** Creator's display name in this Team; null when it cannot be resolved. */
+  createdByName: string | null;
   createdAt: string;
+  /** Step 1 S8: "private" matrices are listed for their creator only (absent: a Space matrix). */
+  visibility?: MatrixVisibility;
 }
 
 export type MatrixDelta = {
@@ -115,6 +173,8 @@ export type MatrixDelta = {
   cells: Record<string, MatrixCellVM>;
   /** M3: every delta poll sends full runs (poll liveness reads payload directly, not store after 100ms buffer). */
   runs: MatrixRunVM[];
+  /** Step 1 S6: the digest the delta was computed against (undefined from older backends). */
+  projectionDigest?: string;
 };
 
 // ─── helpers ────────────────────────────────────────────────
@@ -157,6 +217,7 @@ export function buildCellFromWire(w: WireCell): MatrixCellVM {
     sourceExcerpt: primary?.source_excerpt ?? undefined,
     chunkId: primary?.chunk_id ?? undefined,
     page: primary?.page ?? undefined,
+    chunkIndex: primary?.chunk_index ?? undefined,
     confidence: primary?.confidence ?? undefined,
     edited: !!w.edited,
     verified: !!w.verified,
@@ -168,6 +229,7 @@ export function buildCellFromWire(w: WireCell): MatrixCellVM {
     failReason: w.fail_reason ?? undefined,
     seq: w.seq,
     selfConsistencyAgree: typeof primary?.self_consistency_agree === "number" ? primary.self_consistency_agree : undefined,
+    lastEvent: buildLastEventFromWire(w.last_event),
   };
 }
 
@@ -186,6 +248,8 @@ function buildRun(w: WireRun | null): MatrixRunVM | null {
     scopeKind: w.scope?.kind ?? undefined,
     scopeColumnId: w.scope?.column_id ?? undefined,
     canCancel: w.can_cancel ?? undefined,
+    trial: w.trial ?? undefined,
+    trialFiles: w.trial_files ?? undefined,
   };
 }
 
@@ -239,7 +303,11 @@ function buildSnapshot(w: WireFullSnapshot): MatrixSnapshot {
     rows,
     seq: w.matrix.seq,
     canEdit: w.matrix.can_edit,
+    canManage: !!w.matrix.can_manage,
+    visibility: w.matrix.visibility === "private" ? "private" : "space",
+    canChangeVisibility: !!w.matrix.can_change_visibility,
     structureSeq: w.matrix.structure_seq,
+    projectionDigest: w.projection_digest ?? undefined,
     pollMs: w.matrix.poll_ms,
     run: buildRun(w.run),
     runs: buildRuns(w.runs, w.run),
@@ -268,7 +336,9 @@ async function loadMatrices(url: string): Promise<MatrixListItem[]> {
       status_summary: MatrixListItem["statusSummary"];
       last_run_at: string | null;
       created_by: string;
+      created_by_name?: string | null;
       created_at: string;
+      visibility?: MatrixVisibility;
     }>;
   }>(r, "listMatrices");
   return data.items.map((i) => ({
@@ -280,30 +350,46 @@ async function loadMatrices(url: string): Promise<MatrixListItem[]> {
     statusSummary: i.status_summary,
     lastRunAt: i.last_run_at,
     createdBy: i.created_by,
+    createdByName: i.created_by_name ?? null,
     createdAt: i.created_at,
+    visibility: i.visibility === "private" ? "private" : "space",
   }));
 }
 
-export async function fetchMatrixSnapshot(matrixId: string): Promise<MatrixSnapshot> {
-  const r = await fetch(`/api/v1/kb/matrices/${encodeURIComponent(matrixId)}/snapshot`, { headers: headers() });
+/** A full snapshot. `opened` marks the first load of a matrix page, which the server records once as the matrix
+ * being opened (step 1 S9); polls and later reloads never send it. */
+export async function fetchMatrixSnapshot(matrixId: string, options?: { opened?: boolean }): Promise<MatrixSnapshot> {
+  const query = options?.opened ? "?opened=true" : "";
+  const r = await fetch(`/api/v1/kb/matrices/${encodeURIComponent(matrixId)}/snapshot${query}`, { headers: headers() });
   const wire = await jsonOrThrow<WireFullSnapshot>(r, "fetchMatrixSnapshot");
   return buildSnapshot(wire);
 }
 
-/** Delta polling: since_seq ≥ structure_seq → delta; otherwise server returns full snapshot (structural-change fallback). */
+/** Polling (step 1 S6): with the digest of the projection held, the server answers with only the cells written
+ * after since_seq while nothing else changed, and in full otherwise; without a digest it always answers in full. */
 export async function fetchMatrixDelta(
   matrixId: string,
   sinceSeq: number,
+  digest?: string,
 ): Promise<{ kind: "delta"; delta: MatrixDelta } | { kind: "full"; snapshot: MatrixSnapshot }> {
-  const r = await fetch(
-    `/api/v1/kb/matrices/${encodeURIComponent(matrixId)}/snapshot?since_seq=${encodeURIComponent(String(sinceSeq))}`,
-    { headers: headers() },
-  );
+  const query = new URLSearchParams({ since_seq: String(sinceSeq) });
+  if (digest) query.set("digest", digest);
+  const r = await fetch(`/api/v1/kb/matrices/${encodeURIComponent(matrixId)}/snapshot?${query.toString()}`, {
+    headers: headers(),
+  });
   const wire = await jsonOrThrow<WireFullSnapshot | WireDelta>(r, "fetchMatrixDelta");
   if ("matrix" in wire) return { kind: "full", snapshot: buildSnapshot(wire) };
   const cells: Record<string, MatrixCellVM> = {};
   for (const [key, cw] of Object.entries(wire.cells)) cells[key] = buildCellFromWire(cw);
-  return { kind: "delta", delta: { seq: wire.seq, cells, runs: buildRuns(wire.runs, wire.run) } };
+  return {
+    kind: "delta",
+    delta: {
+      seq: wire.seq,
+      cells,
+      runs: buildRuns(wire.runs, wire.run),
+      projectionDigest: wire.projection_digest ?? undefined,
+    },
+  };
 }
 
 export { cellKey };

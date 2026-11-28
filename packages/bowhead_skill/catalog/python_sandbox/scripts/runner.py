@@ -45,6 +45,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import io
+import itertools
 import json
 import mimetypes
 import os
@@ -61,6 +63,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 # Inline stdout/stderr shown to the agent stays within this bound. A longer stream keeps
 # its beginning (setup, headers) and end (final results, tracebacks) around an explicit
@@ -68,10 +71,17 @@ from typing import Any
 _MAX_STDIO_CHARS = 8 * 1024
 _STDOUT_HEAD_CHARS = 3 * 1024
 _STDERR_HEAD_CHARS = 1024
-# Maximum 50MB per output file (needed for large datasets; the former 10 MB limit blocked real analyses).
-_MAX_OUTPUT_BYTES = 50 * 1024 * 1024
+_MAX_OUTPUT_BYTES = 60 * 1024 * 1024
+# The standalone runner mirrors the Gateway's large export policy.
+_LARGE_OUTPUT_BYTES = 100 * 1024 * 1024
+_LARGE_OUTPUT_EXTENSIONS = frozenset({".csv", ".tsv", ".zip"})
 # Sanitize filenames: strip path separators and control characters.
 _UNSAFE_NAME_RE = re.compile(r"[/\\\x00-\x1f\x7f]+")
+
+
+def _output_limit(path: Path) -> int:
+    return _LARGE_OUTPUT_BYTES if path.suffix.lower() in _LARGE_OUTPUT_EXTENSIONS else _MAX_OUTPUT_BYTES
+
 
 # ─────────────────────────────────────────────────────────
 # pptx-from-template M2 (wheelhouse) — offline hash-pinned long-tail deps.
@@ -257,6 +267,34 @@ def _k_guess_dtype(values: list) -> str:
 _SANDBOX_HELPERS = ("dirty_table.py", "period_growth.py", "pptx_fill.py")
 
 
+_EAST_ASIAN_DATE_FORMAT_IDS = frozenset((*range(27, 37), *range(50, 59)))
+_east_asian_dates_read = False
+
+
+def _read_east_asian_dates() -> None:
+    """Make openpyxl read Excel's East Asian built-in date formats (IDs 27-36, 50-58) as dates.
+
+    A workbook stores only the ID; openpyxl knows 0-22 and 37-49 and returns serial numbers for the
+    rest. Reading only: how openpyxl writes formats is unchanged. Same rule as
+    `bowhead_core.xlsx_dates` (this process cannot import it) and the scaffold's L6 hook.
+    """
+    global _east_asian_dates_read
+    if _east_asian_dates_read:
+        return
+    from openpyxl.styles.stylesheet import Stylesheet  # type: ignore[import-not-found]
+
+    original = Stylesheet._normalise_numbers
+
+    def _normalise_numbers(self):  # type: ignore[no-untyped-def]
+        original(self)
+        for index, style in enumerate(self.cell_styles):
+            if style.numFmtId in _EAST_ASIAN_DATE_FORMAT_IDS:
+                self.date_formats.add(index)
+
+    Stylesheet._normalise_numbers = _normalise_numbers
+    _east_asian_dates_read = True
+
+
 def _stage_sandbox_helpers(workdir: Path) -> None:
     """把 `_SANDBOX_HELPERS` stage 进 workdir，让沙箱 user 代码直接 import
     （如 `from dirty_table import read_dirty_table`、`from period_growth import compare_growth`）。
@@ -428,6 +466,7 @@ def _preview_structured_streaming(
                 import openpyxl  # type: ignore[import-not-found]
             except ImportError:
                 return None, "read_error", []
+            _read_east_asian_dates()
             try:
                 wb = openpyxl.load_workbook(
                     filename=str(path),
@@ -791,14 +830,9 @@ def _upload_artifact(
     stored_name = saved_name or path.name
     try:
         # Construct multipart/form-data manually (no dependencies).
-        boundary = "----bowheadsandboxboundary"
-        body_parts = [
-            f"--{boundary}\r\n".encode(),
-            (f'Content-Disposition: form-data; name="file"; filename="{stored_name}"\r\nContent-Type: {mime}\r\n\r\n').encode(),
-            path.read_bytes(),
-            f"\r\n--{boundary}--\r\n".encode(),
-        ]
-        body = b"".join(body_parts)
+        boundary = "----bowheadsandbox" + uuid4().hex
+        preamble = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{stored_name}"\r\nContent-Type: {mime}\r\n\r\n').encode()
+        closing = f"\r\n--{boundary}--\r\n".encode()
         # Build query string: source + any of the optional asset-model params.
         from urllib.parse import urlencode
 
@@ -822,15 +856,22 @@ def _upload_artifact(
         # output→input read 404s (output owned by dev_default_user, fetched as the real user).
         if token:
             _headers["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(  # noqa: S310
-            f"{gateway.rstrip('/')}/api/v1/files/upload?{urlencode(_qs)}",
-            data=body,
-            method="POST",
-            headers=_headers,
-        )
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-                data = json.loads(resp.read().decode())
+            with path.open("rb") as stream:
+                size = os.fstat(stream.fileno()).st_size
+                if size > _MAX_OUTPUT_BYTES:
+                    body = itertools.chain((preamble,), iter(lambda: stream.read(1024 * 1024), b""), (closing,))
+                    _headers["Content-Length"] = str(len(preamble) + size + len(closing))
+                else:
+                    body = b"".join((preamble, stream.read(), closing))
+                req = urllib.request.Request(  # noqa: S310
+                    f"{gateway.rstrip('/')}/api/v1/files/upload?{urlencode(_qs)}",
+                    data=body,
+                    method="POST",
+                    headers=_headers,
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+                    data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as http_error:
             detail = _http_error_detail(http_error) if 400 <= http_error.code < 500 else {}
             code = str(detail.get("code") or "")
@@ -876,14 +917,21 @@ def _preview_structured(path: Path) -> dict | None:
             import csv as _csv
 
             delim = "\t" if suffix == ".tsv" else ","
-            with path.open(newline="", encoding="utf-8") as f:
-                reader = _csv.reader(f, delimiter=delim)
-                rows_raw = list(reader)
+            limit = _MAX_PREVIEW_ROWS + 2  # Header, displayed rows, and one row to detect truncation.
+            large = path.stat().st_size > _MAX_OUTPUT_BYTES
+            if large:
+                with path.open("rb") as source:
+                    prefix = source.read(1024 * 1024)
+                complete_lines = prefix.rsplit(b"\n", 1)[0] if b"\n" in prefix else b""
+                rows_raw = list(itertools.islice(_csv.reader(io.StringIO(complete_lines.decode("utf-8")), delimiter=delim, strict=True), limit))
+            else:
+                with path.open(newline="", encoding="utf-8") as source:
+                    rows_raw = list(itertools.islice(_csv.reader(source, delimiter=delim), limit))
             if not rows_raw:
                 return None
             header = [str(c) for c in rows_raw[0]]
             data_rows = rows_raw[1 : 1 + _MAX_PREVIEW_ROWS]
-            truncated = len(rows_raw) - 1 > _MAX_PREVIEW_ROWS
+            truncated = large or len(rows_raw) - 1 > _MAX_PREVIEW_ROWS
         elif suffix in (".json", ".jsonl"):
             if suffix == ".jsonl":
                 items = []
@@ -1512,6 +1560,46 @@ def _bh_excepthook(_bh_t, _bh_v, _bh_tb):
 
 _bh_prev_excepthook = _bh_sys.excepthook
 _bh_sys.excepthook = _bh_excepthook
+
+
+# -- L6: Excel's East Asian built-in date formats read as dates --
+# Number formats 27-36 and 50-58 are built-in East Asian dates (zh-CN 'yyyy"年"m"月"' and the like).
+# A workbook stores only the ID; openpyxl knows IDs 0-22 and 37-49, so pandas and openpyxl read these
+# cells as serial numbers (582 cells in 5 of 14 real workbooks). The patch marks them as dates when
+# openpyxl's stylesheet module is first imported, so a run that never opens a workbook pays nothing.
+# Same rule as bowhead_core.xlsx_dates and _read_east_asian_dates() in runner.py.
+class _BhEastAsianDates:
+    _ids = frozenset((*range(27, 37), *range(50, 59)))
+
+    @classmethod
+    def find_spec(cls, _bh_name, _bh_path=None, _bh_target=None):
+        if _bh_name != 'openpyxl.styles.stylesheet':
+            return None
+        _bh_sys.meta_path.remove(cls)
+        import importlib.util as _bh_util
+        _bh_spec = _bh_util.find_spec(_bh_name)
+        if _bh_spec is None or _bh_spec.loader is None:
+            return _bh_spec
+        _bh_exec = _bh_spec.loader.exec_module
+
+        def _bh_exec_and_patch(_bh_module):
+            _bh_exec(_bh_module)
+            _bh_original = _bh_module.Stylesheet._normalise_numbers
+
+            def _bh_normalise_numbers(self):
+                _bh_original(self)
+                for _bh_i, _bh_style in enumerate(self.cell_styles):
+                    if _bh_style.numFmtId in cls._ids:
+                        self.date_formats.add(_bh_i)
+
+            _bh_module.Stylesheet._normalise_numbers = _bh_normalise_numbers
+
+        _bh_spec.loader.exec_module = _bh_exec_and_patch
+        return _bh_spec
+
+
+if 'openpyxl.styles.stylesheet' not in _bh_sys.modules:
+    _bh_sys.meta_path.insert(0, _BhEastAsianDates)
 # --- user code below ---
 """
 
@@ -1935,8 +2023,9 @@ def _declared_file(workdir: Path, parts: tuple[str, ...]) -> Path:
         raise _DeclaredOutputError("is not a regular file")
     if info.st_size <= 0:
         raise _DeclaredOutputError("is empty")
-    if info.st_size > _MAX_OUTPUT_BYTES:
-        raise _DeclaredOutputError(f"is larger than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+    limit = _output_limit(path)
+    if info.st_size > limit:
+        raise _DeclaredOutputError(f"is {info.st_size} bytes, above the {limit // (1024 * 1024)} MiB output limit")
     return path
 
 
@@ -1970,7 +2059,7 @@ def _pack_declared_folder(workdir: Path, parts: tuple[str, ...], out_dir: Path) 
             if len(members) > _MAX_FOLDER_FILES:
                 raise _DeclaredOutputError(f"has more than {_MAX_FOLDER_FILES} files")
             if total > _MAX_OUTPUT_BYTES:
-                raise _DeclaredOutputError(f"holds more than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+                raise _DeclaredOutputError(f"holds more than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MiB of uncompressed files")
     if not members:
         raise _DeclaredOutputError("is empty")
     target = out_dir / f"{parts[-1]}.zip"
@@ -1981,7 +2070,7 @@ def _pack_declared_folder(workdir: Path, parts: tuple[str, ...], out_dir: Path) 
             info.external_attr = 0o644 << 16
             archive.writestr(info, path.read_bytes())
     if target.stat().st_size > _MAX_OUTPUT_BYTES:
-        raise _DeclaredOutputError(f"packs to an archive larger than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MB")
+        raise _DeclaredOutputError(f"packs to an archive larger than {_MAX_OUTPUT_BYTES // (1024 * 1024)} MiB")
     return target, len(members)
 
 
@@ -2391,8 +2480,9 @@ def main() -> int:
         if size <= 0:
             sys.stderr.write(f"[runner] skip {p.name} size={size} (limit {_MAX_OUTPUT_BYTES})\n")
             continue
-        if size > _MAX_OUTPUT_BYTES:
-            not_saved.append((p.name, f"sandbox file {p.name} exceeds Data artifact limit"))
+        output_limit = _output_limit(p)
+        if size > output_limit:
+            not_saved.append((p.name, f"sandbox file {p.name} is {size} bytes, above the {output_limit // (1024 * 1024)} MiB output limit"))
             continue
         _out_kind = _kind_for_output(
             p.name,

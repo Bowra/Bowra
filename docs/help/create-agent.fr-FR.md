@@ -38,7 +38,7 @@ Dans le panneau à droite, la création manuelle crée d’abord un brouillon av
 - Le brouillon dans le Canvas est enregistré automatiquement ; la barre d’outils affiche **Enregistré** ou **Enregistrement…**. Ce n’est que pendant un enregistrement en cours ou après un échec que fermer le panneau ou changer de page, conversation ou espace propose **Continuer à modifier** ou **Abandonner les changements non enregistrés**. L’abandon retire uniquement les changements non enregistrés ; le brouillon déjà enregistré reste. En cas d’échec, choisissez **Réessayer** dans la barre d’outils.
 - Si un autre onglet a enregistré le même brouillon, comparez pour chaque champ sa valeur avant modification, votre saisie et la dernière valeur enregistrée. Choisissez puis enregistrez pour éviter d’écraser les changements ailleurs.
 - L’entrée générale permet de reprendre un brouillon de l’espace actuel ou d’en commencer explicitement un autre. La liste présente nom, origine, état, dernier enregistrement et expiration. Un brouillon manuel reprend directement dans l’éditeur à droite.
-- **Créés par moi** répertorie aussi les brouillons IA et manuels encore reprenables. L’adresse du brouillon ouvert permet d’actualiser et de le retrouver.
+- **Créés par moi** répertorie aussi les brouillons IA et manuels encore reprenables. Chaque brouillon indique sa date d’expiration ; **Supprimer…** retire définitivement un brouillon inutile. L’adresse du brouillon ouvert permet d’actualiser et de le retrouver.
 - Si le brouillon est introuvable, vérifiez l’espace, choisissez **Voir mes brouillons** ou recommencez. Un brouillon expiré n’est pas reprenable. Un échec temporaire de chargement peut être relancé sur la carte.
 
 ## Générer avec l’IA
@@ -61,6 +61,8 @@ Si votre équipe permet cette fonction, les brouillons IA en vérification et le
 ## Après création
 
 **Gérer l’Agent** ouvre immédiatement sa configuration. Vous pouvez aussi le retrouver dans vos Agents. Sa présence dans votre liste personnelle ne signifie pas que vous l’avez recruté. Les anciens Agents ouvrent leur page de configuration ; ceux gérés par versions ouvrent l’atelier des versions.
+
+Dans « Mes agents », chaque ligne a un seul bouton principal : **Gérer** pour vos Agents et **Commencer à utiliser** pour les Agents recrutés ; les autres actions sont dans le menu **⋯** de la ligne. Une étiquette n’apparaît que pour les exceptions : mis en pause par vous, indisponible ou archivé par son propriétaire. **Créés par moi** affiche d’abord les brouillons à reprendre, puis les Agents non archivés ; une dernière ligne renvoie vers **Archivé**. Vous pouvez rechercher par nom ou description, filtrer et trier ; avec beaucoup d’Agents, la recherche porte au plus sur les 500 premiers. **Recrutés par moi** affiche d’abord les Agents utilisables ; les autres sont repliés sous **Indisponibles pour le moment**, chacun avec sa raison et une action. Les responsables et administrateurs de l’équipe voient aussi l’onglet **Approbations de l’équipe**, à la même adresse et avec le même nombre.
 
 L’atelier des versions comporte trois onglets : **Configurer**, **Évaluer** et **Publier** ; seuls les onglets activés par votre équipe apparaissent. Les anciens onglets des propositions de modification, de la vérification et publication et de l’historique des versions y sont regroupés ; les anciens liens mènent automatiquement au bon endroit.
 
@@ -85,7 +87,7 @@ Vous pouvez aussi solliciter Coach directement : tapez **@** dans la zone de sai
 
 - Le changement va uniquement dans le brouillon ; rien n’est publié ni appliqué. La nouvelle version ne prend effet qu’après le contrôle de publication dans l’onglet **Publier**.
 - Si le canevas contient des changements non enregistrés, votre message n’est pas envoyé à Coach et un bandeau s’affiche au-dessus de la zone de saisie : **Enregistrer et continuer** enregistre le canevas puis envoie le même message ; **Abandonner les modifications** supprime les changements du canevas pour que vous puissiez renvoyer.
-- À chaque écriture de Coach dans le brouillon, une ligne sous la réponse indique combien de modifications y sont allées ; **Voir dans le canevas** ouvre l’Agent.
+- À chaque écriture de Coach dans le brouillon, une ligne sous la réponse nomme l’Agent et les champs modifiés, même si Coach n’a pas ouvert le canevas et après un rechargement. **Voir dans le canevas** ouvre l’Agent, **Tester et publier depuis la page de gestion** ouvre sa page de gestion ; si l’Agent est déjà ouvert dans le canevas, la ligne indique seulement **Ouvert à droite**. Si vous n’en êtes plus propriétaire ou s’il est archivé, seule la première partie reste, sans boutons.
 - Une Skill ajoutée par Coach doit être accompagnée des Skills dont elle a besoin. S’il en manque, Coach n’écrit rien et indique lesquelles sont nécessaires.
 - Après l’écriture de Coach, un éditeur ouvert de cet Agent s’actualise, sauf s’il contient une saisie non enregistrée.
 - Corrigez d’abord sous **Ce qu’il peut utiliser** tout outil ou Skill invalide ou non autorisé.
@@ -108,6 +110,30 @@ Dans **Paramètres personnels → Compte → Agents**, ou dans le menu **⋯** d
 - **Me demander d’abord** : Coach demande seulement le contrôle. Vérifiez l’usage estimé et lancez-le depuis la carte du contrôle de publication.
 
 Dans les deux cas, un contrôle réussi ne publie ni n’applique l’Agent de lui-même.
+
+## La nouvelle page d’Agent : Configurer
+
+Quand votre équipe utilise la nouvelle page d’Agent, une barre de publication sous le nom de l’Agent indique où il en est, et **Configurer** suit l’ordre ci-dessous. Tout ce que vous pouviez faire avant est toujours là ; certains éléments ont changé de place.
+
+- **Modifications de Coach** : les champs que Coach ou « Améliorer avec l’IA » ont écrits dans le brouillon viennent en premier, seulement s’il y en a. Chaque ligne propose **Comparer** (avant et après côte à côte) et **Annuler**.
+- **Ce qu’il fait** : nom, présentation en une phrase (l’assistant principal s’en sert pour décider quand lui demander de l’aide ; une fois partagé, vos collègues la voient aussi), instructions et modèle. Si l’équipe n’autorise qu’un modèle, seul son nom s’affiche ; sinon vous pouvez choisir. Le guide des outils intégrés, la responsabilité principale et la sortie structurée sont regroupés sous **Avancé** ; la ligne repliée indique ce qui n’est pas défini. Une petite étiquette à côté d’un champ indique qui l’a modifié dans le brouillon enregistré.
+- **Ce qu’il peut utiliser** : seulement les plugins, connexions d’équipe, outils et skills choisis, chacun avec **Retirer** ; **Ajouter un plugin, un outil ou un skill** ouvre le catalogue sur le côté. Les sources de connaissances et les méthodes facultatives en lecture seule ont chacune une ligne ; **Modifier** ou **Configurer** ouvre leurs réglages habituels sur le côté. Une ligne indique si l’Agent écrit ou supprime à l’extérieur ; **Gérer les connexions** ouvre les connexions d’outils personnelles.
+- **Qui peut l’utiliser** : ouvert par défaut. Pour des membres choisis ou toute l’équipe, « Ce qui se passe une fois partagé » rappelle que chaque publication doit réussir son test puis être validée, que personne n’est prévenu et que chacun l’engage sous **Partagés avec moi**, et qu’il s’exécute avec les droits d’accès de chaque personne.
+- **Autres réglages** : la fiche (catégories, descriptions traduites), l’autorisation de le copier comme sa propre version, et les suggestions en attente (propositions de pipelines externes et pouces vers le bas des membres). **Modifier** ouvre les réglages habituels de chaque ligne.
+
+L’enregistrement se fait depuis la barre de publication : avec des modifications non enregistrées, son action principale est **Enregistrer le brouillon**. Si le brouillon ne peut pas encore être enregistré, la barre indique ce qui manque et renvoie vers la section à corriger.
+
+### Améliorer les instructions avec l’IA
+
+**Améliorer avec l’IA**, à côté des instructions, reformule uniquement ce champ pour le rendre plus clair et mieux organisé. Pour changer ce que l’Agent peut utiliser ou qui peut l’utiliser, utilisez **Demander à Coach de le modifier**. L’éditeur d’Agent du Canvas propose le même bouton.
+
+1. Écrivez quelques lignes d’instructions, puis choisissez **Améliorer avec l’IA** ; le bouton est indisponible tant que les instructions sont vides.
+2. La page enregistre d’abord le brouillon : tout de suite si seules les instructions ont changé ; si d’autres champs ont changé, elle demande d’abord en les nommant.
+3. Pendant l’attente, les instructions sont en lecture seule, en général environ 5 secondes. Au bout de 30 secondes, « Amélioration toujours en cours… » et **Ne plus attendre** apparaissent ; le résultat s’affiche quand même sous les instructions, y compris après un rechargement.
+4. Le résultat est présenté côte à côte : à gauche le texte actuel, à droite la suggestion de l’IA, les phrases ajoutées étant marquées « Ajouté ». Si les instructions sont très courtes ou citent un outil ou des données que l’Agent n’a pas, une note le signale au-dessus.
+5. **Utiliser cette version** l’écrit dans le brouillon, **Abandonner** l’écarte. Vous pouvez ensuite comparer ou annuler la modification sous « Modifications de Coach » et vérifier avec **Essayer le brouillon** si les réponses s’améliorent.
+
+Le brouillon ne change qu’avec **Utiliser cette version**, et aucun échec ne le modifie ; le message indique la cause et qui peut la corriger. Une seule amélioration à la fois. Si l’Agent n’a pas encore de brouillon, un brouillon identique à la version publiée est d’abord enregistré ; il reste après un abandon.
 
 ## Décrire ce que fait une bonne réponse
 
@@ -150,6 +176,22 @@ Avec les références rapides :
 - Pour un Skill grisé sous `/`, lisez la raison. « Ce Skill n’a pas encore de contenu en lecture seule pour les références rapides » signifie qu’il n’est pas sélectionnable ici, même si l’Agent peut habituellement le lire. Son mainteneur doit ajouter ce contenu.
 
 Pour un calcul détaillé de formule, demandez-le. Si l’Agent fournit une substitution vérifiable, la réponse affiche formule et résultat mis en forme ; les formules larges défilent horizontalement. Les formules non vérifiables ne sont pas remplies automatiquement.
+
+## Sources de connaissances lorsque les bases de connaissances sont activées
+
+Si votre équipe utilise les bases de connaissances, les sources de connaissances d’un agent proposent trois choix : **Connaissances lisibles dans le contexte actuel** (avec les accès de chaque personne), **Bases de connaissances sélectionnées** et **Fichiers sélectionnés** (jusqu’à 64 fichiers fixes).
+
+1. Choisissez **Bases de connaissances sélectionnées**, puis **Ajouter une base de connaissances**.
+2. Cochez les bases à inclure, 32 au plus. La liste n’affiche que celles que vous pouvez utiliser, regroupées en « Mes bases de connaissances », chacun de vos espaces et « Équipe ».
+3. Enregistrez le brouillon et publiez-le comme d’habitude. Les fichiers ajoutés plus tard à ces bases sont recherchés automatiquement à la prochaine exécution ; les fichiers retirés ne sont plus lus.
+
+À savoir :
+
+- Quand quelqu’un d’autre utilise l’agent, il ne recherche que les parties de ces bases que cette personne peut elle-même utiliser. Les bases d’un espace ne s’appliquent que dans cet espace, et vos connaissances personnelles ne s’appliquent jamais à quelqu’un d’autre. Avant de partager l’agent, vérifiez que ses utilisateurs peuvent utiliser ces bases.
+- Juste après l’activation, l’option peut indiquer que les bases sont encore en préparation pour les agents. Choisissez **Vérifier à nouveau** après quelques minutes ; d’ici là, utilisez l’un des deux autres choix.
+- Une base que vous ne pouvez plus utiliser apparaît comme un emplacement numéroté. Retirez-la ou demandez l’accès avant d’enregistrer.
+- Passer de fichiers sélectionnés à des bases sélectionnées, ou ajouter une base, est signalé comme une source de connaissances élargie lors de la revue de publication. Retirer des bases la restreint.
+- Si les bases de connaissances sont de nouveau désactivées, la sélection enregistrée ne s’applique plus : l’agent n’y lit rien, et son exécution en indique la raison. Choisissez une autre source de connaissances pour que l’agent continue d’utiliser des connaissances.
 
 ## Si la création échoue
 

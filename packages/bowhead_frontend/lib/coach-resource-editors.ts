@@ -60,7 +60,8 @@ export type CoachResourceEditor = { reference: CoachResourceReference; read_only
 export async function readCoachResourceEditor(pointer: CoachResourceOpen, signal: AbortSignal): Promise<CoachResourceEditor> {
   const response = await apiFetch("/api/v1/agent-coach/resources/editor", { method: "POST", signal, cache: "no-store",
     headers: { "Content-Type": "application/json", ...spaceHeader({ workspaceId: pointer.workspaceId, teamId: pointer.teamId }) },
-    body: JSON.stringify({ reference: pointer.reference, parent: pointer.parent, workspace_id: pointer.workspaceId, session_id: pointer.sessionId }) });
+    // An Owner draft trial opens the editor before its first message, when there is no session yet.
+    body: JSON.stringify({ reference: pointer.reference, parent: pointer.parent, workspace_id: pointer.workspaceId, ...(pointer.sessionId ? { session_id: pointer.sessionId } : {}) }) });
   if (!response.ok) throw await readApiError(response);
   const value = record(await response.json());
   const reference = parseResourceReference(value.reference);

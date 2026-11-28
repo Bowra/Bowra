@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { Chat, Check, Lock, Undo } from "@/components/icons";
@@ -77,7 +77,7 @@ export function ElementList({
             <p className={styles.panelHint}>{t("page_list_hint")}</p>
           </div>
           {onReferencePage ? (
-            <Button size="sm" variant="secondary" onClick={onReferencePage} aria-pressed={pageReferenced}
+            <Button size="sm" variant="secondary" className={styles.pageReference} onClick={onReferencePage} aria-pressed={pageReferenced}
               aria-label={t(pageReferenced ? "referenced_page_label" : "reference_page_label", { page: slide.index })}>
               {pageReferenced ? <Check size={13} aria-hidden="true" /> : <Chat size={13} aria-hidden="true" />}
               {t(pageReferenced ? "referenced_page" : "reference_page")}
@@ -145,7 +145,7 @@ function UndoButton({ onClick, label }: { onClick: () => void; label: string }) 
 }
 
 export function TextPanel({
-  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false,
+  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false, bare = false,
 }: {
   element: InventoryElement;
   page: number;
@@ -160,6 +160,8 @@ export function TextPanel({
   inPlace?: boolean;
   /** Inside a phone sheet, whose footer holds 「撤销这处」 and 「完成」. */
   sheet?: boolean;
+  /** Only the fields, in the editor shell's popover: its title names the element and 修改记录 lists the changes. */
+  bare?: boolean;
 }) {
   const t = useTranslations("presentation_edit");
   const baseId = useId();
@@ -169,7 +171,7 @@ export function TextPanel({
   const mixed = paragraphs.some((paragraph) => paragraph.mixed_style);
   return (
     <div className={styles.panel}>
-      <PanelHeader element={element} page={page} onBack={sheet ? undefined : onBack} onReference={onReference} t={t} fieldToken={fieldToken} />
+      {bare ? null : <PanelHeader element={element} page={page} onBack={sheet ? undefined : onBack} onReference={onReference} t={t} fieldToken={fieldToken} />}
       {inPlace ? (
         <>
           <p className={styles.panelHint}>{t("in_place_text_hint")}</p>
@@ -210,12 +212,12 @@ export function TextPanel({
           );
         })}
       </div>}
-      <ElementChanges title={t("changes_here")} rows={edits.map((edit) => ({
+      {bare ? null : <ElementChanges title={t("changes_here")} rows={edits.map((edit) => ({
         id: pendingEditId(edit),
         location: shown.length > 1 ? t("paragraph_label", { number: edit.paragraph + 1 }) : t("text_label"),
         before: excerpt(edit.expect, fieldToken, 120),
         after: excerpt(edit.text, fieldToken, 120),
-      }))} onUndo={sheet ? undefined : onUndo} undoLabel={t("undo_this")} />
+      }))} onUndo={sheet ? undefined : onUndo} undoLabel={t("undo_this")} />}
     </div>
   );
 }
@@ -277,7 +279,7 @@ function cellName(rows: ReadonlyArray<ReadonlyArray<{ text: string }>>, row: num
 }
 
 export function TablePanel({
-  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false, rowForm = false, focusCell,
+  element, page, pending, refusals, fieldToken, onChange, onUndo, onBack, onReference, inPlace = false, sheet = false, rowForm = false, focusCell, bare = false,
 }: {
   element: InventoryElement;
   page: number;
@@ -296,6 +298,8 @@ export function TablePanel({
   rowForm?: boolean;
   /** The cell the person clicked, which takes focus. */
   focusCell?: readonly [number, number] | null;
+  /** Only the grid and its notes, in the editor shell's popover. */
+  bare?: boolean;
 }) {
   const t = useTranslations("presentation_edit");
   const baseId = useId();
@@ -387,7 +391,7 @@ export function TablePanel({
   }
   return (
     <div className={styles.panel}>
-      {header}
+      {bare ? null : header}
       <p className={styles.panelHint}>{t("table_hint")}</p>
       <div className={styles.gridFrame}>
         <table className={styles.grid} ref={gridRef}>
@@ -440,15 +444,17 @@ export function TablePanel({
       {errorLines}
       <p className={styles.panelNote}>{t("table_formula_note")}</p>
       {rows.some((cells) => cells.some((cell) => !cell.editable)) ? <p className={styles.panelNote}>{t("table_locked_note")}</p> : null}
-      {changes}
+      {bare ? null : changes}
     </div>
   );
 }
 
 /** The chart's values as a grid of fields, in the inspector, a phone sheet or the popover beside the chart. */
 export function ChartGrid({
-  element, pending, drafts, invalid, locale, fieldToken, onDraft,
+  element, pending, drafts, invalid, locale, fieldToken, onDraft, typed,
 }: {
+  /** A digit typed on the selected chart: it replaces the first value, which takes focus. */
+  typed?: string;
   element: InventoryElement;
   pending: ReadonlyArray<PendingEdit>;
   drafts: ReadonlyArray<ReadonlyArray<string | undefined>> | undefined;
@@ -462,6 +468,14 @@ export function ChartGrid({
   const gridRef = useRef<HTMLTableElement>(null);
   // A value that does not parse is announced once the field is left, not on every keystroke.
   const [left, setLeft] = useState<ReadonlySet<string>>(() => new Set());
+  const typedRef = useRef(typed);
+  useEffect(() => {
+    const first = typedRef.current;
+    typedRef.current = undefined;
+    if (first && element.chart?.series.length && element.chart.categories.length) onDraft(0, 0, first);
+    // Once, when the data opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const chart = element.chart;
   if (!chart) return null;
   const edit = pending.find((item): item is Extract<PendingEdit, { kind: "chart" }> => item.kind === "chart" && item.key === element.key);
@@ -606,6 +620,11 @@ const UNSUPPORTED_TITLES: Record<string, string> = {
   duplicate_shape_id: "unsupported_title_duplicate",
 };
 
+/** Why an element cannot be edited here, as its panel says it (图片暂时不能在这里改). */
+export function unsupportedTitle(element: InventoryElement, t: Translate): string {
+  return t(UNSUPPORTED_TITLES[element.reason ?? element.kind] ?? "unsupported_title_other");
+}
+
 export function UnsupportedPanel({
   element, page, fieldToken, downloadHref, onReference, onReferenceElement, onBack, title: titleOverride, body: bodyOverride, phone = false,
 }: {
@@ -631,6 +650,7 @@ export function UnsupportedPanel({
     <div className={styles.panel}>
       <Button size="sm" variant="plain" className={styles.backButton} onClick={onBack}>{t("back_to_list")}</Button>
       <StateBlock
+        icon={<Lock size={20} aria-hidden="true" />}
         title={title}
         body={bodyOverride ?? t(element.reason === "duplicate_shape_id" ? "unsupported_body_duplicate" : "unsupported_body", { name, page })}
         primaryAction={reference ? { label: reference.label, onClick: reference.onClick } : undefined}

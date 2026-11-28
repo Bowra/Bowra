@@ -225,26 +225,98 @@ const caseEffects = new Map<string, readonly CoachCaseEffect[]>();
 const EMPTY_CASES: readonly CoachCaseEffect[] = [];
 export const coachCaseEffects = (turnId: string | null) => turnId ? caseEffects.get(turnId) ?? EMPTY_CASES : EMPTY_CASES;
 
-/** Discover original case effects separately from requests to open a view. */
-export function projectCoachCaseEffects(payload: Record<string, unknown>, turnId: string | null): void {
-  if (!turnId || turnId.length > 256) return;
+/** One Tool's durable `result_meta.coach_operations` receipts, exact keys only; a malformed envelope yields none. */
+function durableReceipts(
+  payload: Record<string, unknown>,
+  toolName: "agent_eval_case_propose" | "agent_change_propose",
+  kind: "eval_cases" | "agent_change",
+): Array<{ callId: string; reference: { agent_id: string; proposal_id: string }; reportedOk: boolean }> {
   const meta = record(record(payload.result_meta).coach_operations);
   if (meta.schema_version !== 1 || typeof meta.truncated !== "boolean" || !Array.isArray(meta.receipts)
-    || meta.receipts.length > 20 || Object.keys(meta).some((key) => !["schema_version", "receipts", "truncated"].includes(key))) return;
-  const current = caseEffects.get(turnId) ?? EMPTY_CASES;
-  const next = [...current];
+    || meta.receipts.length > 20 || Object.keys(meta).some((key) => !["schema_version", "receipts", "truncated"].includes(key))) return [];
+  const receipts: Array<{ callId: string; reference: { agent_id: string; proposal_id: string }; reportedOk: boolean }> = [];
   for (const raw of meta.receipts) {
     const item = record(raw);
     const reference = parseCoachOperationReference(item.operation_ref);
-    if (item.tool_name !== "agent_eval_case_propose" || typeof item.call_id !== "string" || !item.call_id || item.call_id.length > 256
-      || typeof item.reported_ok !== "boolean" || reference?.kind !== "eval_cases"
+    if (item.tool_name !== toolName || typeof item.call_id !== "string" || !item.call_id || item.call_id.length > 256
+      || typeof item.reported_ok !== "boolean" || reference?.kind !== kind
       || Object.keys(item).some((key) => !["call_id", "tool_name", "operation_ref", "reported_ok"].includes(key))) continue;
+    receipts.push({ callId: item.call_id, reference: { agent_id: reference.agent_id, proposal_id: reference.proposal_id }, reportedOk: item.reported_ok });
+  }
+  return receipts;
+}
+
+/** Discover original case effects separately from requests to open a view. */
+export function projectCoachCaseEffects(payload: Record<string, unknown>, turnId: string | null): void {
+  if (!turnId || turnId.length > 256) return;
+  const current = caseEffects.get(turnId) ?? EMPTY_CASES;
+  const next = [...current];
+  for (const { callId, reference, reportedOk } of durableReceipts(payload, "agent_eval_case_propose", "eval_cases")) {
     if (next.some((entry) => entry.reference.agent_id === reference.agent_id && entry.reference.proposal_id === reference.proposal_id)) continue;
-    next.push({ turnId, callId: item.call_id, reference: { ...reference, kind: "eval_cases" }, reportedOk: item.reported_ok });
+    next.push({ turnId, callId, reference: { kind: "eval_cases", ...reference }, reportedOk });
   }
   if (next.length === current.length) return;
   caseEffects.set(turnId, next.slice(-20));
   if (caseEffects.size > 256) caseEffects.delete(caseEffects.keys().next().value!);
   revision += 1;
   listeners.forEach((listener) => listener());
+}
+
+export type CoachChangeReference = { kind: "agent_change"; agent_id: string; proposal_id: string };
+export type CoachChangeEffect = {
+  turnId: string;
+  callId: string;
+  reference: CoachChangeReference;
+  reportedOk: boolean;
+};
+const changeEffects = new Map<string, readonly CoachChangeEffect[]>();
+const EMPTY_CHANGES: readonly CoachChangeEffect[] = [];
+export const coachChangeEffects = (turnId: string | null) => turnId ? changeEffects.get(turnId) ?? EMPTY_CHANGES : EMPTY_CHANGES;
+
+/**
+ * Coach's Agent draft writes (`agent_change_propose`) from the run record, so the receipt does not depend on
+ * Coach calling "open" (slices 2-5 tech design §6). Live `tool_result`, its `step_done` twin and replay carry
+ * the same ids; each proposal is kept once. The ids grant nothing: the row reads them through the scoped reader.
+ */
+export function projectCoachChangeEffects(payload: Record<string, unknown>, turnId: string | null): void {
+  if (!turnId || turnId.length > 256) return;
+  const current = changeEffects.get(turnId) ?? EMPTY_CHANGES;
+  const next = [...current];
+  for (const { callId, reference, reportedOk } of durableReceipts(payload, "agent_change_propose", "agent_change")) {
+    if (next.some((entry) => entry.reference.agent_id === reference.agent_id && entry.reference.proposal_id === reference.proposal_id)) continue;
+    next.push({ turnId, callId, reference: { kind: "agent_change", ...reference }, reportedOk });
+  }
+  if (next.length === current.length) return;
+  changeEffects.set(turnId, next.slice(-20));
+  if (changeEffects.size > 256) changeEffects.delete(changeEffects.keys().next().value!);
+  revision += 1;
+  listeners.forEach((listener) => listener());
+}
+
+export type CoachChangeGroup = { agentId: string; references: CoachChangeReference[] };
+
+const sameChange = (left: { agent_id: string; proposal_id: string }, right: { agent_id: string; proposal_id: string }) =>
+  left.agent_id === right.agent_id && left.proposal_id === right.proposal_id;
+
+/** One receipt row per Agent: every draft write Coach made on it in the Turn, each proposal once, in order. */
+export function coachChangeGroups(effects: readonly CoachChangeEffect[]): CoachChangeGroup[] {
+  const groups: CoachChangeGroup[] = [];
+  for (const { reference } of effects) {
+    let group = groups.find((entry) => entry.agentId === reference.agent_id);
+    if (!group) {
+      group = { agentId: reference.agent_id, references: [] };
+      groups.push(group);
+    }
+    if (!group.references.some((entry) => sameChange(entry, reference))) group.references.push(reference);
+  }
+  return groups;
+}
+
+/** "Open" events for a proposal the run record does not carry: Turns before 2026-10-28 keep their old row. */
+export function uncoveredChangeOpens(
+  opens: readonly CoachOperationOpen[],
+  effects: readonly CoachChangeEffect[],
+): CoachOperationOpen[] {
+  return opens.filter((open) => open.reference.kind === "agent_change"
+    && !effects.some((effect) => open.reference.kind === "agent_change" && sameChange(effect.reference, open.reference)));
 }

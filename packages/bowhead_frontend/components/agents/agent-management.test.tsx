@@ -392,8 +392,8 @@ describe("AgentManagement", () => {
     vi.mocked(listManagedAgents).mockResolvedValue(collection("hired", [broken, checking] as never));
     renderIntl(<AgentManagement />);
 
-    expect(await screen.findByText("需要负责人处理")).toBeTruthy();
-    expect(screen.getByText("请联系负责人 liuyixin 或团队管理员检查")).toBeTruthy();
+    expect(await screen.findByText("需要所有者处理")).toBeTruthy();
+    expect(screen.getByText("请联系所有者 liuyixin 或团队管理员检查")).toBeTruthy();
     expect(screen.getAllByText("暂时无法确认")).toHaveLength(2);
     const calls = vi.mocked(listManagedAgents).mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -652,7 +652,7 @@ describe("AgentManagement", () => {
     vi.mocked(listManagedAgents).mockResolvedValue(collection("hired", [blocked]));
     renderIntl(<AgentManagement />);
 
-    expect(await screen.findByText("此智能体暂不可用，需要由负责人检查介绍。")).toBeTruthy();
+    expect(await screen.findByText("此智能体暂不可用，需要由所有者检查介绍。")).toBeTruthy();
     expect(screen.queryByText(/密钥或凭据/)).toBeNull();
   });
 

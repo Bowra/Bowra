@@ -38,6 +38,7 @@ from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
 from bowhead_router.runtime_notes import (
     FINAL_REPLY_REVIEW_NOTE_NAME,
     OUTPUT_RECOVERY_STATE_NAME,
+    RUN_FILES_NOTE_NAME,
     RUNTIME_CORRECTION_NOTE_NAME,
     VISUAL_VIEW_NOTE_NAME,
     WITHDRAWN_ANSWER_FACT,
@@ -264,12 +265,13 @@ def _agent_attribution_payload(
     binding: ExactAgentExecutionBinding | None,
     *,
     display_name: str = "",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Project an exact execution binding into the public event contract.
 
     Keep this projection deliberately credential-free and identical across the
     three peer event families.  Legacy / plan callers without an M3 binding
-    return the old payload shape unchanged.
+    return the old payload shape unchanged.  An Owner draft trial adds which
+    frozen draft answered (``trial``), read from the Turn's trial row.
     """
 
     if binding is None:
@@ -278,7 +280,7 @@ def _agent_attribution_payload(
     snapshot_name = (
         str(listing_name).strip() if isinstance(listing_name, str) and listing_name.strip() else display_name.strip() or binding.runtime_profile_name
     )
-    payload = {
+    payload: dict[str, Any] = {
         "agent_id": binding.agent_id,
         "agent_revision_id": binding.revision_ref,
         "agent_execution_id": binding.execution_id,
@@ -286,6 +288,12 @@ def _agent_attribution_payload(
     }
     if binding.release_id:
         payload["agent_release_id"] = binding.release_id
+    if binding.trial_candidate_id is not None:
+        payload["trial"] = {
+            "candidate_id": binding.trial_candidate_id,
+            "candidate_kind": binding.trial_candidate_kind,
+            "frozen_at": binding.trial_frozen_at,
+        }
     return payload
 
 
@@ -1787,6 +1795,9 @@ class SubagentResult:
     )
     # Current native review only; checkpoint readers never restore this result-local hint.
     reviewed_delivery_complete: bool = field(default=False, repr=False, kw_only=True)
+    # The delivered file Lead's accepted review named for the reader to see first (chat running state R2.4);
+    # empty when none. Normalized by the review Tool; checked against the final file list by the orchestrator.
+    open_for_reader: str = field(default="", repr=False, kw_only=True)
     # A partial payload whose own delivery review was accepted: its unfulfilled requirements (Regression check N1).
     # None when there is no such review, so the caller cannot cite the delegation.
     reviewed_gaps: tuple[str, ...] | None = field(default=None, repr=False, kw_only=True)
@@ -3602,6 +3613,9 @@ class SubagentRunner:
             # The system Lead keeps the document Tool only to revise an existing draft.
             # Filling or updating an attached file is ordinary file work for an Agent with the sandbox.
             _run_tool_deny = _run_tool_deny | {"template_document_submit"}
+        if profile.name == "lead" and getattr(parent_ctx, "owner_trial", None) is not None:
+            # An Owner trying a draft is not a member escalating feedback on a released Agent (trial-tech-design §5).
+            _run_tool_deny = _run_tool_deny | {"feedback_escalate"}
         if recovery_enabled() and getattr(parent_ctx, "report_read_access", None) is not None and parent_ctx.context_source_observations is None:
             from bowhead_core.context_dependencies import ContextSourceObservations
 
@@ -3910,13 +3924,8 @@ class SubagentRunner:
         if resume_grant is not None and resume_grant.material is not None and resume_grant.material.knowledge_scope is not None:
             retained_scope = resume_grant.material.knowledge_scope
             retained_scope.require_context(parent_ctx)
-            current_scope = parent_ctx.knowledge_scope
-            if current_scope is not None:
-                retained_ids = retained_scope.file_ids
-                current_ids = current_scope.file_ids
-                if current_ids is not None:
-                    retained_ids = current_ids if retained_ids is None else tuple(sorted(set(retained_ids).intersection(current_ids)))
-                retained_scope = retained_scope.model_copy(update={"file_ids": retained_ids})
+            # Each ceiling (files, knowledge bases) narrows separately to the current one.
+            retained_scope = retained_scope.narrowed_by(parent_ctx.knowledge_scope)
             parent_ctx = copy.copy(parent_ctx)
             parent_ctx.knowledge_scope = retained_scope
             from bowhead_core.knowledge_source_runtime import validate_retained_sources
@@ -7530,6 +7539,12 @@ class SubagentRunner:
                         content=final_reply_review_note(invocations, review_tool=delivery_review_carrier.name),
                     )
                 )
+            from bowhead_core.run_files import run_files_note, saved_files
+
+            if saved_files(invocations[_inv_baseline_iter:]):
+                # A helper kept its finished deck in work_outputs and returned "已产出新文件"; the user got nothing.
+                # The run's result and work files after each save let the model see what will reach the user.
+                messages.append(Message(role="user", name=RUN_FILES_NOTE_NAME, content=run_files_note(invocations)))
             output_recovery.observe([inv for inv in invocations[_inv_baseline_iter:] if not _is_inv_failure(inv)])
             output_recovery.sync(messages)
 
@@ -8427,6 +8442,7 @@ class SubagentRunner:
                 and accepted_delivery_review.get("completion") == "complete"
             ),
             reviewed_gaps=_reviewed_gaps,
+            open_for_reader=str((accepted_delivery_review or {}).get("open_for_reader") or ""),
             chat_direct_delivered=_chat_direct_delivered,
             bi_workspace_continuation=_bi_continuation,
             # Return the Lead's child checkpoint through the existing result.
@@ -10152,6 +10168,8 @@ class SubagentRunner:
             _native_presentation = None
         _phi_result_inline = _result_inline_capped(public_result)
         _event_result_meta = _tool_result_meta(public_result)
+        if _event_result_meta and _event_result_meta.get("output_artifacts"):
+            _event_result_meta["output_artifacts"] = await _with_artifact_identity(_event_result_meta["output_artifacts"], ctx)
         from bowhead_core.answer_cards import native_receipt
 
         card_receipt = native_receipt(inv, ctx) if running_profile == "lead" else None
@@ -11869,6 +11887,38 @@ def _output_artifact_meta(obj: dict[str, Any]) -> list[dict[str, Any]]:
         if len(refs) >= _OUTPUT_ARTIFACT_META_CAP:
             break
     return refs
+
+
+async def _with_artifact_identity(refs: list[dict[str, Any]], ctx: Any) -> list[dict[str, Any]]:
+    """Saved files with their stored kind and version (chat running state slice 2, R2.1).
+
+    The interface shows a delivered file as a card when it is saved and updates that card when a later version of the
+    same file arrives; other kinds count as work files. Read from the stored rows through the read pool, outside any
+    write. A failed read leaves the entries as they were: the answer's final file list stays authoritative.
+    """
+    store = getattr(ctx, "artifact_store", None)
+    get_many = getattr(store, "get_many", None)
+    if not callable(get_many):
+        return refs
+    try:
+        rows = {art.id: art for art in await get_many([ref["artifact_id"] for ref in refs])}
+    except Exception as exc:  # noqa: BLE001 — optional presentation facts
+        logger.debug("output_artifacts.identity_lookup_failed error_type=%s", type(exc).__name__)
+        return refs
+    enriched: list[dict[str, Any]] = []
+    for ref in refs:
+        art = rows.get(ref["artifact_id"])
+        if art is None:
+            enriched.append(ref)
+            continue
+        identity: dict[str, Any] = {"lineage_id": getattr(art, "lineage_id", None) or art.id}
+        if isinstance(getattr(art, "kind", None), str) and art.kind:
+            identity["kind"] = art.kind
+        version = getattr(art, "version_no", None)
+        if isinstance(version, int) and not isinstance(version, bool):
+            identity["version_no"] = version
+        enriched.append({**ref, **identity})
+    return enriched
 
 
 def _sub_sources_from_results(results: list[Any]) -> list[dict[str, Any]]:
@@ -13917,6 +13967,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 if result.payload is not None:
                     _has_caveats = bool(result.payload.get("caveats"))
                 _w42_status = "succeeded_with_warnings" if _has_caveats else "succeeded"
+            # The helper's own caveats, bounded as the Lead receives them, so the running card can say what
+            # the warning is about (chat running state TD2). System caveats are left out as for the Lead.
+            _w42_caveats = caveats_for_lead(result.payload)[0] if _w42_status == "succeeded_with_warnings" else []
             # child_tool_count
             _w42_tool_count = len(result.tool_invocations or [])
             # Sprint chat-redesign-2026-05-21 Phase 1.1 — child_tool_summary[]
@@ -14001,6 +14054,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         **({"revise_files": [target.artifact_id for target in _file_targets]} if _file_targets else {}),
                         "duration_ms": _w42_duration_ms,
                         "status": _w42_status,
+                        **({"caveats": [_scrub(caveat) for caveat in _w42_caveats]} if _w42_caveats else {}),
                         "failure_reason": _w42_error_code,
                         "diagnostics": (_peer_failure.diagnostics if _peer_failure is not None and not _partial_result else None),
                         **(

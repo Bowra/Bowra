@@ -98,6 +98,9 @@ export interface TeamToolSourcePublic {
   prompts_count?: number;
   /** OAuth sources only: the service stopped renewing the sign-in; an administrator must authorize again. */
   oauth_sign_in_ended?: boolean;
+  /** An OAuth grant exists even if discovery returned no tools. */
+  oauth_authorized?: boolean;
+  oauth_workspace_name?: string | null;
   /** The real N imported operations (= selected_op_ids.length) — the success-screen count. */
   op_count: number;
   /** Present on create: operations currently advertised to Agents. */
@@ -106,6 +109,8 @@ export interface TeamToolSourcePublic {
   approval_unavailable_count?: number;
   /** Server-owned canary state. False means mutations must keep the legacy flow. */
   impact_guard_enabled?: boolean;
+  /** n8n's instance MCP with FEATURE_N8N_WORKFLOW_TOOLS on: the card offers "n8n workflows". */
+  n8n_workflows?: boolean;
   created_at: string;
   updated_at: string;
   query_auth_warnings?: QueryAuthWarning[];
@@ -144,6 +149,7 @@ export interface PatchSourceBody {
 /** One tool of a source's latest saved snapshot, marked with whether the source imports it. */
 export interface SourceToolEntry extends OpSummary {
   imported: boolean;
+  category?: TeamToolCategory | "unknown";
 }
 
 /** GET /{id}/tools — the latest snapshot used to re-choose an existing source's imported tools. */
@@ -199,16 +205,27 @@ export class TeamToolApiError extends Error {
     /** Error codes and request IDs go only into Copy Diagnostics. */
     public code?: string,
     public requestId?: string,
+    /** Structured error details (data, not UI copy), for example an n8n refusal reason code. */
+    public details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "TeamToolApiError";
   }
 }
 
+export function teamMcpOAuthRecovery(error: unknown) {
+  if (!(error instanceof TeamToolApiError)) return null;
+  if (error.code === "team_mcp_oauth_callback_rejected" || error.code === "public_entry_required") {
+    return "oauth_callback_rejected";
+  }
+  if (error.code === "team_mcp_oauth_registration_rejected") return "oauth_registration_rejected";
+  return null;
+}
+
 async function _check(r: Response): Promise<Response> {
   if (r.ok) return r;
   const error = await readApiError(r);
-  throw attachHttpCause(new TeamToolApiError(error.status, error.message, error.code, error.requestId), error);
+  throw attachHttpCause(new TeamToolApiError(error.status, error.message, error.code, error.requestId, error.details), error);
 }
 
 const BASE = "/api/v1/team-tool-sources";
@@ -390,4 +407,83 @@ export async function saveSourceToolCategories(
   });
   await _check(r);
   return (await r.json()) as SourceToolCategories;
+}
+
+// ── n8n workflows (FEATURE_N8N_WORKFLOW_TOOLS) ─────────────────────────────
+
+export type N8nTriggerKind = "webhook" | "schedule";
+
+export interface N8nWorkflowApproval {
+  tool_ref: string;
+  name: string;
+  category: TeamToolCategory;
+  description: string;
+  input_schema: Record<string, unknown>;
+  trigger: { node: string; kind: N8nTriggerKind };
+  approved_version_id: string;
+  approved_at: string;
+}
+
+export interface N8nWorkflowListItem {
+  id: string;
+  name: string;
+  description: string;
+  updated_at: string | null;
+  /** False: approved, but n8n no longer lists it as MCP-enabled and published. */
+  listed: boolean;
+  approval: N8nWorkflowApproval | null;
+}
+
+export interface N8nWorkflowList {
+  items: N8nWorkflowListItem[];
+  /** Workflows that are not MCP-enabled or not published; never named. */
+  hidden_count: number;
+  more_than_listed: boolean;
+  approval_limit: number;
+}
+
+export interface N8nWorkflowDetail {
+  workflow: { id: string; name: string; description: string; active_version_id: string | null };
+  trigger: { node: string; kind: N8nTriggerKind } | null;
+  problem: { code: string; message: string } | null;
+  draft_input_schema: Record<string, unknown>;
+  approval: N8nWorkflowApproval | null;
+  version_changed: boolean;
+}
+
+function n8nPath(sourceId: string, workflowId?: string): string {
+  const base = `${BASE}/${encodeURIComponent(sourceId)}/n8n-workflows`;
+  return workflowId === undefined ? base : `${base}/${encodeURIComponent(workflowId)}`;
+}
+
+export async function listN8nWorkflows(sourceId: string): Promise<N8nWorkflowList> {
+  const r = await apiFetch(n8nPath(sourceId));
+  await _check(r);
+  return (await r.json()) as N8nWorkflowList;
+}
+
+export async function getN8nWorkflow(sourceId: string, workflowId: string): Promise<N8nWorkflowDetail> {
+  const r = await apiFetch(n8nPath(sourceId, workflowId));
+  await _check(r);
+  return (await r.json()) as N8nWorkflowDetail;
+}
+
+/** Approve (or re-approve) a workflow at its current published version. Applies from the next task. */
+export async function approveN8nWorkflow(
+  sourceId: string,
+  workflowId: string,
+  body: { category: TeamToolCategory; description: string; input_schema: Record<string, unknown> },
+): Promise<{ approval: N8nWorkflowApproval }> {
+  const r = await apiFetch(n8nPath(sourceId, workflowId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  await _check(r);
+  return (await r.json()) as { approval: N8nWorkflowApproval };
+}
+
+export async function removeN8nWorkflow(sourceId: string, workflowId: string): Promise<void> {
+  const r = await apiFetch(n8nPath(sourceId, workflowId), { method: "DELETE" });
+  await _check(r);
 }

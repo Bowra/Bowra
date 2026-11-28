@@ -11,6 +11,7 @@ import { MenuFloating, useMenu, useMenuItem } from "@/components/ui/menu";
 import { fileExtensionLabel, fileTypeIcon } from "@/lib/file-type-icon";
 import { useFileDownload, type FileDownloadStatus } from "@/lib/use-file-download";
 import { chartSelectedScopeLabel } from "@/lib/chart/selected-context";
+import type { DocumentSelection } from "@/lib/document-selection";
 import type { PresentationSelection } from "@/lib/presentation-selection";
 import type { AttachmentRef } from "@/lib/types";
 
@@ -71,6 +72,8 @@ export interface AttachmentItem extends Partial<AttachmentRef> {
   status: AttachmentStatus;
   /** `File.lastModified` of a local pick: duplicate detection compares it with name and size (D10). */
   lastModified?: number;
+  /** Catalog identity for duplicate selection while this draft is open. */
+  librarySourceKey?: string;
   /** Single-file vs zip-bundle marker. Determines badge + indexing semantic. */
   kind?: "file" | "bundle";
   /** User-facing (localized) error message when status === 'error' — never raw XHR/HTTP prose. */
@@ -127,6 +130,18 @@ function presentationLabel(selection: PresentationSelection | undefined, t: (key
     : t("presentation_slides_more", { pages: shown, count: pages.length, more: pages.length - 3 });
 }
 
+/** A Word reference on the chip: the paragraph's name, or the rendered pages (docx inline edit design §7.4). */
+function documentLabel(selection: DocumentSelection | undefined, t: (key: string, values?: Record<string, string | number>) => string): string | null {
+  if (!selection) return null;
+  if (selection.version === 1) return selection.paragraphName || t("document_paragraph");
+  const pages = selection.pages.map((entry) => entry.page);
+  if (pages.length === 1) return t("document_page", { page: pages[0] });
+  const shown = pages.slice(0, 3).join(t("page_list_separator"));
+  return pages.length <= 3
+    ? t("document_pages", { pages: shown })
+    : t("document_pages_more", { pages: shown, count: pages.length, more: pages.length - 3 });
+}
+
 interface Props {
   item: AttachmentItem;
   /** Disable composer-side mutations while keeping safe read/download affordances available. */
@@ -147,6 +162,8 @@ interface Props {
   removeLabel?: string;
   /** The same file was added again: outline the existing chip once (600ms) instead of adding a second chip. */
   flash?: boolean;
+  /** A deck chip holding several pages lists them, each removable on its own (design §13.7). */
+  onRemoveSlide?: (localId: string, page: number) => void;
 }
 
 /** More than this many indexed bundle files collapse into "N more indexed". */
@@ -163,13 +180,19 @@ export function AttachmentChip({
   openLabel,
   removeLabel,
   flash = false,
+  onRemoveSlide,
 }: Props) {
   const t = useTranslations("attachment");
   const locale = useLocale();
   const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext, locale) : null;
-  const elementLabel = presentationLabel(item.presentationSelection, t);
+  const elementLabel = presentationLabel(item.presentationSelection, t) ?? documentLabel(item.documentSelection, t);
   const kind: "file" | "bundle" = item.kind ?? "file";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pagesOpen, setPagesOpen] = useState(false);
+  const pagesMenu = useMenu({ open: pagesOpen, onOpenChange: setPagesOpen, placement: "bottom-start", offset: 4, presentation: "sheet" });
+  const slidePages = item.presentationSelection?.version === 2 ? item.presentationSelection.slides.map((slide) => slide.slideIndex)
+    : item.documentSelection?.version === 2 ? item.documentSelection.pages.map((entry) => entry.page) : [];
+  const showPagesMenu = item.status === "done" && Boolean(onRemoveSlide) && slidePages.length > 1;
   const bundleMenu = useMenu({
     open: menuOpen,
     onOpenChange: setMenuOpen,
@@ -338,6 +361,19 @@ export function AttachmentChip({
           </button>
         ) : null}
 
+        {showPagesMenu ? (
+          <button
+            ref={pagesMenu.refs.setReference}
+            type="button"
+            className={clsx("v2-chip__chev", pagesOpen && "is-open")}
+            aria-label={t("show_referenced_pages")}
+            disabled={mutationDisabled}
+            {...pagesMenu.getReferenceProps({ onClick: (e) => e.stopPropagation() })}
+          >
+            <LucideGlyph icon={ChevronDown} size={14} aria-hidden="true" />
+          </button>
+        ) : null}
+
         {onRemove ? (
           <button
             type="button"
@@ -380,6 +416,28 @@ export function AttachmentChip({
         >
           {renderDlGlyph(dlStatus)}
         </button>
+      ) : null}
+
+      {showPagesMenu && onRemoveSlide ? (
+        <MenuFloating menu={pagesMenu}>
+          <div
+            ref={pagesMenu.refs.setFloating}
+            {...pagesMenu.getFloatingProps({
+              className: "app-floating-menu ui-card-bundle-menu is-portal",
+              "aria-label": t("referenced_pages_title"),
+            })}
+          >
+            <div className="ui-card-bundle-menu__head" aria-hidden="true">
+              <b>{t("referenced_pages_title")}</b>
+              <span>{t("referenced_pages_count", { count: slidePages.length })}</span>
+            </div>
+            {slidePages.map((page) => (
+              <SlideRemoveItem key={page} label={t("presentation_slide", { page })} removeLabel={t("remove_referenced_page", { page })}
+                onSelect={() => onRemoveSlide(item.localId, page)} />
+            ))}
+            {pagesMenu.presentation === "sheet" ? <BundleDoneItem label={t("bundle_done")} /> : null}
+          </div>
+        </MenuFloating>
       ) : null}
 
       {showBundleMenu ? (
@@ -430,6 +488,17 @@ function BundleChildItem({ child }: { child: BundleChild }) {
       <LucideGlyph icon={Icon} size={14} aria-hidden="true" />
       <span className="ui-card-bundle-menu__name">{child.filename}</span>
       <span className="ui-card-bundle-menu__state">{skipKey ? tKb(skipKey) : t(`bundle_child_${child.status}`)}</span>
+    </button>
+  );
+}
+
+/** One page of a deck chip's page set: choosing it takes the page out of the reference. */
+function SlideRemoveItem({ label, removeLabel, onSelect }: { label: string; removeLabel: string; onSelect: () => void }) {
+  const itemProps = useMenuItem({ label: removeLabel, onSelect });
+  return (
+    <button type="button" className="app-floating-menu-item ui-card-bundle-menu__item" aria-label={removeLabel} {...itemProps}>
+      <span className="ui-card-bundle-menu__name">{label}</span>
+      <LucideGlyph icon={X} size={14} aria-hidden="true" />
     </button>
   );
 }

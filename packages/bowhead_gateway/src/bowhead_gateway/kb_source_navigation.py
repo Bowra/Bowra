@@ -28,7 +28,10 @@ def navigation_context(app: Any, scope: ScopeContext) -> Any:
         kb_files_store=app.state.kb_files_store,
         knowledge_scope=None,
         kb_file_authorizer=kb_file_authorizer(
-            app.state.user_store, getattr(app.state, "access_control_store", None), getattr(app.state, "kb_matrix_store", None)
+            app.state.user_store,
+            getattr(app.state, "access_control_store", None),
+            getattr(app.state, "kb_matrix_store", None),
+            files_store=app.state.kb_files_store,
         ),
         knowledge_navigation_uses={},
         knowledge_navigation_ancestors=(),
@@ -41,7 +44,10 @@ async def current_description_assignment(app: Any, team_id: str) -> Any:
 
 
 async def refresh_matrix_navigation(app: Any, scope: Any, matrix: Any, files: dict, cells: list) -> None:
-    """Optional cache only: use already authorized native results, never run Matrix."""
+    """Optional cache only: use already authorized native results, never run Matrix. Only-me matrices
+    (S8) publish nothing: their cells are not the Space's to describe files with."""
+    if getattr(matrix, "visibility", "space") != "space":
+        return
     columns = {column["column_id"]: column for column in matrix.columns if column.get("navigation_role", "none") != "none"}
     if not columns:
         return
@@ -120,7 +126,7 @@ async def _job_input(app: Any, job: dict, *, check_balance: bool) -> tuple[Any, 
         raise NavigationConflict("knowledge_source_changed")
     if file.active_generation_id not in await SourceNavigationStore(files._db_path).published_generations([file]):
         raise NavigationConflict("knowledge_generation_unverified")
-    authorize = kb_file_authorizer(app.state.user_store, getattr(app.state, "access_control_store", None))
+    authorize = kb_file_authorizer(app.state.user_store, getattr(app.state, "access_control_store", None), files_store=files)
     if not await authorize(file, job["actor_user_id"], job["team_id"], job["workspace_id"], write=True):
         raise NavigationConflict("knowledge_source_changed")
     config, version = await app.state.user_store.get_team_llm_config_with_version(job["team_id"])

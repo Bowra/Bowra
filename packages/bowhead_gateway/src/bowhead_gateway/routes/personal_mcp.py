@@ -18,7 +18,6 @@ from bowhead_core.personal_mcp import (
     auth_headers,
     discover,
     normalize_endpoint,
-    personal_mcp_oauth_enabled,
     personal_oauth_headers,
     prime_personal_oauth,
 )
@@ -67,7 +66,6 @@ _CODED_STATUS = {
     "personal_mcp_sign_in_renewal_unavailable": 503,
     "personal_mcp_oauth_endpoint_locked": 409,
     "personal_mcp_oauth_sign_in_required": 400,
-    "personal_mcp_oauth_unavailable": 409,
 }
 
 
@@ -107,7 +105,7 @@ async def capabilities(request: Request, user: User = Depends(_current_user)) ->
     if enabled and _slack_personal_enabled():
         connection = await SlackStore(request.app.state.slack_store.db_path).by_team(user.team_id)
         slack = bool(connection and connection.status == "enabled" and connection.client_id and connection.client_secret_ref)
-    return {"enabled": enabled, "slack_connectable": slack, "oauth_connectable": enabled and personal_mcp_oauth_enabled()}
+    return {"enabled": enabled, "slack_connectable": slack}
 
 
 @router.post("/slack/connect", dependencies=[Depends(_enabled)])
@@ -215,8 +213,6 @@ async def authorize_oauth(
     Registers Bowhead with the service when needed, pins the full callback address in a single-use
     pending row (team public-entry rules) and returns the service's authorization URL. Nothing is
     sent to the service before the member opens that URL."""
-    if not personal_mcp_oauth_enabled():
-        raise HTTPException(404, detail={"code": "personal_mcp_oauth_unavailable"})
     from bowhead_core.mcp_oauth import FernetTokenStorage, McpOAuthRegistrationRefused, begin_mcp_oauth
     from mcp.client.auth.oauth2 import PKCEParameters
 
@@ -305,7 +301,7 @@ async def oauth_callback(request: Request, code: str = "", state: str = "", erro
     restore_oauth_public_access_context(str(pending["redirect_uri"]), callback_path=_OAUTH_CALLBACK_PATH)
     owner, identity, team_id = str(pending.get("created_by") or ""), str(pending["source_id"]), str(pending["team_id"])
     license_check = feature_license_checker(request.app, "mcp")
-    if not personal_mcp_oauth_enabled() or not owner or not await license_check(team_id):
+    if not owner or not await license_check(team_id):
         return _oauth_redirect("failed", "unavailable", identity)
     if error or not code:
         return _oauth_redirect("failed", "authorization_denied", identity)
@@ -429,7 +425,7 @@ async def _save(body: ConnectionInput, user: User, registry: PersonalMcpStore, i
         try:
             tools = await discover(endpoint, headers)
         except PersonalMcpError as exc:
-            if str(exc) == "personal_mcp_discovery_failed" and body.auth_type == "none" and personal_mcp_oauth_enabled():
+            if str(exc) == "personal_mcp_discovery_failed" and body.auth_type == "none":
                 await _offer_sign_in(endpoint)
             raise
         connection_id = await registry.save_connection(

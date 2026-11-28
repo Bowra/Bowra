@@ -177,10 +177,14 @@ async def read_original_material(db, *, sources, cipher, scope, requirements, pl
 
 async def proposal_requirements(runtime: ReferencePrimaryRuntime, steps: Sequence[PlanStep], registry: ToolRegistry) -> ReferencePlanRequirements:
     from bowhead_core._db import open_shared_ctx
+    from bowhead_core.agent_execution_binding import read_owner_trial_turn_in_connection
 
     async with open_shared_ctx(domain_database_path(runtime.bindings.db_path, "execution")) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN IMMEDIATE")
+        if await read_owner_trial_turn_in_connection(db, turn_id=runtime.turn_id) is not None:
+            # Plan steps admit the released version; an Owner draft trial has none (§4.5).
+            raise ValueError("agent_trial_plan_unavailable")
         primary = await runtime._read(db)
         require_readonly_definition(primary.binding.definition, registry)
         composition = await runtime._composition(db, primary)

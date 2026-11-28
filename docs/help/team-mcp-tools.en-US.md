@@ -1,17 +1,18 @@
 # Add a team MCP tool
 
-Team owners and administrators can add an MCP tool in **Team settings → Tool Sources** so team Agents can use selected capabilities from an external service. You add an MCP service and selected tools from it; this does not automatically grant team members access to an account in that service.
+Team owners and administrators can add an MCP tool in **Capability Center → Tools → Manage tool sources** so team Agents can use selected capabilities from an external service. You add an MCP service and selected tools from it; this does not automatically grant team members access to an account in that service.
 
 If each member should use their own account at the service instead of a shared one, members can sign in on **My Connections**; see [Connect a personal MCP service](personal-mcp.en-US.md).
 
 ## Add an MCP service and select tools
 
-1. Open **Team settings → Tool Sources** and select **Add MCP tool**.
+1. Open **Capability Center → Tools → Manage tool sources** and, on the **External tool sources** tab, select **Add MCP tool**.
 2. Select **MCP server** and enter its address. If the service requires authentication, enter credentials or complete authorization when prompted.
 3. Wait for Bowra to load the tools offered by the service, then select the tools your team Agents need.
 4. Enter a source name and confirm. You can then view, validate, disable, or edit the source from the tools list.
 
 Saved credentials cannot be read back or displayed. Connect only trusted services and use least-privilege credentials. Cloud deployments require public HTTPS addresses; internal deployments may use internal addresses.
+If the service uses OAuth, sign in with an account whose accessible content can be shared with the team. Eligible members’ Agents use that account’s permissions. After authorization, select **Choose Tools** on the source, save the selection, then turn on the source. To narrow a long list, filter by category and select or clear the shown results. If the service rejects the return address, open Bowhead through a verified HTTPS public entry and authorize again.
 
 ## Manage added tools
 
@@ -68,3 +69,23 @@ Owners and administrators can record what each tool of an MCP source does when t
 3. Select **Save**. The change applies from the next task.
 
 A tool confirmed as read-only runs without asking, and an unmarked tool with a confirmed category can be selected for Agents. If the service later changes a tool's definition, its confirmation stops applying and the list asks you to confirm it again. Confirm **Read only** only for tools that cannot change data.
+
+## Run n8n workflows
+
+When your deployment turns on n8n workflow tools, an MCP source that connects to n8n's instance-level MCP server (an address ending in `/mcp-server/http`) can offer single n8n workflows as tools. Each approved workflow runs its published version in n8n and waits for the result, so it runs the same way every time.
+
+1. In n8n, publish the workflow and turn on **Available in MCP**. Workflows started by a webhook or a schedule can be approved.
+2. In Bowhead, choose **n8n Workflows** from the source's actions (in the **⋯** menu on the right of the card). Workflows that aren't published or available in MCP are counted but not listed.
+3. Select **Review** next to a workflow. Choose its category by what the workflow does to data, write the description the model reads, and check the input schema: the fields of the webhook request body. The draft lists the fields the published workflow reads; add types and mark the required ones.
+4. Select **Approve**. The workflow becomes a tool from the next task.
+
+The assistant can use approved workflows in any task. To give a custom Agent the workflows of one source, create a Plugin from the **n8n workflows** template under **Team settings → Plugins** and select that Plugin in the Agent.
+
+Things to know:
+
+- A run waits up to 5 minutes, or 15 minutes in a scheduled task. A longer run is reported as still running, with a link to the execution in n8n.
+- If the workflow is published again in n8n, runs stop with "version changed" until you review and approve the new version.
+- Read-only workflows run without asking, also in scheduled tasks. Workflows that write or delete data ask the member who started the task on every run, and need call confirmation to be turned on.
+- Workflows run as the n8n account the source was authorized with. When n8n asks, grant only reading workflows, running workflows and reading executions.
+- You don't need to import n8n's own tools for approved workflows to run. Importing `execute_workflow` lets the assistant run any workflow that is available in MCP without your approval, so leave it unselected.
+- n8n limits MCP requests from one address (100 per 5 minutes by default). Bowhead stays below that limit; an n8n administrator can raise it with `N8N_MCP_SERVER_RATE_LIMIT`.

@@ -15,7 +15,7 @@
  * built-in → personal templates → team template library → extraction tables (kind=manual).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { DialogShell } from "@/components/ui/dialog";
@@ -87,6 +87,17 @@ export interface TemplateManagerProps {
   onNewMatrix: () => void;
   /** Extraction-table [查看提取结果] opens that table's result view. */
   onViewRecords: (dt: KbDocTypeDTO) => void;
+  /**
+   * Which groups this view shows (knowledge bases switch on, Q1). "all" (default): today's Templates view.
+   * "matrix": the Templates tab with matrix templates only (built-in, mine, Team library); New template opens the
+   * new-matrix flow directly. "extraction": the extraction-table definitions of the Extraction tables tab; its New
+   * button opens the extraction-table wizard directly.
+   */
+  groups?: "all" | "matrix" | "extraction";
+  /** Rendered after the groups (the Extraction tables tab puts the extraction results here). */
+  trailing?: ReactNode;
+  /** Called after a change this view made (save, delete, publish, copy) has been reloaded. */
+  onChanged?: () => void;
 }
 
 function kindOf(dt: KbDocTypeDTO): Kind {
@@ -103,10 +114,18 @@ export function TemplateManager({
   toast,
   onNewMatrix,
   onViewRecords,
+  groups = "all",
+  trailing,
+  onChanged,
 }: TemplateManagerProps) {
   const t = useTranslations("kbMatrix");
   const td = useTranslations("kt");
   const tn = useTranslations("knowledge_base.nav_v2");
+  const tTabs = useTranslations("knowledge_bases.tabs");
+  const showMatrixGroups = groups !== "extraction";
+  const showExtraction = groups !== "matrix";
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   const [purposeOpen, setPurposeOpen] = useState(false);
   const [wizard, setWizard] = useState<{ mode: "create" | "edit"; dt?: KbDocTypeDTO } | null>(null);
   // Wizard focus-return target: "New template" for create, the edit control (or the row menu trigger) for edit.
@@ -191,8 +210,10 @@ export function TemplateManager({
     } catch {
       /* Page errors Toast only during initial effect; silent post-action refresh failures recover on the next fetch. */
     }
-    await reloadTeam(true); // Silent: update team library in place without flashing skeletons.
-  }, [reload, reloadTeam]);
+    // Silent: update team library in place without flashing skeletons. The extraction view shows no library.
+    if (showMatrixGroups) await reloadTeam(true);
+    onChangedRef.current?.();
+  }, [reload, reloadTeam, showMatrixGroups]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -203,11 +224,11 @@ export function TemplateManager({
     reload()
       .catch((e) => !cancelled && toast("error", td(kbDocTypeError(e, "load"))))
       .finally(() => !cancelled && setLoading(false));
-    void reloadTeam();
+    if (showMatrixGroups) void reloadTeam();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, reload, reloadTeam, toast, td]);
+  }, [workspaceId, reload, reloadTeam, toast, td, showMatrixGroups]);
 
   const seeds = useMemo(() => items.filter((d) => kindOf(d) === "seed"), [items]);
   const mine = useMemo(
@@ -363,17 +384,19 @@ export function TemplateManager({
 
   // ── 412 mobile: read-only list (+ M5 team-library read-only browsing) ──
   if (isMobile) {
-    const groups: Array<[string, KbDocTypeDTO[]]> = [
-      [t("tpl_group_seed"), seeds],
-      [t("tpl_tab_mine"), mine],
-    ];
+    const mobileGroups: Array<[string, KbDocTypeDTO[]]> = showMatrixGroups
+      ? [
+          [t("tpl_group_seed"), seeds],
+          [t("tpl_tab_mine"), mine],
+        ]
+      : [];
     return (
       <div className="mx-mobile" data-testid="kb-matrix-tplmgr-mobile" style={{ minHeight: 640 }}>
         {loading ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--c-ink-3)" }}>{t("loading")}</div>
         ) : (
           <>
-            {groups.map(([label, list], gi) => (
+            {mobileGroups.map(([label, list], gi) => (
               <div key={gi}>
                 <div
                   style={{
@@ -404,24 +427,32 @@ export function TemplateManager({
                 })}
               </div>
             ))}
-            <div className="tgh">
-              <span className="t">{t("tpl_tab_team")}</span>
-              <span className="n">{teamEntries.length}</span>
-            </div>
-            <MobileTeamLibrary entries={teamEntries} />
-            <div className="kb-tpl-group">
-              <ExtractionTemplateGroup
-                items={extraction}
-                recordCounts={recordCounts}
-                // Mobile at 412 is read-only: no edit/delete, matching other mobile groups on this page.
-                uid={null}
-                isAdmin={false}
-                busy={false}
-                onEdit={() => undefined}
-                onDelete={() => undefined}
-                onViewRecords={onViewRecords}
-              />
-            </div>
+            {showMatrixGroups ? (
+              <>
+                <div className="tgh">
+                  <span className="t">{t("tpl_tab_team")}</span>
+                  <span className="n">{teamEntries.length}</span>
+                </div>
+                <MobileTeamLibrary entries={teamEntries} />
+              </>
+            ) : null}
+            {showExtraction ? (
+              <div className="kb-tpl-group">
+                <ExtractionTemplateGroup
+                  items={extraction}
+                  recordCounts={recordCounts}
+                  // Mobile at 412 is read-only: no edit/delete, matching other mobile groups on this page.
+                  uid={null}
+                  isAdmin={false}
+                  busy={false}
+                  onEdit={() => undefined}
+                  onDelete={() => undefined}
+                  onViewRecords={onViewRecords}
+                  emptyText={groups === "extraction" ? tTabs("extraction_empty_readonly") : undefined}
+                />
+              </div>
+            ) : null}
+            {trailing}
           </>
         )}
         <div style={{ height: 20 }} />
@@ -434,11 +465,26 @@ export function TemplateManager({
   return (
     <div className="mx-tpl-page nav" data-testid="kb-matrix-tplmgr" style={{ position: "relative" }}>
       <div className="viewhd">
-        <span className="d">{tn("templates_desc")}</span>
+        <span className="d">
+          {groups === "matrix" ? tTabs("templates_desc") : groups === "extraction" ? tTabs("records_desc") : tn("templates_desc")}
+        </span>
         {canEdit && (
           <span className="a">
-            <button ref={newTemplateRef} type="button" className="kb-btn kb-btn-primary" data-testid="kb-tpl-new" onClick={() => setPurposeOpen(true)}>
-              {tn("new_template")}
+            <button
+              ref={newTemplateRef}
+              type="button"
+              className="kb-btn kb-btn-primary"
+              data-testid="kb-tpl-new"
+              onClick={() => {
+                // Q1: each tab creates its own kind; only today's combined view asks for the purpose first.
+                if (groups === "matrix") onNewMatrix();
+                else if (groups === "extraction") {
+                  wizardTriggerRef.current = newTemplateRef.current;
+                  setWizard({ mode: "create" });
+                } else setPurposeOpen(true);
+              }}
+            >
+              {groups === "extraction" ? tTabs("new_extraction_table") : tn("new_template")}
             </button>
           </span>
         )}
@@ -449,6 +495,7 @@ export function TemplateManager({
       ) : (
         <div data-testid="kb-tpl-flat">
           {/* Knowledge sidebar "模板" (interaction design 05 · C): flat groups built-in → personal templates → team template library → extraction templates. */}
+          {showMatrixGroups ? (<>
           <section className="tgrp" data-testid="kb-tpl-group-seed">
             <GroupHead title={t("tpl_group_seed")} count={seeds.length} desc={tn("group_seed_desc")} />
             {seeds.length === 0 ? (
@@ -525,16 +572,21 @@ export function TemplateManager({
               inlineEmpty={tn("group_team_empty")}
             />
           </section>
-          <ExtractionTemplateGroup
-            items={extraction}
-            recordCounts={recordCounts}
-            uid={uid}
-            isAdmin={isAdmin}
-            busy={busy}
-            onEdit={(dt, trigger) => { wizardTriggerRef.current = trigger; setWizard({ mode: "edit", dt }); }}
-            onDelete={setDel}
-            onViewRecords={onViewRecords}
-          />
+          </>) : null}
+          {showExtraction ? (
+            <ExtractionTemplateGroup
+              items={extraction}
+              recordCounts={recordCounts}
+              uid={uid}
+              isAdmin={isAdmin}
+              busy={busy}
+              onEdit={(dt, trigger) => { wizardTriggerRef.current = trigger; setWizard({ mode: "edit", dt }); }}
+              onDelete={setDel}
+              onViewRecords={onViewRecords}
+              emptyText={groups === "extraction" ? tTabs(canEdit ? "extraction_empty" : "extraction_empty_readonly") : undefined}
+            />
+          ) : null}
+          {trailing}
           <div style={{ height: 24 }} />
         </div>
       )}

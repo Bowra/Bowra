@@ -25,6 +25,8 @@ export interface ExtractionTemplateGroupProps {
   onEdit: (dt: KbDocTypeDTO, trigger: HTMLElement | null) => void;
   onDelete: (dt: KbDocTypeDTO) => void;
   onViewRecords: (dt: KbDocTypeDTO) => void;
+  /** Empty-group line; defaults to today's "click New template, choose Extraction table". */
+  emptyText?: string;
 }
 
 export function ExtractionTemplateGroup({
@@ -36,6 +38,7 @@ export function ExtractionTemplateGroup({
   onEdit,
   onDelete,
   onViewRecords,
+  emptyText,
 }: ExtractionTemplateGroupProps) {
   const t = useTranslations("knowledge_base.nav_v2");
   return (
@@ -46,7 +49,7 @@ export function ExtractionTemplateGroup({
         <span className="d">{t("group_extraction_desc")}</span>
       </div>
       {items.length === 0 ? (
-        <div className="emptyline">{t("group_extraction_empty")}</div>
+        <div className="emptyline">{emptyText ?? t("group_extraction_empty")}</div>
       ) : (
         <div className="tcards">
           {items.map((dt) => {

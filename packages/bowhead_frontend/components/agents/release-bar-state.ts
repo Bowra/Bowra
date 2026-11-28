@@ -66,7 +66,9 @@ export type ReleaseBarAction =
   | "rebase"
   | "restore"
   | "copy_link"
-  | "copy_diagnostics";
+  | "copy_diagnostics"
+  /** Owner draft trial (trial-tech-design §7): chat with the saved draft; in review, with the submitted version. */
+  | "try_draft";
 
 export interface ReleaseBarStep {
   key: ReleaseBarStepKey;
@@ -102,6 +104,11 @@ export interface ReleaseBarInput {
   archived: boolean;
   /** The draft's audience is not private; with no draft, the live audience. */
   shared: boolean;
+  /**
+   * FEATURE_AGENT_DRAFT_TRIAL_V1 is on for this Owner's revisioned Agent. Legacy and shared-with-me Agents have
+   * no release bar at all, so the reducer only decides where 试用草稿 sits.
+   */
+  trial?: boolean;
 }
 
 type StepSpec = readonly [
@@ -150,7 +157,43 @@ function make(
 /** The reviewer reason that is fixed with test cases; any other reason sends the Owner back to Configure. */
 const EVIDENCE_REASON = "insufficient_evidence";
 
+/** States without 试用草稿: nothing differs from the release, archived, or a draft that can't be frozen until rebased. */
+const NO_TRIAL_STATES = new Set<ReleaseBarStateId>([
+  "archived",
+  "no_change",
+  "released_shared",
+  "rebase",
+]);
+
+/**
+ * Where 试用草稿 sits (ReleaseBar board ②/⑫): a quiet action whenever the draft differs from the released version
+ * or has unsaved edits. A private Agent without the Owner's cases can only run the basic safety check, so trying
+ * the draft says more: it becomes the secondary action, 补几条用例 turns quiet and 只跑基础安全检查 leaves the bar
+ * for the suite menu on 测试用例.
+ */
+function withTrial(state: ReleaseBarState | null): ReleaseBarState | null {
+  if (!state || NO_TRIAL_STATES.has(state.id)) return state;
+  if (state.id === "private_no_cases" || state.id === "private_safety_only") {
+    return {
+      ...state,
+      secondary: [
+        "try_draft",
+        ...state.secondary.filter((action) => action !== "add_cases"),
+      ],
+      quiet: state.secondary.includes("add_cases") ? ["add_cases"] : [],
+    };
+  }
+  return { ...state, quiet: ["try_draft", ...state.quiet] };
+}
+
 export function releaseBarState(
+  input: ReleaseBarInput,
+): ReleaseBarState | null {
+  const state = baseReleaseBarState(input);
+  return input.trial ? withTrial(state) : state;
+}
+
+function baseReleaseBarState(
   input: ReleaseBarInput,
 ): ReleaseBarState | null {
   const { workbench, kind, test, shared } = input;
@@ -199,7 +242,9 @@ export function releaseBarState(
       steps: steps(shared, ["done", "now", "bad", "todo"], "test"),
       primary:
         decision.reason_code === EVIDENCE_REASON ? "add_cases" : "edit_config",
-      secondary: ["view_decision"],
+      // The state lasts until a new candidate exists, and only a test creates one: without 测试这次修改 here
+      // the Owner could never resubmit after a decline (116 acceptance pass 1, F32).
+      secondary: ["test", "view_decision"],
     });
   }
   if (test === "nothing")

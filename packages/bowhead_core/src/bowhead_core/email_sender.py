@@ -205,10 +205,11 @@ def decode_verify_token(token: str, secret: str | list[tuple[str, str]] | list[s
     return None
 
 
-def make_password_reset_token(user_id: str, secret: str, ttl_hours: int = 24) -> str:
+def make_password_reset_token(user_id: str, secret: str, ttl_hours: int = 24, *, sent_via_email: bool = False) -> str:
     payload = {
         "sub": user_id,
         "purpose": "password_reset",
+        "sent_via_email": sent_via_email,
         "iat": int(time.time()),
         "exp": int(time.time()) + ttl_hours * 3600,
     }

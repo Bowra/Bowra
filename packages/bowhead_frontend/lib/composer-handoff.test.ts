@@ -108,6 +108,25 @@ describe("takeComposerAgentUse", () => {
     expect(takeComposerAgentUse()).toBeNull();
     expect(sessionStorage.getItem(COMPOSER_AGENT_USE_KEY)).toBeNull();
   });
+
+  it("carries an Owner draft trial's frozen candidate", () => {
+    sessionStorage.setItem(COMPOSER_AGENT_USE_KEY, JSON.stringify({ agentId: "osa_1", label: "门店周报", trial: { candidateId: "arc_1", revisionRef: "arv_3" } }));
+    expect(takeComposerAgentUse()).toEqual({ agentId: "osa_1", label: "门店周报", trial: { candidateId: "arc_1", revisionRef: "arv_3" } });
+  });
+
+  it("carries whether the trial runs the version in review, and ignores an unknown kind (F27)", () => {
+    sessionStorage.setItem(COMPOSER_AGENT_USE_KEY, JSON.stringify({ agentId: "osa_1", label: "门店周报", trial: { candidateId: "arc_1", revisionRef: "arv_3", candidateKind: "submitted" } }));
+    expect(takeComposerAgentUse()?.trial).toEqual({ candidateId: "arc_1", revisionRef: "arv_3", candidateKind: "submitted" });
+    sessionStorage.setItem(COMPOSER_AGENT_USE_KEY, JSON.stringify({ agentId: "osa_1", label: "门店周报", trial: { candidateId: "arc_1", revisionRef: "arv_3", candidateKind: "approved" } }));
+    expect(takeComposerAgentUse()?.trial).toEqual({ candidateId: "arc_1", revisionRef: "arv_3" });
+  });
+
+  it("drops a trial hand-off whose candidate is malformed", () => {
+    sessionStorage.setItem(COMPOSER_AGENT_USE_KEY, JSON.stringify({ agentId: "osa_1", label: "门店周报", trial: { candidateId: "../arc", revisionRef: "arv_3" } }));
+    expect(takeComposerAgentUse()).toBeNull();
+    sessionStorage.setItem(COMPOSER_AGENT_USE_KEY, JSON.stringify({ agentId: "osa_1", label: "门店周报", trial: "arc_1" }));
+    expect(takeComposerAgentUse()).toBeNull();
+  });
 });
 
 describe("useComposerAgentUseHandoff", () => {

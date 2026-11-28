@@ -120,6 +120,25 @@ AGENT_TRIAL_BLOCKED_FEATURE_CODES: Mapping[str, str] = types.MappingProxyType(
     }
 )
 AGENT_TRIAL_REFUSAL_CODES = frozenset(AGENT_TRIAL_BLOCKED_FEATURE_CODES.values())
+#: Why ``/chat/send`` refuses a trial message, beyond the blocked features (trial-tech-design §4.1).
+#: Each names the condition the Owner can act on; none is folded into ``resource_unavailable``.
+AGENT_TRIAL_SEND_REFUSAL_CODES = frozenset(
+    {
+        "agent_trial_disabled",  # FEATURE_AGENT_DRAFT_TRIAL_V1 is off
+        "agent_trial_owner_required",  # only the Agent's Owner tries its draft
+        "agent_trial_agent_unavailable",  # the Agent is archived, disabled or not revisioned
+        "agent_trial_candidate_not_prepared",  # the frozen draft is neither prepared nor in review
+        "agent_trial_candidate_unavailable",  # the frozen draft no longer exists or failed its checks
+        "agent_trial_candidate_changed",  # the draft was frozen again; send with the current candidate
+        "agent_trial_extra_references",  # a trial message names only the trial Agent
+        "agent_trial_session_mismatch",  # the session is not this Owner's trial of this Agent
+        "agent_trial_reference_required",  # a trial session continues only with the trial Agent
+        "agent_trial_unavailable",  # this database layout has no trials
+    }
+)
+#: Notices on an accepted trial message. TD1: a test runs on the candidate while the saved draft has
+#: moved, so this message used the draft being tested.
+AGENT_TRIAL_NOTICE_CODES = frozenset({"agent_trial_candidate_under_test"})
 
 CHAT_PEER_FAILURE_CODES = frozenset(
     {

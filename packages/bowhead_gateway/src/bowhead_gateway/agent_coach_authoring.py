@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 from bowhead_core.access_control import AccessControlStore
-from bowhead_core.agent_change_proposal_store import AgentChangeProposalStore, AgentProposalBaseline, _value_at, apply_operations
+from bowhead_core.agent_change_proposal_store import (
+    AgentChangeProposalError,
+    AgentChangeProposalStore,
+    AgentProposalBaseline,
+    _value_at,
+    apply_operations,
+)
 from bowhead_core.agent_revision_store import AgentRevisionForbiddenError
 from bowhead_core.chat_reference_scope import read_reference_access_context_in_connection
 from bowhead_core.subagent_authoring_rollout import resolve_subagent_authoring_capabilities
@@ -222,7 +228,13 @@ class AgentCoachAuthoring:
         async def validate_candidate(candidate: dict) -> None:
             from bowhead_gateway.agent_coach_resource_binding import validate_resource_binding
 
-            await validate_resource_binding(resource, target=target, definition=candidate["definition"], context=resource_context)
+            try:
+                await validate_resource_binding(resource, target=target, definition=candidate["definition"], context=resource_context)
+            except ValueError as exc:
+                code = str(exc)
+                if not code.startswith("resource_binding_plugin_"):
+                    raise
+                raise AgentChangeProposalError(code) from exc
 
         try:
             missing = await self._missing_skill_dependencies(target["agent_id"], operations)

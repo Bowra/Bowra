@@ -217,6 +217,7 @@ export type ReferenceEditorHooks = {
   ariaLabel: string;
   onChange: (document: InputDocument) => void;
   onQueryChange?: (query: ReferenceTriggerQuery | null) => void;
+  onPasteImages?: (clipboard: DataTransfer | null) => boolean;
   onRejected: (
     reason:
       "invalid_document" | "plain_text_required" | "composition_in_progress",
@@ -327,6 +328,7 @@ export function referenceEditorOptions(
                   hooks.onRejected("composition_in_progress");
                   return true;
                 }
+                if (hooks.onPasteImages?.(event.clipboardData)) return true;
                 if (!event.clipboardData?.types.includes("text/plain")) {
                   hooks.onRejected("plain_text_required");
                   return true;

@@ -6,6 +6,10 @@ import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+STANDARD_SANDBOX_OUTPUT_BYTES = 60 * 1024 * 1024
+LARGE_SANDBOX_OUTPUT_BYTES = 100 * 1024 * 1024
+LARGE_SANDBOX_OUTPUT_MIMES = frozenset({"text/csv", "text/tab-separated-values", "application/zip", "application/x-zip-compressed"})
+
 
 @dataclass(frozen=True)
 class SandboxExecutionPolicy:

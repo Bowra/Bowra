@@ -205,20 +205,20 @@ GB = 1024**3
 
 
 @pytest.mark.parametrize(
-    ("info", "configured", "slots", "capture_cpus"),
+    ("info", "configured", "slots", "capture_cpus", "view_cpus"),
     [
-        (f"4 {14 * GB}", "", 2, 1),  # 116: as before
-        (f"8 {32 * GB}", "", 6, 1),
-        (f"16 {64 * GB}", "", 8, 1),
-        (f"8 {8 * GB}", "", 2, 2),  # memory-bound: the spare CPUs go to captures
-        (f"2 {4 * GB}", "", 2, 1),  # a small host keeps the earlier two
-        (f"8 {32 * GB}", "3", 3, 2),
-        (f"8 {32 * GB}", "0", 6, 1),
-        (f"8 {32 * GB}", "many", 6, 1),
-        (None, "", 2, 1),
+        (f"4 {14 * GB}", "", 2, 1, 2),  # 116: captures as before; previews get the two unreserved CPUs
+        (f"8 {32 * GB}", "", 6, 1, 2),
+        (f"16 {64 * GB}", "", 8, 1, 2),
+        (f"8 {8 * GB}", "", 2, 2, 2),  # memory-bound: the spare CPUs go to captures
+        (f"2 {4 * GB}", "", 2, 1, 1),  # a small host keeps the earlier two
+        (f"8 {32 * GB}", "3", 3, 2, 2),
+        (f"8 {32 * GB}", "0", 6, 1, 2),
+        (f"8 {32 * GB}", "many", 6, 1, 2),
+        (None, "", 2, 1, 1),
     ],
 )
-def test_document_capacity_follows_the_host(executor, monkeypatch, capsys, info, configured, slots, capture_cpus):
+def test_document_capacity_follows_the_host(executor, monkeypatch, capsys, info, configured, slots, capture_cpus, view_cpus):
     module, *_ = executor
     original = module._docker
 
@@ -232,7 +232,7 @@ def test_document_capacity_follows_the_host(executor, monkeypatch, capsys, info,
     monkeypatch.setattr(module, "_docker", docker)
     monkeypatch.setenv("BOWHEAD_DOCUMENT_RUN_SLOTS", configured)
     capacity = module.host_capacity()
-    assert (capacity["slots"], capacity["capture_cpus"]) == (slots, capture_cpus)
+    assert (capacity["slots"], capacity["capture_cpus"], capacity["view_cpus"]) == (slots, capture_cpus, view_cpus)
     assert module.host_capacity() is capacity  # measured once per process
     assert ("BOWHEAD_DOCUMENT_RUN_SLOTS ignored" in capsys.readouterr().err) is (configured in {"0", "many"})
 
@@ -244,6 +244,7 @@ def test_runs_take_a_free_slot_and_captures_get_the_spare_cpus(executor, tmp_pat
         "bowhead.document.authoring": module.AUTHORING_PROFILE,
         "bowhead.document.authoring.contract": module.AUTHORING_CONTRACT,
         "bowhead.document.authoring.html-view": "html-view-v1",
+        "bowhead.document.authoring.results-preview": "pptx-results-preview-v1",
     }
     active: list[str] = []
     creates: list[tuple[str, ...]] = []
@@ -280,7 +281,10 @@ def test_runs_take_a_free_slot_and_captures_get_the_spare_cpus(executor, tmp_pat
     active[:] = ["a", "b"]
     assert runs.start(capture)["status"] == "running"
     assert runs.start(request("b" * 64, "execute"))["status"] == "running"
-    assert [next(arg for arg in create if arg.startswith("--cpus=")) for create in creates] == ["--cpus=2.0", "--cpus=1.0"]
+    active[:] = ["a"]
+    # A Results preview runs one at a time per application, so it gets the unreserved CPUs (docx design §5.3).
+    assert runs.start(request("c" * 64, "view"))["status"] == "running"
+    assert [next(arg for arg in create if arg.startswith("--cpus=")) for create in creates] == ["--cpus=2.0", "--cpus=1.0", "--cpus=2.0"]
 
 
 @pytest.mark.parametrize("labelled", [True, False])
@@ -312,6 +316,40 @@ def test_html_view_runs_only_on_an_image_that_declares_it(executor, tmp_path, mo
         assert runs.start(request)["status"] == "running"
         create = next(args for args in calls if args and args[0] == "create")
         assert "--network=none" in create and "--read-only" in create and "--pids-limit=128" in create
+    else:
+        with pytest.raises(ValueError, match="document_run_control_invalid"):
+            runs.start(request)
+
+
+@pytest.mark.parametrize("labelled", [True, False])
+def test_word_pages_render_only_on_an_image_that_declares_them(executor, tmp_path, monkeypatch, labelled):
+    """docx inline edit design §5.1: the Word profile offers `view` when the image declares the preview."""
+    module, runs, payload, calls, _ = executor
+    labels = {
+        "bowhead.document.profile": module.PROFILE,
+        "bowhead.document.word-authoring": module.WORD_PROFILE,
+        "bowhead.document.word-authoring.contract": module.WORD_CONTRACT,
+        **({"bowhead.document.word-authoring.results-preview": "docx-results-preview-v1"} if labelled else {}),
+    }
+    original = module._docker
+
+    def docker(*args):
+        if args[0] == "info":
+            return f"4 {14 * GB}"
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Id": IMAGE_ID, "Config": {"Labels": labels}}])
+        return original(*args)
+
+    monkeypatch.setattr(module, "_docker", docker)
+    assert (runs.readiness(module.WORD_PROFILE).get("results_preview_contract") == "docx-results-preview-v1") is labelled
+    control = json.dumps({"profile": module.WORD_PROFILE, "operation": "view"}).encode()
+    inputs = tmp_path / ("document-" + RUN_ID) / "input"
+    (inputs / "control.json").write_bytes(control)
+    request = {**payload, "control_sha256": hashlib.sha256(control).hexdigest(), "profile": module.WORD_PROFILE}
+    if labelled:
+        assert runs.start(request)["status"] == "running"
+        create = next(args for args in calls if args and args[0] == "create")
+        assert "--cpus=2.0" in create and "--network=none" in create
     else:
         with pytest.raises(ValueError, match="document_run_control_invalid"):
             runs.start(request)

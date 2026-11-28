@@ -47,6 +47,35 @@ def _store_except(refused: dict[str, str | None]):
     return upload
 
 
+@pytest.mark.parametrize("entry,limit_mib", [("result.txt", 60), ("out/result.txt", 60), ("result.zip", 100), ("out/result.zip", 100)])
+@pytest.mark.parametrize("extra_bytes", [0, 1], ids=["at-limit", "over-limit"])
+def test_sandbox_delivery_size_limit(runner, tmp_path, monkeypatch, entry: str, limit_mib: int, extra_bytes: int) -> None:
+    size = limit_mib * 1024 * 1024 + extra_bytes
+    code = (
+        "from pathlib import Path\n"
+        f"path = Path({entry!r})\n"
+        "path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "with path.open('wb') as output:\n"
+        f"    output.truncate({size})\n"
+    )
+    result = _run(
+        runner,
+        tmp_path,
+        monkeypatch,
+        code,
+        _store_except({}),
+        _output_purpose="deliverable",
+        _deliverable_outputs=[entry],
+    )
+    if extra_bytes:
+        assert result["ok"] is False
+        assert not result["outputs"]
+        assert entry in result["error"] and f"{size} bytes" in result["error"] and f"{limit_mib} MiB" in result["error"]
+    else:
+        assert result["ok"] is True, result.get("error")
+        assert [(output["name"], output["size"]) for output in result["outputs"]] == [(Path(entry).name, size)]
+
+
 def test_a_refused_deck_is_not_saved_with_its_reason_and_the_code_did_not_fail(runner, tmp_path, monkeypatch) -> None:
     code = "open('deck.pptx', 'wb').write(b'PK')\nopen('notes.txt', 'w').write('kept')\n"
     result = _run(runner, tmp_path, monkeypatch, code, _store_except({"deck.pptx": "file_office_duplicate_part"}))

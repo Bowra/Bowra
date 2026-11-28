@@ -35,9 +35,9 @@ If the page says "Your account is ready" instead, your account was created but t
 1. On the sign-in page, choose "Forgot password?", enter the email you sign in with, and choose "Send reset link".
 2. When you see "Check your email", open the link in the email. To protect accounts, the page shows the same message whether or not the email is registered.
 3. On "Set a new password", enter the new password twice and choose "Save new password".
-4. You'll see "Password updated". A reset link you requested yourself signs you in, so choose the "Open" button; for a link an administrator created for you, choose "Go to sign-in" and sign in with the new password.
+4. You'll see "Password updated". After you use a reset link from a "Forgot password?" email, your email is verified automatically and you're signed in. Choose "Open" to continue. For a link an administrator created for you, choose "Go to sign-in" and sign in with the new password.
 
-Reset links work only once and expire. If you see "This link no longer works", choose "Request a new reset link".
+Email reset links are valid for 24 hours. Links from an administrator can be used once and expire. If you see "This link no longer works", choose "Request a new reset link".
 
 "We can't send email right now" means your team hasn't turned on email delivery. Ask your team owner or an administrator — they can create a password reset link for you on the Members page.
 

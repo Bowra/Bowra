@@ -1,18 +1,24 @@
 "use client";
 
 /**
- * Knowledge base left sidebar (2b, interaction design 05 · A/B): Document Matrices lists only my matrices; Extraction Results lists only extraction tables with results.
- * MatrixTab fetches the data.
+ * Knowledge base sections (2b, interaction design 05 · A/B): Document Matrices lists the Space's matrices as a table
+ * (document matrix step 1, S2: name, row source, files × columns, last run, creator); Extraction Results lists only
+ * extraction tables with results. MatrixTab fetches the data. Step 1 S8: only-me matrices carry a "仅自己可见" badge.
  */
 
 import { useLocale, useTranslations } from "next-intl";
 
+import { ListTime } from "@/components/ui/list-time";
+import { TableFrame } from "@/components/ui/table-frame";
+import { appPath } from "@/lib/base-path";
 import { formatShortDateTime } from "@/lib/locale";
+import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
 
 import type { MatrixListItem } from "@/lib/kb-matrix/snapshot-api";
 import type { TemplateViewSummary } from "@/lib/kb-matrix/types";
 
 import { IcCheck, IcSpin, IcWarn } from "./matrix-icons";
+import { MatrixVisibilityBadge } from "./visibility-badge";
 
 function MatrixStatus({ m }: { m: MatrixListItem }) {
   const t = useTranslations("kbMatrix");
@@ -56,6 +62,11 @@ function cardKeys(onOpen: () => void) {
 }
 
 
+/** The address MatrixTab opens for a matrix (kept in sync with MatrixTab.openView). */
+function matrixHref(matrixId: string): string {
+  return `/knowledge?tab=matrix&view=${encodeURIComponent(matrixId)}`;
+}
+
 export function MatrixSection({
   matrices,
   loading,
@@ -71,13 +82,13 @@ export function MatrixSection({
 }) {
   const t = useTranslations("kbMatrix");
   const tn = useTranslations("knowledge_base.nav_v2");
-  const locale = useLocale();
   return (
     <div data-testid="kb-matrix-section">
       <div className="viewhd">
         <span className="d">{t("list_subtitle")}</span>
         {canEdit && (
           <span className="a">
+            {/* The tab's one primary action; the page header's upload button is secondary here. */}
             <button type="button" className="kb-btn kb-btn-primary" data-testid="kb-matrix-new" onClick={onNew}>
               {t("new_matrix")}
             </button>
@@ -89,28 +100,51 @@ export function MatrixSection({
       ) : matrices.length === 0 ? (
         <div className="emptyline">{t("empty_body_m2")}</div>
       ) : (
-        <div className="mxlist">
-          {matrices.map((m) => (
-            <div key={m.matrixId} className="mx" data-testid={`kb-matrix-mx-${m.matrixId}`} {...cardKeys(() => onOpen(m.matrixId))}>
-              <div className="nm">{m.name}</div>
-              {m.columnsCount === 0 ? (
-                <>
-                  <div className="mt">{tn("matrix_files", { n: m.filesCount })}</div>
-                  <div className="mt2">{tn("empty_matrix")}</div>
-                </>
-              ) : (
-                <>
-                  <div className="mt">
-                    {t("scale_matrix", { files: m.filesCount, cols: m.columnsCount })}
-                    {" · "}
-                    <MatrixStatus m={m} />
-                  </div>
-                  <div className="mt2">{m.lastRunAt ? tn("last_run", { time: formatShortDateTime(m.lastRunAt, locale) }) : null}</div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
+        <TableFrame className="mx-list-frame">
+          <table className="ui-table mx-list-table" data-testid="kb-matrix-table">
+            <thead>
+              <tr>
+                <th scope="col">{t("list_col_name")}</th>
+                <th scope="col">{t("list_col_source")}</th>
+                <th scope="col" className="ui-num">{t("list_col_size")}</th>
+                <th scope="col">{t("list_col_last_run")}</th>
+                <th scope="col">{t("list_col_creator")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrices.map((m) => (
+                <tr key={m.matrixId} className="mx-list-row" data-testid={`kb-matrix-mx-${m.matrixId}`} onClick={() => onOpen(m.matrixId)}>
+                  <td>
+                    <a
+                      className="mx-list-name"
+                      href={appPath(matrixHref(m.matrixId))}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!shouldHandleAppLinkClick(e)) return;
+                        e.preventDefault();
+                        onOpen(m.matrixId);
+                      }}
+                    >
+                      {m.name}
+                    </a>
+                    <span className="mx-list-sub">
+                      <MatrixVisibilityBadge visibility={m.visibility} />
+                      {m.columnsCount === 0 ? tn("empty_matrix") : <MatrixStatus m={m} />}
+                    </span>
+                  </td>
+                  <td>{t("list_source_selected")}</td>
+                  <td className="ui-num">
+                    {m.filesCount} × {m.columnsCount}
+                  </td>
+                  <td>
+                    <ListTime className="mx-list-muted" value={m.lastRunAt} empty={t("list_never_run")} />
+                  </td>
+                  <td>{m.createdByName ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableFrame>
       )}
     </div>
   );
@@ -120,19 +154,35 @@ export function TemplateRecordsSection({
   views,
   loading,
   onOpen,
+  variant = "section",
 }: {
   views: TemplateViewSummary[];
   loading: boolean;
   onOpen: (viewId: string) => void;
+  /**
+   * "section" (default): today's Extracted Results view with its own header. "group": one group of the
+   * Extraction tables tab (knowledge bases switch on), headed like the template groups (name + count + one line).
+   */
+  variant?: "section" | "group";
 }) {
   const t = useTranslations("kbMatrix");
   const tn = useTranslations("knowledge_base.nav_v2");
+  const tTabs = useTranslations("knowledge_bases.tabs");
   const locale = useLocale();
+  const Root = variant === "group" ? "section" : "div";
   return (
-    <div data-testid="kb-records-section">
-      <div className="viewhd">
-        <span className="d">{tn("records_desc")}</span>
-      </div>
+    <Root className={variant === "group" ? "tgrp" : undefined} data-testid="kb-records-section">
+      {variant === "group" ? (
+        <div className="tgh">
+          <span className="t">{tTabs("results_group")}</span>
+          {loading ? null : <span className="n">{views.length}</span>}
+          <span className="d">{tTabs("results_group_desc")}</span>
+        </div>
+      ) : (
+        <div className="viewhd">
+          <span className="d">{tn("records_desc")}</span>
+        </div>
+      )}
       {loading ? (
         <div className="emptyline">{t("loading")}</div>
       ) : views.length === 0 ? (
@@ -150,6 +200,6 @@ export function TemplateRecordsSection({
           ))}
         </div>
       )}
-    </div>
+    </Root>
   );
 }

@@ -63,7 +63,7 @@ export const SETTINGS_TAB_REQUIRED_TEAM_ROLES: Partial<Record<Tab, readonly Team
 
 function inferredScope(active: Tab): SettingsScope {
   if (active === "access-requests") return "feature";
-  if (["people", "workspaces", "llm", "datasource", "integrations", "email-service", "public-entries", "oidc", "license", "openapi", "team-appearance", "tools", "capabilities", "subagents", "workflows", "scheduled", "feedback-inbox", "team-operations", "reference-retention"].includes(active)) return "team";
+  if (["people", "workspaces", "llm", "datasource", "integrations", "email-service", "public-entries", "oidc", "license", "openapi", "team-appearance", "tools", "capabilities", "subagents", "workflows", "scheduled", "feedback-inbox", "team-operations", "file-retention", "reference-retention"].includes(active)) return "team";
   if (["general", "instructions", "members"].includes(active)) return "space";
   return "personal";
 }

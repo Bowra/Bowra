@@ -40,6 +40,7 @@ import { ApiError } from "@/lib/api-client";
 import { dismissToast, toast } from "@/lib/use-toast";
 import { useTurnEvalShare } from "@/lib/use-turn-eval-share";
 import { AnswerFeedbackDialog, type AnswerFeedbackValue } from "./answer-feedback-dialog";
+import { useAgentTrialChat } from "./agent-trial-chat";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 /** Copy the **human-readable body**, removing machine markers rendered as badges / figure slots or hidden
@@ -65,7 +66,9 @@ export interface MessageActionsProps {
 
 export function MessageActions({ answerText, resendText, onResend, latest = false, sessionId, turnId }: MessageActionsProps) {
   const t = useTranslations("chat");
-  const evalShare = useTurnEvalShare(sessionId, turnId);
+  // An Owner draft trial has no thumbs and no sharing: the answer came from an unreleased draft.
+  const trial = useAgentTrialChat() !== null;
+  const evalShare = useTurnEvalShare(trial ? null : sessionId, trial ? null : turnId);
   // Icon-only buttons (the text is the accessible name / tooltip); "edit and send" uses a pencil icon.
   const [copied, setCopied] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);

@@ -53,7 +53,15 @@ import {
   isKbAcceptedFileName,
 } from "@/lib/kb-upload-formats";
 import { useSpaceSelection } from "@/lib/use-space";
+import { directoryKnowledgeBases, notifyKnowledgeBasesChanged } from "@/lib/knowledge-bases-api";
 
+import {
+  KnowledgeBaseTargetPicker,
+  canAddToKnowledgeBase,
+  defaultKnowledgeBaseTarget,
+  knowledgeBaseUploadScope,
+} from "./bases/kb-target-picker";
+import { useKnowledgeBaseDirectory, useKnowledgeBaseNamer, useKnowledgeBasesEnabled } from "./bases/use-knowledge-bases";
 import { typeMeta } from "./kb-file-types";
 import { IconCheckBig, IconRetry, IconSpin, IconX } from "./kb-icons";
 import { useKbMeState } from "./use-kb-me";
@@ -61,7 +69,13 @@ import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 
 interface Props {
+  /** Switch off: the preselected scope card. Ignored while knowledge bases are on (the target decides the scope). */
   defaultScope: KbScope;
+  /**
+   * Knowledge bases (FEATURE_KNOWLEDGE_BASES): the preselected "Add to" target (the knowledge base you are in). Used when
+   * you can add to it; otherwise the current Space's default, else My knowledge. Ignored with the switch off.
+   */
+  defaultKnowledgeBaseId?: string | null;
   onClose: () => void;
   onUploaded: (file: KbFileDTO) => void;
 }
@@ -74,8 +88,10 @@ const MAX_MB = (KB_MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0);
 /** Files one Drive import accepts (matches the backend's per-request limit). */
 const DRIVE_IMPORT_LIMIT = 20;
 
-export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
+export function KbUploadModal({ defaultScope, defaultKnowledgeBaseId = null, onClose, onUploaded }: Props) {
   const t = useTranslations("knowledge_base.upload_modal");
+  const tTarget = useTranslations("knowledge_bases.upload");
+  const tBasesCommon = useTranslations("knowledge_bases.common");
   const tKb = useTranslations("knowledge_base");
   const tErr = useTranslations("knowledge_base.errors");
   const tDrive = useTranslations("google_drive");
@@ -94,6 +110,23 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
   // File rejected at selection/drop: preserve filename for error (FR5.4), keep dialog open.
   const [rejected, setRejected] = useState<{ file: File; reason: RejectReason } | null>(null);
   const [scope, setScope] = useState<KbScope>(defaultScope);
+  // Knowledge bases on: "Add to" picks a knowledge base; its home sets the scope (PRD §4.7).
+  const knowledgeBases = useKnowledgeBasesEnabled();
+  const {
+    directory: kbDirectory,
+    loading: kbDirectoryLoading,
+    error: kbDirectoryError,
+    refresh: refreshKbDirectory,
+  } = useKnowledgeBaseDirectory({ enabled: knowledgeBases });
+  const knowledgeBaseName = useKnowledgeBaseNamer();
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const target = knowledgeBases ? directoryKnowledgeBases(kbDirectory).find((kb) => kb.id === targetId) ?? null : null;
+  useEffect(() => {
+    if (!knowledgeBases || !kbDirectory) return;
+    const chosen = directoryKnowledgeBases(kbDirectory).find((kb) => kb.id === targetId);
+    if (chosen && canAddToKnowledgeBase(chosen)) return;
+    setTargetId(defaultKnowledgeBaseTarget(kbDirectory, defaultKnowledgeBaseId));
+  }, [knowledgeBases, kbDirectory, targetId, defaultKnowledgeBaseId]);
   const [useLlm, setUseLlm] = useState(false);
   // credential-readiness R9: upload entry warns if visual parsing ineffective (null = unknown/unavailable, no hint).
   const [kbVision, setKbVision] = useState<KbCapabilityState | null>(null);
@@ -136,6 +169,9 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
   // Identity not returned (me === null) differs from nonadmin: no permission decision yet, submission temporarily unavailable.
   const identityLoading = identityStatus === "loading";
   const teamLocked = me !== null && !me.is_team_admin;
+  // Space viewers are read-only for Space knowledge (the server refuses their writes too).
+  const spaceReadOnly =
+    me !== null && !me.is_team_admin && spaces.find((w) => w.id === me.workspace_id)?.role === "viewer";
   // Never conclude no space while space list still loading.
   const noSpace = me !== null && !me.workspace_id && !spacesLoading;
   const spaceName = me?.workspace_id
@@ -144,10 +180,10 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
 
   // Unavailable default scope (team for nonadmin, space with none) falls back to “个人”.
   useEffect(() => {
-    if ((scope === "team" && teamLocked) || (scope === "space" && noSpace)) {
+    if ((scope === "team" && teamLocked) || (scope === "space" && (noSpace || spaceReadOnly))) {
       setScope("personal");
     }
-  }, [scope, teamLocked, noSpace]);
+  }, [scope, teamLocked, noSpace, spaceReadOnly]);
 
   const formatList = KB_UPLOAD_FORMATS.map((f) => t(`format.${f.id}`)).join(t("format_sep"));
 
@@ -191,6 +227,13 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
     return me.team_id;
   }, [me, scope]);
 
+  /** Where the upload goes: today's scope, or (knowledge bases on) the target's home plus its ID; null while none can be used. */
+  const destination = useCallback((): { scope: KbScope; scope_id: string; knowledge_base_id?: string } | null => {
+    if (!knowledgeBases) return { scope, scope_id: computeScopeId() };
+    if (!target || !canAddToKnowledgeBase(target)) return null;
+    return { ...knowledgeBaseUploadScope(target), knowledge_base_id: target.id };
+  }, [knowledgeBases, scope, computeScopeId, target]);
+
   const [bundleSummary, setBundleSummary] = useState<KbBundleUploadResponse | null>(null);
   // M3: per-file parse status for the bundle result list (polled until terminal).
   const [bundleStatus, setBundleStatus] = useState<Record<string, KbParseStatus>>({});
@@ -233,6 +276,8 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       setError(tErr("auth_missing"));
       return;
     }
+    const dest = destination();
+    if (!dest) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy(true);
@@ -245,25 +290,25 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       // user from seeing summary. Show summary, dispatch only after Done clicked.
       if (isZip(file)) {
         const summary = await uploadKbBundle(file, {
-          scope,
-          scope_id: computeScopeId(),
+          ...dest,
           use_llm: useLlm,
           onProgress: (pct) => setUploadPct(Math.round(pct)),
           signal: ctrl.signal,
         });
         setBundleSummary(summary);
         setBundleStatus(Object.fromEntries(summary.uploaded.map((f) => [f.file_id, f.parse_status])));
+        if (knowledgeBases && summary.uploaded.length > 0) notifyKnowledgeBasesChanged();
         return;
       }
       const dto = await uploadKbFile(file, {
-        scope,
-        scope_id: computeScopeId(),
+        ...dest,
         use_llm: useLlm,
         // Send doc_type_id only for xlsx/xls (no binding for other types).
         doc_type_id: isXlsx && docTypeId ? docTypeId : null,
         onProgress: (pct) => setUploadPct(Math.round(pct)),
         signal: ctrl.signal,
       });
+      if (knowledgeBases) notifyKnowledgeBasesChanged();
       onUploaded(dto);
       onClose();
     } catch (e) {
@@ -274,14 +319,15 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       setBusy(false);
       setUploadPct(null);
     }
-  }, [file, me, scope, useLlm, computeScopeId, onUploaded, onClose, tErr, isXlsx, docTypeId, readiness.state]);
+  }, [file, me, useLlm, destination, knowledgeBases, onUploaded, onClose, tErr, isXlsx, docTypeId, readiness.state]);
 
   const cancelUpload = () => abortRef.current?.abort();
 
   const scopeBlocked =
     busy || driveBusy || me === null || readiness.state !== "ready" ||
-    (scope === "team" && teamLocked) ||
-    (scope === "space" && !me?.workspace_id);
+    (knowledgeBases
+      ? !target || !canAddToKnowledgeBase(target)
+      : (scope === "team" && teamLocked) || (scope === "space" && (!me?.workspace_id || spaceReadOnly)));
   const submitBlocked = !file || scopeBlocked;
 
   const importFromDrive = useCallback(async () => {
@@ -290,6 +336,8 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       setError(tErr("auth_missing"));
       return;
     }
+    const dest = destination();
+    if (!dest) return;
     setError(null);
     let picked: Awaited<ReturnType<typeof pickDriveFiles>>;
     try {
@@ -302,7 +350,9 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
     setDriveSkipped(Math.max(0, picked.length - DRIVE_IMPORT_LIMIT));
     setDriveBusy(true);
     try {
-      setDriveResults(await importKbFromGoogleDrive(picked.slice(0, DRIVE_IMPORT_LIMIT).map((f) => f.id), { scope, scope_id: computeScopeId() }));
+      const results = await importKbFromGoogleDrive(picked.slice(0, DRIVE_IMPORT_LIMIT).map((f) => f.id), dest);
+      setDriveResults(results);
+      if (knowledgeBases && results.some((r) => r.ok)) notifyKnowledgeBasesChanged();
     } catch (e) {
       const code = e instanceof ApiError ? e.code : undefined;
       setError(code === "google_not_connected" || code === "google_reauth_required"
@@ -311,7 +361,7 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
     } finally {
       setDriveBusy(false);
     }
-  }, [me, scope, computeScopeId, tErr, tDrive, readiness.state]);
+  }, [me, destination, knowledgeBases, tErr, tDrive, readiness.state]);
 
   const finishDriveImport = useCallback(async () => {
     const imported = (driveResults ?? []).flatMap((r) => (r.ok && r.kb_file_id ? [r.kb_file_id] : []));
@@ -405,7 +455,13 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
       <div className="md-hd">
         <div className="kb-up-head-text">
           <h3 id="kb-upload-title">{t("title")}</h3>
-          {view !== "select" && view !== "bundle" && <div className="sub" data-testid="kb-upload-subtitle">{t("uploading_to", { scope: scopeLabel(scope) })}</div>}
+          {view !== "select" && view !== "bundle" && (!knowledgeBases || target) && (
+            <div className="sub" data-testid="kb-upload-subtitle">
+              {knowledgeBases && target
+                ? tTarget("uploading_to", { name: knowledgeBaseName(target) })
+                : t("uploading_to", { scope: scopeLabel(scope) })}
+            </div>
+          )}
         </div>
         <button type="button" className="kb-x" onClick={onClose} disabled={busy} aria-label={t("close_aria")}>
           <IconX size={12} />
@@ -420,42 +476,67 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
         {view === "select" && (
           <>
             <KbIngestionNotice state={readiness.state} canConfigure={me?.is_team_admin === true} onRetry={readiness.retry} />
-            <div className="scopehd" id="kb-upload-scope-title">{t("scope_title")}</div>
-            <div role="radiogroup" aria-labelledby="kb-upload-scope-title" onKeyDown={selectEdgeScope} className="kb-up-scope-list">
-              <ScopeCard
-                value="personal" current={scope} onChange={setScope}
-                title={t("scope_card_personal")}
-                desc={t("scope_desc_personal")}
-              />
-              <ScopeCard
-                value="space" current={scope} onChange={setScope}
-                title={scopeLabel("space")}
-                desc={noSpace ? (
-                  <>
-                    {t("no_space")}
-                    <a href={appPath("/empty-workspace/")} data-testid="kb-upload-join-space">{t("no_space_link")}</a>
-                  </>
-                ) : t("scope_desc_space")}
-                disabled={noSpace}
-              />
-              <ScopeCard
-                value="team" current={scope} onChange={setScope}
-                title={t("scope_card_team")}
-                desc={identityLoading ? t("scope_desc_team_loading") : t("scope_desc_team")}
-                disabled={me === null || teamLocked}
-                loading={identityLoading}
-                trailing={identityLoading ? (
-                  <span
-                    className="lockskel"
-                    role="status"
-                    aria-label={t("scope_identity_loading")}
-                    data-testid="kb-scope-team-skeleton"
+            {knowledgeBases ? (
+              <>
+                <div className="scopehd" id="kb-upload-target-title">{tTarget("target_title")}</div>
+                {kbDirectoryError && !kbDirectory ? (
+                  <div role="alert" className="alert err" data-testid="kb-upload-target-error">
+                    {tTarget("directory_failed")}
+                    <button type="button" onClick={refreshKbDirectory}>{tBasesCommon("retry")}</button>
+                  </div>
+                ) : (
+                  <div className="kb-up-target">
+                    <KnowledgeBaseTargetPicker
+                      directory={kbDirectory}
+                      loading={kbDirectoryLoading}
+                      value={targetId}
+                      onChange={setTargetId}
+                      purpose="add"
+                      labelledBy="kb-upload-target-title"
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="scopehd" id="kb-upload-scope-title">{t("scope_title")}</div>
+                <div role="radiogroup" aria-labelledby="kb-upload-scope-title" onKeyDown={selectEdgeScope} className="kb-up-scope-list">
+                  <ScopeCard
+                    value="personal" current={scope} onChange={setScope}
+                    title={t("scope_card_personal")}
+                    desc={t("scope_desc_personal")}
                   />
-                ) : teamLocked ? (
-                  <span className="lock" data-testid="kb-scope-team-lock">{t("scope_team_lock")}</span>
-                ) : null}
-              />
-            </div>
+                  <ScopeCard
+                    value="space" current={scope} onChange={setScope}
+                    title={scopeLabel("space")}
+                    desc={noSpace ? (
+                      <>
+                        {t("no_space")}
+                        <a href={appPath("/empty-workspace/")} data-testid="kb-upload-join-space">{t("no_space_link")}</a>
+                      </>
+                    ) : spaceReadOnly ? t("scope_desc_space_read_only") : t("scope_desc_space")}
+                    disabled={noSpace || spaceReadOnly}
+                  />
+                  <ScopeCard
+                    value="team" current={scope} onChange={setScope}
+                    title={t("scope_card_team")}
+                    desc={identityLoading ? t("scope_desc_team_loading") : t("scope_desc_team")}
+                    disabled={me === null || teamLocked}
+                    loading={identityLoading}
+                    trailing={identityLoading ? (
+                      <span
+                        className="lockskel"
+                        role="status"
+                        aria-label={t("scope_identity_loading")}
+                        data-testid="kb-scope-team-skeleton"
+                      />
+                    ) : teamLocked ? (
+                      <span className="lock" data-testid="kb-scope-team-lock">{t("scope_team_lock")}</span>
+                    ) : null}
+                  />
+                </div>
+              </>
+            )}
 
             {file && fileCard(file, {})}
             {dropZone(file !== null)}
@@ -466,6 +547,13 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
                   {driveBusy ? tDrive("importing") : tDrive("kb_import_entry")}
                 </button>
               </div>
+            ) : null}
+            {knowledgeBases && target && canAddToKnowledgeBase(target) && !file ? (
+              <p className="kb-up-from-files" data-testid="kb-upload-from-files">
+                {tTarget.rich("from_files", {
+                  link: (chunks) => <a href={appPath(`/files/?add_to_kb=${encodeURIComponent(target.id)}`)}>{chunks}</a>,
+                })}
+              </p>
             ) : null}
 
             {/* credential-readiness R9 (PRD §6.4, highest-priority contextual hint):
@@ -496,7 +584,7 @@ export function KbUploadModal({ defaultScope, onClose, onUploaded }: Props) {
                   ))}
                 </select>
                 <small className="kb-up-template-hint">
-                  {t("template_hint_prefix")}<a href={appPath("/knowledge/?tab=templates")} className="kb-up-link">{t("manage_link")}</a>
+                  {t("template_hint_prefix")}<a href={appPath(knowledgeBases ? "/knowledge/?tab=records" : "/knowledge/?tab=templates")} className="kb-up-link">{t("manage_link")}</a>
                 </small>
               </label>
             )}

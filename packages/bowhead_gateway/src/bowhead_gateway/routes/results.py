@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from bowhead_core.space_governance import SpaceOperation
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from bowhead_gateway.document_edit_service import DocumentEditsRequestV1, DocumentInventoryRequestV1
 from bowhead_gateway.presentation_edit_service import PresentationEditsRequestV1, PresentationInventoryRequestV1
 from bowhead_gateway.results_capabilities import resolve_results_capabilities
 from bowhead_gateway.results_contracts import (
@@ -333,7 +334,9 @@ __all__ = ["owner_router", "router"]
 
 
 async def _presentation_edit_session(request: Request, session_id: str, user: User) -> Any:
-    """The owner fences of the Results routes, with write access to the Space (pptx-inline-edit design §6)."""
+    """The owner fences of the Results routes, with write access to the Space (pptx-inline-edit design §6).
+
+    The Word editor's routes use the same fences (docx inline edit design §7.1)."""
     session_store = getattr(request.app.state, "session_store", None)
     if session_store is None or getattr(request.app.state, "artifact_store", None) is None:
         raise coded_results_error(status.HTTP_503_SERVICE_UNAVAILABLE, "results_read_model_unavailable")
@@ -369,7 +372,7 @@ async def owner_presentation_edit_inventory(
     target = await resolve_target(request.app, store, session_id=session.id, user_id=user.id, artifact_id=body.artifact_id)
     from bowhead_gateway.error_handler import _resolve_ui_language
 
-    return await inventory(store, target, session_id=session.id, user_id=user.id, language=await _resolve_ui_language(request))
+    return await inventory(store, target, session_id=session.id, user_id=user.id, language=await _resolve_ui_language(request), app=request.app)
 
 
 @owner_router.post("/sessions/{session_id}/results/presentation-edits", status_code=status.HTTP_201_CREATED)
@@ -385,6 +388,51 @@ async def owner_presentation_edits(
 
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Cookie"
+    session = await _presentation_edit_session(request, session_id, user)
+    store = request.app.state.artifact_store
+    target = await resolve_target(request.app, store, session_id=session.id, user_id=user.id, artifact_id=body.artifact_id)
+    from bowhead_gateway.error_handler import _resolve_ui_language
+
+    language = await _resolve_ui_language(request)
+    return await save_edits(request.app, store, target, session=session, user_id=user.id, edits=body.edits, language=language)
+
+
+@owner_router.post("/sessions/{session_id}/results/document-edit/inventory")
+async def owner_document_edit_inventory(
+    session_id: str,
+    body: DocumentInventoryRequestV1,
+    request: Request,
+    response: Response,
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """What a person can edit in place in a Word file in their Results (docx inline edit design §7.1)."""
+    from bowhead_gateway.document_edit_service import inventory, require_enabled, resolve_target
+
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie"
+    require_enabled()
+    session = await _presentation_edit_session(request, session_id, user)
+    store = request.app.state.artifact_store
+    target = await resolve_target(request.app, store, session_id=session.id, user_id=user.id, artifact_id=body.artifact_id)
+    from bowhead_gateway.error_handler import _resolve_ui_language
+
+    return await inventory(store, target, session_id=session.id, user_id=user.id, language=await _resolve_ui_language(request), app=request.app)
+
+
+@owner_router.post("/sessions/{session_id}/results/document-edits", status_code=status.HTTP_201_CREATED)
+async def owner_document_edits(
+    session_id: str,
+    body: DocumentEditsRequestV1,
+    request: Request,
+    response: Response,
+    user: User = Depends(_current_user),
+) -> dict[str, Any]:
+    """Save a person's Word edits as the next version, or as a new file for an upload (docx inline edit design §7.2)."""
+    from bowhead_gateway.document_edit_service import require_enabled, resolve_target, save_edits
+
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie"
+    require_enabled()
     session = await _presentation_edit_session(request, session_id, user)
     store = request.app.state.artifact_store
     target = await resolve_target(request.app, store, session_id=session.id, user_id=user.id, artifact_id=body.artifact_id)

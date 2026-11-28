@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { rememberResultsOpen } from "./_results-open";
 
 /**
  * ?session= deep links and page-owned URL-write timing (chromium + webkit).
@@ -400,6 +401,8 @@ async function installArchiveOfS2(page: Page): Promise<void> {
 /** s2 has one chat turn and editable report, enabling proof page remains s2 and unsaved report edits. */
 async function installS2WithReport(page: Page): Promise<{ saves: string[] }> {
   const saves: string[] = [];
+  // The report proves the page shows s2; its reader left Results open there (chat running state R2.7).
+  await rememberResultsOpen(page, ["s2"]);
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/v1/sessions/s2", (route) => route.fulfill(json({
     session: { id: "s2", workspace_id: "ws_test", title: S2, started_at: "2026-09-28T00:00:00Z", last_active_at: "2026-09-28T01:00:00Z", status: "done", cost_usd: 0, tokens_total: 0, intents: ["analysis"] },

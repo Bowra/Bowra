@@ -578,6 +578,13 @@ plugins:
         "skill_read",
       ]
     skill_revision: sha256:a59b33001b7f108463f92d8740ec6738e0f6eae37f7b8cccbe5ff1f4229b6eaa
+  - name: settings-personal-appearance
+    version: 6
+    family: settings
+    selectable: false
+    tools: []
+    parts: *configuration_parts
+    skill_revision: sha256:812e53d077f4c3ab1d36d956aa868566bc0623a0d9f1cf48053f7819054cb804
   - name: settings-team-administration
     version: 1
     family: settings

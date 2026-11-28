@@ -206,6 +206,11 @@ def delivery_gaps_notice(gaps: list[str], lang: str, *, unconfirmed: bool = Fals
     )
 
 
+def supported_chrome_langs() -> tuple[str, ...]:
+    """The locales report chrome is written in."""
+    return tuple(_CHROME)
+
+
 def chrome_text(key: str, lang: str, **fmt: Any) -> str:
     """Render report copy; unsupported locales use English and unknown keys raise."""
     table = _CHROME.get(lang) or _CHROME["en-US"]

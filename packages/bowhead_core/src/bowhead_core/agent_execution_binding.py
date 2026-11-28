@@ -25,7 +25,7 @@ from bowhead_core.agent_behavior_flags import agent_behavior_m3_enabled
 from bowhead_core.agent_behavior_materializer import AgentBehaviorMaterializer, default_agent_behavior_materializer
 from bowhead_core.agent_knowledge_policy import (
     KnowledgeAccessError,
-    require_knowledge_migration,
+    require_knowledge_admission,
     require_supported_knowledge_access,
     source_bindings_enabled,
 )
@@ -134,6 +134,9 @@ class ExactAgentExecutionBinding:
     # An Owner draft trial binds a release candidate's frozen revision instead of a release; the
     # marker comes only from the Turn's trial row (agent_owner_trial_turn), never from a client.
     trial_candidate_id: str | None = None
+    # ``draft`` or ``submitted`` and the revision's save time, as recorded on the trial row.
+    trial_candidate_kind: str | None = None
+    trial_frozen_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,10 +489,10 @@ class AgentExecutionBindingStore:
                     _require_resumable_execution(existing)
                     await db.commit()
                     return _binding_from_rows(existing, snapshot, listing=listing)
-                if source_kind == "system" and require_supported_knowledge_access(definition) is not None:
+                if source_kind == "system" and (knowledge_policy := require_supported_knowledge_access(definition)) is not None:
                     if not source_bindings_enabled():
                         raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
-                    await require_knowledge_migration(db)
+                    await require_knowledge_admission(db, knowledge_policy)
                 execution_id = f"aex_{uuid4().hex}"
                 policy_fingerprint = _policy_fingerprint(
                     {
@@ -919,9 +922,7 @@ class AgentExecutionBindingStore:
                 candidate = await cursor.fetchone()
             if candidate is None or str(candidate["state"]) not in _OWNER_TRIAL_CANDIDATE_STATES:
                 raise AgentExecutionBindingError("agent_trial_candidate_not_prepared")
-            snapshot = await _candidate_team_snapshot(
-                db, team_id=team_id, agent_id=agent_id, candidate_id=candidate_id, revision_ref=trial.revision_ref
-            )
+            snapshot = await _candidate_team_snapshot(db, trial=trial)
             _validate_team_snapshot(snapshot)
             if str(snapshot["capability_fingerprint"]) != trial.capability_fingerprint:
                 raise AgentExecutionBindingError("agent_trial_candidate_unavailable")
@@ -1146,10 +1147,10 @@ class AgentExecutionBindingStore:
                 )
                 return _binding_from_rows(existing, snapshot)
 
-            if require_supported_knowledge_access(definition_value) is not None:
+            if (knowledge_policy := require_supported_knowledge_access(definition_value)) is not None:
                 if not source_bindings_enabled():
                     raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
-                await require_knowledge_migration(db)
+                await require_knowledge_admission(db, knowledge_policy)
             if prepared_revision is None or domain_layout_active(self.db_path):
                 async with db.execute(
                     "SELECT 1 FROM system_agent_effective_revision WHERE team_id=? AND agent_id=? AND definition_hash=?",
@@ -1742,10 +1743,22 @@ class AgentExecutionBindingStore:
                 (team_id, turn_id),
             ) as cursor:
                 executions = await cursor.fetchall()
+            trial = await _owner_trial_row(db, turn_id=turn_id)
+        items = [dict(row) for row in executions]
+        if trial is not None:
+            # The same ``trial`` member the live events carry, so stored and replayed views agree.
+            for item in items:
+                if (item["agent_id"], item["agent_revision_id"], item["agent_release_id"], item["capability_fingerprint"]) == (
+                    trial.agent_id,
+                    trial.revision_ref,
+                    None,
+                    trial.capability_fingerprint,
+                ):
+                    item["trial"] = {"candidate_id": trial.candidate_id, "candidate_kind": trial.candidate_kind, "frozen_at": trial.frozen_at}
         return {
             "turn_id": turn_id,
             "root_binding": dict(root) if root is not None else None,
-            "executions": [dict(row) for row in executions],
+            "executions": items,
         }
 
     async def mark_terminal(
@@ -2463,14 +2476,7 @@ async def read_owner_trial_turn_in_connection(db: aiosqlite.Connection, *, turn_
     return await _owner_trial_row(db, turn_id=turn_id)
 
 
-async def _candidate_team_snapshot(
-    db: aiosqlite.Connection,
-    *,
-    team_id: str,
-    agent_id: str,
-    candidate_id: str,
-    revision_ref: str,
-) -> aiosqlite.Row:
+async def _candidate_team_snapshot(db: aiosqlite.Connection, *, trial: OwnerTrialTurn) -> aiosqlite.Row:
     """Load a release candidate's frozen revision with its own Safety report, in any candidate state.
 
     The revision is immutable, so a started trial keeps running on it after the candidate is
@@ -2484,7 +2490,8 @@ async def _candidate_team_snapshot(
                revision.definition_hash,revision.risk_json,
                behavior.descriptor_json AS behavior_descriptor_json,
                safety.status AS safety_status,safety.content_hash AS safety_content_hash,
-               candidate.id AS trial_candidate_id
+               candidate.id AS trial_candidate_id,
+               ? AS trial_candidate_kind,? AS trial_frozen_at
         FROM team_subagent_release_candidate candidate
         JOIN team_subagent_revision revision
           ON revision.team_id=candidate.team_id
@@ -2506,7 +2513,7 @@ async def _candidate_team_snapshot(
           AND revision.capability_fingerprint=candidate.capability_fingerprint
           AND revision.dependency_fingerprint=candidate.dependency_fingerprint
         """,
-        (team_id, agent_id, candidate_id, revision_ref),
+        (trial.candidate_kind, trial.frozen_at, trial.team_id, trial.agent_id, trial.candidate_id, trial.revision_ref),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
@@ -2565,13 +2572,7 @@ async def _team_snapshot_by_execution(
             execution["revision_ref"],
             execution["capability_fingerprint"],
         ):
-            return await _candidate_team_snapshot(
-                db,
-                team_id=trial.team_id,
-                agent_id=trial.agent_id,
-                candidate_id=trial.candidate_id,
-                revision_ref=trial.revision_ref,
-            )
+            return await _candidate_team_snapshot(db, trial=trial)
     async with db.execute(
         """
         SELECT release.id AS release_id,release.revision_id,
@@ -2818,10 +2819,10 @@ async def _resolved_team_definition_json(
     from bowhead_core.system_plugins import BuiltinPluginSelectionError, expand_builtin_plugins
 
     definition = _decode_object(snapshot["definition_json"], "Agent definition")
-    if admission and require_supported_knowledge_access(definition) is not None:
+    if admission and (knowledge_policy := require_supported_knowledge_access(definition)) is not None:
         if not source_bindings_enabled():
             raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
-        await require_knowledge_migration(db)
+        await require_knowledge_admission(db, knowledge_policy)
 
     builtin_selected = bool(definition.get("builtin_plugin_ids"))
     try:
@@ -2848,7 +2849,7 @@ def _binding_from_rows(
 ) -> ExactAgentExecutionBinding:
     source_kind = str(execution["agent_source_kind"])
     columns = execution.keys()
-    trial_candidate_id = None
+    trial_candidate_id = trial_candidate_kind = trial_frozen_at = None
     if source_kind == "team":
         # resolved_definition_json was added in 0123; old-schema rows lack it. Fall back to the snapshot definition
         # so admission reaches its *_migration_required checks instead of raising IndexError here.
@@ -2866,6 +2867,8 @@ def _binding_from_rows(
         snapshot_columns = snapshot.keys()
         if "trial_candidate_id" in snapshot_columns and snapshot["trial_candidate_id"] is not None:
             trial_candidate_id = str(snapshot["trial_candidate_id"])
+            trial_candidate_kind = str(snapshot["trial_candidate_kind"])
+            trial_frozen_at = str(snapshot["trial_frozen_at"])
     else:
         authored = None
         definition = _decode_object(snapshot["definition_json"], "system Agent definition")
@@ -2892,6 +2895,8 @@ def _binding_from_rows(
         authored_definition=authored,
         parent_execution_id=execution["parent_execution_id"] if "parent_execution_id" in columns else None,
         trial_candidate_id=trial_candidate_id,
+        trial_candidate_kind=trial_candidate_kind,
+        trial_frozen_at=trial_frozen_at,
     )
 
 

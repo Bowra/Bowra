@@ -516,8 +516,7 @@ async def create_share_grant(
     require_sharing_expansion(res.kind)
     pid = body.principal_id.strip()
     if body.principal_type == "user":
-        target = await store.get_user(pid)
-        if target is None or target.team_id != user.team_id or target.status != "active":
+        if not await store.filter_active_team_members(user.team_id, {pid}):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "user not found in your team")
     else:
         group = await access_store.get_group(user.team_id, pid)

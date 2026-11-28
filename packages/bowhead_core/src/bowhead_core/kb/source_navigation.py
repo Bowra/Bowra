@@ -142,7 +142,7 @@ async def _project(
         and not file.source_absent
         and file.parse_status == "done"
         and file.team_id == ctx.team_id
-        and (scope is None or scope.permits(file.file_id))
+        and (scope is None or scope.permits(file))
     ]
     page = SourcePage()
     if not files:
@@ -246,6 +246,10 @@ async def list_sources(
         except (ValueError, TypeError, KeyError, UnicodeError, InvalidToken) as exc:
             raise ValueError("knowledge_catalog_cursor_invalid") from exc
     budget = 100 if initial else 128
+    from bowhead_core.knowledge_source_runtime import knowledge_base_filter_of
+
+    # An Agent's selected knowledge bases filter the candidates in SQL, so files outside them do not use up the budget.
+    knowledge_bases = await knowledge_base_filter_of(ctx)
     files = await ctx.kb_files_store.list_for_scopes_filtered(
         team_id=ctx.team_id,
         personal_owner_id=ctx.user_id,
@@ -257,6 +261,7 @@ async def list_sources(
         order_by="uploaded_at" if initial else "file_id",
         order_dir="desc" if initial else "asc",
         after_file_id=after,
+        **({"knowledge_base_ids": knowledge_bases} if knowledge_bases is not None else {}),
     )
     categories = await visible_categories(ctx, store)
     if category_id and category_id != "unclassified" and category_id not in {row["id"] for row in categories}:

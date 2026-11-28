@@ -1,6 +1,6 @@
 """飞书07.06 #11 — 数字溯源精确化回归锁。
 
-真机事故 (prod 116, s_8a063ae8cd8e / t_de2b93219ee6):
+真机事故 (prod 116, s_8a063ae8cd8e / an observed task):
 narrative `同比增长[num:4.18%:src:call_e5a0…][3]` — 同一数字双标记;
 点数字走 call_id → source_ref_aggregator subs[0] 塌缩 → 指到批次第一张
 csv (一级分行) 而非真出处 (同比变化率)。 [3] 编号按 sources[] 下标反而正确。
@@ -107,7 +107,7 @@ def test_value_map_ref_artifact_id_trusted_without_prefix() -> None:
 
 
 def test_binder_skips_number_already_cited_with_numbered_ref() -> None:
-    """真机事故（prod 116 t_de2b93219ee6）的 gen3 形态锁：writer 已写 `4.18%[3]`，
+    """真机事故（prod an observed execution）的 gen3 形态锁：writer 已写 `4.18%[3]`，
     绑定器**不得**再给同一数字叠一个引用记号（当年叠成 `[num:4.18%:src:…][3]`
     → FE 双装饰 + trust 双计数）。M3-4 换形态：绑定动作现在是 `bind_to_numbered`
     产 `值 [N]`，adjacent-[N] 跳过判据逐字复用。"""
@@ -331,7 +331,7 @@ def test_v2s_weak_ignores_failed_or_non_sandbox() -> None:
 
 
 def test_v2s_weak_accepts_flat_python_exec_entrance() -> None:
-    """批 5ⓑ盲区回归钉（2026-08-29 真机 t_1c34b8e87ef9）：compute 扁平入口
+    """批 5ⓑ盲区回归钉（2026-08-29 真机 an observed task）：compute 扁平入口
     `python_exec` 的 stdout 嵌在 result_json 里——weak 臂必须认这一入口/形状，
     否则量贡献类派生值整条裸奔。"""
     flat = SimpleNamespace(
@@ -360,7 +360,7 @@ def _runner_output(artifact_id: str, name: str, data_role: str | None = None) ->
 
 
 def test_v2s_weak_src_id_prefers_sandbox_output_artifact_over_call_id() -> None:
-    """e2-r2 第二半（1.1.94 真机 t_1831b22ed3c1）：扁平入口的产物 id 在
+    """e2-r2 第二半（1.1.94 真机 an observed task）：扁平入口的产物 id 在
     `result_json.outputs[]`，不读它就退 call_id——而 call_id 不是任何归属解析器
     认得的形状 ⇒ 来源判 `linked_unavailable`，用户点开角标是「该来源不可用」。
     只认 stdout 产物（weak 值的出处），它是本 turn 产物、走既有 art_ 解析器。"""
@@ -410,23 +410,27 @@ def test_v2s_weak_skips_a_failed_sandbox_run() -> None:
     assert 123456700.0 not in m  # Ten-thousand scale bridge must not admit it either.
 
 
-def test_v2s_weak_keeps_a_run_that_only_failed_artifact_materialization() -> None:
-    """review R2-1：产物物化失败**不是**跑挂。runner 的 `_fail_data_materialization`
-    会因「某个文件超 50MB / 上传失败 / 声明的 deliverable 没产出」把**算完并打印了全部
-    派生值**的运行标成 ok=False+exit_code=1（它自己写着 "Run success remains independent
-    from artifact presence"）。照 D17 原样跳过 ⇒「stdout 派生值裸奔」这个 e2 要修的回归
-    静默复发。"""
+@pytest.mark.parametrize(
+    "size_error",
+    [
+        "sandbox structured exceeds Data artifact limit",
+        "sandbox file annual payroll.csv is 62914561 bytes, above the 60 MiB output limit",
+        "declared deliverable out/payroll.csv is 62914561 bytes, above the 60 MiB output limit",
+    ],
+)
+def test_v2s_weak_keeps_a_run_that_only_failed_artifact_materialization(size_error: str) -> None:
+    """Completed computations retain stdout evidence when saving an output fails."""
     materialization_only = SimpleNamespace(
         call_id="call_bigcsv",
         tool_name="python_exec",
         result={
             "ok": False,
             "exit_code": 1,
-            "error": "sandbox structured exceeds Data artifact limit",
+            "error": size_error,
             "result_json": {
                 "ok": False,
                 "exit_code": 1,
-                "error": "sandbox structured exceeds Data artifact limit",
+                "error": size_error,
                 "stdout": "量贡献: -3,505.52 万元",
                 "outputs": [_runner_output("art_stdoutbig001", "sandbox-stdout.txt", "stdout")],
             },

@@ -47,6 +47,9 @@ import {
   type PeerBlock,
 } from "./agent-grouping";
 import { isRecoverableStepFailure } from "./self-healing";
+import { orderAgentWork, type LeadEntry } from "./run-groups";
+import { FoldedNoteRow, useFoldedNotes } from "./folded-notes";
+import { TraceStyleOverview } from "./TraceStyleOverview";
 import { useTurnRunning } from "./turn-running";
 import { Chunks, Code, Hits, ParallelRail, ResultTable } from "./tool-results";
 import { stepDisplayToolName, writingDisplayKey } from "./tool-catalog";
@@ -519,6 +522,7 @@ function StepFromView({ s, agentName }: StepFromViewProps) {
   return (
     <>
       <Step
+        stepId={s.stepId}
         toolName={stepDisplayToolName(s.stepType, s.toolName)}
         label={s.label}
         summary={waitingSummary ?? deriveRightSummary(s, tChat)}
@@ -603,6 +607,7 @@ function PeerBlockView({ block }: PeerBlockViewProps) {
       outcomeDiagnostics={block.failureDiagnostics ?? undefined}
       open={block.status === "run"}
       forceOpen={block.steps.some(hasPendingConfirmation)}
+      agentKey={block.peerId}
     >
       {block.steps.filter((s) => !isInternalCloseoutStep(s)).map((s) => (
         <StepFromView
@@ -630,8 +635,11 @@ export function AgentTrace({
   const contextActivities = useContextActivities();
   const leadContext = contextActivities.filter((activity) => activity.subagent_id === null);
   const collaboration = useCollaborationTrace();
+  const groupingSteps = collaboration?.enabled
+    ? steps.filter((step) => step.toolName !== "agent_message" || step.state !== "done")
+    : steps;
   const { leadSteps, peerBlocks: groupedBlocks } = buildAgentGrouping(
-    collaboration?.enabled ? steps.filter((step) => step.toolName !== "agent_message" || step.state !== "done") : steps,
+    groupingSteps,
     peerNames,
     peerProse,
     peerTasks,
@@ -659,41 +667,80 @@ export function AgentTrace({
     });
   }
 
+  // Chat running state R1.5: the finished trace shows the running card's structure. Lead's runs of steps and each
+  // helper where Lead dispatched it, in the order they happened; helpers dispatched one after another without Lead
+  // steps between them (parallel dispatches) stay together under one heading as before.
+  const notes = useFoldedNotes();
+  const work = orderAgentWork(groupingSteps, leadSteps, peerBlocks, notes);
+  const leadRuns = work.filter((item) => item.kind === "lead");
+  const lastLeadRun = leadRuns[leadRuns.length - 1] ?? null;
+  const sections: Array<
+    | { kind: "lead"; steps: StepView[]; entries: LeadEntry[]; key: string }
+    | { kind: "helpers"; blocks: PeerBlock[]; key: string }
+  > = [];
+  for (const item of work) {
+    if (item.kind === "lead") {
+      const first = item.entries[0];
+      const firstKey = first ? (first.kind === "step" ? first.step.stepId : first.note.key) : String(sections.length);
+      sections.push({ kind: "lead", steps: item.steps, entries: item.entries, key: `lead:${firstKey}` });
+      continue;
+    }
+    const previous = sections[sections.length - 1];
+    if (previous?.kind === "helpers") previous.blocks.push(item.block);
+    else sections.push({ kind: "helpers", blocks: [item.block], key: `peers:${item.block.peerId}` });
+  }
+  // Lead's context organizing has no step of its own: it shows in Lead's last run, or alone when Lead has none.
+  if (lastLeadRun === null && leadContext.length > 0) sections.unshift({ kind: "lead", steps: [], entries: [], key: "lead:context" });
+
   return (
     <div className="ag-trace">
-      {(leadSteps.some((s) => !isInternalCloseoutStep(s)) || leadContext.length > 0) && (
-        <AgentBlock
-          agent="lead"
-          status={turnRunning && leadContext.some((activity) => activity.phase === "running") ? "run" : statusOf(leadSteps)}
-          open
-        >
-          {leadSteps.filter((s) => !isInternalCloseoutStep(s)).map((s) => (
-            <StepFromView
-              key={s.stepId}
-              s={s}
-              agentName={agentDisplayName("lead")}
-            />
-          ))}
-          <ContextActivityRows subagentId={null} />
-        </AgentBlock>
-      )}
-
-      {peerBlocks.length === 1 && (
-        <PeerBlockView
-          block={peerBlocks[0]}
-        />
-      )}
-
-      {peerBlocks.length > 1 && (
-        <MultiAgentGroup n={peerBlocks.length}>
-          {peerBlocks.map((b) => (
-            <PeerBlockView
-              key={b.peerId}
-              block={b}
-            />
-          ))}
-        </MultiAgentGroup>
-      )}
+      {/* Chat running state R3.2: the reader's display style, with an overview of the Turn in that style. */}
+      <TraceStyleOverview
+        steps={groupingSteps}
+        peerNames={peerNames}
+        peerDisplayNames={peerDisplayNames}
+        peerTasks={peerTasks}
+        peerTerminalById={peerTerminalById}
+        notes={notes}
+        running={turnRunning}
+      />
+      {sections.map((section) => {
+        if (section.kind === "helpers") {
+          return section.blocks.length === 1 ? (
+            <PeerBlockView key={section.key} block={section.blocks[0]} />
+          ) : (
+            <MultiAgentGroup key={section.key} n={section.blocks.length}>
+              {section.blocks.map((b) => (
+                <PeerBlockView key={b.peerId} block={b} />
+              ))}
+            </MultiAgentGroup>
+          );
+        }
+        const visible = section.entries.filter((entry) => entry.kind === "note" || !isInternalCloseoutStep(entry.step));
+        const carriesContext = lastLeadRun === null || section.steps === lastLeadRun.steps;
+        if (visible.length === 0 && !(carriesContext && leadContext.length > 0)) return null;
+        return (
+          <AgentBlock
+            key={section.key}
+            agent="lead"
+            status={carriesContext && turnRunning && leadContext.some((activity) => activity.phase === "running") ? "run" : statusOf(section.steps)}
+            open
+          >
+            {visible.map((entry) => (
+              entry.kind === "note" ? (
+                <FoldedNoteRow key={`note:${entry.note.key}`} note={entry.note} />
+              ) : (
+                <StepFromView
+                  key={entry.step.stepId}
+                  s={entry.step}
+                  agentName={agentDisplayName("lead")}
+                />
+              )
+            ))}
+            {carriesContext ? <ContextActivityRows subagentId={null} /> : null}
+          </AgentBlock>
+        );
+      })}
 
       <CollaborationTrace />
 

@@ -6,12 +6,13 @@ Soll jedes Mitglied beim Dienst sein eigenes Konto statt eines geteilten verwend
 
 ## MCP-Verbindung auf Teamebene einrichten
 
-1. Öffnen Sie **Team-Einstellungen → Tools**.
+1. Öffnen Sie **Fähigkeiten → Tools → Werkzeugquellen verwalten** (Tab **Externe Werkzeugquellen**).
 2. Fügen Sie einen MCP-Dienst mit Namen, Serveradresse und der erforderlichen Authentifizierung hinzu.
 3. Lassen Sie Bowra die verfügbaren Tools ermitteln und wählen Sie nur die Tools aus, die das Team benötigt.
 4. Speichern Sie die Verbindung und prüfen Sie ihren Status.
 
 Verwenden Sie nur vertrauenswürdige Dienste und Zugangsdaten mit den geringstmöglichen Rechten. Prüfen Sie bei jedem Tool, welche Informationen an den externen Dienst übertragen werden und ob dieser Änderungen ausführen kann. In einer Cloud-Bereitstellung muss der Dienst über öffentliches HTTPS erreichbar sein; interne Bereitstellungen können interne Adressen verwenden.
+Wenn der Dienst OAuth verwendet, melden Sie sich mit einem Konto an, dessen zugängliche Inhalte mit dem Team geteilt werden dürfen. Agents berechtigter Mitglieder verwenden die Rechte dieses Kontos. Wählen Sie nach der Autorisierung die Tools der Quelle, speichern Sie die Auswahl und aktivieren Sie die Quelle. Filtern Sie lange Listen nach Kategorie und wählen Sie die angezeigten Ergebnisse gesammelt aus oder ab. Falls der Dienst die Rücksprungadresse ablehnt, öffnen Sie Bowhead über einen verifizierten öffentlichen HTTPS-Zugang und autorisieren Sie erneut.
 
 ## Tools für Agents freigeben
 
@@ -70,3 +71,23 @@ Inhaber und Administratoren können festhalten, was jedes Tool einer MCP-Quelle 
 3. Wählen Sie **Speichern**. Die Änderung gilt ab der nächsten Aufgabe.
 
 Ein als nur lesend bestätigtes Tool läuft ohne Rückfrage, und ein nicht gekennzeichnetes Tool mit bestätigter Kategorie kann für Agents ausgewählt werden. Ändert der Dienst später die Definition eines Tools, gilt dessen Bestätigung nicht mehr und die Liste fordert eine erneute Bestätigung an. Bestätigen Sie **Nur lesend** nur für Tools, die keine Daten ändern können.
+
+## n8n-Workflows ausführen
+
+Wenn Ihre Bereitstellung n8n-Workflow-Tools aktiviert, kann eine MCP-Quelle, die mit dem instanzweiten MCP-Server von n8n verbunden ist (eine Adresse, die auf `/mcp-server/http` endet), einzelne n8n-Workflows als Tools anbieten. Jeder freigegebene Workflow führt seine veröffentlichte Version in n8n aus und wartet auf das Ergebnis, sodass er jedes Mal gleich läuft.
+
+1. Veröffentlichen Sie den Workflow in n8n und aktivieren Sie **Available in MCP**. Freigegeben werden können Workflows, die per Webhook oder Zeitplan gestartet werden.
+2. Wählen Sie in Bowhead in den Aktionen der Quelle (im **⋯**-Menü rechts auf der Karte) **n8n-Workflows**. Nicht veröffentlichte oder nicht für MCP verfügbare Workflows werden gezählt, aber nicht aufgeführt.
+3. Wählen Sie neben einem Workflow **Prüfen**. Wählen Sie die Kategorie danach, was der Workflow mit Daten tut, schreiben Sie die Beschreibung, die das Modell liest, und prüfen Sie das Eingabeschema: die Felder des Webhook-Request-Bodys. Der Entwurf listet die Felder, die die veröffentlichte Version liest; ergänzen Sie Typen und kennzeichnen Sie Pflichtfelder.
+4. Wählen Sie **Freigeben**. Ab der nächsten Aufgabe ist der Workflow ein Tool.
+
+Der Assistent kann freigegebene Workflows in jeder Aufgabe verwenden. Um einem eigenen Agent die Workflows einer Quelle zu geben, erstellen Sie unter **Team-Einstellungen → Plugins** ein Plugin aus der Vorlage **n8n-Workflows** und wählen dieses Plugin im Agent aus.
+
+Gut zu wissen:
+
+- Eine Ausführung wartet bis zu 5 Minuten, in einer geplanten Aufgabe bis zu 15 Minuten. Eine längere Ausführung wird als noch laufend gemeldet, mit einem Link zur Ausführung in n8n.
+- Wird der Workflow in n8n erneut veröffentlicht, stoppen Ausführungen mit „Version geändert“, bis Sie die neue Version prüfen und freigeben.
+- Nur lesende Workflows laufen ohne Rückfrage, auch in geplanten Aufgaben. Workflows, die Daten schreiben oder löschen, fragen bei jeder Ausführung das Mitglied, das die Aufgabe gestartet hat, und setzen voraus, dass die Aufrufbestätigung aktiviert ist.
+- Workflows laufen mit dem n8n-Konto, mit dem die Quelle autorisiert wurde. Gewähren Sie auf Nachfrage von n8n nur das Lesen von Workflows, das Ausführen von Workflows und das Lesen von Ausführungen.
+- Für freigegebene Workflows müssen Sie keine eigenen n8n-Tools importieren. Wenn Sie `execute_workflow` importieren, kann der Assistent jeden für MCP verfügbaren Workflow ohne Ihre Freigabe ausführen; lassen Sie es daher abgewählt.
+- n8n begrenzt MCP-Anfragen von einer Adresse (standardmäßig 100 pro 5 Minuten). Bowhead bleibt unter diesem Limit; ein n8n-Administrator kann es mit `N8N_MCP_SERVER_RATE_LIMIT` erhöhen.

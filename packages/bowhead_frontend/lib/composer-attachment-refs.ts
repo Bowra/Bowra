@@ -1,4 +1,5 @@
 import { canonicalizeChartSelectedContext } from "./chart/selected-context";
+import { canonicalizeDocumentSelection } from "./document-selection";
 import { canonicalizePresentationSelection } from "./presentation-selection";
 import type { AttachmentRef } from "./types";
 
@@ -18,6 +19,7 @@ export function canonicalizeComposerAttachmentRef(
     "size",
     "selectedContext",
     "presentationSelection",
+    "documentSelection",
   ]);
   if (Object.keys(attachment).some((key) => !allowed.has(key))) return null;
   if (
@@ -56,9 +58,18 @@ export function canonicalizeComposerAttachmentRef(
     || (attachment.bundleArtifactIds as string[] | undefined)?.length
     || presentationSelection.artifactId !== attachment.fileId
   ))) return null;
+  const documentSelection = attachment.documentSelection === undefined ? undefined : canonicalizeDocumentSelection(attachment.documentSelection);
+  if (documentSelection === null || (documentSelection && (
+    attachment.referenceKind !== "result"
+    || selectedContext
+    || presentationSelection
+    || (attachment.bundleArtifactIds as string[] | undefined)?.length
+    || documentSelection.artifactId !== attachment.fileId
+  ))) return null;
   return {
     ...(selectedContext ? { selectedContext } : {}),
     ...(presentationSelection ? { presentationSelection } : {}),
+    ...(documentSelection ? { documentSelection } : {}),
     fileId: attachment.fileId,
     filename: attachment.filename,
     size: attachment.size,

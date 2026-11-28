@@ -23,6 +23,17 @@ Dans **Évaluer**, vous pouvez supprimer n’importe quel cas, y compris le dern
 
 L’absence de cas personnalisés n’empêche pas la publication et ne nécessite aucune justification. La page et la revue des Agents partagés précisent que la qualité des réponses n’a pas été évaluée. Les autres contrôles de sécurité, les échecs réels des tests et la revue des Agents partagés restent applicables.
 
+### Les cas de test sur la nouvelle page d’Agent
+
+Quand votre équipe utilise la nouvelle page d’Agent, l’onglet **Évaluer** s’appelle **Cas de test**, et le seul bouton de test est **Tester cette modification** dans la barre de publication. De haut en bas :
+
+- **Dernier test** : quand il a eu lieu, ce qui a été comparé (le brouillon et quelle version publiée), combien de vos propres cas vont mieux, pareil ou moins bien, et le contrôle de sécurité de base sur sa propre ligne. Si le brouillon a changé depuis, la carte indique qu’il n’a pas encore été testé. **Voir tous les résultats** ouvre le détail sous **Versions** ; après une publication, la carte renvoie à l’historique des versions.
+- Une phrase sur l’usage des cas ; le contrôle de sécurité de base s’exécute toujours aussi.
+- **Suggestions à adopter** : les cas proposés par Coach, l’IA ou des conversations sont ici et non plus sous **Configurer** ; l’onglet en indique le nombre. Tant que les cas ont des modifications non enregistrées, vous ne pouvez rien adopter.
+- **Le groupe** : le menu **Ajouter un cas** propose En écrire un, Rédiger depuis des conversations et Proposer des cas automatiquement. Le « ⋯ » du groupe contient **Tester sur la vN publiée**, les derniers résultats, le contrôle de sécurité seul, la relance après des changements importants et le passage aux réglages par défaut actuels.
+
+Les modifications des cas s’enregistrent dans le groupe lui-même (**Abandonner les modifications** / **Enregistrer les cas**). Avec des modifications non enregistrées, **Tester cette modification** demande d’abord : **Enregistrer et tester** ou **Tester avec les cas enregistrés uniquement**. Quitter la page avec des cas non enregistrés demande une confirmation.
+
 ## Vérifier les verdicts de Coach
 
 La carte liste quelques réponses. Chaque ligne montre la question, un extrait de la réponse avec la phrase sur laquelle Coach s’appuie en surbrillance, et la conclusion de Coach.

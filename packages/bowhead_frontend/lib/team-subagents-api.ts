@@ -40,6 +40,8 @@ export interface ToolsCatalog {
   text_only_allowed?: boolean;
   team_tools: TeamToolPickerEntry[];
   native_tools: string[];
+  /** Built-in Tools the team turned off: kept where already selected, never offered. */
+  team_disabled_tools?: string[];
 }
 
 /** A skill attachable to an team subagent as an auto-read SOP (the subagent skill_reads it first). */
@@ -295,6 +297,7 @@ export async function getToolsCatalog(context?: SubagentDraftRequestContext): Pr
     text_only_allowed: data.text_only_allowed === true,
     team_tools: data.team_tools ?? [],
     native_tools: withoutSkillOperationToolRefs(data.native_tools ?? []),
+    team_disabled_tools: data.team_disabled_tools ?? [],
   };
 }
 

@@ -7,22 +7,29 @@
  * M4 (decision 14): template cards fetch doc_types (built-in seed + user template/graduated,
  * retired FE constants); prefill columns from dt.fields (fieldsToColumns); `preset` (Templates-page
  * Apply as matrix handoff) fixes columns → skip step 1, choose files directly.
+ *
+ * Step 1 S8 (`privateOption`, FEATURE_KB_MATRIX_PRIVATE): "谁能看到" in the step with the create button — Space
+ * members (default) or only me. Only me also lists the viewer's personal files; switching back unchecks them.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { LucideGlyph } from "@/components/icon-refresh";
+import { fileTypeIcon } from "@/lib/file-type-icon";
 import { fetchKbFiles } from "@/lib/kb-api";
 import type { KbDocTypeDTO } from "@/lib/kb-knowledge-tables-api";
 import { fieldsToColumns, isColumnGroupKind } from "@/lib/kb-matrix/graduate-api";
 import { kbMatrixMutationError } from "@/lib/kb-matrix/mutation-error";
 import { type NewColumnIn, createMatrix } from "@/lib/kb-matrix/run-api";
+import type { MatrixVisibility } from "@/lib/kb-matrix/types";
 
-import { IcGrid, IcPlus } from "./matrix-icons";
+import { IcPlus } from "./matrix-icons";
 
 interface FileOption {
   fileId: string;
   filename: string;
+  mime: string;
 }
 
 export interface NewMatrixFlowProps {
@@ -33,6 +40,8 @@ export interface NewMatrixFlowProps {
   preset?: { name: string; columns: NewColumnIn[] };
   /** Template-card source (matrix-tab loaded space doc_types; only column-group template kinds become cards). */
   docTypes?: KbDocTypeDTO[];
+  /** Step 1 S8: only-me matrices are enabled (`/me` `capabilities.kb_matrix_private`); offers "谁能看到". */
+  privateOption?: boolean;
   onCancel: () => void;
   onCreated: (matrixId: string) => void;
   onError: (message: string) => void;
@@ -43,6 +52,7 @@ export function NewMatrixFlow({
   preselectedFileIds,
   preset,
   docTypes,
+  privateOption = false,
   onCancel,
   onCreated,
   onError,
@@ -60,6 +70,11 @@ export function NewMatrixFlow({
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [visibility, setVisibility] = useState<MatrixVisibility>("space");
+  // The viewer's personal files: loaded once "仅自己" is chosen (null until then).
+  const [personalFiles, setPersonalFiles] = useState<FileOption[] | null>(null);
+  const [personalFailed, setPersonalFailed] = useState(false);
+  const isPrivate = privateOption && visibility === "private";
 
   // M4: column-group cards (seeds first in seed order; user templates by updated_at descending).
   const templates = useMemo(() => {
@@ -90,7 +105,7 @@ export function NewMatrixFlow({
         let offset = 0;
         for (;;) {
           const res = await fetchKbFiles({ scope: "space", offset, limit: 200 });
-          for (const f of res.files) if (f.parse_status === "done") out.push({ fileId: f.file_id, filename: f.filename });
+          for (const f of res.files) if (f.parse_status === "done") out.push({ fileId: f.file_id, filename: f.filename, mime: f.mime_type });
           offset += res.files.length;
           if (!res.has_more || res.files.length === 0) break;
         }
@@ -104,6 +119,40 @@ export function NewMatrixFlow({
     })();
   }, [effStep, skipFiles, files.length, filesFailed]);
 
+  useEffect(() => {
+    if (!isPrivate || effStep !== 2 || skipFiles || personalFiles !== null || personalFailed) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const out: FileOption[] = [];
+        let offset = 0;
+        for (;;) {
+          const res = await fetchKbFiles({ scope: "personal", offset, limit: 200 });
+          for (const f of res.files) if (f.parse_status === "done") out.push({ fileId: f.file_id, filename: f.filename, mime: f.mime_type });
+          offset += res.files.length;
+          if (!res.has_more || res.files.length === 0) break;
+        }
+        if (!cancelled) setPersonalFiles(out);
+      } catch (e) {
+        if (cancelled) return;
+        setPersonalFailed(true);
+        onErrorRef.current(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPrivate, effStep, skipFiles, personalFiles, personalFailed]);
+
+  const chooseVisibility = (next: MatrixVisibility) => {
+    setVisibility(next);
+    // Personal files only go into only-me matrices: switching back unchecks them.
+    if (next === "space" && personalFiles?.length) {
+      const personal = new Set(personalFiles.map((f) => f.fileId));
+      setChecked((cur) => new Set([...cur].filter((id) => !personal.has(id))));
+    }
+  };
+
   const fileIds = useMemo(
     () => (skipFiles ? (preselectedFileIds ?? []) : Array.from(checked)),
     [skipFiles, preselectedFileIds, checked],
@@ -112,7 +161,7 @@ export function NewMatrixFlow({
   const create = async () => {
     setCreating(true);
     try {
-      const res = await createMatrix(workspaceId, name.trim() || defaultName, fileIds, columns);
+      const res = await createMatrix(workspaceId, name.trim() || defaultName, fileIds, columns, privateOption ? visibility : undefined);
       onCreated(res.matrix_id);
     } catch (e) {
       const message = kbMatrixMutationError(e);
@@ -123,6 +172,40 @@ export function NewMatrixFlow({
 
   // Preset handoff hides step 1 (columns fixed); with skipFiles too, show create footer directly.
   const showStep1 = !preset;
+
+  // S8: shown once, in the step that holds the create button (the file step when files are chosen here).
+  const visibilityControl = privateOption ? (
+    <fieldset className="mx-visibility" data-testid="kb-matrix-newflow-visibility">
+      <legend className="mx-visibility-legend">{t("newflow_visibility")}</legend>
+      {(["space", "private"] as const).map((value) => (
+        <label key={value} className={"mx-visopt" + (visibility === value ? " on" : "")}>
+          <input type="radio" name="kb-matrix-visibility" value={value} checked={visibility === value} onChange={() => chooseVisibility(value)} />
+          <span className="mx-visopt-copy">
+            <span className="t">{t(value === "space" ? "newflow_visibility_space" : "newflow_visibility_private")}</span>
+            <span className="d">{t(value === "space" ? "newflow_visibility_space_desc" : "newflow_visibility_private_desc")}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  ) : null;
+
+  const fileRow = (f: FileOption) => (
+    <label key={f.fileId} className="mx-filepick-row">
+      <input
+        type="checkbox"
+        checked={checked.has(f.fileId)}
+        onChange={(e) => {
+          const next = new Set(checked);
+          if (e.target.checked) next.add(f.fileId);
+          else next.delete(f.fileId);
+          setChecked(next);
+        }}
+      />
+      {/* The icon follows the file type (a PDF used to show the table icon). */}
+      <LucideGlyph icon={fileTypeIcon(f.filename, f.mime)} size={14} aria-hidden="true" style={{ color: "var(--c-ink-3)" }} />
+      <span className="fn">{f.filename}</span>
+    </label>
+  );
 
   return (
     <div data-testid="kb-matrix-newflow" style={{ background: "var(--c-bg)" }}>
@@ -188,6 +271,7 @@ export function NewMatrixFlow({
               <div className="d" style={{ minHeight: 0, textAlign: "center" }}>{t("blank_matrix_desc")}</div>
             </div>
           </div>
+          {skipFiles && visibilityControl}
           <div className="mx-newfoot">
             <input
               className="mx-inp"
@@ -215,6 +299,7 @@ export function NewMatrixFlow({
 
       {effStep === 2 && !skipFiles && (
         <>
+          {visibilityControl}
           <div className="mx-filepick">
             {loadingFiles ? (
               <div style={{ padding: 24, textAlign: "center", color: "var(--c-ink-3)" }}>{t("loading")}</div>
@@ -224,25 +309,30 @@ export function NewMatrixFlow({
                   {t("matrix_unavailable_retry")}
                 </button>
               </div>
+            ) : isPrivate ? (
+              // Only me: this Space's files, then the viewer's personal files.
+              <>
+                <div className="mx-filepick-group">{t("add_files_group_space")}</div>
+                {files.length === 0 ? <div className="mx-filepick-empty">{t("newflow_no_files")}</div> : files.map(fileRow)}
+                <div className="mx-filepick-group">{t("add_files_group_personal")}</div>
+                {personalFiles === null && !personalFailed ? (
+                  <div className="mx-filepick-empty">{t("loading")}</div>
+                ) : personalFailed ? (
+                  <div className="mx-filepick-empty">
+                    <button type="button" className="kb-btn kb-btn-secondary" onClick={() => setPersonalFailed(false)}>
+                      {t("matrix_unavailable_retry")}
+                    </button>
+                  </div>
+                ) : personalFiles?.length ? (
+                  personalFiles.map(fileRow)
+                ) : (
+                  <div className="mx-filepick-empty">{t("newflow_no_files")}</div>
+                )}
+              </>
             ) : files.length === 0 ? (
               <div style={{ padding: 24, textAlign: "center", color: "var(--c-ink-3)" }}>{t("newflow_no_files")}</div>
             ) : (
-              files.map((f) => (
-                <label key={f.fileId} className="mx-filepick-row">
-                  <input
-                    type="checkbox"
-                    checked={checked.has(f.fileId)}
-                    onChange={(e) => {
-                      const next = new Set(checked);
-                      if (e.target.checked) next.add(f.fileId);
-                      else next.delete(f.fileId);
-                      setChecked(next);
-                    }}
-                  />
-                  <IcGrid s={14} style={{ color: "var(--c-ink-3)" }} />
-                  <span className="fn">{f.filename}</span>
-                </label>
-              ))
+              files.map(fileRow)
             )}
           </div>
           <div className="mx-newfoot">
@@ -275,6 +365,7 @@ export function NewMatrixFlow({
       )}
 
       {/* Preset + Open as matrix dual prefill: zero steps, create directly. */}
+      {preset && skipFiles && visibilityControl}
       {preset && skipFiles && (
         <div className="mx-newfoot">
           <input

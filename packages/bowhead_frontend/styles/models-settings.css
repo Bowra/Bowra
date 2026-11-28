@@ -142,6 +142,13 @@
 .mset .overview-state.fact-failed,.mset .overview-state.attempt-errored{color:var(--c-err-ink)}
 .mset .overview-state.fact-not_testable{color:var(--c-ink-2)}
 .mset .overview-state.attempt-none{font-weight:400;color:var(--c-ink-4)}
+.mset button.overview-state.is-action{padding:0;border:0;background:none;font:inherit;font-size:0.75rem;font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.mset button.overview-state.is-action:hover:not(:disabled){text-decoration-style:solid}
+.mset button.overview-state.is-action:focus-visible{outline:none;box-shadow:var(--mset-focus);border-radius:var(--radius-sm, 4px)}
+.mset .overview-external-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mset .overview-external-name small{font-size:0.71875rem;color:var(--c-ink-4)}
+.mset .overview-external-name small.is-passed{color:var(--c-own-ink)}
+.mset .overview-external-name small.is-failed{color:var(--c-err-ink)}
 
 .mset .overview-external-rows>div{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:var(--rule-w, 1px) solid var(--c-line-2);font-size:0.78125rem;color:var(--c-ink-3)}
 .mset .overview-external-rows b{font-size:0.75rem;font-weight:600;color:var(--c-ink-4)}
@@ -925,6 +932,20 @@
 .mset .overview-provider-row { grid-template-columns: 32px minmax(0, 1fr) minmax(110px, auto) auto; }
 .mset .overview-model-capabilities { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; }
 .mset .overview-model-capabilities > span:first-child { font-size: 0.75rem; overflow-wrap: anywhere; }
+/* Everything a connection serves, grouped by where it is used (walk W4). */
+.mset .overview-provider-main > .overview-uses-group { display: block; margin-top: 6px; }
+.mset .overview-uses-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 10px; }
+.mset .overview-uses-group > .overview-uses-head { margin-top: 0; }
+.mset .overview-uses-label { font-size: 0.6875rem; font-weight: 600; color: var(--c-ink-3); }
+.mset .overview-uses-roles { font-size: 0.71875rem; color: var(--c-ink-3); }
+.mset .overview-uses-link { font-size: 0.71875rem; color: var(--c-accent); text-decoration: none; }
+.mset .overview-uses-link:hover { color: var(--c-accent-hover); text-decoration: underline; }
+.mset .overview-uses-link:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 2px; }
+.mset .connect-uses { margin-top: 14px; padding: 10px 12px; border: var(--border-w, 1px) solid var(--c-line); border-radius: var(--r-md); }
+.mset .connect-uses .hint { margin: 4px 0 6px; }
+.mset .connect-uses ul { margin: 0; padding-left: 18px; font-size: 0.75rem; display: grid; gap: 2px; }
+.mset .connect-uses ul code { overflow-wrap: anywhere; }
+.mset .connect-uses-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; }
 .mset .model-advanced { grid-column: 1 / -1; min-width: 0; }
 .mset .verification-row-failures { grid-column: 1 / -1; min-width: 0; display: grid; gap: 6px; }
 .mset .verification-row-failure strong { display: flex; align-items: flex-start; gap: 5px; }

@@ -7,13 +7,17 @@ browser. The application sends the product preview's own transform as a browser 
 (``bowheadHtmlPreview``, built from ``lib/interactive-html.ts``), so the page here is the
 same document in the same sandboxed frame as ``SafeHtmlFrame``.
 
-Writes ``snapshot.png`` (1280 px wide, up to ``MAX_HEIGHT``) and ``text.txt`` (the page's
-visible text) to the output directory and returns content-free facts.
+Writes ``snapshot.png`` (1280 px wide, up to ``MAX_HEIGHT``), ``text.txt`` (the page's
+visible text) and, for HTML, ``layout.json`` (the page's blocks, the rows a screen cut must not cross,
+elements a model can name and measured layout findings; docs/sprints/visual-geometry-2026-11-27/tech-design.md
+§3) to the output directory and returns content-free facts.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 import threading
 from collections.abc import Callable
@@ -81,6 +85,170 @@ _MEASURE = """() => {
     text: body ? body.innerText : "",
   };
 }"""
+
+
+MAX_LAYOUT_BYTES = 65_536
+# Measured in the content frame after the viewport has grown to the page, so coordinates match the capture.
+# Findings are measurements only, for elements that show text or a picture (decoration may overflow).
+_LAYOUT = r"""() => {
+  const W = document.documentElement.clientWidth;
+  const H = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+  const cut = (text, n) => (text || "").replace(/\s+/g, " ").trim().slice(0, n);
+  const shown = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === "none" || s.visibility === "hidden" || Number(s.opacity) === 0) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const inSvg = (el) => !!(el.parentElement && el.parentElement.closest("svg"));
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const selector = (el) => {
+    let sel = el.tagName.toLowerCase();
+    if (el.id) sel += "#" + el.id;
+    else if (el.classList && el.classList.length) sel += "." + [...el.classList].slice(0, 2).join(".");
+    return sel.slice(0, 40);
+  };
+  const label = (el) => cut(el.innerText || el.textContent, 40);
+  const content = (el) => !!((el.innerText || el.textContent || "").trim() || el.matches("svg, img, canvas, video, picture") || el.querySelector("svg, img, canvas, video, picture"));
+  let root = document.body;
+  for (let i = 0; i < 8 && root; i++) {
+    const kids = [...root.children].filter(shown);
+    const rootH = root.getBoundingClientRect().height || 1;
+    const big = kids.filter((k) => k.getBoundingClientRect().height >= 0.9 * rootH);
+    if (kids.length === 1) root = kids[0];
+    else if (big.length === 1 && kids.length <= 3) root = big[0];
+    else break;
+  }
+  const blockEls = root ? [...root.children].filter(shown).filter((el) => el.getBoundingClientRect().height >= 40).slice(0, 64) : [];
+  const blocks = blockEls.map((el) => { const b = box(el); return { y: Math.max(0, b.y), h: Math.max(1, b.h), label: label(el) }; });
+  const raw = [];
+  const guard = (el) => { const b = box(el); if (b.h >= 4 && b.h <= 800) raw.push([b.y, b.y + b.h]); };
+  for (const el of document.querySelectorAll("svg, img, canvas, video, picture, figure, tr, p, h1, h2, h3, h4, h5, h6, li, button, input, textarea, select, blockquote, pre, [role=img]")) {
+    if (shown(el) && !inSvg(el)) guard(el);
+  }
+  for (const el of document.querySelectorAll("div, span, td, th, a, strong, em, b, label, small")) {
+    if (shown(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) guard(el);
+  }
+  for (const b of blocks) if (b.h <= 800) raw.push([b.y, b.y + b.h]);
+  raw.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const guards = [];
+  for (const [a, b] of raw) {
+    const last = guards[guards.length - 1];
+    if (last && a < last[1]) last[1] = Math.max(last[1], b);
+    else guards.push([a, b]);
+  }
+  const elements = [];
+  for (const el of document.querySelectorAll("svg, canvas, img, picture, video, table, h1, h2, h3")) {
+    if (elements.length >= 120) break;
+    if (!shown(el) || inSvg(el)) continue;
+    const b = box(el);
+    if (b.w < 24 || b.h < 16) continue;
+    const tag = el.tagName.toLowerCase();
+    const kind = { svg: "chart", canvas: "chart", img: "picture", picture: "picture", video: "picture", table: "table" }[tag] || "heading";
+    elements.push({ kind, ...b, label: kind === "chart" || kind === "picture" ? "" : label(el) });
+  }
+  const findings = [];
+  const push = (f) => { if (findings.length < 40) findings.push(f); };
+  for (const el of document.querySelectorAll("body *")) {
+    if (!shown(el) || el.closest("svg")) continue;
+    const s = getComputedStyle(el);
+    const cx = ["hidden", "clip"].includes(s.overflowX), cy = ["hidden", "clip"].includes(s.overflowY);
+    if (!((cy && el.scrollHeight > el.clientHeight + 2) || (cx && el.scrollWidth > el.clientWidth + 2))) continue;
+    const er = el.getBoundingClientRect();
+    for (const d of el.querySelectorAll("*")) {
+      if (!shown(d) || inSvg(d)) continue;
+      if (!(d.matches("svg, img, canvas, video") || [...d.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))) continue;
+      const r = d.getBoundingClientRect();
+      if ((cy && (r.bottom > er.bottom + 2 || r.top < er.top - 2)) || (cx && (r.right > er.right + 2 || r.left < er.left - 2))) {
+        push({ kind: "clipped", selector: selector(el), text: label(el), box: box(el), other_text: label(d), other_box: box(d) });
+        break;
+      }
+    }
+  }
+  for (const el of document.querySelectorAll("body *")) {
+    if (!shown(el) || inSvg(el) || !content(el)) continue;
+    const r = el.getBoundingClientRect();
+    const p = el.parentElement ? el.parentElement.getBoundingClientRect() : null;
+    if (r.right > W + 1 && (!p || p.right <= W + 1)) push({ kind: "beyond_page_width", selector: selector(el), text: label(el), box: box(el), right: Math.round(r.right + scrollX) });
+  }
+  for (const t of document.querySelectorAll("svg text")) {
+    const svg = t.ownerSVGElement;
+    if (!svg || !shown(svg) || !(t.textContent || "").trim()) continue;
+    const tr = t.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+    const outX = Math.max(0, sr.left - tr.left) + Math.max(0, tr.right - sr.right);
+    const outY = Math.max(0, sr.top - tr.top) + Math.max(0, tr.bottom - sr.bottom);
+    if (tr.width && (outX >= 0.3 * tr.width || outY >= 0.3 * tr.height)) {
+      push({ kind: "chart_text_outside_chart", selector: selector(svg), text: cut(t.textContent, 40), box: box(t), other_box: box(svg) });
+    }
+  }
+  for (const blockEl of blockEls) {
+    const br = blockEl.getBoundingClientRect();
+    for (const el of blockEl.querySelectorAll("*")) {
+      if (!shown(el) || inSvg(el) || !content(el)) continue;
+      const r = el.getBoundingClientRect();
+      const edge = r.top < br.top - 2 ? "top" : r.bottom > br.bottom + 2 ? "bottom" : "";
+      if (edge && r.height < 3000) {
+        push({ kind: "outside_block", selector: selector(el), text: label(el), box: box(el), other_text: label(blockEl), other_box: box(blockEl), edge });
+        break;
+      }
+    }
+  }
+  const lines = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode() && lines.length < 5000) {
+    const n = walker.currentNode;
+    if (!n.textContent.trim()) continue;
+    const p = n.parentElement;
+    if (!p || !shown(p)) continue;
+    const range = document.createRange();
+    range.selectNodeContents(n);
+    for (const r of range.getClientRects()) if (r.width > 2 && r.height > 2) lines.push({ el: p, x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height, text: cut(n.textContent, 40) });
+  }
+  lines.sort((a, b) => a.y - b.y);
+  const pairs = new Set();
+  const ids = new Map();
+  const id = (el) => { if (!ids.has(el)) ids.set(el, ids.size); return ids.get(el); };
+  for (let i = 0; i < lines.length; i++) {
+    for (let j = i + 1; j < lines.length && lines[j].y < lines[i].y + lines[i].h; j++) {
+      const a = lines[i], c = lines[j];
+      if (a.el === c.el || a.el.contains(c.el) || c.el.contains(a.el)) continue;
+      const ox = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x);
+      const oy = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
+      if (ox <= 0 || oy <= 0 || ox * oy < 0.25 * Math.min(a.w * a.h, c.w * c.h)) continue;
+      const key = id(a.el) + "|" + id(c.el);
+      if (pairs.has(key)) continue;
+      pairs.add(key);
+      push({ kind: "text_overlap", selector: "", text: a.text, box: { x: Math.round(a.x), y: Math.round(a.y), w: Math.round(a.w), h: Math.round(a.h) }, other_text: c.text });
+    }
+  }
+  return { version: 1, width: W, height: H, blocks, guards: guards.slice(0, 1000), elements, findings };
+}"""
+
+
+def _write_layout(frame: Any, output: Path) -> dict[str, Any]:
+    """Measure the page and write ``layout.json``; ``{}`` when the measurement fails or does not fit.
+
+    The capture never depends on it: an older application ignores the file, a newer one falls back to pixel cuts.
+    """
+    try:
+        layout = frame.evaluate(_LAYOUT)
+    except Exception:  # noqa: BLE001 - a page script can break the measurement; the capture stands
+        return {}
+    if not isinstance(layout, dict):
+        return {}
+    data = json.dumps(layout, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    # Trim the longest lists first until it fits; guards, then findings and elements keep their first entries.
+    for key in ("guards", "findings", "elements"):
+        while len(data) > MAX_LAYOUT_BYTES and layout.get(key):
+            layout[key] = layout[key][: len(layout[key]) // 2]
+            data = json.dumps(layout, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(data) > MAX_LAYOUT_BYTES:
+        return {}
+    (output / "layout.json").write_bytes(data)
+    return {"layout_sha256": hashlib.sha256(data).hexdigest()}
 
 
 def _bounded(value: Any) -> int:
@@ -191,6 +359,7 @@ def _capture(kind: str, content: bytes, transform: bytes, output: Path) -> dict[
                     if height > HEIGHT:
                         page.set_viewport_size({"width": WIDTH, "height": height})
                         _settle(page)
+                    facts.update(_write_layout(frame, output))
                     page.screenshot(path=str(output / "snapshot.png"), type="png", animations="disabled")
                     issues = page.evaluate("() => globalThis.__bowheadIssues || []")
                     facts["issues"] = [issue for issue in issues if issue in {"runtime", "blocked"}] if isinstance(issues, list) else []

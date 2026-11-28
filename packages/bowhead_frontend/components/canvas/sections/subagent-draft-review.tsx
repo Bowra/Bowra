@@ -191,6 +191,8 @@ export function SubagentDraftReview({
   const [created, setCreated] = useState<CreatedSubagentFromDraft | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogTools, setCatalogTools] = useState<AgentAuthoringTool[] | null>(null);
+  // Built-in Tools the team turned off: kept where selected, never offered or reported as unavailable.
+  const [teamDisabledTools, setTeamDisabledTools] = useState<ReadonlySet<string>>(() => new Set());
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
   const [toolQuery, setToolQuery] = useState("");
@@ -367,6 +369,7 @@ export function SubagentDraftReview({
     try {
       const catalog = await getAgentAuthoringCatalog();
       setCatalogTools(withoutSkillOperationTools(catalog.tools));
+      setTeamDisabledTools(new Set(catalog.team_disabled_tools ?? []));
       setCatalogPlugins(catalog.plugins);
       setCatalogSkills(catalog.skills);
     } catch {
@@ -451,8 +454,8 @@ export function SubagentDraftReview({
       ...(draft?.tools.map((tool) => tool.tool_ref) ?? []),
       ...catalogTools.map((tool) => tool.stable_ref),
     ]);
-    return [...selectedTools].filter((toolRef) => !visible.has(toolRef) && !isSkillOperationToolRef(toolRef));
-  }, [catalogTools, draft?.tools, selectedTools]);
+    return [...selectedTools].filter((toolRef) => !visible.has(toolRef) && !teamDisabledTools.has(toolRef) && !isSkillOperationToolRef(toolRef));
+  }, [catalogTools, draft?.tools, selectedTools, teamDisabledTools]);
 
   const save = async (): Promise<SubagentDraftDetail | null> => {
     if (!draft || !definition || !draft.actions.edit) return null;
@@ -1502,7 +1505,7 @@ function ValidationSummary({
               )).join(" ") : null)
               || (issue.code === "subagent_tool_required"
                 ? t("draft_validation_tool_required")
-                : issue.code === "subagent_tool_no_longer_available" || issue.code === "subagent_tool_not_selectable"
+                : issue.code === "subagent_tool_no_longer_available" || issue.code === "subagent_tool_not_selectable" || issue.code === "tool_disabled_by_team"
                   ? t("draft_validation_tool_unavailable", { name: toolName })
                   : t("draft_validation_unknown"));
             return <li key={`${issue.code}:${index}`}>{message}</li>;

@@ -1,7 +1,15 @@
 import type { AgentChangeProposal, AgentDraftChange, AgentDraftChangeSource } from "./agents-api";
+import { isAiOptimizeProposal } from "./agent-optimize";
 
-/** The Configure section that holds a draft field. */
-export type AgentConfigSectionKey = "does" | "uses" | "who";
+/** The Configure section that holds a draft field. `more` (更多设置) exists only in the redesigned layout. */
+export type AgentConfigSectionKey = "does" | "uses" | "who" | "more";
+
+/**
+ * Which Configure layout a section map follows: today's three sections, or the redesigned five behind
+ * FEATURE_AGENT_RELEASE_BAR (design §4), where knowledge and optional methods move to 它能用什么 and the output
+ * contract to 它做什么 › 高级 (S10).
+ */
+export type AgentConfigLayout = "legacy" | "v2";
 
 const USES_FIELDS = new Set([
   "/definition/tool_refs",
@@ -13,8 +21,13 @@ const USES_FIELDS = new Set([
   "/definition/team_tool_connections",
 ]);
 const WHO_FIELDS = new Set(["/definition/knowledge_access", "/definition/runtime_extensions", "/definition/output_schema"]);
+const V2_USES_FIELDS = new Set([...USES_FIELDS, "/definition/knowledge_access", "/definition/runtime_extensions"]);
 
-export function draftChangeSection(path: string): AgentConfigSectionKey {
+export function draftChangeSection(path: string, layout: AgentConfigLayout = "legacy"): AgentConfigSectionKey {
+  if (layout === "v2") {
+    if (V2_USES_FIELDS.has(path)) return "uses";
+    return path.startsWith("/audience/") ? "who" : "does";
+  }
   if (USES_FIELDS.has(path)) return "uses";
   if (WHO_FIELDS.has(path) || path.startsWith("/audience/")) return "who";
   return "does";
@@ -32,6 +45,9 @@ export function draftFieldLabelKey(path: string): string {
   if (path === "/definition/model") return "version_proposal_field_model";
   if (path === "/definition/max_iterations") return "version_proposal_field_iterations";
   if (path === "/definition/capability_protocol_block") return "version_proposal_field_capability_protocol_block";
+  // The two listing fields people edit by name keep that name (一句话介绍, not 市场资料).
+  if (path === "/listing/description") return "release_description";
+  if (path === "/listing/display_name") return "release_display_name";
   if (path.startsWith("/listing/")) return "version_proposal_field_listing";
   if (path.startsWith("/audience/")) return "version_proposal_field_audience";
   return "version_proposal_field_other";
@@ -55,12 +71,12 @@ export interface DraftChangeSummary {
  * Changes that differ from live, per Configure section, with how many each source made. A Coach row the
  * Owner undid back to the live value no longer differs, so it is not counted.
  */
-export function summarizeDraftChanges(changes: readonly AgentDraftChange[]): DraftChangeSummary[] {
+export function summarizeDraftChanges(changes: readonly AgentDraftChange[], layout: AgentConfigLayout = "legacy"): DraftChangeSummary[] {
   const order: AgentConfigSectionKey[] = ["does", "uses", "who"];
   const sections = new Map<AgentConfigSectionKey, Map<DraftChangeTag, number>>();
   for (const change of changes) {
     if (sameValue(change.live, change.draft)) continue;
-    const section = draftChangeSection(change.path);
+    const section = draftChangeSection(change.path, layout);
     const counts = sections.get(section) ?? new Map<DraftChangeTag, number>();
     const tag = draftChangeTag(change.source);
     counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -73,6 +89,20 @@ export function summarizeDraftChanges(changes: readonly AgentDraftChange[]): Dra
       .map((tag) => ({ tag, count: counts.get(tag)! }));
     return { section, count: sources.reduce((total, item) => total + item.count, 0), sources };
   });
+}
+
+/** Who changed a field of the saved draft, for its chip on Configure (你改过 / Coach 改过 / AI 优化过). */
+export type DraftFieldChip = "manual" | "coach" | "ai_optimize";
+
+/**
+ * The chip a field shows, from the draft's change list: Coach's current value, the Owner's own edit, or nothing
+ * (unchanged, or set by another source such as a pipeline). `aiProposalIds` are Coach proposals AI 优化 made.
+ */
+export function draftFieldChip(changes: readonly AgentDraftChange[] | undefined, path: string, aiProposalIds: ReadonlySet<string>): DraftFieldChip | null {
+  const change = changes?.find((item) => item.path === path);
+  if (!change || sameValue(change.live, change.draft)) return null;
+  if (change.coach?.state === "applied" && !change.coach.conflict) return aiProposalIds.has(change.coach.proposal_id) ? "ai_optimize" : "coach";
+  return change.source === "manual" || change.coach ? "manual" : null;
 }
 
 /** Absent and empty (null, "", [] or {}) mean the same, matching the server's draft comparison. */
@@ -95,4 +125,29 @@ export function pendingProposals(proposals: readonly AgentChangeProposal[]): Age
   return proposals.filter((proposal) => proposal.source_type !== "coach"
     || proposal.status === "open"
     || proposal.suggested_cases.some((item) => item.decision_status === "pending"));
+}
+
+/** A proposal whose only change is suggested cases (it names the suite they go to). */
+export function isCaseOnlyProposal(proposal: Pick<AgentChangeProposal, "base">): boolean {
+  return Boolean(proposal.base.suite_revision_id || proposal.base.initial_suite_name);
+}
+
+/**
+ * The redesigned page (FEATURE_AGENT_RELEASE_BAR) splits a proposal: field changes wait under Configure › 更多设置
+ * › 待处理的建议, suggested cases under 测试用例 › 待采纳的建议 (Q5). AI 优化's own result shows under 工作说明, so
+ * its field part is left out of the list and of the count (§3.2 "Persistence"); its cases, if any, still go to
+ * 测试用例.
+ */
+export function pendingFieldProposals(proposals: readonly AgentChangeProposal[]): AgentChangeProposal[] {
+  return pendingProposals(proposals).filter((proposal) => proposal.status === "open" && !isCaseOnlyProposal(proposal) && !isAiOptimizeProposal(proposal));
+}
+
+/** Proposals with suggested cases still waiting for the Owner's decision. */
+export function pendingCaseProposals(proposals: readonly AgentChangeProposal[]): AgentChangeProposal[] {
+  return pendingProposals(proposals).filter((proposal) => proposal.suggested_cases.some((item) => item.decision_status === "pending"));
+}
+
+/** How many suggested cases wait on 测试用例 (the tab chip "N 条建议"). */
+export function pendingSuggestedCaseCount(proposals: readonly AgentChangeProposal[]): number {
+  return pendingCaseProposals(proposals).reduce((total, proposal) => total + proposal.suggested_cases.filter((item) => item.decision_status === "pending").length, 0);
 }

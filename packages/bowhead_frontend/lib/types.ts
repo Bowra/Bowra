@@ -528,6 +528,8 @@ export interface AttachmentRef {
   selectedContext?: import("./chart/selected-context").ChartSelectedContext;
   /** A deck element the person pointed at (pptx-inline-edit design §6.9); result references only. */
   presentationSelection?: import("./presentation-selection").PresentationSelection;
+  /** A paragraph, cell or rendered pages of a Word file (docx inline edit design §7.4); result references only. */
+  documentSelection?: import("./document-selection").DocumentSelection;
   /** Sprint file-upload-presign Phase 3 — for zip bundles uploaded via the
    * KB presign path, this carries the child artifact_ids so the chat
    * orchestrator sees per-entry attachments (instead of the opaque zip

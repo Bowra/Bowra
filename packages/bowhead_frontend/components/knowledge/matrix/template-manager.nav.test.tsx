@@ -197,7 +197,7 @@ describe("模板视图 · 平铺分组（左栏导航）", () => {
     mocks.listDocTypes.mockResolvedValue({ items: [seed, mineManual], stats: {} });
     renderNav();
     const mine = await screen.findByTestId("kb-tpl-group-mine");
-    expect(mine.querySelector(".emptyline")).toHaveTextContent("还没有。打开一个矩阵，在列设置里选「存为模板」。");
+    expect(mine.querySelector(".emptyline")).toHaveTextContent("还没有。打开一个矩阵，点顶部的「存为模板」。");
     expect(screen.queryByTestId("kb-matrix-tpl-empty")).not.toBeInTheDocument();
     const team = screen.getByTestId("kb-tpl-group-team");
     await waitFor(() => expect(team.querySelector(".emptyline")).toBeInTheDocument());

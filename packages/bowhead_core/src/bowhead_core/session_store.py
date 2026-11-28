@@ -319,14 +319,15 @@ async def _ensure_chat_session_in_tx(
     user_id: str,
     now: str,
     origin: str = "normal",
+    initial_title: str | None = None,
 ) -> bool:
     """First-winner Session creation for callers that already own a transaction."""
 
     if origin not in _SESSION_ORIGINS:
         raise ValueError("chat_session_origin_invalid")
     cursor = await connection.execute(
-        "INSERT OR IGNORE INTO sessions(id,workspace_id,user_id,started_at,last_active_at,origin) VALUES (?,?,?,?,?,?)",
-        (session_id, workspace_id, user_id, now, now, origin),
+        "INSERT OR IGNORE INTO sessions(id,workspace_id,user_id,started_at,last_active_at,origin,title) VALUES (?,?,?,?,?,?,?)",
+        (session_id, workspace_id, user_id, now, now, origin, initial_title),
     )
     async with connection.execute(
         "SELECT workspace_id,user_id,origin FROM sessions WHERE id=?",
@@ -2319,8 +2320,9 @@ class SessionStore:
         workspace_id: str,
         user_id: str,
         origin: str = "normal",
+        initial_title: str | None = None,
     ) -> Session:
-        """拿到现有 session 或新建."""
+        """Return an existing Session or create it with the supplied initial title."""
         now = _now()
         sid = session_id or f"s_{uuid4().hex[:12]}"
         async with open_shared_ctx(self._db_path) as db:
@@ -2333,6 +2335,7 @@ class SessionStore:
                     user_id=user_id,
                     now=now,
                     origin=origin,
+                    initial_title=initial_title,
                 )
                 await db.commit()
             except BaseException:

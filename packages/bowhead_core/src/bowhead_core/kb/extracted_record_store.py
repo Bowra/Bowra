@@ -371,9 +371,11 @@ def wrap_extractor_result_to_variants(
     Per tech-design §A.7. Always emits exactly 1 variant per field, is_primary=true,
     extracted_by="tier1" (NOT _legacy — this is a fresh LLM extract).
 
-    Provenance path B (kb-optimization): chunk_id is read from ``fdata`` when the
-    worker's backfill (structured_extractor.backfill_chunk_ids) located an origin
-    chunk; stays None when there's no source_snippet match (unchanged behavior).
+    Provenance path B (kb-optimization): chunk_id is read from ``fdata`` when
+    ``source_location.bind_field_sources`` located an origin chunk; stays None when
+    there's no source_snippet match. That binding also replaces ``source_page`` with the
+    page derived from the file (document matrix S7) and adds ``chunk_index``, which the
+    variant carries only when known.
     """
     type_by_name = _build_field_def_map(doc_type_fields)
     out: dict[str, list[dict[str, Any]]] = {}
@@ -393,6 +395,10 @@ def wrap_extractor_result_to_variants(
             "chunk_id": fdata.get("chunk_id"),  # provenance path B: backfilled by worker, else None
             "page": fdata.get("source_page"),
         }
+        # The located chunk's position (document matrix S7): the UI shows "paragraph N" when there is no page.
+        chunk_index = fdata.get("chunk_index")
+        if isinstance(chunk_index, int) and not isinstance(chunk_index, bool) and chunk_index >= 1:
+            variant["chunk_index"] = chunk_index
         # Carry cross-verify evidence (kb-matrix M3 FR-39, additive): agree was previously dropped at this boundary;
         # reduced confidence was the only cv evidence surviving in persisted variants. Records also benefit
         # (doc_type cv production enabled); a dormant key when there are no consumers.
@@ -816,21 +822,27 @@ class KbExtractedRecordStore:
         limit: int = 100,
         offset: int = 0,
         doc_type_fields: Any = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> list[KbExtractedRecordDTO]:
         """List records for doc_type. P0-R1: 强制 workspace_id 过滤防 cross-ws leak.
 
         ``doc_type_fields`` (optional): list[ExtractField] for lazy-migrate type_hint
         per tech-design §A.2 step 7. Callers with batch context fetch once outside
         the loop + pass down.
+
+        ``allowed_file_ids`` (optional): the caller's readable files. Records of other
+        files are excluded before ordering and paging, as in ``count_for_doc_type``.
         """
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        clauses = ["doc_type_id = ?", "workspace_id = ?", "soft_deleted_at IS NULL"]
+        params: list[Any] = [doc_type_id, workspace_id]
+        append_source_filter(clauses, params, allowed_file_ids)
         async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM kb_extracted_records "
-                "WHERE doc_type_id = ? AND workspace_id = ? "
-                "AND soft_deleted_at IS NULL "
-                "ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
-                (doc_type_id, workspace_id, limit, offset),
+                "SELECT * FROM kb_extracted_records WHERE " + " AND ".join(clauses) + " ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ) as cur:
                 rows = await cur.fetchall()
         return [_row_to_dto(r, doc_type_fields=doc_type_fields) for r in rows]

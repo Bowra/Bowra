@@ -1,5 +1,5 @@
 /**
- * RunningBand — component guards (throttling / timing / three-row structure / announcements).
+ * RunningBand — component guards (throttling / timing / card body / announcements).
  * Boundaries with existing disclosure live in `../TurnContainer.running-band.test.tsx`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -31,21 +31,31 @@ function step(id: string, over: Record<string, unknown> = {}): StepView {
   } as unknown as StepView;
 }
 
-/** Band row count = history rows + current row. Always three rows is the basis for constant height. */
-function rowCount(container: HTMLElement): number {
-  return container.querySelectorAll(".bh-band__row").length
-    + container.querySelectorAll(".bh-band__now").length;
+/** Lines shown in the card body: step lines, group ends and placeholders. */
+function lineCount(container: HTMLElement): number {
+  return container.querySelectorAll(".bh-band__row").length;
 }
 
-describe("三行恒定 —— 高度恒定的实现基础", () => {
-  it.each([
-    ["零步骤", [] as StepView[]],
-    ["一步", [step("a", { state: "active" })]],
-    ["五步", ["a", "b", "c", "d", "e"].map((id, i) =>
-      step(id, { state: i === 4 ? "active" : "done" }))],
-  ])("%s → 3 行", (_label, steps) => {
+/** The heartbeat line (chat running state: it carries the states the old current row showed). */
+function heartbeat(container: HTMLElement): string {
+  return container.querySelector(".bh-band__txt")?.textContent ?? "";
+}
+
+describe("Card body (chat running state R1.5, P1: no fixed height)", () => {
+  it("shows a placeholder before the first step", () => {
+    const { container } = render(<RunningBand steps={[]} running startedAt={null} />);
+    expect(container.querySelectorAll(".bh-band__row--ghost")).toHaveLength(2);
+  });
+
+  it("lists Lead's steps under one group, the running one last", () => {
+    const steps = ["a", "b", "c", "d", "e"].map((id, i) => step(id, { state: i === 4 ? "active" : "done" }));
     const { container } = render(<RunningBand steps={steps} running startedAt={null} />);
-    expect(rowCount(container)).toBe(3);
+    expect(container.querySelectorAll('[data-testid="run-group"]')).toHaveLength(1);
+    expect(container.querySelector(".bh-band__row--ghost")).toBeNull();
+    // Three finished lines, the running one, and the count of earlier lines.
+    expect(container.querySelectorAll('[data-row-kind="step"]')).toHaveLength(4);
+    expect(container.textContent).toContain("group_more_before:1");
+    expect(container.querySelector(".bh-band__row.is-active")?.textContent).toContain("band_doing:");
   });
 
   it("纯聊天轮（答案流式 + 零步骤）收成单行，但带本身还在", () => {
@@ -57,7 +67,7 @@ describe("三行恒定 —— 高度恒定的实现基础", () => {
     expect(
       container.querySelector('[data-testid="running-band"]')?.getAttribute("data-density"),
     ).toBe("single");
-    expect(rowCount(container)).toBe(1);
+    expect(lineCount(container)).toBe(0);
   });
 });
 
@@ -101,8 +111,8 @@ describe("最短驻留 —— 节流不是防抖", () => {
     vi.advanceTimersByTime(MIN_DWELL_MS);
     rerender(<RunningBand steps={all} running startedAt={null} />);
 
-    // Released at least through step two (disclosure's step N is no longer 0).
-    expect(container.querySelector(".bh-band__meta")?.textContent).toMatch(/band_step_n:[23]/);
+    // Released at least through step two.
+    expect(container.querySelectorAll('[data-row-kind="step"]').length).toBeGreaterThanOrEqual(2);
   });
 
   it("积压超过阈值直接跳到最新（排队排到天亮比闪更糟）", () => {
@@ -114,8 +124,9 @@ describe("最短驻留 —— 节流不是防抖", () => {
     rerender(<RunningBand steps={many} running startedAt={null} />);
     vi.advanceTimersByTime(1);
     rerender(<RunningBand steps={many} running startedAt={null} />);
-    expect(container.querySelector(".bh-band__meta")?.textContent)
-      .toContain(`band_step_n:${many.length}`);
+    // Jumped to the latest: the last three lines show and the rest are counted.
+    expect(container.querySelector(`[data-step-id="s${many.length - 1}"]`)).toBeTruthy();
+    expect(container.textContent).toContain(`group_more_before:${many.length - 3}`);
   });
 });
 
@@ -161,7 +172,7 @@ describe("播报", () => {
         startedAt={null}
       />,
     );
-    const act = container.querySelector(".bh-band__act")?.textContent ?? "";
+    const act = heartbeat(container);
     expect(act).toBe("band_waiting_peer_anon");
     // Before the name arrives, **never** use the named variant (it would receive Lead's name).
     expect(act).not.toMatch(/^band_waiting_peer:/);
@@ -180,14 +191,14 @@ describe("播报", () => {
         startedAt={null}
       />,
     );
-    expect(container.querySelector(".bh-band__act")?.textContent).toBe("band_waiting_peer:主分析");
+    expect(heartbeat(container)).toBe("band_waiting_peer:主分析");
   });
 
-  it("静默期（paused）当前行换成「仍在等模型响应」", () => {
+  it("静默期（paused）心跳行换成「仍在等模型响应」", () => {
     const { container } = render(
       <RunningBand steps={[step("a", { state: "active" })]} running startedAt={null} paused />,
     );
-    expect(container.querySelector(".bh-band__act")?.textContent).toBe("band_paused");
+    expect(heartbeat(container)).toBe("band_paused");
     expect(
       container.querySelector('[data-testid="running-band"]')?.getAttribute("data-paused"),
     ).toBe("1");
@@ -206,14 +217,14 @@ describe("披露条与当前行是两个粒度", () => {
         startedAt={null}
       />,
     );
-    const bar = container.querySelector(".bh-band__txt")?.textContent ?? "";
-    const act = container.querySelector(".bh-band__act")?.textContent ?? "";
+    const bar = heartbeat(container);
+    const act = container.querySelector(".bh-band__row.is-active .bh-band__lab")?.textContent ?? "";
     expect(bar).toBeTruthy();
     expect(act).toBeTruthy();
     expect(act).not.toBe(bar);
-    // Disclosure strip uses coarse phase vocabulary based on tool category (bi_query → query).
+    // The heartbeat uses coarse phase vocabulary based on tool category (bi_query → query).
     expect(bar).toBe("band_phase_query");
-    // Only the current row carries the specific action.
+    // Only the group's current line carries the specific action.
     expect(act).toContain("按门店汇总客流量并排名");
   });
 
@@ -234,24 +245,24 @@ describe("Bar copy without an active step (2026-11-08 dogfood F9)", () => {
   // Mutation: render `band_preparing` for every phase other than `running` → the gap and helper cases fail.
   const band = (container: HTMLElement) => ({
     phase: container.querySelector('[data-testid="running-band"]')?.getAttribute("data-phase"),
-    bar: container.querySelector(".bh-band__txt")?.textContent,
-    act: container.querySelector(".bh-band__act")?.textContent,
+    bar: heartbeat(container),
   });
 
   it("the opening, before any step, is the only state that reads as getting ready", () => {
     const { container } = render(<RunningBand steps={[]} running startedAt={null} />);
-    expect(band(container)).toEqual({ phase: "preparing", bar: "band_preparing", act: "band_thinking" });
+    expect(band(container)).toEqual({ phase: "preparing", bar: "band_preparing" });
   });
 
-  it("a gap between steps uses neutral working copy, never the opening's", () => {
+  it("a gap between steps reads as Lead deciding, never the opening's copy, and counts no steps", () => {
     const { container } = render(
       <RunningBand steps={[step("a", { state: "done" })]} running startedAt={null} />,
     );
-    expect(band(container)).toEqual({ phase: "gap", bar: "band_working", act: "band_thinking" });
-    expect(container.querySelector(".bh-band__meta")?.textContent).toContain("band_step_n:1");
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_thinking" });
+    // PRD R1.4: no step number anywhere; an ordinary Turn has no total.
+    expect(container.textContent).not.toContain("band_step_n");
   });
 
-  it("waiting on a helper reads as collaboration, naming the helper on the current row", () => {
+  it("waiting on a helper names it on the heartbeat line", () => {
     const { container } = render(
       <RunningBand
         steps={[
@@ -267,10 +278,12 @@ describe("Bar copy without an active step (2026-11-08 dogfood F9)", () => {
         startedAt={null}
       />,
     );
-    expect(band(container)).toEqual({ phase: "gap", bar: "band_phase_agent", act: "band_waiting_peer:主分析" });
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_waiting_peer:主分析" });
+    // Who is active joins the elapsed time.
+    expect(container.querySelector(".bh-band__meta")?.textContent).toContain("主分析");
   });
 
-  it("waiting on a helper whose name has not arrived is still collaboration", () => {
+  it("waiting on a helper whose name has not arrived never names anyone", () => {
     const { container } = render(
       <RunningBand
         steps={[step("spawn", {
@@ -281,16 +294,25 @@ describe("Bar copy without an active step (2026-11-08 dogfood F9)", () => {
         startedAt={null}
       />,
     );
-    expect(band(container)).toEqual({ phase: "gap", bar: "band_phase_agent", act: "band_waiting_peer_anon" });
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_waiting_peer_anon" });
   });
 
-  it.each([
-    ["the opening", [] as StepView[]],
-    ["a gap", [step("a", { state: "done" })]],
-    ["a running step", [step("a", { state: "active" })]],
-  ])("%s keeps the band's three rows (constant height)", (_label, steps) => {
-    const { container } = render(<RunningBand steps={steps} running startedAt={null} />);
-    expect(rowCount(container)).toBe(3);
+  it("counts helpers working at once instead of naming one", () => {
+    const helpers = ["p1", "p2", "p3"];
+    const { container } = render(
+      <RunningBand
+        steps={helpers.flatMap((peer) => [
+          step(`s-${peer}`, { state: "active", toolName: "subagent_spawn", subagentId: "lead_1", peerProseKey: peer }),
+          step(`a-${peer}`, { state: "active", subagentId: peer }),
+        ])}
+        peerNames={{ p1: "compute", p2: "compute", p3: "compute" }}
+        running
+        startedAt={null}
+      />,
+    );
+    expect(container.querySelector(".bh-band__meta")?.textContent).toContain("band_active_n:3");
+    // P1: more than two at once → each group shows its header with the count and its current line only.
+    expect(container.querySelectorAll(".bh-band__gmeta")).toHaveLength(3);
   });
 });
 
@@ -307,24 +329,21 @@ describe("禁词与兜底", () => {
         startedAt={null}
       />,
     );
-    const rows = Array.from(container.querySelectorAll(".bh-band__row"));
-    const ghosts = rows.filter((r) => r.className.includes("--ghost"));
-    expect(ghosts).toHaveLength(1); // Only the padding row is a skeleton.
+    expect(container.querySelector(".bh-band__row--ghost")).toBeNull(); // A finished step is never a skeleton.
     expect(container.textContent).toContain("band_row_done");
     expect(container.textContent).not.toContain("python_sandbox");
   });
 });
 
 /**
- * chat-ux-2026-08 ① — peer terminal states on the band.
- * Data rules (which rows, ordering) live in `running-band-model.test.ts`; pin only **rendering** here:
- * glyphs / copy keys / persistent chip.
+ * chat-ux-2026-08 ① — peer terminal states on the band. Chat running state: a returned helper is its group's
+ * one end line. Grouping rules live in `run-groups.test.ts`; pin only **rendering** here.
  */
 describe("★ peer 终态行与常驻失败计数", () => {
   const peerNames = { p1: "compute" };
   const peerDisplayNames = { p1: "主分析" };
 
-  it("零子步骤的 peer 挂掉 → 红行 + 归属名进得去文案", () => {
+  it("零子步骤的 peer 挂掉 → 红行，组头带归属名", () => {
     const { container } = render(
       <RunningBand
         steps={[step("a", { state: "active" })]}
@@ -333,11 +352,12 @@ describe("★ peer 终态行与常驻失败计数", () => {
         peerTerminalById={{ p1: { status: "failed", evtSeq: 9 } }}
       />,
     );
-    const row = container.querySelector('[data-row-kind="peer"]');
+    const row = container.querySelector('[data-row-kind="group-end"]');
     expect(row).toBeTruthy();
     expect(row!.className).toContain("is-fail");
     // Copy uses i18n (mock echoes key:parameters), **not** Chinese strings constructed in the model.
-    expect(row!.textContent).toContain("band_peer_failed:主分析");
+    expect(row!.textContent).toContain("run_failed");
+    expect(row!.closest('[data-testid="run-group"]')!.querySelector(".bh-band__gname")!.textContent).toBe("主分析");
   });
 
   it("★ peer 行**不能**渲成「已重试」", () => {
@@ -351,9 +371,9 @@ describe("★ peer 终态行与常驻失败计数", () => {
         peerTerminalById={{ p1: { status: "failed", evtSeq: 9 } }}
       />,
     );
-    const row = container.querySelector('[data-row-kind="peer"]')!;
-    expect(row.textContent).toContain("band_peer_failed:主分析");
-    expect(row.textContent).not.toContain("band_row_retried");
+    const row = container.querySelector('[data-row-kind="group-end"]')!;
+    expect(row.textContent).toContain("run_failed");
+    expect(row.textContent).not.toMatch(/retried/);
   });
 
   it("★ 失败计数必须能被读屏听见（chip 在 aria-label 的 button 里，听不到）", () => {
@@ -374,11 +394,9 @@ describe("★ peer 终态行与常驻失败计数", () => {
     expect(live.textContent).toContain("band_peer_fail_n:1");
   });
 
-  it("★ 失败计数 chip 常驻披露条 —— 行滚出去了它还在", () => {
-    // History has only 2 rows. Deliberately put the peer terminal state **first**, followed by three steps,
-    // forcing it out of history; the chip is its only remaining trace.
-    // Mutation: remove the disclosure strip's `peerFailCount` chip → this case must fail
-    //       (a row-presence assertion cannot catch it; the row should already have scrolled out).
+  it("★ 失败计数 chip 常驻披露条", () => {
+    // The failed helper keeps its group end line; the chip still sums failures on the heartbeat.
+    // Mutation: remove the disclosure strip's `peerFailCount` chip → this case must fail.
     const { container } = render(
       <RunningBand
         steps={["a", "b", "c"].map((id, i) =>
@@ -388,7 +406,7 @@ describe("★ peer 终态行与常驻失败计数", () => {
         peerTerminalById={{ p1: { status: "failed", evtSeq: 1 } }}
       />,
     );
-    expect(container.querySelector('[data-row-kind="peer"]')).toBeNull();  // Already scrolled out.
+    expect(container.querySelector('[data-row-kind="group-end"]')).toBeTruthy();  // Never scrolls out now.
     const chip = container.querySelector('[data-testid="running-band-peer-fail"]');
     expect(chip).toBeTruthy();
     expect(chip!.textContent).toContain("band_peer_fail_n:1");
@@ -405,23 +423,13 @@ describe("★ peer 终态行与常驻失败计数", () => {
     expect(container.querySelector('[data-testid="running-band-peer-fail"]')).toBeNull();
   });
 
-  it("★ 恒高不变：peer 行进来之后仍是 3 行", () => {
-    const { container } = render(
-      <RunningBand
-        steps={[]} running startedAt={null}
-        peerNames={peerNames} peerDisplayNames={peerDisplayNames}
-        peerTerminalById={{ p1: { status: "failed", evtSeq: 1 } }}
-      />,
-    );
-    expect(rowCount(container)).toBe(3);
-  });
 });
 
 /**
- * chat-ux-2026-08 ② — prose tail rendering and throttling in the current row.
+ * chat-ux-2026-08 ② — prose tail rendering and throttling, under the owning agent's current line.
  * Data rules (whose prose, windowing/filter order) live in `running-band-model.test.ts`.
  */
-describe("★ 散文尾巴：当前行第二行", () => {
+describe("★ 散文尾巴：归属组当前行下面", () => {
   const peerNames = { p1: "compute" };
   const peerDisplayNames = { p1: "主分析" };
 
@@ -437,12 +445,10 @@ describe("★ 散文尾巴：当前行第二行", () => {
     const prose = container.querySelector('[data-testid="running-band-prose"]');
     expect(prose).toBeTruthy();
     expect(prose!.textContent).toContain("正在按品牌汇总营业额");
-    expect(prose!.closest(".bh-band__foot")).toBeTruthy();
+    expect(prose!.closest('[data-testid="run-group"]')!.querySelector(".bh-band__gname")!.textContent).toBe("主分析");
   });
 
-  it("★ 散文在场时替掉 detail，但归属名仍在", () => {
-    // `.bh-band__foot` is one line: including both silently sacrifices the less-observed item under flex pressure.
-    // Mutation: make footMeta always pass detail rather than `prose ? [] : detail` → this case must fail.
+  it("the current line keeps its label while prose streams under it", () => {
     const { container } = render(
       <RunningBand
         steps={[step("a", { state: "active", subagentId: "p1", label: "2025年 天津 营业额" })]}
@@ -451,38 +457,23 @@ describe("★ 散文尾巴：当前行第二行", () => {
         peerProse={{ p1: "正在核对口径" }}
       />,
     );
-    const foot = container.querySelector(".bh-band__foot")!;
-    expect(foot.textContent).toContain("主分析");          // Preserve attribution.
-    expect(foot.textContent).toContain("正在核对口径");     // Prose remains.
-    expect(foot.textContent).not.toContain("2025年 天津 营业额"); // Detail yields.
+    expect(container.querySelector(".bh-band__row.is-active")!.textContent).toContain("2025年 天津 营业额");
+    expect(container.querySelector('[data-testid="running-band-prose"]')!.textContent).toContain("正在核对口径");
   });
 
-  it("正对照：没有散文时 detail 必须回来", () => {
-    // Pinning only the preceding case would also pass if detail never rendered.
-    const { container } = render(
-      <RunningBand
-        steps={[step("a", { state: "active", subagentId: "p1", label: "2025年 天津 营业额" })]}
-        running startedAt={null}
-        peerNames={peerNames} peerDisplayNames={peerDisplayNames}
-      />,
-    );
-    const foot = container.querySelector(".bh-band__foot")!;
-    expect(foot.textContent).toContain("2025年 天津 营业额");
-    expect(container.querySelector('[data-testid="running-band-prose"]')).toBeNull();
-  });
-
-  it("★ 无名 peer 走「无名」文案，不出现编造的名字", () => {
-    // Mutation: renderer always uses `band_peer_failed:{name}` again → this case must fail
-    //       (would render `band_peer_failed:` with an empty suffix).
+  it("★ 无名 peer 不出现编造的名字", () => {
+    // Before agent_spawned names it, the group uses the generic helper label, never Lead's or an empty name.
     const { container } = render(
       <RunningBand
         steps={[]} running startedAt={null}
         peerTerminalById={{ pX: { status: "failed", evtSeq: 1 } }}
       />,
     );
-    const row = container.querySelector('[data-row-kind="peer"]')!;
-    expect(row.textContent).toContain("band_peer_failed_anon");
-    expect(row.textContent).not.toContain("band_peer_failed:");
+    const group = container.querySelector('[data-testid="run-group"]')!;
+    expect(group.querySelector('[data-row-kind="group-end"]')!.textContent).toContain("run_failed");
+    const name = group.querySelector(".bh-band__gname")!.textContent ?? "";
+    expect(name).toBeTruthy();
+    expect(name).not.toBe("Bowhead");
   });
 
   it("★★ 换人那一刻散文必须同帧跟着换（节流不能跨归属）", () => {
@@ -508,10 +499,11 @@ describe("★ 散文尾巴：当前行第二行", () => {
 
     // Ownership changes p1 → p2. **Advance no timers**: the next frame must already show p2's words.
     rerender(view("v", "p2"));
-    const foot = container.querySelector(".bh-band__foot")!;
-    expect(foot.textContent).toContain("库存分析");     // Name changed.
-    expect(foot.textContent).toContain("我在看库存");   // Words must change too.
-    expect(foot.textContent).not.toContain("我在看销售");
+    const prose = container.querySelector('[data-testid="running-band-prose"]')!;
+    const owner = prose.closest('[data-testid="run-group"]')!.querySelector(".bh-band__gname")!.textContent;
+    expect(owner).toBe("库存分析");                      // Under the new owner.
+    expect(prose.textContent).toContain("我在看库存");   // Words must change too.
+    expect(prose.textContent).not.toContain("我在看销售");
   });
 
   it("★★ 交棒到 Lead 自己的步时，上一位的散文必须立刻消失", () => {
@@ -579,5 +571,14 @@ describe("工作台与画布第 1 批：原内联样式改修饰类", () => {
     expect(lead.className).toBe("bh-band__gbar legacy-band-gbar--lead");
     expect(lead.getAttribute("style")).toBeNull();
     expect(second.style.width).toMatch(/px$/);
+  });
+});
+
+describe("Lead checking the delivery (PRD state table)", () => {
+  it("names the check on the heartbeat line instead of the tool's collaboration category", () => {
+    const { container } = render(
+      <RunningBand steps={[step("q"), step("review", { state: "active", toolName: "review_delivery", headerZh: "核对交付" })]} running startedAt={null} />,
+    );
+    expect(container.querySelector(".bh-band__txt")?.textContent).toBe("band_closeout_review");
   });
 });

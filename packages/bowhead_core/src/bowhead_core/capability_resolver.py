@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from bowhead_router.types import ToolSchema
 
+from bowhead_core.agents._generated.tool_names import WECOM_NOTIFY
 from bowhead_core.approval_gate import approval_executable
 from bowhead_core.tool_registry import ToolRegistry, _effective_tool_whitelist, connector_for_tool
 
@@ -19,6 +20,23 @@ if TYPE_CHECKING:
     from bowhead_core.tool_registry import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
+
+
+def wecom_notification_registered(runtime: Any) -> bool:
+    registry = getattr(runtime, "tool_registry", None)
+    return isinstance(registry, ToolRegistry) and registry.has(WECOM_NOTIFY)
+
+
+async def wecom_notification_available(user_store: Any, team_id: str) -> bool:
+    """Business supplies the Team readiness check during Gateway startup."""
+    ready = getattr(user_store, "wecom_notification_ready", None)
+    if ready is None or not team_id:
+        return False
+    try:
+        return bool(await ready(team_id))
+    except Exception:
+        logger.warning("capability_visibility.resolve_failed cap=wecom_notify")
+        return False
 
 
 async def resolve_unconfigured_capability_tools(runtime: Any, team_id: str) -> frozenset[str]:
@@ -33,7 +51,7 @@ async def resolve_unconfigured_capability_tools(runtime: Any, team_id: str) -> f
         # Without a team there is no Google connection: never advertise what would always be refused.
         from bowhead_core.google_delivery_tool import TOOL_NAMES as google_delivery_tools
 
-        return frozenset(google_delivery_tools)
+        return frozenset(google_delivery_tools) | ({WECOM_NOTIFY} if wecom_notification_registered(runtime) else set())
     unavailable: set[str] = set()
     for resolver_attr, capability, tool_name in (
         ("team_search_resolver", "web_search", "web_search"),
@@ -61,7 +79,10 @@ async def resolve_unconfigured_capability_tools(runtime: Any, team_id: str) -> f
             logger.warning("capability_visibility.resolve_failed cap=tavily team=%s", team_id, exc_info=True)
     from bowhead_core.google_delivery_tool import delivery_tools_unavailable
 
-    unavailable |= await delivery_tools_unavailable(getattr(runtime, "user_store", None), team_id, attended=None)
+    user_store = getattr(runtime, "user_store", None)
+    unavailable |= await delivery_tools_unavailable(user_store, team_id, attended=None)
+    if wecom_notification_registered(runtime) and not await wecom_notification_available(user_store, team_id):
+        unavailable.add(WECOM_NOTIFY)
     return frozenset(unavailable)
 
 
@@ -319,8 +340,16 @@ class CapabilityResolver:
                 filtered_entries: list[Any] = []
                 shadow_denied = 0
                 from bowhead_core.grant_evaluation import grant_verdicts, grant_verdicts_batch
+                from bowhead_core.openapi_tool_source import op_tool_name
 
-                entry_targets = [[("team_tool_source", entry.source_id, "use"), ("team_tool_op", entry.advertised_name, "use")] for entry in entries]
+                entry_targets = [
+                    [
+                        ("team_tool_source", entry.source_id, "use"),
+                        ("team_tool_op", entry.advertised_name, "use"),
+                        *([("team_tool_op", op_tool_name(entry.source_id, entry.dispatch_name), "use")] if entry.notion_knowledge_binding else []),
+                    ]
+                    for entry in entries
+                ]
                 if callable(getattr(self._access_control_store, "explain_decisions", None)):
                     # One decision batch per resource kind for every Team tool, not two reads per target per tool.
                     entry_verdicts = await grant_verdicts_batch(execution_context, self._access_control_store, access_ctx, entry_targets)
@@ -375,11 +404,11 @@ class CapabilityResolver:
                     )
                 )
 
-            mcp_by_source: dict[str, list[Any]] = {}
+            mcp_by_source: dict[tuple[str, str | None], list[Any]] = {}
             for entry in entries:
                 if entry.kind == "mcp":
-                    mcp_by_source.setdefault(entry.source_id, []).append(entry)
-            for source_id, source_entries in mcp_by_source.items():
+                    mcp_by_source.setdefault((entry.source_id, entry.notion_knowledge_binding), []).append(entry)
+            for (source_id, notion_binding), source_entries in mcp_by_source.items():
                 source = by_id.get(source_id)
                 if source is None or not source.base_url:
                     continue
@@ -390,7 +419,11 @@ class CapabilityResolver:
 
                     # Access tokens come from the process-wide broker at call time: one refresh per
                     # source however many Turns call it, so rotating refresh tokens survive.
-                    header_source = team_oauth_header_source(store, team_id, source_id, source.base_url)
+                    header_source = (
+                        team_oauth_header_source(store, team_id, source_id, source.base_url, notion_binding=notion_binding)
+                        if notion_binding
+                        else team_oauth_header_source(store, team_id, source_id, source.base_url)
+                    )
                     headers = {}
                 # mcp-connect-repair F1-b: connects per call in the dispatching task (no session on
                 # the turn stack — that was an anyio cross-task cancel-scope violation). Still zero

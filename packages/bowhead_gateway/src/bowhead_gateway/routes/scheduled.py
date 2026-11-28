@@ -63,6 +63,17 @@ def _coded_failure(status_code: int, code: str) -> HTTPException:
     return HTTPException(status_code, detail=detail)
 
 
+async def _refuse_trial_anchor(request: Request, anchor_session_id: str | None) -> None:
+    """A schedule runs the released Agent, never the draft an Owner trial chats with (trial-tech-design §5)."""
+    store = getattr(request.app.state, "session_store", None)
+    if not anchor_session_id or store is None:
+        return
+    from bowhead_core.agent_owner_trial import session_is_owner_trial
+
+    if await session_is_owner_trial(store.db_path, session_id=anchor_session_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "agent_trial_schedule_unavailable"})
+
+
 _DELIVERY_MODES = frozenset({"always", "on_alert"})
 
 
@@ -707,6 +718,7 @@ async def create_job(
         body.workspace_id,
         SpaceOperation.WRITE,
     )
+    await _refuse_trial_anchor(request, body.anchor_session_id)
     # Batch 2/c9 (PRD §3.9 decision 10): per-user mode **snapshots at creation** the owner's current Datarc
     # workspace into the job, explicitly fixing the routine's data domain so it cannot drift with owner preferences.
     _snapshot_ws: str | None = None
@@ -1018,6 +1030,7 @@ async def patch_job(
     )
     if body.cron is not None:
         _validate_cron(body.cron)
+    await _refuse_trial_anchor(request, body.anchor_session_id)
     # Binding changes share create's single validation entry. ⚠ Omitting this means DTO accepts recipe_ref but server
     # silently drops it: edit-page rebinding/unbinding/reconfirmation all fail while FE appears successful.
     _recipe_ref = await _bind_recipe_ref(request, body.recipe_ref, user_id=_user_id(request))

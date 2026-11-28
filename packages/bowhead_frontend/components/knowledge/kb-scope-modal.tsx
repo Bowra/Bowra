@@ -26,7 +26,12 @@ export interface ScopeTarget {
   file_id: string;
   filename: string;
   scope: KbScope;
+  /** Who owns the file (personal: scope_id; other scopes: uploader). Unknown for off-page selections. */
+  owner_id?: string | null;
 }
+
+/** The server asks for a reason of at least this many characters when you change a file you do not own. */
+const MIN_REASON_CHARS = 10;
 
 interface Props {
   targets: ScopeTarget[];
@@ -47,6 +52,11 @@ export function KbScopeModal({ targets, bulk, me, onClose, onMigrated, toast }: 
   const [step, setStep] = useState<Step>("select");
   const [chosen, setChosen] = useState<KbScope | null>(null);
   const [failed, setFailed] = useState<FailedItem[]>([]);
+  const [reason, setReason] = useState("");
+  // Changing a file someone else owns is an administrator override; the server records a reason for it.
+  // Unknown owners (off-page selections) are treated the same, since the server may require it.
+  const needsReason = targets.some((x) => x.owner_id !== me.user_id);
+  const reasonReady = !needsReason || reason.trim().length >= MIN_REASON_CHARS;
 
   const ids = targets.map((x) => x.file_id);
   const fromScopes = [...new Set(targets.map((x) => x.scope))];
@@ -60,6 +70,7 @@ export function KbScopeModal({ targets, bulk, me, onClose, onMigrated, toast }: 
       const res = await bulkChangeKbFilesScope(workIds, {
         new_scope: chosen,
         new_scope_id: scopeIdFor(chosen, me),
+        ...(needsReason ? { reason: reason.trim() } : {}),
       });
       const failedItems: FailedItem[] = res.results
         .filter((r) => !r.ok)
@@ -161,10 +172,26 @@ export function KbScopeModal({ targets, bulk, me, onClose, onMigrated, toast }: 
                 br: () => <br />,
               })}
             </div>
+            {needsReason && (
+              <div className="settings-field kb-scope-reason">
+                <label htmlFor="kb-scope-reason">{t("scope_modal.reason_label")}</label>
+                <textarea
+                  id="kb-scope-reason"
+                  className="settings-textarea"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  aria-describedby="kb-scope-reason-hint"
+                  data-testid="kb-scope-reason"
+                />
+                <span className="settings-field__hint" id="kb-scope-reason-hint">
+                  {t("scope_modal.reason_hint", { n: MIN_REASON_CHARS })}
+                </span>
+              </div>
+            )}
           </div>
           <div className="kb-modal-foot">
             <button type="button" className="kb-btn kb-btn-ghost" onClick={() => setStep("select")}><CharIconText ch="←">{t("scope_modal.back")}</CharIconText></button>
-            <button type="button" className="kb-btn kb-btn-primary" onClick={() => runMigrate(ids)}>{t("scope_modal.confirm_migrate")}</button>
+            <button type="button" className="kb-btn kb-btn-primary" disabled={!reasonReady} onClick={() => runMigrate(ids)}>{t("scope_modal.confirm_migrate")}</button>
           </div>
         </>
       )}

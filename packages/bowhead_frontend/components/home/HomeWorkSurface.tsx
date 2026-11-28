@@ -42,6 +42,11 @@ interface HomeWorkSurfaceProps {
    * Single-column home: page supplies composer after title/before proposals (DOM order = focus/screen-reader order).
    */
   composerSlot?: ReactNode;
+  /**
+   * The first screen of an Owner draft trial: the composer (with the trial band and the Owner's case questions)
+   * without the generic proposals, brief and footer, which would start ordinary work instead of a trial question.
+   */
+  composerOnly?: boolean;
 }
 
 interface LocalWorkProposal {
@@ -271,6 +276,7 @@ export function HomeWorkSurface({
   onStartPrompt,
   onWorkspaceInvalidated,
   composerSlot,
+  composerOnly = false,
 }: HomeWorkSurfaceProps) {
   const locale = useLocale();
   const router = useAppRouter();
@@ -753,7 +759,7 @@ export function HomeWorkSurface({
         {composerSlot ? <div className="home-work-composer-slot">{composerSlot}</div> : null}
 
         {showInitialLoading ? (
-          <HomeSkeleton />
+          composerOnly ? null : <HomeSkeleton />
         ) : workspaceUnavailable ? (
           <section className="home-work-state" aria-labelledby="home-space-list-unavailable-title">
             <span className="home-work-state-icon home-work-state-icon-error" aria-hidden="true">
@@ -802,13 +808,13 @@ export function HomeWorkSurface({
               ) : null}
             </div>
           </section>
-        ) : (
+        ) : composerOnly ? null : (
           <div className="home-work-layout">
             {[proposalsSection, briefSection]}
           </div>
         )}
 
-        {!showInitialLoading && !noWorkspace && !showInitialError ? (
+        {!composerOnly && !showInitialLoading && !noWorkspace && !showInitialError ? (
           <footer className="home-work-footer">
             <span>{t("footerScope")}</span>
           </footer>

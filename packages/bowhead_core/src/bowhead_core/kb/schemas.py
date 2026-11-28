@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, SerializationInfo, SerializerFunctionWrapHandler, model_serializer
 
 
 def _normalize_scope(v: str) -> str:
@@ -130,6 +130,10 @@ class KbFileDTO(BaseModel):
     version: int = 1
     ingestion_action_id: str | None = None
     membership_revision: int = Field(default=1, ge=1)
+    # The stored knowledge base (0239). Responses carry it only while knowledge bases are on
+    # (the serializer below), so the file table can show and open it. NULL or a home mismatch
+    # means the scope's default (knowledge_base_store).
+    knowledge_base_id: str | None = None
     active_generation_id: str | None = None
     source_observation_json: str | None = Field(default=None, exclude=True)
     source_health: dict[str, Any] | None = None
@@ -144,6 +148,17 @@ class KbFileDTO(BaseModel):
     # File versions (Q7): the source file has a newer version; the entry keeps the indexed one until the
     # user adds the newer version. Shown only to the file's owner.
     newer_version: KbNewerVersionDTO | None = None
+
+    @model_serializer(mode="wrap")
+    def _knowledge_base_while_enabled(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
+        """With FEATURE_KNOWLEDGE_BASES off, JSON (API responses) keeps today's fields exactly."""
+        data = handler(self)
+        if info.mode == "json" and isinstance(data, dict) and "knowledge_base_id" in data:
+            from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
+
+            if not knowledge_bases_enabled():
+                data.pop("knowledge_base_id")
+        return data
 
 
 class KbFileScopePatchRequest(BaseModel):
@@ -160,6 +175,8 @@ class KbSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=50, strict=True)
     scope_filter: list[KbScopeIn] | None = None
+    # One knowledge base's deep search (FEATURE_KNOWLEDGE_BASES); ignored while the switch is off.
+    knowledge_base_id: str | None = Field(default=None, max_length=64)
 
 
 class KbSearchResultChunk(BaseModel):

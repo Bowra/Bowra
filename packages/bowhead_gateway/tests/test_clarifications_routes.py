@@ -1615,7 +1615,7 @@ async def test_resolved_retry_repairs_event_before_resuming(
         "_ensure_clarification_resolved_event",
         _flaky_event,
     )
-    monkeypatch.setattr(clarification_routes, "resume_turn", _resume)
+    monkeypatch.setattr(clarification_routes, "resume_for_user", _resume)
 
     first = await http.post(
         f"/api/v1/clarifications/{req.request_id}/resolve",
@@ -1719,7 +1719,7 @@ async def test_resume_turn_multi_answer_merges_all_picks(http, app_with_orch) ->
     """B1 (clarification-true-continuation): a multi-question clarification must
     carry ALL the user's answers into the resumed turn, not just the first.
 
-    Regression for prod t_f2f6a88ad3cc — a 2-question clarification (分析方向 +
+    Regression for prod an observed task — a 2-question clarification (分析方向 +
     时间范围) resumed with only the first answer, so the rerun dropped the time
     filter. The empty-token (ambiguous_turn) path merges chosen_values into
     user_text; the old code passed only chosen_value.
@@ -2053,9 +2053,9 @@ async def test_resume_turn_cross_user_denied(http, app_with_orch) -> None:
 # dingsiyan #11 (2026-07-07): resolve→resume→stream delivery contract.
 #
 # Encode two actual-device incidents:
-# - t_1ccf9e0aec11: clarification.resolved emitted through unseeded new bus → payload seq=1,
+# - an observed task: clarification.resolved emitted through unseeded new bus → payload seq=1,
 #   colliding with turn_started; FE replay dedup drops card-close reversal ('面板不收起/点 N 遍');
-# - t_f2f6a88ad3cc residual window: closed gen1 bus swallows resolved without persistence;
+# - an observed task residual window: closed gen1 bus swallows resolved without persistence;
 #   done(clarification_pending) remains last → replay retains stale done →
 #   FE markTerminal removes watchdog. Placeholder turn.resumed closes both gaps.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2188,7 +2188,7 @@ async def test_d11_resume_emits_turn_resumed_and_unstales_paused_done(
     delivery_ctx,
 ) -> None:
     """resume 起跑必须先落 turn.resumed → stale paused-done 不再是最后一行，
-    _replay_rows_for_stream 才能把它滤掉（t_f2f6a88ad3cc 残窗关死）。"""
+    _replay_rows_for_stream 才能把它滤掉（an observed task 残窗关死）。"""
     import asyncio
 
     from bowhead_core.events import get_event_registry
@@ -2568,3 +2568,74 @@ async def test_scheduled_lookup_failure_fails_closed(
 
     assert rv.status_code == 503
     assert rv.json()["detail"]["error"]["code"] == "clarification_store_unavailable"
+
+
+@pytest.mark.integration
+async def test_teams_personal_card_and_web_replay_share_one_turn_generation(http, app_with_orch, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from bowhead_gateway.routes import teams
+    from bowhead_gateway.teams.clarification import question_card
+
+    monkeypatch.setenv("FEATURE_TEAMS_CHAT_CLARIFICATION", "1")
+    app = app_with_orch
+    store = app.state.clarification_store
+    session = "teams:tenant:personal:u_dev_alice"
+    connection = SimpleNamespace(id="conn", entra_tenant_id="tenant", microsoft_app_id="app", team_id="team_resume")
+    bindings = SimpleNamespace(get_identity=AsyncMock(return_value=("u_dev_alice", "team_resume")), get_workspace=AsyncMock(return_value="42"))
+    app.state.teams_store = bindings
+    monkeypatch.setattr(teams, "_authenticate_activity", AsyncMock(return_value=(connection, "tenant")))
+    sessions = app.state.orchestrator.session_store
+    original = sessions.get_turn
+
+    async def read_turn(turn_id):
+        turn = await original(turn_id)
+        turn.session_id = session
+        return turn
+
+    monkeypatch.setattr(sessions, "get_turn", read_turn)
+    monkeypatch.setattr(sessions, "get_session", AsyncMock(return_value=SimpleNamespace(user_id="u_dev_alice", workspace_id="42")), raising=False)
+    card = await store.put(
+        turn_id="t_teams_continue",
+        user_id="u_dev_alice",
+        workspace_id="42",
+        session_id=session,
+        token="",
+        rationale="Which period?",
+        kind="options",
+        candidates=[ClarificationCandidate(value="week", label="Week"), ClarificationCandidate(value="month", label="Month")],
+        resume_context={
+            "user_text": "Compare revenue",
+            "session_id": session,
+            "workspace_id": "42",
+            "user_id": "u_dev_alice",
+            "team_id": "team_resume",
+        },
+    )
+    rendered = await question_card(app, card.request_id, card.turn_id, "en-US")
+    assert rendered["body"][0]["choices"][1]["title"] == "Month"
+    action = rendered["actions"][0]
+    action["data"]["q0"] = "1"
+    inbound = {
+        "id": "callback",
+        "type": "invoke",
+        "name": "adaptiveCard/action",
+        "conversation": {"id": "personal", "conversationType": "personal"},
+        "from": {"aadObjectId": "oid"},
+        "value": {"action": action},
+    }
+    url = "/api/v1/integrations/teams/messages"
+    bindings.get_workspace.return_value = "other"
+    assert (await http.post(url, json=inbound)).json()["statusCode"] == 409
+    assert (await store.get(card.request_id)).status == "pending"
+    bindings.get_workspace.return_value = "42"
+    response = await http.post(url, json=inbound)
+    assert response.status_code == 200, response.text
+    assert response.json()["type"] == "application/vnd.microsoft.card.adaptive"
+    assert (await store.get(card.request_id)).chosen_value == "month"
+    replay = await http.post(f"/api/v1/clarifications/{card.request_id}/resolve", json={"chosen_value": "week"})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["chosen_value"] == "month"
+    assert replay.json()["resume_turn_id"] == card.turn_id
+    assert replay.json()["execution_generation"] == 2
+    assert len(app.state.orchestrator.calls) == 1

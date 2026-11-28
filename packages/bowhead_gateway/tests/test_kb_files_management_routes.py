@@ -526,6 +526,46 @@ async def test_exact_file_filter_has_a_bounded_request(ctx) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("team", [WS, "other-team"], ids=["current-team", "other-team"])
+async def test_team_library_download_resolves_the_original_for_members(production_ctx, tmp_path: Path, team: str) -> None:
+    client, files = production_ctx
+    artifacts = ArtifactStore(str(tmp_path / "library-artifacts.db"), LocalBackend(tmp_path / "library-blobs"))
+    await artifacts.initialize()
+    client.app.state.artifact_store = artifacts
+    content = b"expense,limit\nmeal,10\n"
+    original = await artifacts.put_bytes(
+        content=content,
+        filename="HQ expenses.csv",
+        mime="text/csv",
+        source="kb_upload",
+        scope="team",
+        created_by="u_hq",
+    )
+    [file_id] = await _seed(
+        files,
+        1,
+        artifact_id=original.id,
+        filename=original.filename,
+        mime_type=original.mime,
+        size_bytes=original.size,
+        scope="team",
+        scope_id=team,
+        team_id=team,
+        workspace_id="",
+        uploaded_by="u_hq",
+        initial_parse_status="done",
+    )
+    response = client.get(f"/api/v1/kb/files/{file_id}/download", headers={"X-Space-Id": WS})
+    if team == WS:
+        assert response.status_code == 200
+        assert response.content == content
+        assert (await artifacts.get(original.id)).created_by == "u_hq"
+        assert await artifacts.get_ready_uploads_for_chat([original.id], user_id=UID, workspace_id=WS) == {}
+    else:
+        assert response.status_code == 404
+        assert content not in response.content
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("invalid", [None, "existing_upload", "artifact_owner", "foreign_owner", "foreign_space", "retired"])
 async def test_prepare_kb_chat_attachment_uses_current_source_and_original_upload_authority(production_ctx, tmp_path: Path, invalid: str | None):

@@ -26,7 +26,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { builtinTools, systemCapabilities, type BuiltinTool } from "@/lib/tool-display";
 import { fetchMe } from "@/lib/auth-api";
 import { formatDateTime } from "@/lib/locale";
 import { DatarcMark, PowerBiMark, TavilyMark } from "@/components/settings/data-source-icons";
@@ -38,6 +37,7 @@ import {
   SourceToolSelectionDialog,
   type ToolSelectionSaved,
 } from "@/components/settings/tools/source-tool-selection-dialog";
+import { SourceN8nWorkflowsDialog } from "@/components/settings/tools/source-n8n-workflows-dialog";
 import { SourceToolCategoryDialog } from "@/components/settings/tools/source-tool-category-dialog";
 import type { ToolSourceRefreshResult } from "@/lib/team-tool-source-refresh-api";
 import {
@@ -61,6 +61,7 @@ import {
   previewSourceImpact,
   validateSource,
   TeamToolApiError,
+  teamMcpOAuthRecovery,
   type AuthType,
   type TeamToolSourcePublic,
   type ResourceChangeImpact,
@@ -82,6 +83,8 @@ import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { formatDateYMD } from "@/lib/format";
 import { DialogShell, Dialog } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
+import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
 import {
   AlertTriangle,
   Check,
@@ -91,8 +94,10 @@ import {
   Search,
 } from "@/components/icons";
 import { useAppRouter } from "@/lib/use-app-router";
+import { appPath } from "@/lib/base-path";
+import { teamSettingsPath } from "@/lib/team-settings-paths";
 import { randomUuid } from "@/lib/random-id";
-import { CharIcon, CharIconText } from "@/components/char-icon";
+import { CharIconText } from "@/components/char-icon";
 import { withHttpFailureReason } from "@/lib/user-facing-error";
 
 // Semantic colors (mockup: MCP blue/OpenAPI purple, low-saturation strokes). All user-facing technical identifiers mono.
@@ -227,6 +232,9 @@ function KindBadge({ kind }: { kind: string }) {
 
 function AuthBadge({ source }: { source: TeamToolSourcePublic }) {
   const t = useTranslations("settings.tools");
+  if (source.auth_type === "oauth" && (source.oauth_authorized === false || source.oauth_sign_in_ended)) {
+    return null;
+  }
   if (source.auth_type === "none" || !source.has_auth) {
     return <span className="legacy-ai-tools-auth ai-tools-auth">{t("auth_none")}</span>;
   }
@@ -283,6 +291,7 @@ function SourceCard({
   onRefresh,
   onChooseTools,
   onConfirmCategories,
+  onN8nWorkflows,
   onAuthorize,
   onEdit,
   onDelete,
@@ -304,30 +313,30 @@ function SourceCard({
   onChooseTools: (returnFocusTo: HTMLElement | null) => void;
   /** Confirm tool categories; present only when requester confirmation is enabled. */
   onConfirmCategories?: (returnFocusTo: HTMLElement | null) => void;
+  /** Approve n8n workflows as tools; present only for an n8n source with the feature on. */
+  onN8nWorkflows?: (returnFocusTo: HTMLElement | null) => void;
   onAuthorize: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const t = useTranslations("settings.tools");
-  const failed = source.status === "failed";
   const off = source.status === "disabled";
-  // WP2b: an oauth source needs the browser authorize flow. tools_count===0 ⇒ never authorized
-  // (a real OAuth server refuses an unauthenticated tools/list, so create left it empty) → prompt
-  // authorization; once tools exist it's established → offer re-authorization. When the service
-  // stopped renewing the sign-in, the card prompts authorization again but keeps its tool counts.
   const isOauth = source.auth_type === "oauth";
-  const neverAuthorized = isOauth && source.tools_count === 0;
+  const neverAuthorized = isOauth && !(source.oauth_authorized ?? source.tools_count > 0);
   const needsAuth = neverAuthorized || (isOauth && source.oauth_sign_in_ended === true);
   // Only MCP sources can re-list tools; an OAuth source must be authorized before it can list anything.
   const canRefresh = source.kind === "mcp" && !needsAuth;
   // Choosing needs a saved tool list to pick from.
   const canChooseTools = source.kind === "mcp" && source.tools_count > 0;
+  // An n8n source may import no raw tool at all: its approved workflows are its tools.
+  const canApproveN8n = Boolean(onN8nWorkflows) && !needsAuth;
+  const needsSelection = isOauth && !needsAuth && source.op_count === 0 && !canApproveN8n;
   const managementActionsRef = useRef<HTMLDivElement>(null);
   const operationsId = `tool-source-operations-${source.id}`;
   const hasOperationMatches = matchingOperationIds.length > 0;
   const visibleOperationIds = expanded ? source.selected_op_ids : matchingOperationIds;
   return (
-    <div className={`legacy-ai-tools-card ai-tools-card${failed ? " is-failed" : ""}${off ? " is-off" : ""}`}>
+    <div className={`legacy-ai-tools-card ai-tools-card${off ? " is-off" : ""}`}>
       <div className="tool-source-card-top legacy-ai-tools-card-top">
         <div className="tool-source-card-main legacy-ai-tools-card-main">
           <div className="legacy-ai-tools-card-head">
@@ -339,12 +348,11 @@ function SourceCard({
                 {t("oauth_needs_auth")}
               </span>
             ) : null}
-            {failed ? (
-              <span className="legacy-ai-tools-pill is-danger ai-tools-pill">
-                {t("status_failed")}
-              </span>
+            {needsSelection && canChooseTools ? (
+              <span className="legacy-ai-tools-pill is-accent ai-tools-pill">{t("oauth_setup_pending")}</span>
             ) : null}
           </div>
+          {source.oauth_workspace_name ? <p className="legacy-ai-tools-card-meta">{t("oauth_workspace", { name: source.oauth_workspace_name })}</p> : null}
           <div className="tool-source-card-metadata legacy-ai-tools-card-meta ai-tools-card-meta">
             <span className="legacy-ai-tools-card-url ai-tools-card-url">
               {source.base_url}
@@ -398,10 +406,22 @@ function SourceCard({
         </div>
         <div className="tool-source-card-actions legacy-ai-tools-card-actions">
           <div ref={managementActionsRef} className="tool-source-card-management-actions">
-            {/* Initial authorization is card's next step, remains on card; other actions move into “⋯”. */}
             {isOauth && needsAuth ? (
               <Button className="tool-source-card-action" size="sm" variant="primary" onClick={onAuthorize} disabled={busy}>
                 <Lock size={13} /> {t("action_authorize")}
+              </Button>
+            ) : needsSelection ? (
+              <Button
+                className="tool-source-card-action"
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                onClick={(event) => {
+                  if (canChooseTools) onChooseTools(event.currentTarget);
+                  else onRefresh(event.currentTarget);
+                }}
+              >
+                {t(canChooseTools ? "action_choose_tools" : "action_refresh_tools")}
               </Button>
             ) : null}
             <RowActionsMenu
@@ -410,7 +430,7 @@ function SourceCard({
               actions={[
                 ...(isOauth && !needsAuth ? [{ id: "reauthorize", label: t("action_reauthorize"), disabled: busy, onSelect: onAuthorize }] : []),
                 { id: "validate", label: t("action_validate"), disabled: busy, onSelect: onValidate },
-                ...(canRefresh
+                ...(canRefresh && (!needsSelection || canChooseTools)
                   ? [{
                     id: "refresh",
                     label: t("action_refresh_tools"),
@@ -419,12 +439,20 @@ function SourceCard({
                     onSelect: () => onRefresh(managementActionsRef.current?.querySelector<HTMLElement>(".ui-row-more") ?? null),
                   }]
                   : []),
-                ...(canChooseTools
+                ...(canChooseTools && !needsSelection
                   ? [{
                     id: "choose-tools",
                     label: t("action_choose_tools"),
                     disabled: busy,
                     onSelect: () => onChooseTools(managementActionsRef.current?.querySelector<HTMLElement>(".ui-row-more") ?? null),
+                  }]
+                  : []),
+                ...(canApproveN8n && onN8nWorkflows
+                  ? [{
+                    id: "n8n-workflows",
+                    label: t("n8n_action"),
+                    disabled: busy,
+                    onSelect: () => onN8nWorkflows(managementActionsRef.current?.querySelector<HTMLElement>(".ui-row-more") ?? null),
                   }]
                   : []),
                 ...(canChooseTools && onConfirmCategories
@@ -445,14 +473,14 @@ function SourceCard({
             className="tool-source-card-availability legacy-ai-tools-avail ai-tools-avail"
           >
             <span className="legacy-ai-tools-avail-label ai-tools-avail-label">
-              {off || failed || neverAuthorized ? t("status_disabled") : t("status_enabled")}
+              {off || neverAuthorized ? t("status_disabled") : t("status_enabled")}
             </span>
             {/* WP2b-3c: a never-authorized OAuth source has 0 tools → can't be enabled. An ended sign-in
                 keeps its switch: the administrator may still turn the source off while re-authorizing. */}
             <StatusToggle
-              on={!off && !failed && !neverAuthorized}
+              on={!off && !neverAuthorized}
               busy={busy}
-              disabled={neverAuthorized}
+              disabled={off && (needsAuth || needsSelection)}
               label={t("toggle_aria", { name: source.name })}
               buttonRef={toggleRef}
               onToggle={onToggleStatus}
@@ -609,102 +637,6 @@ function EditDialog({
  * Display does not mean currently usable by this team/role; permission remains in respective configuration (subagent tools,
  * team tool-source switches). Names/descriptions come from generated table; **never author wording here**.
  */
-function BuiltinCapabilities({ query }: { query: string }) {
-  const t = useTranslations("settings.tools");
-  // Google write capabilities only appear once the team's Google connection is enabled.
-  const [googleWorkspace, setGoogleWorkspace] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void fetchMe()
-      .then((me) => {
-        if (active) setGoogleWorkspace(Boolean(me.capabilities?.google_workspace));
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
-  const all = useMemo(() => builtinTools({ googleWorkspace }), [googleWorkspace]);
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? all.filter((c) => `${c.name}${c.blurb}${c.ref}`.toLowerCase().includes(q))
-    : all;
-
-  // Capabilities every Agent has from the runtime. They are not counted with the Tools above:
-  // nothing selects or disables them.
-  const system = useMemo(() => systemCapabilities(), []);
-  const shownSystem = q ? system.filter((c) => `${c.name}${c.blurb}${c.ref}`.toLowerCase().includes(q)) : system;
-
-  const groups = useMemo(() => {
-    const by = new Map<string, BuiltinTool[]>();
-    for (const c of shown) {
-      const list = by.get(c.category) ?? [];
-      list.push(c);
-      by.set(c.category, list);
-    }
-    return [...by.entries()];
-  }, [shown]);
-
-  return (
-    <section className="legacy-ai-tools-caps ai-tools-caps" data-testid="builtin-capabilities">
-      <h2 className="legacy-ai-tools-caps-title ui-section-title">
-        {t("builtin_title")}
-      </h2>
-      <p className="legacy-ai-tools-caps-desc ui-section-desc">
-        {/* Filtering must show matched N / total M (116 dogfood 2026-09-09):
-            search “知识库” left 4 cards, subtitle still “自带的 33 项能力”, appearing miscounted. */}
-        {q
-          ? t("builtin_filtered", { shown: shown.length, total: all.length })
-          : t("builtin_subtitle", { count: all.length })}
-      </p>
-      {groups.length === 0 && shownSystem.length === 0 ? (
-        <div className="legacy-ai-tools-nomatch ai-tools-nomatch">{t("builtin_no_match")}</div>
-      ) : (
-        <div className="legacy-ai-tools-cap-groups">
-          {groups.map(([category, items]) => (
-            <div key={category}>
-              <div className="legacy-ai-tools-cap-cat ai-tools-cap-cat">
-                {t(`cap_cat_${category}` as never)}
-              </div>
-              <div className="legacy-ai-tools-cap-grid ai-tools-cap-grid">
-                {items.map((c) => (
-                  <div
-                    key={c.ref}
-                    className="legacy-ai-tools-cap ai-tools-cap"
-                  >
-                    <span aria-hidden className="legacy-ai-tools-cap-sigil"><CharIcon ch={c.sigil} aria-hidden /></span>
-                    <div className="legacy-ai-min0">
-                      <div className="legacy-ai-tools-cap-name ai-tools-cap-name">{c.name}</div>
-                      <div className="legacy-ai-tools-cap-blurb ai-tools-cap-blurb">{c.blurb}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-          {shownSystem.length > 0 ? (
-            <div data-testid="system-capabilities">
-              <div className="legacy-ai-tools-cap-cat ai-tools-cap-cat">{t("cap_cat_system")}</div>
-              <p className="legacy-ai-tools-caps-desc ui-section-desc">{t("system_capabilities_desc")}</p>
-              <div className="legacy-ai-tools-cap-grid ai-tools-cap-grid">
-                {shownSystem.map((c) => (
-                  <div key={c.ref} className="legacy-ai-tools-cap ai-tools-cap">
-                    <span aria-hidden className="legacy-ai-tools-cap-sigil"><CharIcon ch={c.sigil} aria-hidden /></span>
-                    <div className="legacy-ai-min0">
-                      <div className="legacy-ai-tools-cap-name ai-tools-cap-name">{c.name}</div>
-                      <div className="legacy-ai-tools-cap-blurb ai-tools-cap-blurb">{c.blurb}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
-  );
-}
-
 // Built-in third-party save failure: backend HTTPException(detail="<code>") returns machine code;
 // map to readable text, unknown code uses generic fallback; never display raw machine codes.
 const BUILTIN_SAVE_ERROR_KEYS = {
@@ -739,6 +671,21 @@ function builtinSaveErrorKey(error: unknown): BuiltinSaveErrorKey {
   return "builtin_save_error_generic";
 }
 
+type ManagerTab = "sources" | "services";
+const TOOLS_PAGE = "/capabilities/?type=tools";
+
+/**
+ * The tab a landing URL belongs to: the Google Workspace sign-in return (`?google=`) and a repair link for a Tool of
+ * a built-in connection (`?dependency=teammcp.ibt_…` / `teammcp.pbi_…`) open the services tab; everything else,
+ * including Team Tool Source sign-in returns (`?oauth=`), opens the sources tab.
+ */
+export function landingTab(search: string): ManagerTab {
+  const params = new URLSearchParams(search);
+  if (params.has("google")) return "services";
+  const dependency = params.get("dependency") ?? "";
+  return /^teammcp\.(ibt|pbi)_/.test(dependency) ? "services" : "sources";
+}
+
 export function ToolsManager() {
   const t = useTranslations("settings.tools");
   // Chinese UI alone uses Chinese; others (English/German/French) use English.
@@ -766,7 +713,16 @@ export function ToolsManager() {
   const [googleCreateRequest, setGoogleCreateRequest] = useState(0);
   // Google Workspace is a single team connection; offer it in the picker only while available and not yet configured.
   const [googlePickable, setGooglePickable] = useState(false);
-  const onGoogleAvailability = useCallback((available: boolean, configured: boolean) => setGooglePickable(available && !configured), []);
+  const [googleConfigured, setGoogleConfigured] = useState(false);
+  const onGoogleAvailability = useCallback((available: boolean, configured: boolean) => {
+    setGooglePickable(available && !configured);
+    setGoogleConfigured(available && configured);
+  }, []);
+  const [tab, setTab] = useState<ManagerTab>("sources");
+  // A Google sign-in return or a repair link for a built-in connection's Tool opens the services tab.
+  useEffect(() => {
+    if (landingTab(window.location.search) === "services") setTab("services");
+  }, []);
   const [builtinPickerQuery, setBuiltinPickerQuery] = useState("");
   const [tavilyConfigOpen, setTavilyConfigOpen] = useState(false);
   const [tavilyKey, setTavilyKey] = useState("");
@@ -803,10 +759,14 @@ export function ToolsManager() {
   const [chooseTarget, setChooseTarget] = useState<{ source: TeamToolSourcePublic; highlight: string[] } | null>(null);
   const chooseReturnFocusRef = useRef<HTMLElement | null>(null);
   const [categoryTarget, setCategoryTarget] = useState<TeamToolSourcePublic | null>(null);
+  const [n8nTarget, setN8nTarget] = useState<TeamToolSourcePublic | null>(null);
+  const n8nReturnFocusRef = useRef<HTMLElement | null>(null);
   const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
   const categoryReturnFocusRef = useRef<HTMLElement | null>(null);
   const [chooseNotice, setChooseNotice] = useState<{ name: string; result: ToolSelectionSaved } | null>(null);
-  const [oauthNotice, setOauthNotice] = useState<"success" | "error" | null>(null);
+  const [oauthNotice, setOauthNotice] = useState<{ status: "success" | "error"; sourceId: string | null; reason: string | null } | null>(null);
+  const [authorizeTarget, setAuthorizeTarget] = useState<TeamToolSourcePublic | null>(null);
+  const [authorizeError, setAuthorizeError] = useState<string | null>(null);
   const [usageTarget, setUsageTarget] = useState<{
     sourceId: string;
     operationId?: string;
@@ -823,12 +783,13 @@ export function ToolsManager() {
   // doesn't re-show it. On success the source's tools were just re-enumerated → reload the list.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const o = new URLSearchParams(window.location.search).get("oauth");
-    if (o !== "success" && o !== "error") return;
-    setOauthNotice(o);
     const url = new URL(window.location.href);
+    const o = url.searchParams.get("oauth");
+    if (o !== "success" && o !== "error") return;
+    setOauthNotice({ status: o, sourceId: url.searchParams.get("source"), reason: url.searchParams.get("reason") });
     url.searchParams.delete("oauth");
     url.searchParams.delete("source");
+    url.searchParams.delete("reason");
     window.history.replaceState({}, "", url.toString());
   }, []);
 
@@ -922,13 +883,27 @@ export function ToolsManager() {
     // WP2b: begin the OAuth flow, then hand the browser to the provider. It returns to
     // /oauth/callback (server-side) which redirects back here with ?oauth=success|error.
     setRowBusy(s.id);
+    setAuthorizeError(null);
     try {
       const { authorization_url } = await authorizeSource(s.id);
       window.location.href = authorization_url; // full-page navigation → we don't return here
     } catch (e) {
-      setError(withHttpFailureReason(t("connect_failed_safe"), e));
+      const recovery = teamMcpOAuthRecovery(e);
+      setAuthorizeError(recovery ?? "oauth_start_unavailable");
       setRowBusy(null);
     }
+  };
+
+  const openAuthorize = (source: TeamToolSourcePublic) => {
+    setAuthorizeError(null);
+    setAuthorizeTarget(source);
+  };
+
+  const openRefresh = (source: TeamToolSourcePublic, returnFocusTo: HTMLElement | null) => {
+    refreshReturnFocusRef.current = returnFocusTo;
+    setRefreshNotice(null);
+    setChooseNotice(null);
+    setRefreshTarget(source);
   };
 
   const onRefreshApplied = async (source: TeamToolSourcePublic, result: ToolSourceRefreshResult) => {
@@ -937,7 +912,7 @@ export function ToolsManager() {
       sourceId: source.id,
       name: source.name,
       result,
-      offerChooseTools: result.added.length > 0 && source.selected_op_ids.length > 0,
+      offerChooseTools: result.added.length > 0 && (source.auth_type === "oauth" || source.selected_op_ids.length > 0),
     });
     await refresh();
   };
@@ -956,6 +931,7 @@ export function ToolsManager() {
   const onChooseToolsSaved = async (source: TeamToolSourcePublic, result: ToolSelectionSaved) => {
     setChooseTarget(null);
     setRefreshNotice(null);
+    if (oauthNotice?.sourceId === source.id) setOauthNotice(null);
     setChooseNotice({ name: source.name, result });
     await refresh();
   };
@@ -1045,6 +1021,8 @@ export function ToolsManager() {
   }, [data, normalizedQuery, operationMatches]);
 
   const importedOperations = useMemo(() => (data ?? []).reduce((total, source) => total + source.op_count, 0), [data]);
+  const builtinLoaded = data !== null;
+  const servicesCount = builtinTools.filter((tool) => tool.provider !== "shopify" || shopifyEnabled).length + (googleConfigured ? 1 : 0);
   const tavily = builtinTools.find((tool) => tool.provider === "tavily");
   const datarcTools = builtinTools.filter((tool) => tool.provider === "datarc");
   const shopifyTools = builtinTools.filter((tool) => tool.provider === "shopify");
@@ -1147,6 +1125,19 @@ export function ToolsManager() {
     if (!usageTarget) return Promise.reject(new Error("resource_usage_target_missing"));
     return getSourceUsage(usageTarget.sourceId, usageTarget.operationId);
   }, [usageTarget]);
+  const oauthNoticeSource = data?.find((source) => source.id === oauthNotice?.sourceId);
+  const oauthNeedsRefresh = oauthNotice?.reason === "discovery_failed" || oauthNotice?.reason === "no_tools";
+  const oauthChooseNext = oauthNotice?.status === "success" && !oauthNeedsRefresh
+    && oauthNoticeSource?.op_count === 0 && oauthNoticeSource.tools_count > 0;
+  const oauthNoticeAction = oauthNoticeSource?.auth_type === "oauth"
+    ? oauthNotice?.status === "error"
+      ? { label: "action_authorize", open: () => openAuthorize(oauthNoticeSource) } as const
+      : oauthNeedsRefresh
+        ? { label: "action_refresh_tools", open: (anchor: HTMLElement) => openRefresh(oauthNoticeSource, anchor) } as const
+        : oauthChooseNext
+          ? { label: "action_choose_tools", open: (anchor: HTMLElement) => openChooseTools(oauthNoticeSource, anchor) } as const
+          : null
+    : null;
 
   return (
     <div data-testid="tools-manager" className="legacy-ai-tools-root ai-tools">
@@ -1154,181 +1145,227 @@ export function ToolsManager() {
         <div className="legacy-ai-flex1 ai-page-head-text">
           <h1 className="ui-page-title legacy-tools-title">{t("title")}</h1>
           <p className="ui-page-desc legacy-tools-desc">
-            {data ? t("subtitle_count", { sources: data.length, tools: importedOperations }) : t("subtitle")}
+            {t.rich("subtitle", {
+              tools: (chunks) => (
+                <a className="legacy-tools-desc-link" href={appPath(TOOLS_PAGE)} onClick={(event) => { if (!shouldHandleAppLinkClick(event)) return; event.preventDefault(); router.push(TOOLS_PAGE); }}>
+                  {chunks}
+                </a>
+              ),
+            })}
           </p>
         </div>
-        <Button variant="primary" onClick={() => setCreateOpen(true)}>
-          <CharIconText ch="＋">{t("new_source")}</CharIconText>
-        </Button>
-        <Button variant="secondary" onClick={() => setBuiltinPickerOpen(true)}>
-          <CharIconText ch="＋">{t("new_builtin")}</CharIconText>
-        </Button>
       </header>
 
       <CapabilityRepairContext kind="tool" onDependency={setQuery} />
 
-      {tavily ? <div className="legacy-ai-tools-builtin ai-tools-builtin">
-        <TavilyMark />
-        <div className="legacy-ai-flex1"><strong>Tavily</strong><div className="legacy-ai-tools-builtin-desc ai-tools-builtin-desc">{t("tavily_desc")}</div></div>
-        <RowActionsMenu
-          label={t("more_actions_for", { name: "Tavily" })}
-          actions={[{ id: "edit", label: t("action_edit"), onSelect: () => setTavilyConfigOpen(true) }]}
-        />
-        <StatusToggle on={tavily.status === "enabled"} busy={rowBusy === "tavily"} label={t("toggle_tavily")} onToggle={() => void toggleTavily()} />
-      </div> : null}
-
-      {datarcTools.map((tool) => <div key={tool.id} className={`legacy-ai-tools-builtin ai-tools-builtin${tool.status === "enabled" ? "" : " is-off"}`}>
-        <DatarcMark />
-        <div className="legacy-ai-flex1 legacy-ai-min0">
-          <strong>{tool.display_name}</strong>
-          <div className="legacy-ai-tools-builtin-desc is-clip ai-tools-builtin-desc">{tool.endpoint}{tool.key_hint ? ` · ${t("datarc_key_hint", { hint: tool.key_hint })}` : ""}</div>
-        </div>
-        <RowActionsMenu
-          label={t("more_actions_for", { name: tool.display_name })}
-          actions={[
-            { id: "edit", label: t("action_edit"), onSelect: () => openDatarcConfig(tool) },
-            { id: "delete", label: t("action_delete"), danger: true, onSelect: () => setDatarcDeleteTarget(tool) },
-          ]}
-        />
-        <StatusToggle on={tool.status === "enabled"} busy={rowBusy === tool.id} label={t("toggle_datarc", { name: tool.display_name })} onToggle={() => void toggleDatarc(tool)} />
-      </div>)}
-
-      {shopifyEnabled ? <ShopifyToolSection tools={shopifyTools} createRequest={shopifyCreateRequest} onChanged={refresh} /> : null}
-      <PowerBiToolSection tools={powerbiTools} createRequest={powerbiCreateRequest} onChanged={refresh} />
-      <GoogleWorkspaceToolSection createRequest={googleCreateRequest} onAvailableChange={onGoogleAvailability} />
-
-      {data && data.length > 0 ? (
-        <div className="legacy-ai-tools-search ai-tools-search">
-          <span className="legacy-ai-tools-search-icon ai-tools-search-icon">
-            <Search size={15} />
-          </span>
-          <input
-            type="search"
-            name="tool_source_search"
-            autoComplete="off"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("search_ph")}
-            aria-label={t("search_ph")}
-            className="ui-input legacy-input-tools legacy-ai-tools-search-input ai-tools-search-input"
-          />
-        </div>
-      ) : null}
-
-      {oauthNotice ? (
-        <div className="legacy-ai-mb12">
-          <Notice tone={oauthNotice}>{oauthNotice === "success" ? t("oauth_success") : t("oauth_error")}</Notice>
-        </div>
-      ) : null}
-
-      {refreshNotice ? (
-        <div className="legacy-ai-mb12">
-          <Notice tone="success">
-            {t("refresh_success", {
-              name: refreshNotice.name,
-              added: refreshNotice.result.added.length,
-              removed: refreshNotice.result.removed.length,
-            })}
-            {(refreshNotice.result.changed?.length ?? 0) > 0
-              ? ` ${t("refresh_success_changed", { n: refreshNotice.result.changed?.length ?? 0 })}`
-              : ""}
-            {refreshNotice.result.paused_schedule_ids.length > 0
-              ? ` ${t("refresh_success_paused", { n: refreshNotice.result.paused_schedule_ids.length })}`
-              : ""}
-            {refreshNotice.offerChooseTools ? (
-              <span className="legacy-tools-notice-action">
-                {t("refresh_success_choose_hint")}{" "}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={(event) => {
-                    const current = data?.find((item) => item.id === refreshNotice.sourceId);
-                    if (current) openChooseTools(current, event.currentTarget, refreshNotice.result.added);
-                  }}
-                >
-                  {t("action_choose_tools")}
-                </Button>
-              </span>
-            ) : null}
-          </Notice>
-        </div>
-      ) : null}
-
-      {chooseNotice ? (
-        <div className="legacy-ai-mb12">
-          <Notice tone="success">
-            {t("choose_tools_success", { name: chooseNotice.name, n: chooseNotice.result.imported })}
-            {chooseNotice.result.paused_schedule_ids.length > 0
-              ? ` ${t("refresh_success_paused", { n: chooseNotice.result.paused_schedule_ids.length })}`
-              : ""}
-          </Notice>
-        </div>
-      ) : null}
-
-      {categoryNotice ? (
-        <div className="legacy-ai-mb12">
-          <Notice tone="success">{t("category_saved", { name: categoryNotice })}</Notice>
-        </div>
-      ) : null}
-
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      {busy && !data ? (
-        <LoadingSkeleton label={t("loading")} />
-      ) : filtered && filtered.length === 0 && (data?.length ?? 0) === 0 && builtinTools.length === 0 ? (
-        <EmptyState onNew={() => setCreateOpen(true)} />
-      ) : filtered ? (
-        <div className="legacy-ai-ds-list ai-card-list">
-          {filtered.map((s) => (
-            <SourceCard
-              key={s.id}
-              source={s}
-              expanded={expanded === s.id}
-              matchingOperationIds={operationMatches.get(s.id) ?? []}
-              validateState={validateStates[s.id]}
-              busy={rowBusy === s.id}
-              toggleRef={(node) => bindSourceToggle(s.id, node)}
-              onToggleExpand={() => setExpanded((e) => (e === s.id ? null : s.id))}
-              onToggleStatus={() => void onToggleStatus(s)}
-              onOpenUsage={() =>
-                setUsageTarget({ sourceId: s.id, title: s.name })
-              }
-              onOpenOperationUsage={(operationId) =>
-                setUsageTarget({
-                  sourceId: s.id,
-                  operationId,
-                  title: `${s.name} / ${operationId}`,
-                })
-              }
-              onValidate={() => void onValidate(s)}
-              onRefresh={(returnFocusTo) => {
-                refreshReturnFocusRef.current = returnFocusTo;
-                setRefreshNotice(null);
-                setChooseNotice(null);
-                setRefreshTarget(s);
-              }}
-              onChooseTools={(returnFocusTo) => openChooseTools(s, returnFocusTo)}
-              onConfirmCategories={toolConfirmationEnabled
-                ? (returnFocusTo) => {
-                  categoryReturnFocusRef.current = returnFocusTo;
-                  setCategoryNotice(null);
-                  setCategoryTarget(s);
-                }
-                : undefined}
-              onAuthorize={() => void onAuthorize(s)}
-              onEdit={() => setEditTarget(s)}
-              onDelete={() => {
-                if (s.impact_guard_enabled) void openImpactConfirmation(s, "delete");
-                else setLegacyDeleteTarget(s);
-              }}
-            />
-          ))}
-          {filtered.length === 0 ? <div className="legacy-ai-tools-nomatch ai-tools-nomatch">{t("no_match")}</div> : null}
-        </div>
-      ) : null}
+      <Tabs value={tab} onValueChange={(value) => setTab(value as ManagerTab)}>
+        <TabList appearance="underline" className="legacy-tools-tabs">
+          <Tab value="sources" className={tab === "sources" ? "is-active" : undefined}>
+            {t("tab_sources")}{data ? <span className="legacy-tools-tab-count">{data.length}</span> : null}
+          </Tab>
+          <Tab value="services" className={tab === "services" ? "is-active" : undefined}>
+            {t("tab_services")}{builtinLoaded ? <span className="legacy-tools-tab-count">{servicesCount}</span> : null}
+          </Tab>
+        </TabList>
+        {/* Both panels stay mounted: the service sections load their own state and read their callback notices once. */}
+        <TabPanel value="services" keepMounted as="section" className="legacy-tools-panel">
+          <div className="legacy-tools-panel-bar">
+            <p className="ui-section-desc legacy-tools-panel-desc">{t("services_desc")}</p>
+            <Button variant="secondary" onClick={() => setBuiltinPickerOpen(true)}>
+              <CharIconText ch="＋">{t("new_builtin")}</CharIconText>
+            </Button>
+          </div>
 
-      {/* Search filters built-ins too; customers need not know built-in versus external-source origin to find capability. */}
-      <BuiltinCapabilities query={query} />
+          {tavily ? <div className="legacy-ai-tools-builtin ai-tools-builtin">
+            <TavilyMark />
+            <div className="legacy-ai-flex1"><strong>Tavily</strong><div className="legacy-ai-tools-builtin-desc ai-tools-builtin-desc">{t("tavily_desc")}</div></div>
+            <RowActionsMenu
+              label={t("more_actions_for", { name: "Tavily" })}
+              actions={[{ id: "edit", label: t("action_edit"), onSelect: () => setTavilyConfigOpen(true) }]}
+            />
+            <StatusToggle on={tavily.status === "enabled"} busy={rowBusy === "tavily"} label={t("toggle_tavily")} onToggle={() => void toggleTavily()} />
+          </div> : null}
+
+          {datarcTools.map((tool) => <div key={tool.id} className={`legacy-ai-tools-builtin ai-tools-builtin${tool.status === "enabled" ? "" : " is-off"}`}>
+            <DatarcMark />
+            <div className="legacy-ai-flex1 legacy-ai-min0">
+              <strong>{tool.display_name}</strong>
+              <div className="legacy-ai-tools-builtin-desc is-clip ai-tools-builtin-desc">{tool.endpoint}{tool.key_hint ? ` · ${t("datarc_key_hint", { hint: tool.key_hint })}` : ""}</div>
+            </div>
+            <RowActionsMenu
+              label={t("more_actions_for", { name: tool.display_name })}
+              actions={[
+                { id: "edit", label: t("action_edit"), onSelect: () => openDatarcConfig(tool) },
+                { id: "delete", label: t("action_delete"), danger: true, onSelect: () => setDatarcDeleteTarget(tool) },
+              ]}
+            />
+            <StatusToggle on={tool.status === "enabled"} busy={rowBusy === tool.id} label={t("toggle_datarc", { name: tool.display_name })} onToggle={() => void toggleDatarc(tool)} />
+          </div>)}
+
+          {shopifyEnabled ? <ShopifyToolSection tools={shopifyTools} createRequest={shopifyCreateRequest} onChanged={refresh} /> : null}
+          <PowerBiToolSection tools={powerbiTools} createRequest={powerbiCreateRequest} onChanged={refresh} />
+          <GoogleWorkspaceToolSection createRequest={googleCreateRequest} onAvailableChange={onGoogleAvailability} />
+          {builtinLoaded && servicesCount === 0 ? <div className="legacy-ai-tools-nomatch ai-tools-nomatch">{t("services_empty")}</div> : null}
+        </TabPanel>
+
+        <TabPanel value="sources" keepMounted as="section" className="legacy-tools-panel">
+          <div className="legacy-tools-panel-bar">
+            <p className="ui-section-desc legacy-tools-panel-desc">
+              {data ? t("sources_count", { sources: data.length, tools: importedOperations }) : t("sources_desc")}
+            </p>
+            <Button variant="primary" onClick={() => setCreateOpen(true)}>
+              <CharIconText ch="＋">{t("new_source")}</CharIconText>
+            </Button>
+          </div>
+
+          {data && data.length > 0 ? (
+            <div className="legacy-ai-tools-search ai-tools-search">
+              <span className="legacy-ai-tools-search-icon ai-tools-search-icon">
+                <Search size={15} />
+              </span>
+              <input
+                type="search"
+                name="tool_source_search"
+                autoComplete="off"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("search_ph")}
+                aria-label={t("search_ph")}
+                className="ui-input legacy-input-tools legacy-ai-tools-search-input ai-tools-search-input"
+              />
+            </div>
+          ) : null}
+
+          {oauthNotice ? (
+            <div className="legacy-ai-mb12">
+              <Notice tone={oauthNotice.status === "error" ? "error" : oauthNotice.reason ? "info" : "success"}>
+                {oauthNotice.status === "error"
+                  ? t(oauthNotice.reason === "denied" ? "oauth_denied" : oauthNotice.reason === "expired" ? "oauth_expired" : "oauth_error")
+                  : oauthNeedsRefresh
+                    ? t(oauthNotice.reason === "no_tools" ? "oauth_no_tools" : "oauth_discovery_failed")
+                    : oauthChooseNext
+                      ? t("oauth_success_choose", { name: oauthNoticeSource.name })
+                      : t("oauth_success")}
+                {oauthNoticeAction ? (
+                  <span className="legacy-tools-notice-action">
+                    <Button size="sm" variant="secondary" onClick={(event) => oauthNoticeAction.open(event.currentTarget)}>
+                      {t(oauthNoticeAction.label)}
+                    </Button>
+                  </span>
+                ) : null}
+              </Notice>
+            </div>
+          ) : null}
+
+          {refreshNotice ? (
+            <div className="legacy-ai-mb12">
+              <Notice tone="success">
+                {t("refresh_success", {
+                  name: refreshNotice.name,
+                  added: refreshNotice.result.added.length,
+                  removed: refreshNotice.result.removed.length,
+                })}
+                {(refreshNotice.result.changed?.length ?? 0) > 0
+                  ? ` ${t("refresh_success_changed", { n: refreshNotice.result.changed?.length ?? 0 })}`
+                  : ""}
+                {refreshNotice.result.paused_schedule_ids.length > 0
+                  ? ` ${t("refresh_success_paused", { n: refreshNotice.result.paused_schedule_ids.length })}`
+                  : ""}
+                {refreshNotice.offerChooseTools ? (
+                  <span className="legacy-tools-notice-action">
+                    {t("refresh_success_choose_hint")}{" "}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        const current = data?.find((item) => item.id === refreshNotice.sourceId);
+                        if (current) openChooseTools(current, event.currentTarget, refreshNotice.result.added);
+                      }}
+                    >
+                      {t("action_choose_tools")}
+                    </Button>
+                  </span>
+                ) : null}
+              </Notice>
+            </div>
+          ) : null}
+
+          {chooseNotice ? (
+            <div className="legacy-ai-mb12">
+              <Notice tone="success">
+                {t("choose_tools_success", { name: chooseNotice.name, n: chooseNotice.result.imported })}
+                {chooseNotice.result.paused_schedule_ids.length > 0
+                  ? ` ${t("refresh_success_paused", { n: chooseNotice.result.paused_schedule_ids.length })}`
+                  : ""}
+              </Notice>
+            </div>
+          ) : null}
+
+          {categoryNotice ? (
+            <div className="legacy-ai-mb12">
+              <Notice tone="success">{t("category_saved", { name: categoryNotice })}</Notice>
+            </div>
+          ) : null}
+
+          {busy && !data ? (
+            <LoadingSkeleton label={t("loading")} />
+          ) : filtered && filtered.length === 0 && (data?.length ?? 0) === 0 ? (
+            <EmptyState />
+          ) : filtered ? (
+            <div className="legacy-ai-ds-list ai-card-list">
+              {filtered.map((s) => (
+                <SourceCard
+                  key={s.id}
+                  source={s}
+                  expanded={expanded === s.id}
+                  matchingOperationIds={operationMatches.get(s.id) ?? []}
+                  validateState={validateStates[s.id]}
+                  busy={rowBusy === s.id}
+                  toggleRef={(node) => bindSourceToggle(s.id, node)}
+                  onToggleExpand={() => setExpanded((e) => (e === s.id ? null : s.id))}
+                  onToggleStatus={() => void onToggleStatus(s)}
+                  onOpenUsage={() =>
+                    setUsageTarget({ sourceId: s.id, title: s.name })
+                  }
+                  onOpenOperationUsage={(operationId) =>
+                    setUsageTarget({
+                      sourceId: s.id,
+                      operationId,
+                      title: `${s.name} / ${operationId}`,
+                    })
+                  }
+                  onValidate={() => void onValidate(s)}
+                  onRefresh={(returnFocusTo) => openRefresh(s, returnFocusTo)}
+                  onChooseTools={(returnFocusTo) => openChooseTools(s, returnFocusTo)}
+                  onConfirmCategories={toolConfirmationEnabled
+                    ? (returnFocusTo) => {
+                      categoryReturnFocusRef.current = returnFocusTo;
+                      setCategoryNotice(null);
+                      setCategoryTarget(s);
+                    }
+                    : undefined}
+                  onN8nWorkflows={s.n8n_workflows
+                    ? (returnFocusTo) => {
+                      n8nReturnFocusRef.current = returnFocusTo;
+                      setN8nTarget(s);
+                    }
+                    : undefined}
+                  onAuthorize={() => openAuthorize(s)}
+                  onEdit={() => setEditTarget(s)}
+                  onDelete={() => {
+                    if (s.impact_guard_enabled) void openImpactConfirmation(s, "delete");
+                    else setLegacyDeleteTarget(s);
+                  }}
+                />
+              ))}
+              {filtered.length === 0 ? <div className="legacy-ai-tools-nomatch ai-tools-nomatch">{t("no_match")}</div> : null}
+            </div>
+          ) : null}
+        </TabPanel>
+      </Tabs>
+
 
       {createOpen ? (
         <DialogShell
@@ -1411,6 +1448,32 @@ export function ToolsManager() {
         />
       ) : null}
 
+      {authorizeTarget ? (
+        <Dialog
+          title={t("oauth_authorize_title", { name: authorizeTarget.name })}
+          onClose={() => setAuthorizeTarget(null)}
+          busy={rowBusy === authorizeTarget.id}
+          footer={
+            <>
+              <Button data-dialog-initial-focus="" onClick={() => setAuthorizeTarget(null)} disabled={rowBusy === authorizeTarget.id}>{t("cancel")}</Button>
+              <Button variant="primary" onClick={() => void onAuthorize(authorizeTarget)} disabled={rowBusy === authorizeTarget.id}>
+                {t("action_authorize")}
+              </Button>
+            </>
+          }
+        >
+          <p>{t("oauth_shared_access")}</p>
+          {authorizeError ? (
+            <Notice tone="error">
+              {t(authorizeError)}
+              {authorizeError === "oauth_callback_rejected" ? (
+                <> <a href={appPath(teamSettingsPath("public-entries"))} target="_blank" rel="noreferrer">{t("oauth_public_entry_action")}</a></>
+              ) : null}
+            </Notice>
+          ) : null}
+        </Dialog>
+      ) : null}
+
       {chooseTarget ? (
         <SourceToolSelectionDialog
           source={chooseTarget.source}
@@ -1431,6 +1494,15 @@ export function ToolsManager() {
             setCategoryTarget(null);
             void refresh();
           }}
+        />
+      ) : null}
+
+      {n8nTarget ? (
+        <SourceN8nWorkflowsDialog
+          source={n8nTarget}
+          returnFocusRef={n8nReturnFocusRef}
+          onClose={() => setN8nTarget(null)}
+          onChanged={() => void refresh()}
         />
       ) : null}
 
@@ -1526,15 +1598,12 @@ function ImpactDescription({ pending }: { pending: PendingImpact }) {
   );
 }
 
-function EmptyState({ onNew }: { onNew: () => void }) {
+function EmptyState() {
   const t = useTranslations("settings.tools");
   return (
     <div className="legacy-ai-tools-empty ai-tools-empty">
       <div className="legacy-ai-tools-empty-title ai-tools-empty-title">{t("empty_title")}</div>
       <div className="legacy-ai-tools-empty-sub ai-tools-empty-sub">{t("empty_sub")}</div>
-      <Button variant="primary" onClick={onNew}>
-        <CharIconText ch="＋">{t("new_source")}</CharIconText>
-      </Button>
     </div>
   );
 }

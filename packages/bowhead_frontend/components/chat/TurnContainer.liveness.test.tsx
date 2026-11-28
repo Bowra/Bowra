@@ -110,8 +110,8 @@ describe("TurnContainer · UX-2 MidTurnLivenessNote", () => {
     );
     // Click band = request details → bandMode off → return to trace layout.
     fireEvent.click(container.querySelector('[data-testid="running-band-bar"]') as HTMLElement);
-    // Yielding means the **three rows** give way to full trace (disclosure band stays as collapse entry since 2026-08-15).
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    // Yielding means the card body gives way to full trace (disclosure band stays as collapse entry since 2026-08-15).
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     const note = screen.getByTestId("midturn-liveness-note");
     expect(note.textContent).toMatch(/仍在运行/);
     expect(note.textContent).toMatch(/4[45] 秒/);

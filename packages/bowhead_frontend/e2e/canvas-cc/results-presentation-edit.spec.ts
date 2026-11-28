@@ -53,6 +53,7 @@ function slidePdf(lines: string[], table = false, pages = 1): Buffer {
 function inventory(id: string, version: number, title: string, table = false, chart = false, pages = 1) {
   return {
     artifact_id: id, version_no: version, edit_mode: "version", slide_width: 12192000, slide_height: 6858000, field_token: "￼",
+    file: { filename: "Board.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", size: 4096 },
     slides: [{ slide_id: 256, index: 1, inherited_text: false, elements: [
       { key: "256:2", shape_id: 2, name: "Title 1", kind: "text", box: [0.05, 0.08, 0.6, 0.12], editable: true, reason: null,
         paragraphs: [{ text: title, mixed_style: false, fields: 0 }] },
@@ -235,6 +236,8 @@ test("a table cell is edited on the slide where it is drawn", async ({ page }) =
   await table.click();
   await expect(editor.locator("input[data-armed]")).toBeFocused();
   await expect(editor.locator("aside").getByText(copy.in_place_table_hint)).toBeVisible();
+  // The cell that takes typing is outlined (design §13.7).
+  await expect(editor.locator("[class*='cellTarget']")).toBeVisible();
 
   // A second click opens the cell under the pointer: 「2,905」 in row 2, column 2.
   // Selected, the table's hit leaves the accessibility tree for its field; it is found by its key.
@@ -252,10 +255,11 @@ test("a table cell is edited on the slide where it is drawn", async ({ page }) =
   await expect(editor.locator("[data-painted='cell']", { hasText: "3,050" })).toBeVisible();
   await expect(editor.getByText("1 处未保存的修改")).toBeVisible();
 
-  // Typing on the selected table continues in the cell it was in, at the end; Shift+Tab moves back.
-  await page.keyboard.type("0");
+  // Typing on the selected table continues in the cell it was in: a number is typed over, as in a
+  // spreadsheet (design §13.7); Shift+Tab moves back to a text cell, where typing appends.
+  await page.keyboard.type("3,100");
   await expect(cell).toBeFocused();
-  await expect(cell).toHaveValue("3,0500");
+  await expect(cell).toHaveValue("3,100");
   await page.keyboard.press("Shift+Tab");
   const previous = editor.getByRole("textbox", { name: /第 2 行第 1 列 · Line$/ });
   await expect(previous).toBeFocused();
@@ -264,6 +268,36 @@ test("a table cell is edited on the slide where it is drawn", async ({ page }) =
   await page.keyboard.press("Escape");
   await expect(editor.getByText("2 处未保存的修改")).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("9-cells-painted.png") });
+});
+
+test("Tab reaches a table's first data cell, and a digit on a chart lands in its first value", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDeck(page, { table: true, chart: true });
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  const editor = page.getByTestId("presentation-editor");
+  await expect(editor.locator("[data-layout-ready]")).toHaveCount(1);
+
+  // Tab from the title onto the table selects its first data cell, past the header row.
+  await editor.locator('[data-element-key="256:2"]').click();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
+  const armed = editor.locator("input[data-armed]");
+  await expect(armed).toBeFocused();
+  await expect(armed).toHaveValue("B");
+
+  // A digit typed on the selected chart opens its data with that digit as the first value.
+  const chart = editor.getByRole("button", { name: /^图表数据：/ });
+  await chart.click();
+  await page.keyboard.type("1");
+  const popover = editor.getByRole("dialog", { name: /Sales chart/ });
+  const first = popover.getByRole("textbox", { name: /Jan/ });
+  await expect(first).toBeFocused();
+  await page.keyboard.type("000");
+  await expect(first).toHaveValue("1000");
+  await page.keyboard.press("Escape");
+  // The changed value is written on the chart until the new render draws it.
+  await expect(editor.locator("[data-painted='chart']")).toHaveText("Jan 905 → 1,000");
+  await page.screenshot({ path: test.info().outputPath("10-chart-marks.png") });
 });
 
 test("an input method types on a selected box from its first key", async ({ page }) => {
@@ -293,20 +327,20 @@ test("an input method types on a selected box from its first key", async ({ page
   await expect(title).toHaveValue("Quarterly review环比");
   await page.keyboard.press("Escape");
 
-  // Tab selects the next element, and the table takes the composition in its first cell. Keys
+  // Tab selects the next element, and the table takes the composition in its first data cell. Keys
   // pressed while composing belong to the input method: ArrowDown does not move to the next row.
   await page.keyboard.press("Tab");
   await expect(editor.locator('[data-element-key="256:3"]')).toHaveAttribute("aria-pressed", "true");
   await client.send("Input.imeSetComposition", { text: "bei", selectionStart: 3, selectionEnd: 3 });
-  const first = editor.getByRole("textbox", { name: /第 1 行第 1 列$/ });
+  const first = editor.getByRole("textbox", { name: /第 2 行第 1 列 · Line$/ });
   await page.keyboard.press("ArrowDown");
   await expect(first).toBeFocused();
   await client.send("Input.insertText", { text: "北" });
-  await expect(first).toHaveValue("Line北");
+  await expect(first).toHaveValue("B北");
   // Backspace on a selection changes nothing; the next Esc clears it.
   await page.keyboard.press("Escape");
   await page.keyboard.press("Backspace");
-  await expect(editor.locator("[data-painted='cell']", { hasText: "Line北" })).toBeVisible();
+  await expect(editor.locator("[data-painted='cell']", { hasText: "B北" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(editor.getByRole("button", { name: /^表格：.* · 未保存的第 2 处修改$/ })).toBeFocused();
   await expect(editor.getByRole("button", { name: /^表格：/ })).toHaveAttribute("aria-pressed", "false");
@@ -420,6 +454,37 @@ test("several pages of a deck gather in one Composer chip and are sent as one re
   await expect(pageButton(3)).toHaveAttribute("aria-pressed", "false");
 });
 
+test("a page set loses one page at a time, and an element reference says which pages it replaced", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDeck(page, { pages: 3 });
+  const pageButton = (number: number) => page.getByRole("button", { name: new RegExp(`^(引用这一页|已引用) · 第 ${number} 页$`) });
+  await pageButton(1).click();
+  await pageButton(2).click();
+  await pageButton(3).click();
+  await expect(page.getByText("第 1、2、3 页", { exact: true }).first()).toBeVisible();
+
+  // The chip lists its pages; one can go on its own (design §13.7).
+  await page.getByRole("button", { name: "查看引用的页" }).click();
+  await page.getByRole("menuitem", { name: "取消引用第 2 页" }).click();
+  await expect(page.getByText("第 1、3 页", { exact: true }).first()).toBeVisible();
+  await expect(pageButton(2)).toHaveAttribute("aria-pressed", "false");
+
+  // In the editor, the header counts the pages; referencing an element stays in the editor and says what it replaced.
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  const editor = page.getByTestId("presentation-editor");
+  await expect(editor.getByText("已引用 2 页", { exact: true })).toBeVisible();
+  await editor.locator('[data-element-key="256:2"]').click();
+  await editor.getByRole("button", { name: copy.reference_element, exact: true }).click();
+  const replaced = page.getByText(/^已改为引用「.+」，第 1、3 页的引用已取消$/);
+  await expect(replaced).toBeVisible();
+  await expect(editor).toBeVisible();
+  await expect(page.getByText(/^第 1 页 · /).first()).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("13-element-replaced-pages.png") });
+  await page.getByRole("button", { name: messages.artifact_viewer.undo, exact: true }).click();
+  await expect(page.getByText("第 1、3 页", { exact: true }).first()).toBeVisible();
+  await expect(editor.getByText("已引用 2 页", { exact: true })).toBeVisible();
+});
+
 test("entering edit mode puts focus on the page, so PageDown turns it at once", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openDeck(page, { pages: 3 });
@@ -428,6 +493,17 @@ test("entering edit mode puts focus on the page, so PageDown turns it at once", 
   await expect(editor.getByRole("group", { name: "编辑模式 · 第 1 / 3 页" })).toBeFocused();
   await page.keyboard.press("PageDown");
   await expect(editor.locator('[data-rail-page="2"]')).toHaveAttribute("aria-current", "page");
+  // Started from the Results panel, 「退出编辑」 is the one way out (design §13.7).
+  await expect(editor.getByRole("button", { name: copy.close_full_view })).toHaveCount(0);
+  await editor.getByRole("button", { name: copy.exit, exact: true }).click();
+  await expect(editor).toHaveCount(0);
+
+  // Started in the full view, its header can also close the full view.
+  await page.getByRole("button", { name: messages.artifact_viewer.open_full }).first().click();
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  await expect(editor.getByRole("button", { name: copy.close_full_view })).toBeVisible();
+  await editor.getByRole("button", { name: copy.exit, exact: true }).click();
+  await expect(page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true })).toBeVisible();
 });
 
 test("on a phone, referencing pages stays on Results and a toast leads to the chat", async ({ page }) => {
@@ -465,9 +541,14 @@ test("the narrow desktop layout swaps the page rail for a page switcher", async 
   await expect(editor.getByRole("button", { name: /^表格：.* · 未保存的第 1 处修改$/ })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: messages.canvas_object.guard_keep, exact: true })).toBeVisible();
+  // The guard says 「退出编辑」 and counts the changes (design §13.7).
+  await expect(page.getByText("「Board.pptx」的 1 处修改还没保存，退出后会丢失。已保存的版本不受影响。")).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("7-leave-guard.png") });
   await page.getByRole("button", { name: messages.canvas_object.guard_keep, exact: true }).click();
   await expect(editor).toBeVisible();
+  // Below 1024 px the list sits under the slide, and the guide says so.
+  await page.setViewportSize({ width: 960, height: 800 });
+  await expect(editor.getByText(copy.guide_text_below)).toBeVisible();
 });
 
 test("on a phone the slides are a list and elements are edited in sheets", async ({ page }) => {
@@ -488,12 +569,16 @@ test("on a phone the slides are a list and elements are edited in sheets", async
   const sheet = page.getByRole("dialog", { name: "Quarterly review" });
   const field = sheet.getByRole("textbox", { name: copy.text_label });
   await expect(field).toBeVisible();
+  // The sheet focuses its panel; the keyboard waits until a field is chosen (design §13.7).
+  await expect(field).not.toBeFocused();
   expect(await field.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
   await field.fill("Quarterly review 2026");
   await page.screenshot({ path: test.info().outputPath("10-phone-text-sheet.png") });
   await sheet.getByRole("button", { name: copy.done, exact: true }).click();
   await expect(sheet).toHaveCount(0);
   await expect(editor.getByText("1 处已改，未保存")).toBeVisible();
+  // A phone paints no text on the slide, so the change is written under it.
+  await expect(editor.getByText("改为「Quarterly review 2026」")).toBeVisible();
 
   await editor.getByRole("button", { name: copy.save_version, exact: true }).click();
   await expect(editor.getByText("已保存为第 2 版", { exact: false }).first()).toBeVisible();
@@ -522,9 +607,100 @@ test("a newer version while editing keeps the editor and its edits, and the save
   await expect(editor.getByText(/AI 在 .* 把这份文件存成了第 2 版（对话「把第 2 页的标题改成区域明细」）/)).toBeVisible();
   await expect(editor.getByText(copy.conflict_applicable, { exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("12-conflict.png") });
+  // The painted edit stays on the slide during the conflict.
+  await expect(editor.locator('[data-element-key="256:3"]')).toHaveAttribute("data-pending", "true");
   await editor.getByRole("button", { name: "在第 2 版上重新套用 1 处" }).click();
   await expect(editor.getByText("已在第 2 版上套用 1 处修改，还没保存。")).toBeVisible();
   await editor.getByRole("button", { name: copy.save_version, exact: true }).click();
   await expect(editor.getByText("已保存为第 3 版", { exact: false }).first()).toBeVisible();
   expect(state.saved).toMatchObject({ artifact_id: "art_deck_2", edits: [{ kind: "cell", text: "3,050", expect: "2,905" }] });
 });
+
+// The shared editor shell (PPT design §13.8, canvas Google 式排列), behind FEATURE_DOCX_INLINE_EDIT.
+async function enableShell(page: Page) {
+  await page.route("**/api/v1/auth/me", async (route: Route) => {
+    const response = await route.fetch();
+    const body = await response.json() as { capabilities?: Record<string, unknown> };
+    await route.fulfill({ response, json: { ...body, capabilities: { ...(body.capabilities ?? {}), docx_inline_edit: true } } });
+  });
+}
+
+const shellCopy = messages.edit_shell;
+
+test("in the editor shell, a deck is edited on the slide, saved from the top bar and listed in 修改记录", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await enableShell(page);
+  const state = await openDeck(page, { table: true, pages: 3 });
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  const editor = page.getByTestId("presentation-editor");
+  await expect(editor.getByRole("toolbar", { name: shellCopy.toolbar_label })).toBeVisible();
+  await expect(editor.getByRole("navigation", { name: copy.pages })).toBeVisible();
+  // Panels are closed by default; nothing sits permanently beside the slide.
+  await expect(editor.getByRole("complementary")).toHaveCount(0);
+  await expect(editor.locator("[data-layout-ready]")).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("shell-1-idle.png") });
+
+  await editor.getByRole("button", { name: /^文字：Quarterly review/ }).click();
+  await expect(editor.getByRole("group", { name: /^选中的内容：文字/ })).toBeVisible();
+  await editor.locator('[data-element-key="256:2"]').click();
+  const field = editor.getByRole("textbox", { name: "文字：Quarterly review" });
+  await field.fill("Quarterly review for the whole year");
+  await page.keyboard.press("Escape");
+  await expect(editor.getByRole("status").filter({ hasText: "1 处未保存的修改" })).toBeVisible();
+  await expect(editor.getByRole("button", { name: shellCopy.rail_changes_count.replace("{count}", "1") })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("shell-2-text.png") });
+
+  await editor.getByRole("button", { name: shellCopy.rail_changes_count.replace("{count}", "1") }).click();
+  const panel = editor.getByRole("complementary", { name: new RegExp(shellCopy.panel_changes) });
+  await expect(panel.getByText("Quarterly review for the whole year")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("shell-3-changes.png") });
+
+  await editor.getByRole("button", { name: copy.save_version, exact: true }).click();
+  await expect(editor.getByRole("button", { name: copy.edit_again, exact: true })).toBeFocused();
+  await expect(editor.getByText("已保存为第 2 版", { exact: false }).first()).toBeVisible();
+  expect(state.saved).toEqual({
+    artifact_id: "art_deck_1",
+    edits: [{ kind: "text", key: "256:2", paragraph: 0, text: "Quarterly review for the whole year", expect: "Quarterly review" }],
+  });
+  await page.screenshot({ path: test.info().outputPath("shell-4-saved.png") });
+});
+
+test("in the editor shell, a refused save opens 修改记录 with the newer version's facts and keeps the edits", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await enableShell(page);
+  const state = await openDeck(page);
+  state.conflictOnce = true;
+  await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+  const editor = page.getByTestId("presentation-editor");
+  await expect(editor.locator("[data-layout-ready]")).toHaveCount(1);
+  await editor.getByRole("button", { name: /^文字：Quarterly review/ }).click();
+  await editor.locator('[data-element-key="256:2"]').click();
+  await editor.getByRole("textbox", { name: "文字：Quarterly review" }).fill("Quarterly review, revised");
+  await page.keyboard.press("Escape");
+  await editor.getByRole("button", { name: copy.save_version, exact: true }).click();
+  const panel = editor.getByRole("complementary", { name: new RegExp(shellCopy.panel_changes) });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("把第 2 页的标题改成区域明细", { exact: false })).toBeVisible();
+  await expect(editor.getByRole("button", { name: copy.discard_mine, exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("shell-5-conflict.png") });
+});
+
+for (const width of [1100, 960]) {
+  test(`in the editor shell at ${width} px, an open panel pushes the page and hides the page strip`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await enableShell(page);
+    await openDeck(page, { pages: 3 });
+    await page.getByRole("button", { name: messages.artifact_viewer.edit_presentation, exact: true }).click();
+    const editor = page.getByTestId("presentation-editor");
+    await expect(editor.locator("[data-layout-ready]")).toHaveCount(1);
+    await editor.getByRole("button", { name: shellCopy.panel_items, exact: true }).click();
+    await expect(editor.getByRole("complementary", { name: new RegExp(shellCopy.panel_items) })).toBeVisible();
+    await expect(editor.getByRole("navigation", { name: copy.pages })).toHaveCount(0);
+    await expect(editor.getByRole("button", { name: shellCopy.next_page })).toBeVisible();
+    // Editing still happens on the slide, which shrank to fit beside the panel.
+    const slide = await editor.getByRole("img", { name: "Board.pptx · 第 1 页" }).boundingBox();
+    const panel = await editor.getByRole("complementary").boundingBox();
+    expect((slide?.x ?? 0) + (slide?.width ?? 0)).toBeLessThanOrEqual(panel?.x ?? 0);
+    await page.screenshot({ path: test.info().outputPath(`shell-6-narrow-${width}.png`) });
+  });
+}

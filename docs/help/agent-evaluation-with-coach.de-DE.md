@@ -23,6 +23,17 @@ Unter **Bewerten** können Sie jeden Fall entfernen, auch den letzten, und ansch
 
 Fehlende eigene Testfälle verhindern die Veröffentlichung nicht und erfordern keine Begründung. Die Seite und die Prüfung freigegebener Agents weisen darauf hin, dass die Antwortqualität nicht bewertet wurde. Andere Sicherheitsprüfungen, tatsächliche Testfehler und die Prüfung freigegebener Agents gelten weiterhin.
 
+### Testfälle auf der neuen Agent-Seite
+
+Wenn Ihr Team die neue Agent-Seite nutzt, heißt der Tab **Evaluieren** jetzt **Testfälle**, und die einzige Testschaltfläche ist **Diese Änderung testen** in der Veröffentlichungsleiste. Von oben nach unten:
+
+- **Letzter Test**: wann er lief, was verglichen wurde (der Entwurf mit welcher veröffentlichten Version), wie viele Ihrer eigenen Testfälle besser, gleich oder schlechter wurden, und die grundlegende Sicherheitsprüfung als eigene Zeile. Wurde der Entwurf danach geändert, steht dort, dass er noch nicht getestet ist. **Alle Ergebnisse ansehen** öffnet die Details unter **Versionen**; nach einer Veröffentlichung verweist die Karte auf den Versionsverlauf.
+- Ein Satz dazu, wie Testfälle verwendet werden; die grundlegende Sicherheitsprüfung läuft immer mit.
+- **Vorschläge zum Übernehmen**: von Coach, KI oder aus Unterhaltungen vorgeschlagene Testfälle stehen hier statt unter **Konfigurieren**; der Tab zeigt ihre Anzahl. Solange die Testfälle ungespeicherte Änderungen haben, können Sie nichts übernehmen.
+- **Die Gruppe**: Das Menü **Testfall hinzufügen** enthält Selbst schreiben, Aus Unterhaltungen entwerfen und Testfälle automatisch vorschlagen. Das „⋯“ der Gruppe enthält **Auf veröffentlichter vN testen**, die letzten Ergebnisse, die Sicherheitsprüfung allein, das erneute Ausführen nach wichtigen Änderungen und das Aktualisieren auf die aktuellen Standards.
+
+Änderungen an Testfällen werden in der Gruppe selbst gespeichert (**Änderungen verwerfen** / **Testfälle speichern**). Mit ungespeicherten Änderungen fragt **Diese Änderung testen** zuerst: **Speichern und testen** oder **Nur mit gespeicherten Testfällen testen**. Beim Verlassen der Seite mit ungespeicherten Testfällen werden Sie gewarnt.
+
 ## Coachs Urteile prüfen
 
 Die Prüfkarte listet einige Antworten. Jede Zeile zeigt die Frage, einen Ausschnitt der Antwort mit dem hervorgehobenen Satz, auf den sich Coach stützt, und Coachs Schluss.

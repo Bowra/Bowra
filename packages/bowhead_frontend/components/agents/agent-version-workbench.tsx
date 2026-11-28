@@ -1,6 +1,6 @@
 "use client";
 
-import { AGENT_PENDING_ANCHOR } from "@/lib/agent-case-proposal-path";
+import { AGENT_PENDING_ANCHOR, AGENT_PENDING_CASES_ANCHOR } from "@/lib/agent-case-proposal-path";
 
 /**
  * Agent version workbench: change proposals and Validate and release › Release check (Claude Design
@@ -12,7 +12,7 @@ import { AGENT_PENDING_ANCHOR } from "@/lib/agent-case-proposal-path";
  * phone get the narrow layout while the full page keeps the wide one at the same viewport.
  */
 
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -31,6 +31,7 @@ import {
   getAgentVersionWorkbench,
   handleAgentMemberFeedback,
   type AgentChangeProposal,
+  type AgentDraftChange,
   type AgentMemberFeedback,
   type AgentEvalSuite,
   type AgentSuggestedCaseSpec,
@@ -38,7 +39,15 @@ import {
   type AgentWorkingCopyValue,
 } from "@/lib/agents-api";
 import { ApiError } from "@/lib/api-client";
-import { draftFieldLabelKey, pendingProposals, type AgentConfigSectionKey } from "@/lib/agent-draft-changes";
+import {
+  draftFieldLabelKey,
+  isCaseOnlyProposal,
+  pendingFieldProposals,
+  pendingProposals,
+  type AgentConfigSectionKey,
+} from "@/lib/agent-draft-changes";
+import { isAiOptimizeProposal } from "@/lib/agent-optimize";
+import { coachProposalIds, useAiOptimizedProposalIds } from "@/lib/use-ai-optimized-proposals";
 import { releaseResultAt } from "@/lib/agent-release-seen";
 import { agentCiMerges, isCiProposal, recordCiMerge, settleCiMerges, useCiMerges, waitingCiMerges } from "@/lib/agent-ci-merges";
 import { MISSING, previewAtomicGroup, proposalDocument, type FieldDiff, type PointerValue, type ProposalBaseDocument } from "@/lib/agent-proposal-operations";
@@ -104,7 +113,54 @@ function toggleAtomicGroup(
 }
 
 /** First line of a proposal's rationale, for undo toasts ("Dismissed Coach proposal “…”"). */
-export { AGENT_PENDING_ANCHOR } from "@/lib/agent-case-proposal-path";
+export { AGENT_PENDING_ANCHOR, AGENT_PENDING_CASES_ANCHOR } from "@/lib/agent-case-proposal-path";
+
+function isMissingValue(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && (value as { state?: unknown }).state === "missing");
+}
+
+function isOmittedValue(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "hash" in value && "size" in value);
+}
+
+/** A text field of a document by its `/root/field` pointer; "" when unset, null when it is not text. */
+function pointerText(document: ProposalBaseDocument | null | undefined, path: string): string | null {
+  if (!document) return null;
+  const [, root, field] = path.split("/");
+  const section = (document as unknown as Record<string, unknown>)[root];
+  if (!section || typeof section !== "object") return null;
+  const value = (section as Record<string, unknown>)[field];
+  if (value === undefined || value === null) return "";
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * 对比 on Coach's strip: Coach's before → after when the change list carries both as text. A long value arrives as
+ * a hash only, so the dialog then compares the released text with the saved draft and says so.
+ */
+function coachCompareView(
+  row: AgentDraftChange,
+  released: ProposalBaseDocument | null,
+  workingCopy: ProposalBaseDocument | null,
+  documentsNote: string,
+): ReactNode | null {
+  const coach = row.coach;
+  if (!coach) return null;
+  const text = (value: unknown): string | null => typeof value === "string" ? value : isMissingValue(value) || value === null || value === undefined ? "" : null;
+  const before = text(coach.before);
+  const after = text(coach.value);
+  if (before !== null && after !== null && (typeof coach.before === "string" || typeof coach.value === "string")) {
+    return <TextDiff row={{ kind: "text", path: row.path, before, after }} />;
+  }
+  if (isOmittedValue(coach.before) || isOmittedValue(coach.value)) {
+    const liveText = pointerText(released, row.path);
+    const draftText = pointerText(workingCopy ?? released, row.path);
+    if (liveText !== null && draftText !== null) {
+      return <><p className="am-ci-note">{documentsNote}</p><TextDiff row={{ kind: "text", path: row.path, before: liveText, after: draftText }} /></>;
+    }
+  }
+  return null;
+}
 
 
 function proposalName(proposal: AgentChangeProposal): string {
@@ -149,6 +205,13 @@ export function AgentVersionWorkbenchPanel({
   onAddCases,
   onTestState,
   releaseBar = null,
+  onWorkbench,
+  refreshKey = 0,
+  proposalsSlot = null,
+  casesDirtyCount = 0,
+  onCasesAccepted,
+  lastReleaseTest = null,
+  layout = "legacy",
 }: {
   agentId: string;
   agentName: string;
@@ -172,7 +235,7 @@ export function AgentVersionWorkbenchPanel({
   onChanged: () => Promise<void>;
   /** Page-level load failure only; action failures stay in the card that caused them. */
   onError: (message: string, cause?: unknown) => void;
-  onOpenConfig?: () => void;
+  onOpenConfig?: (section?: "does" | "uses" | "who" | "more") => void;
   onOpenEvaluate?: () => void;
   onOpenHistory?: () => void;
   /** Open the Release tab (from a merged CI proposal and the Evaluate tab's release-check result). */
@@ -192,9 +255,27 @@ export function AgentVersionWorkbenchPanel({
   onTestState?: (state: TestChangeState) => void;
   /** FEATURE_AGENT_RELEASE_BAR: the release bar's host; every view then renders the bar above the tabs. */
   releaseBar?: ReleaseBarHost | null;
+  /** Every workbench read, for what the page shows outside these views (field chips, AI 优化, the cases chip). */
+  onWorkbench?: (workbench: AgentVersionWorkbench) => void;
+  /** Bumped by the page after it changed the draft or a proposal on its own (AI 优化): reread the workbench. */
+  refreshKey?: number;
+  /** FEATURE_AGENT_RELEASE_BAR: Configure › 更多设置 › 待处理的建议, where field proposals and thumbs-downs render. */
+  proposalsSlot?: HTMLElement | null;
+  /** 测试用例: unsaved edits in the suite editor; accepting suggested cases waits until they are saved (S13). */
+  casesDirtyCount?: number;
+  /** 测试用例: suggested cases were accepted, so the suite editor takes the new revision. */
+  onCasesAccepted?: () => void;
+  /** The latest release's test, for the 最近一次测试 card after a release (S12). */
+  lastReleaseTest?: { sequence: number } | null;
+  /**
+   * "v2" (FEATURE_AGENT_RELEASE_BAR): Coach's changes head Configure on the full page too, field proposals move to
+   * 更多设置 (`proposalsSlot`), suggested cases to 测试用例, and AI 优化's own result stays out of both lists.
+   */
+  layout?: "legacy" | "v2";
 }) {
   const t = useTranslations("agents_marketplace");
   const [workbench, setWorkbench] = useState<AgentVersionWorkbench | null>(null);
+  const redesigned = layout === "v2";
   // Why there is no workbench yet: still loading, not offered for this Agent (404, e.g. archived), or a failed load.
   // Only `loading` shows the skeleton; the other two settle into a visible state instead of an endless skeleton.
   const [loadState, setLoadState] = useState<"loading" | "ready" | "unavailable" | "failed">("loading");
@@ -205,7 +286,11 @@ export function AgentVersionWorkbenchPanel({
       settleCiMerges(agentId, result);
       setWorkbench(result);
       setLoadState("ready");
-      const pending = pendingProposals(result.change_proposals ?? []).filter((proposal) => proposal.status === "open").length
+      onWorkbench?.(result);
+      // The redesigned page counts field proposals only: suggested cases have their own chip on 测试用例.
+      const pending = (redesigned
+        ? pendingFieldProposals(result.change_proposals ?? []).length
+        : pendingProposals(result.change_proposals ?? []).filter((proposal) => proposal.status === "open").length)
         + (result.member_feedback?.length ?? 0);
       onPendingCount?.(pending);
       onResultWaiting?.(releaseResultAt(result));
@@ -224,7 +309,7 @@ export function AgentVersionWorkbenchPanel({
       onAvailability("enabled");
       if (!quiet) onError(withHttpFailureReason(t("version_load_failed"), cause, { read: true }), cause);
     }
-  }, [agentId, onAvailability, onError, onPendingCount, onRecommendedTask, onResultWaiting, t]);
+  }, [agentId, onAvailability, onError, onPendingCount, onRecommendedTask, onResultWaiting, onWorkbench, redesigned, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -232,6 +317,17 @@ export function AgentVersionWorkbenchPanel({
   }, [view]);
 
   const reload = useCallback(() => load(true), [load]);
+  const lastRefresh = useRef(refreshKey);
+  useEffect(() => {
+    if (lastRefresh.current === refreshKey) return;
+    lastRefresh.current = refreshKey;
+    void reload();
+  }, [refreshKey, reload]);
+  // Coach rows that AI 优化 wrote read "AI 优化" on the strip; their proposals are read once by id.
+  const aiProposalIds = useAiOptimizedProposalIds(agentId, coachProposalIds(workbench?.draft_changes), workbench?.change_proposals ?? [], redesigned);
+  const tv = useTranslations("agent_config_v2");
+  const tc = useTranslations("agent_cases_v2");
+  const compareView = useCallback((row: AgentDraftChange) => coachCompareView(row, released, workingCopy, tv("compare_from_documents")), [released, tv, workingCopy]);
   const pendingDismissals = usePendingDismissals();
   const dismissMemberFeedback = useCallback((item: AgentMemberFeedback) => {
     deferDismissal({
@@ -289,36 +385,43 @@ export function AgentVersionWorkbenchPanel({
     return <div className="am-ci"><LoadingSkeleton rows={3} label={t("version_loading")} /></div>;
   }
 
+  // The canvas puts Coach's changes above the configuration; the redesigned full page does too (S9).
+  const coachStrip = coachSlot && (view === "canvas" || (redesigned && view === "proposals")) ? createPortal(
+    <CoachChangesSection
+      agentId={agentId}
+      changes={workbench.draft_changes ?? []}
+      workingCopy={workingCopy}
+      editorDirty={editorDirty}
+      onChanged={async () => {
+        await onChanged();
+        await reload();
+      }}
+      onOpenSection={onOpenSection}
+      layout={layout}
+      {...(redesigned ? { aiProposalIds, compare: compareView } : {})}
+    />,
+    coachSlot,
+  ) : null;
+  const pendingOnConfigure = (
+    <>
+      <MemberFeedbackView
+        agentId={agentId}
+        agentName={agentName}
+        items={workbench.member_feedback ?? []}
+        hidden={pendingDismissals}
+        onDismiss={dismissMemberFeedback}
+        onImprove={onImproveWithCoach}
+        reload={reload}
+      />
+      <ProposalsView agentId={agentId} workbench={workbench} workingCopy={workingCopy} released={released} reload={reload} onChanged={onChanged} onOpenRelease={onOpenRelease} part={redesigned ? "fields" : "all"} />
+    </>
+  );
+
   return (
     <div className="am-ci" data-view={view}>
-      {view === "canvas" && coachSlot ? createPortal(
-        <CoachChangesSection
-          agentId={agentId}
-          changes={workbench.draft_changes ?? []}
-          workingCopy={workingCopy}
-          editorDirty={editorDirty}
-          onChanged={async () => {
-            await onChanged();
-            await reload();
-          }}
-          onOpenSection={onOpenSection}
-        />,
-        coachSlot,
-      ) : null}
-      {view === "proposals" ? (
-        <MemberFeedbackView
-          agentId={agentId}
-          agentName={agentName}
-          items={workbench.member_feedback ?? []}
-          hidden={pendingDismissals}
-          onDismiss={dismissMemberFeedback}
-          onImprove={onImproveWithCoach}
-          reload={reload}
-        />
-      ) : null}
-      {view === "proposals" ? (
-        <ProposalsView agentId={agentId} workbench={workbench} workingCopy={workingCopy} released={released} reload={reload} onChanged={onChanged} onOpenRelease={onOpenRelease} />
-      ) : null}
+      {coachStrip}
+      {/* Redesigned: field proposals and thumbs-downs wait under Configure › 更多设置 › 待处理的建议. */}
+      {view === "proposals" ? (redesigned ? (proposalsSlot ? createPortal(pendingOnConfigure, proposalsSlot) : null) : pendingOnConfigure) : null}
       {view === "proposals" && releaseBar ? (
         // Configure shows no test card; this instance renders only the release bar and its dialogs.
         <AgentVersionValidation
@@ -383,6 +486,21 @@ export function AgentVersionWorkbenchPanel({
           onAddCases={onAddCases}
           onTestState={onTestState}
           releaseBar={releaseBar}
+          lastReleaseTest={lastReleaseTest}
+        />
+      ) : null}
+      {view === "evaluate" && redesigned ? (
+        // Q5: suggested cases wait here, above the suite they add to; Configure no longer shows them.
+        <ProposalsView
+          agentId={agentId}
+          workbench={workbench}
+          workingCopy={workingCopy}
+          released={released}
+          reload={reload}
+          onChanged={onChanged}
+          part="cases"
+          casesBlockedReason={casesDirtyCount > 0 ? tc("suggestions_blocked") : null}
+          onCasesAccepted={onCasesAccepted}
         />
       ) : null}
     </div>
@@ -466,6 +584,9 @@ function ProposalsView({
   reload,
   onChanged,
   onOpenRelease,
+  part = "all",
+  casesBlockedReason = null,
+  onCasesAccepted,
 }: {
   agentId: string;
   workbench: AgentVersionWorkbench;
@@ -474,8 +595,22 @@ function ProposalsView({
   reload: () => Promise<void>;
   onChanged: () => Promise<void>;
   onOpenRelease?: () => void;
+  /**
+   * "all": today's list on Configure. FEATURE_AGENT_RELEASE_BAR splits it (Q5): "fields" lists field changes under
+   * 更多设置 (AI 优化's own result left out), "cases" lists suggested cases on 测试用例.
+   */
+  part?: "all" | "fields" | "cases";
+  /** "cases": why accepting waits (the suite editor has unsaved edits a later save would overwrite, S13). */
+  casesBlockedReason?: string | null;
+  /** "cases": the accepted cases are in a new suite revision; the suite editor takes it. */
+  onCasesAccepted?: () => void;
 }) {
   const t = useTranslations("agents_marketplace");
+  const tc = useTranslations("agent_cases_v2");
+  const showFields = part !== "cases";
+  const showCases = part !== "fields";
+  // The redesigned page keeps its one primary action on the release bar.
+  const primary = (wanted: boolean) => (part === "all" && wanted ? "primary" : "secondary");
   const locale = useLocale();
   const format = useCiFormat();
   const headingId = useId();
@@ -500,12 +635,19 @@ function ProposalsView({
 
   // Merged CI proposals stay as "Merged" cards with the next step until CI's candidate appears (§6).
   const proposals = useMemo(() => {
-    const listed = pendingProposals(workbench.change_proposals ?? []).filter((proposal) => proposal.agent_id === agentId);
+    const all = pendingProposals(workbench.change_proposals ?? []).filter((proposal) => proposal.agent_id === agentId);
+    const listed = part === "fields"
+      // Field changes still to decide; AI 优化's own result shows under 工作说明 instead.
+      ? all.filter((proposal) => proposal.status === "open" && !isCaseOnlyProposal(proposal) && !isAiOptimizeProposal(proposal))
+      : part === "cases"
+        ? all.filter((proposal) => proposal.suggested_cases.some((item) => item.decision_status === "pending"))
+        : all;
+    if (part === "cases") return listed;
     const merged = waitingCiMerges(allMerges, agentId, workbench)
       .map((merge) => merge.proposal)
       .filter((proposal) => !listed.some((item) => item.proposal_id === proposal.proposal_id));
     return [...listed, ...merged];
-  }, [agentId, allMerges, workbench]);
+  }, [agentId, allMerges, part, workbench]);
   // With no saved draft, the draft is the released configuration: compare against that.
   const draftDocument = useMemo(() => {
     const base = workingCopy ?? released;
@@ -521,7 +663,7 @@ function ProposalsView({
     return caseReview[`${proposal.proposal_id}:${id}`] ?? (item ? reviewDefault(item) : "");
   };
 
-  const needsSuites = proposals.some((proposal) => proposal.suggested_cases.some((item) => item.decision_status === "pending"));
+  const needsSuites = showCases && proposals.some((proposal) => proposal.suggested_cases.some((item) => item.decision_status === "pending"));
   const suiteState = suiteRead?.agentId === agentId && suiteRead.proposals === proposals ? suiteRead.status : "loading";
   const ownerSuites = suiteState === "ready" ? suiteRead!.suites : [];
   useEffect(() => {
@@ -603,10 +745,10 @@ function ProposalsView({
 
   if (!visibleProposals.length) return null;
   return (
-    <section id={AGENT_PENDING_ANCHOR} className="am-ci-proposals" aria-labelledby={headingId}>
+    <section id={part === "cases" ? AGENT_PENDING_CASES_ANCHOR : AGENT_PENDING_ANCHOR} className="am-ci-proposals" data-part={part} aria-labelledby={headingId}>
       <div className="am-ci-vh">
-        <h2 id={headingId}>{t("version_proposals_title")}</h2>
-        <p>{t("version_proposals_body")}</p>
+        <h2 id={headingId}>{part === "cases" ? tc("suggestions_heading") : t("version_proposals_title")}</h2>
+        <p>{part === "cases" ? tc("suggestions_body") : t("version_proposals_body")}</p>
       </div>
       {visibleProposals.map((proposal) => {
         const selected = selectedGroups[proposal.proposal_id] ?? proposal.atomic_groups.map((group) => group.id);
@@ -637,21 +779,30 @@ function ProposalsView({
         const titleId = `${headingId}-${proposal.proposal_id}`;
         return (
           <article key={proposal.proposal_id} className="am-ci-card" aria-labelledby={titleId}>
-            <div className="am-ci-irow">
-              <h3 id={titleId} className="am-ci-card-title">{caseOnly ? t("version_suggested_cases", { count: pendingCases.length || visibleCases.length }) : t(`version_proposal_source_${proposal.source_type}` as never)}</h3>
-              <Badge tone={proposal.status === "open" ? "warning" : proposal.status === "accepted" ? "positive" : "neutral"}>{t(`version_proposal_status_${proposal.status}` as never)}</Badge>
-              <span className="am-ci-sp" />
-              <time className="am-ci-note" dateTime={proposal.created_at}>{format.dateTime(proposal.created_at)}</time>
-            </div>
-            {proposal.origin ? <ProposalOrigin origin={proposal.origin} /> : null}
-            <p className="am-ci-body">{proposal.rationale || t("version_proposal_no_rationale")}</p>
-            {proposal.status === "accepted" && isCiProposal(proposal) ? (
+            {part === "cases" ? (
+              <div className="am-ci-irow">
+                <h3 id={titleId} className="am-ci-card-title">{tc("suggestions_title", { count: pendingCases.length || visibleCases.length })}</h3>
+                <span className="am-ci-sp" />
+                <span className="am-ci-note">{tc("suggestions_meta", { source: t(`version_proposal_source_${proposal.source_type}` as never), time: format.dateTime(proposal.created_at) })}</span>
+              </div>
+            ) : (
+              <div className="am-ci-irow">
+                <h3 id={titleId} className="am-ci-card-title">{caseOnly ? t("version_suggested_cases", { count: pendingCases.length || visibleCases.length }) : t(`version_proposal_source_${proposal.source_type}` as never)}</h3>
+                <Badge tone={proposal.status === "open" ? "warning" : proposal.status === "accepted" ? "positive" : "neutral"}>{t(`version_proposal_status_${proposal.status}` as never)}</Badge>
+                <span className="am-ci-sp" />
+                <time className="am-ci-note" dateTime={proposal.created_at}>{format.dateTime(proposal.created_at)}</time>
+              </div>
+            )}
+            {proposal.origin && showFields ? <ProposalOrigin origin={proposal.origin} /> : null}
+            {/* On 测试用例 a mixed proposal's explanation stays with its field part under 更多设置. */}
+            {part !== "cases" || caseOnly ? <p className="am-ci-body">{proposal.rationale || t("version_proposal_no_rationale")}</p> : null}
+            {showFields && proposal.status === "accepted" && isCiProposal(proposal) ? (
               <div className="am-ci-ist" data-tone="info" role="status">
                 <span className="am-ci-ist-text">{t("version_proposal_merged_next")}</span>
                 {onOpenRelease ? <span className="am-ci-ist-actions"><Button size="sm" variant="ghost" onClick={onOpenRelease}>{t("version_proposal_open_release")}</Button></span> : null}
               </div>
             ) : null}
-            {proposal.status === "open" && !caseOnly ? (
+            {showFields && proposal.status === "open" && !caseOnly ? (
               <>
                 {changedFields.length ? <p className="am-ci-note">{t("version_proposal_overview", { fields: listFormatter.format(changedFields) })}</p> : null}
                 <details className="am-ci-details am-ci-review">
@@ -687,7 +838,7 @@ function ProposalsView({
                 {mergeBase === null ? <p className="am-ci-note" role="status">{t("version_proposal_no_base")}</p> : null}
                 <div className="am-ci-acts">
                   <Button
-                    variant={proposal === firstActionable ? "primary" : "secondary"}
+                    variant={primary(proposal === firstActionable)}
                     disabled={busy !== null || !selected.length || mergeBase === null}
                     loading={busy === `proposal:${proposal.proposal_id}`}
                     onClick={() => void mutate(
@@ -703,9 +854,9 @@ function ProposalsView({
                 </div>
               </>
             ) : null}
-            {visibleCases.length ? (
+            {showCases && visibleCases.length ? (
               <section className="am-ci-cases" aria-label={t("version_suggested_cases", { count: visibleCases.length })}>
-                {!caseOnly ? <h4 className="am-ci-card-title">{t("version_suggested_cases", { count: visibleCases.length })}</h4> : null}
+                {!caseOnly && part !== "cases" ? <h4 className="am-ci-card-title">{t("version_suggested_cases", { count: visibleCases.length })}</h4> : null}
                 <p className="am-ci-note">{t(hasEdits ? "version_suggested_case_edits_note" : "version_suggested_cases_note")}</p>
                 <ol className="am-ci-case-preview">
                   {visibleCases.map((item) => {
@@ -784,10 +935,12 @@ function ProposalsView({
                     )}
                     {staleSuite ? <p className="am-ci-note" role="status">{t("version_suggested_case_suite_changed")}</p> : null}
                     {invalidCaseReview ? <p className="am-ci-note" role="status">{t("version_suggested_case_expectations_invalid")}</p> : null}
+                    {casesBlockedReason ? <p id={`${titleId}-blocked`} className="am-ci-note" data-tone="warning" role="status">{casesBlockedReason}</p> : null}
                     <div className="am-ci-acts">
                       <Button
-                        variant={proposal === firstActionable && (caseOnly || proposal.status !== "open") ? "primary" : "secondary"}
-                        disabled={busy !== null || suiteState !== "ready" || staleSuite || invalidCaseReview || (!initialSuite && !targetSuiteRevision) || !caseSelection.length || caseSelection.some((id) => !(caseTasks[`${proposal.proposal_id}:${id}`] ?? proposal.suggested_cases.find((item) => item.id === id)!.task).trim())}
+                        variant={primary(proposal === firstActionable && (caseOnly || proposal.status !== "open"))}
+                        disabled={busy !== null || Boolean(casesBlockedReason) || suiteState !== "ready" || staleSuite || invalidCaseReview || (!initialSuite && !targetSuiteRevision) || !caseSelection.length || caseSelection.some((id) => !(caseTasks[`${proposal.proposal_id}:${id}`] ?? proposal.suggested_cases.find((item) => item.id === id)!.task).trim())}
+                        aria-describedby={casesBlockedReason ? `${titleId}-blocked` : undefined}
                         loading={busy === `cases:${proposal.proposal_id}`}
                         onClick={() => void mutate(
                           proposal.proposal_id,
@@ -808,7 +961,9 @@ function ProposalsView({
                             }),
                           ),
                           t("version_suggested_cases_accepted"),
-                          t("version_failed_accept_cases"),
+                          // A case with nothing to score is refused; say what to change instead of "refresh".
+                          (cause) => t(cause instanceof ApiError && cause.code === "agent_eval_scoring_contract_invalid" ? "version_failed_accept_cases_unscorable" : "version_failed_accept_cases"),
+                          () => onCasesAccepted?.(),
                         )}
                       >{selectedEdits ? t(selectedEdits === caseSelection.length ? "version_suggested_cases_update" : "version_suggested_cases_save_changes", { count: caseSelection.length }) : allCasesSelected ? t("version_suggested_cases_accept_all", { count: caseSelection.length }) : t("version_suggested_cases_accept")}</Button>
                       <Button variant="ghost" disabled={busy !== null || !caseSelection.length} onClick={() => dismissCases(proposal, caseSelection)}>{t(allCasesSelected ? "version_suggested_cases_dismiss_all" : "version_suggested_cases_dismiss")}</Button>
@@ -877,7 +1032,8 @@ function plainValue(value: PointerValue, t: ReturnType<typeof useTranslations>):
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function TextDiff({ row }: { row: Extract<FieldDiff, { kind: "text" }> }) {
+/** Line by line before → after of one text field; long diffs fold after 12 lines. */
+export function TextDiff({ row }: { row: Extract<FieldDiff, { kind: "text" }> }) {
   const t = useTranslations("agents_marketplace");
   const [expanded, setExpanded] = useState(false);
   const lines = useMemo(() => {

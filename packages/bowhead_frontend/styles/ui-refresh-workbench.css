@@ -31,9 +31,9 @@
   font-family: var(--font-control);
 }
 
-/* ── Running status band: retain three-row structure (PRD A3: constant height, user decision 2026-09-29), appearance only ──
- * Disclosure bar 40 high (state icon + phase word + step N · elapsed time + expand arrow), followed by two history rows + current row;
- * structure and text sources are unchanged. */
+/* ── Running status band, appearance only ──
+ * Heartbeat bar 40 high (state icon + heartbeat · elapsed · who is active + expand arrow), followed by the agent groups
+ * (chat running state, 2026-11-25; the fixed three-row structure is retired). */
 :root:root .bh-band__bar {
   gap: 8px;
   min-height: 40px;
@@ -110,13 +110,6 @@
   font-family: var(--font-control);
   font-size: var(--fs-sm);
 }
-/* History rows recede by ink step, not opacity: opacity took this 12px text to 2.1-3.8:1. Warn and fail colors still win. */
-:root:root .bh-band__row--h1 :is(.bh-band__lab, .bh-band__rmeta) {
-  color: var(--c-ink-4);
-}
-:root:root .bh-band__row--h2 :is(.bh-band__lab, .bh-band__rmeta) {
-  color: var(--c-ink-3);
-}
 :root:root :is(.bh-band__row.is-warn .bh-band__glyph, .bh-band__row.is-warn .bh-band__rmeta) {
   color: var(--c-warn-ink);
 }
@@ -129,12 +122,37 @@
 :root:root .bh-band__gbar {
   background: var(--c-fill-2);
 }
-:root:root .bh-band__now {
-  border-top: var(--hairline) solid var(--c-separator);
-}
-:root:root .bh-band__act {
-  font-size: var(--fs-md);
+:root:root .bh-band__ghead {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
   font-weight: 500;
+}
+:root:root .bh-band__gmeta {
+  color: var(--c-ink-3);
+  font-weight: 400;
+}
+:root:root .bh-note {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+:root:root .bh-note__glyph {
+  color: var(--c-ink-3);
+}
+:root:root .bh-note[data-note-replaced] .bh-note__lab {
+  color: var(--c-ink-4);
+}
+:root:root .bh-note__toggle {
+  color: var(--c-accent);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-note__toggle:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+  border-radius: var(--r-2, 4px);
+}
+/* "前面还有 N 步": the quietest line of a group. */
+:root:root .bh-band__row--more .bh-band__lab {
+  color: var(--c-ink-4);
 }
 :root:root .bh-band__foot {
   color: var(--c-ink-3);
@@ -1397,6 +1415,67 @@
 :root:root .v2-ws-edge .v2-ws-new-dot {
   margin-top: 6px;
 }
+/* Chat running state R2.6: how many results are new behind the collapsed Results rail. */
+:root:root .v2-ws-new-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  margin-top: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* The one-time reminder beside the collapsed rail: what the Turn added, with 查看. */
+:root:root .v2-results-bubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(440px, calc(100% - 80px));
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-2), 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  animation: v2-results-bubble-in 160ms ease-out both;
+}
+:root:root .v2-results-bubble__text {
+  min-width: 0;
+}
+:root:root .v2-results-bubble__view {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--c-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+:root:root .v2-results-bubble__view:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+  border-radius: var(--r-2, 4px);
+}
+@keyframes v2-results-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .v2-results-bubble {
+    animation: none;
+  }
+}
 
 /* Upload drop overlay: inside the chat column (target temporarily positioned only while dragging), inset 8, radius 14, 1.5px dashed border;
  * accepted = accent + light accent background, rejected = error + light error background. No pointer reception; drag
@@ -1537,4 +1616,257 @@
     width: 100%;
     min-height: 44px;
   }
+}
+
+/* Chat running state R3: the style switcher, the three other running styles and the Appearance row's cards.
+   Tones: done (secondary), running (accent outline), warning (warn), failed (err), needs you (accent fill), Lead
+   (secondary, square marks). Shapes and outlines carry the meaning as well as colour. */
+/* The header's separator runs under the switcher too: the bar draws it, the switcher's slot continues it. */
+:root:root .bh-band__head:has(> .bh-band__switch) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .bh-band__head:has(> .bh-band__switch) > .bh-band__bar {
+  border-bottom: 0;
+}
+:root:root .bh-band__switch {
+  margin-right: 8px;
+}
+:root:root .bh-style-switch {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .bh-style-switch__opt {
+  border-radius: var(--r-1, 6px);
+  background: transparent;
+  color: var(--c-ink-3);
+}
+:root:root .bh-style-switch__opt:hover {
+  color: var(--c-ink);
+}
+:root:root .bh-style-switch__opt.is-on {
+  background: var(--c-surface);
+  color: var(--c-ink);
+  box-shadow: var(--shadow-sm);
+}
+:root:root .bh-style-switch__opt:focus-visible,
+:root:root .bh-chip:focus-visible,
+:root:root .bh-dot:focus-visible,
+:root:root .bh-seg:focus-visible,
+:root:root .rvs-card:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .bh-style__head {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+}
+:root:root .bh-style__meta {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+:root:root .bh-style__meta.is-warn {
+  color: var(--c-warn-ink);
+}
+:root:root .bh-style__meta.is-fail {
+  color: var(--c-err);
+}
+:root:root .bh-style__caveat {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  color: var(--c-warn-ink);
+}
+:root:root .bh-chip {
+  border-radius: 11px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root button.bh-chip {
+  cursor: pointer;
+}
+:root:root .bh-chip__fact {
+  color: var(--c-ink-3);
+}
+:root:root .bh-chip.is-active {
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1.5px var(--c-accent);
+  color: var(--c-ink);
+}
+:root:root .bh-chip__pulse {
+  background: var(--c-accent);
+  animation: bh-style-pulse 1.2s ease-in-out infinite;
+}
+:root:root .bh-chip.is-needs {
+  background: var(--c-accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--c-accent);
+  color: var(--c-ink);
+}
+:root:root .bh-chip.is-warn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}
+:root:root .bh-chip.is-fail {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+:root:root .bh-chip.is-warn .bh-chip__fact,
+:root:root .bh-chip.is-fail .bh-chip__fact {
+  color: inherit;
+}
+:root:root .bh-chip.is-lead {
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+}
+:root:root .bh-chip.is-more {
+  background: transparent;
+  color: var(--c-ink-4);
+}
+:root:root .bh-dot {
+  background: var(--c-ink-4);
+}
+:root:root button.bh-dot {
+  cursor: pointer;
+}
+:root:root .bh-dot.is-active {
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 2px var(--c-accent);
+  animation: bh-style-pulse 1.2s ease-in-out infinite;
+}
+:root:root .bh-dot.is-needs {
+  background: var(--c-accent);
+}
+:root:root .bh-dot.is-warn {
+  background: var(--c-warn);
+}
+:root:root .bh-dot.is-fail {
+  background: var(--c-err);
+}
+:root:root .bh-dot.is-lead {
+  background: var(--c-ink-3);
+}
+:root:root .bh-dots__more,
+:root:root .bh-track__axis,
+:root:root .bh-track__longest {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+:root:root .bh-track__longest {
+  margin: 0;
+}
+:root:root .bh-style__now {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  color: var(--c-ink);
+}
+:root:root .bh-style__now-time {
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .bh-style__now--large {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .bh-track__name {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+}
+:root:root .bh-track__bar {
+  border-radius: 3px;
+  background: var(--c-fill-1);
+}
+:root:root .bh-seg {
+  border-radius: 2px;
+  background: var(--c-ink-4);
+}
+:root:root button.bh-seg {
+  cursor: pointer;
+}
+:root:root .bh-seg.is-active {
+  background: var(--c-accent);
+  animation: bh-style-pulse 1.2s ease-in-out infinite;
+}
+:root:root .bh-seg.is-needs {
+  background: var(--c-accent);
+}
+:root:root .bh-seg.is-warn {
+  background: var(--c-warn);
+}
+:root:root .bh-seg.is-fail {
+  background: var(--c-err);
+}
+:root:root .bh-track__now {
+  background: var(--c-accent);
+}
+:root:root .ag-trace__overview {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .rvs-card {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .rvs-card.is-on {
+  box-shadow: inset 0 0 0 2px var(--c-accent);
+}
+:root:root .rvs-card__name {
+  font-weight: 600;
+}
+:root:root .rvs-card__desc,
+:root:root .rvs-note {
+  color: var(--c-ink-3);
+  font-size: var(--fs-xs);
+}
+:root:root .rvs-note {
+  margin: 8px 0 0;
+  font-family: var(--font-control);
+}
+:root:root .rvs-card__radio {
+  box-shadow: inset 0 0 0 1.5px var(--c-ink-4);
+}
+:root:root .rvs-card.is-on .rvs-card__radio {
+  box-shadow: inset 0 0 0 4px var(--c-accent);
+}
+:root:root .rvs-preview {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .rvs-preview i {
+  border-radius: 3px;
+  background: var(--c-fill-3);
+}
+:root:root .rvs-preview--lanes i {
+  border-radius: 50%;
+}
+@keyframes bh-style-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .bh-chip__pulse,
+  :root:root .bh-dot.is-active,
+  :root:root .bh-seg.is-active {
+    animation: none;
+  }
+}
+:root:root[data-theme-motion="reduced"] .bh-chip__pulse,
+:root:root[data-theme-motion="reduced"] .bh-dot.is-active,
+:root:root[data-theme-motion="reduced"] .bh-seg.is-active {
+  animation: none;
+}
+/* A step brought into view from the style overview flashes once. */
+:root:root .stp[data-revealed="1"] {
+  border-radius: var(--r-2);
+  background: var(--c-accent-soft);
+  transition: background-color var(--dur-fast) linear;
 }

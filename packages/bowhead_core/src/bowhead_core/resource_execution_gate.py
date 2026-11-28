@@ -27,8 +27,14 @@ async def check_team_tool_execution(
     source_id: str,
     operation_id: str,
     advertised_name: str,
+    notion_knowledge_binding: str | None = None,
+    n8n_workflow_digest: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return a stable denial envelope, or ``None`` when dispatch may proceed."""
+    """Return a stable denial envelope, or ``None`` when dispatch may proceed.
+
+    A derived n8n workflow tool (``n8n_workflow_digest``) is checked against its stored approval
+    instead of the raw tool selection: its handler calls the raw n8n tools whatever is selected.
+    """
 
     if not getattr(ctx, "team_id", "") or ctx.team_id != team_id:
         return _denied("resource_revoked", "team tool source is no longer available")
@@ -41,12 +47,13 @@ async def check_team_tool_execution(
     try:
         from bowhead_core._db import open_shared_ctx
 
+        columns = "kind,status,selected_op_ids_json,tools_schema_json,openapi_spec_json,auth_type,auth_ref"
+        if notion_knowledge_binding is not None or n8n_workflow_digest is not None:
+            columns += ",base_url"
         async with (
             open_shared_ctx(str(db_path)) as db,
             db.execute(
-                "SELECT kind,status,selected_op_ids_json,tools_schema_json,openapi_spec_json,"
-                "auth_type,auth_ref "
-                "FROM team_tool_source WHERE team_id=? AND id=?",
+                f"SELECT {columns} FROM team_tool_source WHERE team_id=? AND id=?",  # noqa: S608 -- fixed column names
                 (team_id, source_id),
             ) as cursor,
         ):
@@ -58,20 +65,72 @@ async def check_team_tool_execution(
         return _denied("resource_revoked", "team tool source is no longer available")
     if str(row[5]) != "none" and not row[6]:
         return _denied("resource_revoked", "team tool credentials are no longer available")
+    if n8n_workflow_digest is not None:
+        denied = await _check_n8n_workflow(db_path, row, team_id=team_id, source_id=source_id, operation_id=operation_id, digest=n8n_workflow_digest)
+        if denied is not None:
+            return denied
+        return await _check_team_tool_grants(ctx, source_id=source_id, advertised_name=advertised_name, extra_targets=())
     try:
         selected = {str(item) for item in json.loads(str(row[2]) or "[]")}
     except (TypeError, ValueError, json.JSONDecodeError):
         return _denied("resource_state_unavailable", "team tool selection could not be verified")
-    if selected and operation_id not in selected:
+    if (selected or str(row[5]) == "oauth") and operation_id not in selected:
         return _denied("operation_unavailable", "team tool operation is no longer selected")
     if str(row[0]) == "mcp":
         try:
-            available = {str(item.get("name")) for item in json.loads(str(row[3]) or "[]") if isinstance(item, dict) and item.get("name")}
+            available = {str(item.get("name")): item for item in json.loads(str(row[3]) or "[]") if isinstance(item, dict) and item.get("name")}
         except (TypeError, ValueError, json.JSONDecodeError):
             return _denied("resource_state_unavailable", "team tool catalog could not be verified")
         if operation_id not in available:
             return _denied("operation_unavailable", "team tool operation is no longer advertised")
+    if notion_knowledge_binding is not None:
+        from bowhead_core.mcp_oauth import notion_knowledge_binding_from_ref
+        from bowhead_core.notion_knowledge import is_notion_oauth_source, notion_knowledge_entry
+        from bowhead_core.openapi_tool_source import mcp_entry
 
+        binding = notion_knowledge_binding_from_ref(row[6]) if is_notion_oauth_source(row[0], row[5], row[7]) else None
+        if binding != notion_knowledge_binding:
+            return _denied(
+                "notion_connection_changed", "Ask a team administrator to review this Plugin's Notion connection and select its tools again."
+            )
+        if notion_knowledge_entry(mcp_entry(source_id, available[operation_id]), binding) is None:
+            return _denied("operation_unavailable", "Ask a team administrator to refresh the Notion source and review its read-only tools.")
+
+    from bowhead_core.openapi_tool_source import op_tool_name
+
+    extra = (("team_tool_op", op_tool_name(source_id, operation_id), "use"),) if notion_knowledge_binding is not None else ()
+    return await _check_team_tool_grants(ctx, source_id=source_id, advertised_name=advertised_name, extra_targets=extra)
+
+
+async def _check_n8n_workflow(db_path: Any, row: Any, *, team_id: str, source_id: str, operation_id: str, digest: str) -> dict[str, Any] | None:
+    """The source is still n8n's MCP server and the workflow's approval still matches the tool."""
+    from bowhead_core.n8n_workflows import current_approval, is_n8n_source, n8n_workflow_tools_enabled, workflow_id_from_operation
+
+    if not n8n_workflow_tools_enabled():
+        return _denied("operation_unavailable", "n8n workflow tools are turned off on this deployment.")
+    try:
+        tools = json.loads(str(row[3]) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return _denied("resource_state_unavailable", "team tool catalog could not be verified")
+    if not is_n8n_source(str(row[0]), str(row[7] or ""), tools if isinstance(tools, list) else []):
+        return _denied("operation_unavailable", "This source no longer offers n8n's workflow tools. Ask a team administrator to refresh it.")
+    workflow_id = workflow_id_from_operation(operation_id)
+    try:
+        approval = await current_approval(db_path, team_id, source_id, workflow_id) if workflow_id else None
+    except Exception:
+        logger.warning("resource_execution_gate.n8n_approval_failed source=%s", source_id, exc_info=True)
+        return _denied("resource_state_unavailable", "the n8n workflow approval could not be verified")
+    if approval is None or approval.digest != digest:
+        return _denied(
+            "operation_unavailable",
+            "A team administrator changed or removed this n8n workflow's approval. Ask them to review it under Team settings · Tools.",
+        )
+    return None
+
+
+async def _check_team_tool_grants(
+    ctx: Any, *, source_id: str, advertised_name: str, extra_targets: tuple[tuple[str, str, str], ...]
+) -> dict[str, Any] | None:
     access_store = getattr(ctx, "access_control_store", None)
     access_ctx = getattr(ctx, "access_context", None)
     if access_store is not None and resource_grants_enforce_enabled():
@@ -79,12 +138,14 @@ async def check_team_tool_execution(
             return _denied("resource_revoked", "team tool permission could not be verified")
         from bowhead_core.grant_evaluation import grant_verdicts
 
+        targets = [("team_tool_source", source_id, "use"), ("team_tool_op", advertised_name, "use"), *extra_targets]
+
         try:
             verdicts = await grant_verdicts(
                 ctx,
                 access_store,
                 access_ctx,
-                [("team_tool_source", source_id, "use"), ("team_tool_op", advertised_name, "use")],
+                targets,
             )
         except Exception:
             logger.warning("resource_execution_gate.team_tool_grant_failed source=%s", source_id, exc_info=True)

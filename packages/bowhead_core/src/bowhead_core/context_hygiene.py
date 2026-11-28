@@ -24,6 +24,7 @@ from bowhead_router.runtime_notes import (
     FINAL_REPLY_REVIEW_NOTE_NAME,
     OUTPUT_RECOVERY_STATE_NAME,
     REJECTED_TOOL_SYNTAX_HISTORY_NAME,
+    RUN_FILES_NOTE_NAME,
     RUNTIME_CORRECTION_NOTE_NAME,
     VISUAL_VIEW_NOTE_NAME,
 )
@@ -53,6 +54,8 @@ MESSAGE_KIND_POLICY: dict[str, HistoryPolicy] = {
     VISUAL_VIEW_NOTE_NAME: "turn_local",
     # The final reply waits for the delivery review; its evidence IDs are this Turn's.
     FINAL_REPLY_REVIEW_NOTE_NAME: "turn_local",
+    # The run's result and work files after a save; the next save restates them.
+    RUN_FILES_NOTE_NAME: "turn_local",
     "context_summary": "conversation",
     # A user-selected Skill stays with the request it belongs to.
     "skill_content": "conversation",

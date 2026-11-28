@@ -240,7 +240,7 @@ describe("HelpCenterPage capability-gated articles", () => {
     expect(visibleHelpArticles(all, { access_requests: false })).toEqual(ungated);
     expect(visibleHelpArticles(all, undefined)).toEqual(ungated);
     expect(
-      visibleHelpArticles(all, { access_requests: true, google_workspace_feature: true, shopify_plugin: true, agent_eval_alignment: true, account_deletion: true, notification_reach: true, routine_notify: true, notification_delivery: true }).map(({ id }) => id),
+      visibleHelpArticles(all, { access_requests: true, google_workspace_feature: true, shopify_plugin: true, agent_eval_alignment: true, agent_draft_trial: true, docx_inline_edit: true, account_deletion: true, notification_reach: true, routine_notify: true, notification_delivery: true }).map(({ id }) => id),
     ).toEqual(all.map(({ id }) => id));
   });
 

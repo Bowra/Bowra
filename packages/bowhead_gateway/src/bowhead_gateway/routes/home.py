@@ -263,15 +263,17 @@ async def _collect_active_routines(
 
 async def _collect_active_matrices(
     request: Request,
+    user: User,
     scope: _WorkspaceScope,
 ) -> list[HomeActiveItemDTO]:
+    """Active runs of the latest matrices the user may see: Space matrices and the user's own private ones."""
     store = getattr(request.app.state, "kb_matrix_store", None)
     if store is None:
         raise RuntimeError("matrix store unavailable")
     items: list[HomeActiveItemDTO] = []
     seen: set[str] = set()
     for workspace_id in scope.query_workspace_ids:
-        for matrix in (await store.list_matrices(workspace_id))[:8]:
+        for matrix in (await store.list_matrices(workspace_id, viewer_id=user.id))[:8]:
             if matrix.matrix_id in seen:
                 continue
             seen.add(matrix.matrix_id)
@@ -507,7 +509,7 @@ async def get_home_snapshot(
         _record_source_metric("routines", "error", source_started)
     source_started = monotonic()
     try:
-        active.extend(await _collect_active_matrices(request, scope))
+        active.extend(await _collect_active_matrices(request, user, scope))
         _record_source_metric("matrix", "success", source_started)
     except Exception as exc:
         _record_issue(issues, "matrix", exc)

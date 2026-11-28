@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializationInfo, SerializerFunctionWrapHandler, model_serializer
 
 
 # ─────────────────────────────────────────────────────────────
@@ -49,6 +49,9 @@ class SessionDTO(BaseModel):
     cost_usd: float = 0.0
     tokens_total: int = 0
     intents: list[str] = Field(default_factory=list)
+    # ``agent_trial``: an Agent Owner's chat with the saved draft; the page knows it is a trial after a reload.
+    origin: str = "normal"
+    trial_agent_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TurnAttachmentDTO(BaseModel):
@@ -62,6 +65,7 @@ class TurnAttachmentDTO(BaseModel):
     )
     selected_context: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     presentation_selection: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    document_selection: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     bundle_artifact_ids: list[str] | None = None
 
 
@@ -1041,6 +1045,20 @@ class FileKbStatusDTO(BaseModel):
     parse_progress_pct: int | None = None
     parse_stuck: bool = False
     parse_error_code: str | None = None
+    # The knowledge base the row is in (the scope's default when none is stored), so the Files page
+    # can name it. Responses carry it only while knowledge bases are on, like ``KbFileDTO``.
+    knowledge_base_id: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _knowledge_base_while_enabled(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
+        """With FEATURE_KNOWLEDGE_BASES off, JSON (API responses) keeps today's fields exactly."""
+        data = handler(self)
+        if info.mode == "json" and isinstance(data, dict) and "knowledge_base_id" in data:
+            from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
+
+            if not knowledge_bases_enabled():
+                data.pop("knowledge_base_id")
+        return data
 
 
 class FileListItemDTO(BaseModel):

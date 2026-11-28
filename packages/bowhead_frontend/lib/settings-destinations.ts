@@ -20,10 +20,10 @@ export type SettingsTabId =
   | "datasource" | "tools" | "capabilities" | "workflows" | "subagents" | "access-requests" | "instructions"
   | "mcp" | "scheduled" | "integrations" | "email-service" | "public-entries" | "oidc" | "license"
   | "openapi" | "security" | "export" | "team-appearance" | "general" | "feedback-inbox"
-  | "reference-retention" | "team-operations";
+  | "file-retention" | "reference-retention" | "team-operations";
 
 export type SettingsScope = "personal" | "feature" | "team" | "space";
-export type SettingsGateKey = "access_requests" | "feedback_loop";
+export type SettingsGateKey = "access_requests" | "feedback_loop" | "file_library";
 export type SettingsGroupKey =
   | "personal"
   | "team_people"
@@ -78,6 +78,7 @@ export const SETTINGS_TAB_ROLES: Partial<Record<SettingsTabId, readonly Settings
   tools: TEAM_ADMIN_ROLES,
   capabilities: TEAM_ADMIN_ROLES,
   "team-appearance": TEAM_ADMIN_ROLES,
+  "file-retention": TEAM_ADMIN_ROLES,
   "reference-retention": TEAM_ADMIN_ROLES,
   subagents: TEAM_ADMIN_ROLES,
   "team-operations": TEAM_ADMIN_ROLES,
@@ -133,6 +134,7 @@ const TAB_GROUPS: { key: SettingsGroupKey; tabs: SettingsTabSpec[] }[] = [
     key: "team_appearance",
     tabs: [
       { id: "team-appearance", roles: SETTINGS_TAB_ROLES["team-appearance"] },
+      { id: "file-retention", gate: "file_library", roles: SETTINGS_TAB_ROLES["file-retention"] },
       { id: "reference-retention", roles: SETTINGS_TAB_ROLES["reference-retention"] },
     ],
   },
@@ -150,7 +152,7 @@ const SPACE_TABS: ReadonlySet<SettingsTabId> = new Set(["general", "instructions
 const TEAM_TABS: ReadonlySet<SettingsTabId> = new Set([
   "people", "workspaces", "llm", "datasource", "integrations", "email-service", "public-entries", "oidc",
   "license", "openapi", "team-appearance", "tools", "capabilities", "subagents", "workflows", "scheduled",
-  "feedback-inbox", "team-operations", "reference-retention",
+  "feedback-inbox", "team-operations", "file-retention", "reference-retention",
 ]);
 /**
  * Team tabs that have their own route rather than a `teamSettingsPath` segment, mapped to that route's segment.
@@ -246,6 +248,7 @@ const TEAM_SEGMENT_TABS: Record<string, SettingsTabId> = {
   "brand-appearance": "team-appearance",
   "feedback-inbox": "feedback-inbox",
   "team-operations": "team-operations",
+  "file-retention": "file-retention",
   "reference-retention": "reference-retention",
   tools: "tools",
   plugins: "capabilities",

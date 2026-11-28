@@ -12,11 +12,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Any
 
+import aiosqlite
 import pytest
 from bowhead_core.kb.matrix_store import (
     KbMatrixStore,
+    MatrixColumnBusyError,
+    MatrixColumnNameError,
+    MatrixRunDTO,
     cell_is_stale,
     is_raw_string_sentinel,
     new_run_id,
@@ -33,7 +38,9 @@ TEAM = "team_mx"
 
 
 @pytest.fixture
-async def store(tmp_path: Path) -> KbMatrixStore:
+async def store(tmp_path: Path, initialize_migrated_kb_matrix_database) -> KbMatrixStore:
+    # The schema at head, as deployments run it (cell history included).
+    initialize_migrated_kb_matrix_database(tmp_path / "kb_matrix.db")
     s = KbMatrixStore(tmp_path / "kb_matrix.db")
     await s.initialize()
     return s
@@ -987,3 +994,464 @@ async def test_create_run_and_enqueue_zero_targets_rolls_back(store: KbMatrixSto
     )
     assert second is None
     assert await store.count_active_batch_runs_for_matrix(m.matrix_id) == 1
+
+
+# ─── Document matrix step 1, S1 correctness ─────────────────
+
+
+async def _run_for(store: KbMatrixStore, matrix_id: str, targets: list[tuple[str, str]]) -> MatrixRunDTO:
+    run = await store.create_run_and_enqueue(
+        matrix_id=matrix_id,
+        workspace_id=WS,
+        team_id=TEAM,
+        scope={"kind": "all_pending"},
+        initiated_by="u1",
+        targets=targets,
+        skipped_edited=0,
+        credits_estimated=1,
+        column_versions=dict.fromkeys((col for _, col in targets), 1),
+        file_versions={},
+    )
+    assert run is not None
+    return run
+
+
+async def _raw_cell(store: KbMatrixStore, matrix_id: str, file_id: str, column_id: str) -> dict[str, Any] | None:
+    """The stored row, soft-deleted rows included."""
+    async with aiosqlite.connect(store._db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT status, queued_from, run_id, soft_deleted_at FROM kb_matrix_cells WHERE matrix_id = ? AND file_id = ? AND column_id = ?",
+            (matrix_id, file_id, column_id),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def test_replace_files_takes_removed_files_out_of_active_runs(store: KbMatrixStore) -> None:
+    """Spike bug C: removed rows' queued cells revert and leave cells_total; running cells only leave cells_total."""
+    m = await _mk_matrix(store, n_files=3, n_cols=2)
+    c0, c1 = (c["column_id"] for c in m.columns)
+    await store.insert_cells_bulk(
+        m.matrix_id,
+        [{"file_id": "kbf_1", "column_id": c0, "workspace_id": WS, "team_id": TEAM, "status": "failed", "prompt_version": 1}],
+    )
+    run = await _run_for(store, m.matrix_id, [("kbf_0", c0), ("kbf_1", c0), ("kbf_1", c1), ("kbf_2", c0)])
+    assert run.cells_total == 4
+    await store.mark_cells_running(m.matrix_id, [("kbf_2", c0)])
+
+    assert await store.replace_files(m.matrix_id, [{"file_id": "kbf_0", "char_count": 1}], workspace_id=WS)
+
+    got = await store.get_run(run.run_id)
+    assert got is not None and got.cells_total == 1  # Only the kept row is still owed.
+    kept = await store.get_cell(m.matrix_id, "kbf_0", c0)
+    assert kept is not None and kept.status == "queued" and kept.run_id == run.run_id
+    assert await _raw_cell(store, m.matrix_id, "kbf_1", c1) is None  # Queued from empty: row deleted.
+    restored = await _raw_cell(store, m.matrix_id, "kbf_1", c0)
+    assert restored is not None
+    assert (restored["status"], restored["queued_from"], restored["run_id"]) == ("failed", None, None)
+    assert restored["soft_deleted_at"] is not None
+    running = await _raw_cell(store, m.matrix_id, "kbf_2", c0)
+    assert running is not None and running["status"] == "running" and running["soft_deleted_at"] is not None
+    # The running cell finishes, and the soft-delete guard discards its write.
+    assert not await store.finalize_cell(m.matrix_id, "kbf_2", c0, status="done", variants=_variants(), run_id=run.run_id)
+
+
+async def test_replace_files_leaves_terminal_runs_alone(store: KbMatrixStore) -> None:
+    m = await _mk_matrix(store, n_files=2, n_cols=1)
+    col = m.columns[0]["column_id"]
+    run = await _run_for(store, m.matrix_id, [("kbf_0", col), ("kbf_1", col)])
+    assert await store.set_run_status(run.run_id, "failed")
+    assert await store.replace_files(m.matrix_id, [{"file_id": "kbf_0", "char_count": 1}], workspace_id=WS)
+    got = await store.get_run(run.run_id)
+    assert got is not None and got.cells_total == 2
+
+
+async def test_edit_cell_value_revives_soft_deleted_row(store: KbMatrixStore) -> None:
+    """Spike bug A: remove → re-add → edit used to fail with IntegrityError on the soft-deleted key."""
+    m = await _mk_matrix(store, n_files=2, n_cols=1)
+    col = m.columns[0]
+    col_id = col["column_id"]
+    first = await store.edit_cell_value(m.matrix_id, "kbf_0", col_id, value="旧值", column=col, workspace_id=WS, team_id=TEAM)
+    assert first is not None
+    _, changed = await store.set_cell_verified(m.matrix_id, "kbf_0", col_id, workspace_id=WS)
+    assert changed
+    await store.replace_files(m.matrix_id, [{"file_id": "kbf_1", "char_count": 1}], workspace_id=WS)
+    await store.replace_files(m.matrix_id, [{"file_id": "kbf_0", "char_count": 1}, {"file_id": "kbf_1", "char_count": 1}], workspace_id=WS)
+    assert await store.get_cell(m.matrix_id, "kbf_0", col_id) is None
+
+    revived = await store.edit_cell_value(m.matrix_id, "kbf_0", col_id, value="新值", column=col, workspace_id=WS, team_id=TEAM)
+
+    assert revived is not None
+    assert revived.status == "done"
+    assert revived.edited_by_user and not revived.verified
+    assert [v["normalized"] for v in revived.variants] == [{"value": "新值"}]
+    assert revived.seq > first.seq
+    assert [c.file_id for c in await store.list_cells(m.matrix_id)] == ["kbf_0"]
+
+
+async def test_promote_column_refuses_while_cells_pending(store: KbMatrixStore) -> None:
+    """Spike bug E: queued or running cells would land question-shaped values in a typed column."""
+    m = await _mk_matrix(store, n_files=1, n_cols=1)
+    col = m.columns[0]["column_id"]
+    run = await _run_for(store, m.matrix_id, [("kbf_0", col)])
+    for _state in ("queued", "running"):
+        with pytest.raises(MatrixColumnBusyError) as busy:
+            await store.promote_column(m.matrix_id, col, "number", workspace_id=WS)
+        assert busy.value.payload == {"column_id": col, "name": "列0", "pending": 1}
+        await store.mark_cells_running(m.matrix_id, [("kbf_0", col)])
+    unchanged = await store.get_matrix(m.matrix_id)
+    assert unchanged is not None and unchanged.columns[0]["type"] == "question"
+
+    await store.finalize_cell(m.matrix_id, "kbf_0", col, status="done", variants=_variants("12"), run_id=run.run_id)
+    promoted = await store.promote_column(m.matrix_id, col, "number", workspace_id=WS)
+    assert promoted is not None and promoted["type"] == "number"
+
+
+@pytest.mark.parametrize(
+    ("names", "code", "payload"),
+    [
+        (["金额", " 金额 "], "column_name_duplicate", {"name": "金额"}),
+        (["ＡＢＣ", "ABC"], "column_name_duplicate", {"name": "ＡＢＣ"}),  # NFKC folds full-width forms.
+        (["金额", "   "], "column_name_invalid", {}),
+    ],
+)
+async def test_create_matrix_rejects_empty_and_duplicate_column_names(
+    store: KbMatrixStore, names: list[str], code: str, payload: dict[str, str]
+) -> None:
+    with pytest.raises(MatrixColumnNameError) as err:
+        await store.create_matrix(
+            name="m",
+            workspace_id=WS,
+            team_id=TEAM,
+            created_by="u1",
+            files=[],
+            columns=[{"name": n, "type": "question"} for n in names],
+        )
+    assert (err.value.code, err.value.payload) == (code, payload)
+
+
+async def test_add_and_update_column_name_rules(store: KbMatrixStore) -> None:
+    m = await _mk_matrix(store, n_files=0, n_cols=2)
+    c0, c1 = (c["column_id"] for c in m.columns)
+    with pytest.raises(MatrixColumnNameError) as dup:
+        await store.add_column(m.matrix_id, {"name": " 列0", "type": "question"}, workspace_id=WS)
+    assert (dup.value.code, dup.value.payload) == ("column_name_duplicate", {"name": "列0", "column_id": c0})
+    with pytest.raises(MatrixColumnNameError, match="column_name_invalid"):
+        await store.add_column(m.matrix_id, {"name": "", "type": "question"}, workspace_id=WS)
+    # No character whitelist: full-width punctuation is a normal name and is stored as typed.
+    added = await store.add_column(m.matrix_id, {"name": "金额（万元）", "type": "question"}, workspace_id=WS)
+    assert added is not None
+
+    with pytest.raises(MatrixColumnNameError) as renamed:
+        await store.update_column(m.matrix_id, c1, workspace_id=WS, name="金额(万元)")
+    assert renamed.value.payload == {"name": "金额（万元）", "column_id": added}
+    with pytest.raises(MatrixColumnNameError, match="column_name_invalid"):
+        await store.update_column(m.matrix_id, c1, workspace_id=WS, name="  ")
+    same = await store.update_column(m.matrix_id, c1, workspace_id=WS, name=" 列1 ")
+    assert same is not None and same["name"] == "列1"
+    after = await store.get_matrix(m.matrix_id)
+    assert after is not None and [c["name"] for c in after.columns] == ["列0", "列1", "金额（万元）"]
+
+
+async def test_existing_duplicate_column_names_keep_working(store: KbMatrixStore) -> None:
+    """The name rule applies to writes only; a legacy matrix with duplicates stays editable."""
+    m = await _mk_matrix(store, n_files=0, n_cols=2)
+    legacy = [dict(c, name="金额") for c in m.columns]
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute("UPDATE kb_matrices SET columns_json = ? WHERE matrix_id = ?", (json.dumps(legacy, ensure_ascii=False), m.matrix_id))
+        await db.commit()
+    edited = await store.update_column(m.matrix_id, legacy[0]["column_id"], workspace_id=WS, name="金额", question="新问题?")
+    assert edited is not None and edited["question"] == "新问题?"
+    assert await store.add_column(m.matrix_id, {"name": "日期", "type": "date"}, workspace_id=WS) is not None
+
+
+# ─── Document matrix step 1 (S3): automatic retry requeue ───
+
+
+async def test_requeue_for_retry_guards_and_adjusts_failed_count(store: KbMatrixStore) -> None:
+    """Only this run's failed, unedited, not-yet-retried cells go back to queued; cells_failed follows."""
+    m = await _mk_matrix(store, n_files=4, n_cols=1)
+    col = m.columns[0]["column_id"]
+    keys = [(f"kbf_{i}", col) for i in range(4)]
+    # kbf_1 holds an edit that a single-cell run is rerunning (failed + edited after the failure).
+    await store.edit_cell_value(
+        m.matrix_id, "kbf_1", col, value="人工", column={"type": "question", "prompt_version": 1}, workspace_id=WS, team_id=TEAM
+    )
+    run = await store.create_run_and_enqueue(
+        matrix_id=m.matrix_id,
+        workspace_id=WS,
+        team_id=TEAM,
+        scope={"kind": "all_pending"},
+        initiated_by="u1",
+        targets=keys,
+        skipped_edited=0,
+        credits_estimated=4,
+        column_versions={col: 1},
+        file_versions={},
+    )
+    assert run is not None
+    assert await store.fail_cells(m.matrix_id, keys, fail_reason="timeout") == 4
+    await store.increment_run_counters(run.run_id, failed=4)
+    # kbf_2 moved to another run meanwhile.
+    await store.enqueue_cells(
+        m.matrix_id, [("kbf_2", col)], run_id="mxrun_other", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+
+    requeued = await store.requeue_failed_cells_for_retry(run.run_id, m.matrix_id, keys)
+    assert requeued == [("kbf_0", col), ("kbf_3", col)]
+    got = await store.get_run(run.run_id)
+    assert got is not None and got.cells_failed == 2
+    cell = await store.get_cell(m.matrix_id, "kbf_0", col)
+    assert cell is not None
+    assert (cell.status, cell.queued_from, cell.run_id, cell.fail_reason) == ("queued", "failed", run.run_id, "timeout")
+
+    # Edited cells are skipped by batch runs only.
+    assert await store.requeue_failed_cells_for_retry(run.run_id, m.matrix_id, [("kbf_1", col)], include_edited=True) == [("kbf_1", col)]
+
+    # A cancel during the retry restores the failure.
+    assert await store.revert_queued_cells_for_run(run.run_id) == 3
+    cell = await store.get_cell(m.matrix_id, "kbf_0", col)
+    assert cell is not None and (cell.status, cell.fail_reason) == ("failed", "timeout")
+    # A cell is re-enqueued at most once per run, even when the run resumes after a restart.
+    assert await store.requeue_failed_cells_for_retry(run.run_id, m.matrix_id, keys) == []
+
+
+# ─── Document matrix step 1 (S4): cell history and bulk verify ───
+
+_QUESTION = {"type": "question", "prompt_version": 1}
+
+
+async def _events(store: KbMatrixStore, matrix_id: str) -> list[tuple[Any, ...]]:
+    """(file, column, kind, actor, run, cell_seq, batch, workspace, team) in write order."""
+    async with (
+        aiosqlite.connect(store._db_path) as db,
+        db.execute(
+            "SELECT file_id, column_id, kind, actor_user_id, run_id, cell_seq, batch_id, workspace_id, team_id"
+            " FROM kb_matrix_cell_events WHERE matrix_id = ? ORDER BY cell_seq",
+            (matrix_id,),
+        ) as cur,
+    ):
+        return [tuple(r) for r in await cur.fetchall()]
+
+
+async def _land(
+    store: KbMatrixStore, matrix_id: str, file_id: str, col: str, *, run_id: str, variants: list[dict] | None = None, single_cell: bool = False
+) -> bool:
+    await store.enqueue_cells(matrix_id, [(file_id, col)], run_id=run_id, workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={})
+    return await store.finalize_cell(
+        matrix_id,
+        file_id,
+        col,
+        status="done",
+        variants=variants or _variants(),
+        prompt_version=1,
+        file_version=1,
+        run_id=run_id,
+        require_unedited=not single_cell,
+    )
+
+
+async def test_every_cell_write_records_one_event_with_the_cell_seq(store: KbMatrixStore) -> None:
+    """Each human-visible change writes one event in the cell's transaction, carrying the cell's new seq and no content."""
+    m = await _mk_matrix(store, n_files=3, n_cols=1)
+    col = m.columns[0]["column_id"]
+    expected: list[tuple[Any, ...]] = []
+
+    async def wrote(file_id: str, kind: str, actor: str | None, run: str | None = None) -> None:
+        cell = await store.get_cell(m.matrix_id, file_id, col)
+        assert cell is not None
+        expected.append((file_id, col, kind, actor, run, cell.seq, None, WS, TEAM))
+        assert await _events(store, m.matrix_id) == expected
+
+    assert await _land(store, m.matrix_id, "kbf_0", col, run_id="mxrun_a")
+    await wrote("kbf_0", "ai_value", None, "mxrun_a")
+    await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=True, actor_user_id="u_rev")
+    await wrote("kbf_0", "verified", "u_rev")
+    await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=False, actor_user_id="u_rev")
+    await wrote("kbf_0", "verify_reverted", "u_rev")
+    await store.edit_cell_value(m.matrix_id, "kbf_0", col, value="人工", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u_ed")
+    await wrote("kbf_0", "edited", "u_ed")
+    await store.revert_cell_edited(m.matrix_id, "kbf_0", col, workspace_id=WS, actor_user_id="u_ed")
+    await wrote("kbf_0", "edit_reverted", "u_ed")
+    # A single-cell rerun over an edit supersedes it; the AI write carries no actor.
+    await store.edit_cell_value(m.matrix_id, "kbf_0", col, value="再改", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u_ed")
+    await wrote("kbf_0", "edited", "u_ed")
+    assert await _land(store, m.matrix_id, "kbf_0", col, run_id="mxrun_b", single_cell=True)
+    await wrote("kbf_0", "edit_superseded", None, "mxrun_b")
+    # Keep as text on a value that needs review.
+    review = [dict(_variants()[0], normalized={"raw_string": "约 500 万"})]
+    await store.enqueue_cells(
+        m.matrix_id, [("kbf_1", col)], run_id="mxrun_c", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+    assert await store.finalize_cell(m.matrix_id, "kbf_1", col, status="needs_review", variants=review, run_id="mxrun_c")
+    await wrote("kbf_1", "ai_value", None, "mxrun_c")
+    await store.keep_cell_as_text(m.matrix_id, "kbf_1", col, workspace_id=WS, actor_user_id="u_ed")
+    await wrote("kbf_1", "kept_as_text", "u_ed")
+    # Editing a cell that has no row yet inserts it with its event.
+    await store.edit_cell_value(m.matrix_id, "kbf_2", col, value="新值", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u_ed")
+    await wrote("kbf_2", "edited", "u_ed")
+    async with aiosqlite.connect(store._db_path) as db, db.execute("PRAGMA table_info(kb_matrix_cell_events)") as cur:
+        columns = {row[1] for row in await cur.fetchall()}
+    assert not columns & {"value", "variants_json", "normalized", "source_excerpt"}
+
+
+async def test_writes_that_change_nothing_record_no_event(store: KbMatrixStore) -> None:
+    m = await _mk_matrix(store, n_files=2, n_cols=1)
+    col = m.columns[0]["column_id"]
+    assert await _land(store, m.matrix_id, "kbf_0", col, run_id="mxrun_a")
+    before = await _events(store, m.matrix_id)
+    # Undo on an unverified cell, and a second verify.
+    assert (await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=False, actor_user_id="u1"))[1] is False
+    assert (await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=True, actor_user_id="u1"))[1] is True
+    assert (await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=True, actor_user_id="u1"))[1] is False
+    with pytest.raises(ValueError, match="not_edited"):
+        await store.revert_cell_edited(m.matrix_id, "kbf_0", col, workspace_id=WS, actor_user_id="u1")
+    # Another Space's write is refused before it reaches the cell.
+    assert await store.edit_cell_value(m.matrix_id, "kbf_0", col, value="x", column=_QUESTION, workspace_id="ws_other", team_id=TEAM) is None
+    # A batch run never overwrites an edit: no AI value lands, so no event.
+    await store.edit_cell_value(m.matrix_id, "kbf_1", col, value="人工", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u1")
+    assert not await _land(store, m.matrix_id, "kbf_1", col, run_id="mxrun_b")
+    # Queueing, running and failing cells are not history.
+    await store.mark_cells_running(m.matrix_id, [("kbf_1", col)])
+    await store.fail_cells(m.matrix_id, [("kbf_1", col)], fail_reason="timeout")
+    kinds = [e[2] for e in (await _events(store, m.matrix_id))[len(before) :]]
+    assert kinds == ["verified", "edited"]
+
+
+async def test_a_failed_event_write_rolls_the_cell_back(store: KbMatrixStore) -> None:
+    """The event and the cell commit together: without the event the verification is not written either."""
+    m = await _mk_matrix(store, n_files=1, n_cols=1)
+    col = m.columns[0]["column_id"]
+    assert await _land(store, m.matrix_id, "kbf_0", col, run_id="mxrun_a")
+    before = await store.get_matrix(m.matrix_id)
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute("ALTER TABLE kb_matrix_cell_events RENAME TO kb_matrix_cell_events_gone")
+        await db.commit()
+    with pytest.raises(aiosqlite.OperationalError, match="kb_matrix_cell_events"):
+        await store.set_cell_verified(m.matrix_id, "kbf_0", col, workspace_id=WS, verified=True, actor_user_id="u1")
+    cell = await store.get_cell(m.matrix_id, "kbf_0", col)
+    after = await store.get_matrix(m.matrix_id)
+    assert cell is not None and not cell.verified
+    assert before is not None and after is not None and after.last_seq == before.last_seq
+
+
+async def test_requeue_for_retry_records_auto_retried(store: KbMatrixStore) -> None:
+    m = await _mk_matrix(store, n_files=2, n_cols=1)
+    col = m.columns[0]["column_id"]
+    keys = [("kbf_0", col), ("kbf_1", col)]
+    run = await store.create_run_and_enqueue(
+        matrix_id=m.matrix_id,
+        workspace_id=WS,
+        team_id=TEAM,
+        scope={"kind": "all_pending"},
+        initiated_by="u1",
+        targets=keys,
+        skipped_edited=0,
+        credits_estimated=2,
+        column_versions={col: 1},
+        file_versions={},
+    )
+    assert run is not None
+    await store.fail_cells(m.matrix_id, [keys[0]], fail_reason="timeout")
+    assert await store.requeue_failed_cells_for_retry(run.run_id, m.matrix_id, keys) == [keys[0]]
+    cell = await store.get_cell(m.matrix_id, "kbf_0", col)
+    assert cell is not None
+    assert await _events(store, m.matrix_id) == [("kbf_0", col, "auto_retried", None, run.run_id, cell.seq, None, WS, TEAM)]
+
+
+async def test_removing_a_file_drops_its_history(store: KbMatrixStore) -> None:
+    """A file added back starts with fresh cells, so its old history must not come back with it."""
+    m = await _mk_matrix(store, n_files=2, n_cols=1)
+    col = m.columns[0]["column_id"]
+    for file_id in ("kbf_0", "kbf_1"):
+        await store.edit_cell_value(m.matrix_id, file_id, col, value="人工", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u1")
+    await store.remove_files(m.matrix_id, ["kbf_0"], workspace_id=WS, allow_reviewed=True)
+    assert [e[0] for e in await _events(store, m.matrix_id)] == ["kbf_1"]
+    await store.add_files(m.matrix_id, [{"file_id": "kbf_0", "char_count": 1}], workspace_id=WS)
+    assert await store.list_cell_events(m.matrix_id, "kbf_0", col) == []
+
+
+async def test_list_and_last_cell_events(store: KbMatrixStore) -> None:
+    m = await _mk_matrix(store, n_files=2, n_cols=2)
+    a, b = (c["column_id"] for c in m.columns)
+    assert await _land(store, m.matrix_id, "kbf_0", a, run_id="mxrun_a")
+    for actor in ("u1", "u2", "u3"):
+        await store.set_cell_verified(m.matrix_id, "kbf_0", a, workspace_id=WS, verified=actor != "u2", actor_user_id=actor)
+    await store.edit_cell_value(m.matrix_id, "kbf_1", b, value="x", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u4")
+    history = await store.list_cell_events(m.matrix_id, "kbf_0", a)
+    assert [(e.kind, e.actor_user_id) for e in history] == [("verified", "u3"), ("verify_reverted", "u2"), ("verified", "u1"), ("ai_value", None)]
+    assert [e.cell_seq for e in history] == sorted((e.cell_seq for e in history), reverse=True)
+    assert [e.kind for e in await store.list_cell_events(m.matrix_id, "kbf_0", a, limit=2)] == ["verified", "verify_reverted"]
+    latest = await store.last_cell_events(m.matrix_id)
+    assert set(latest) == {("kbf_0", a), ("kbf_1", b)}
+    assert (latest[("kbf_0", a)].kind, latest[("kbf_0", a)].actor_user_id) == ("verified", "u3")
+    assert latest[("kbf_0", a)].event_id == history[0].event_id
+    assert (latest[("kbf_1", b)].kind, latest[("kbf_1", b)].actor_user_id) == ("edited", "u4")
+
+
+async def test_verify_cells_classifies_every_cell_and_shares_a_batch(store: KbMatrixStore) -> None:
+    """Verifying takes done, current cells (edited ones too); undoing takes every verified cell."""
+    m = await _mk_matrix(store, n_files=8, n_cols=1)
+    col = m.columns[0]["column_id"]
+    for i in (0, 1, 2, 3, 5):
+        assert await _land(store, m.matrix_id, f"kbf_{i}", col, run_id="mxrun_a")
+    await store.edit_cell_value(m.matrix_id, "kbf_1", col, value="人工", column=_QUESTION, workspace_id=WS, team_id=TEAM)
+    await store.set_cell_verified(m.matrix_id, "kbf_5", col, workspace_id=WS, verified=True)
+    # kbf_2: an older prompt; kbf_3: an older file version; kbf_4: failed; kbf_6: needs review; kbf_7: no row.
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute("UPDATE kb_matrix_cells SET prompt_version = 0 WHERE file_id = 'kbf_2'")
+        await db.commit()
+    await store.enqueue_cells(
+        m.matrix_id, [("kbf_4", col), ("kbf_6", col)], run_id="mxrun_b", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+    await store.fail_cells(m.matrix_id, [("kbf_4", col)], fail_reason="timeout")
+    review = [dict(_variants()[0], normalized={"raw_string": "?"})]
+    await store.finalize_cell(m.matrix_id, "kbf_6", col, status="needs_review", variants=review)
+    keys = [(f"kbf_{i}", col) for i in range(8)]
+    files = {f"kbf_{i}": 1 for i in range(8)} | {"kbf_3": 2}
+    before = len(await _events(store, m.matrix_id))
+
+    outcome = await store.verify_cells(
+        m.matrix_id, keys, verified=True, workspace_id=WS, actor_user_id="u_rev", column_versions={col: 1}, file_versions=files
+    )
+    assert sorted(outcome.changed) == [("kbf_0", col), ("kbf_1", col)]
+    assert outcome.skipped == {"not_done": 3, "stale": 2, "already": 1}
+    new = (await _events(store, m.matrix_id))[before:]
+    assert [(e[0], e[2], e[3], e[6]) for e in new] == [(f, "verified", "u_rev", outcome.batch_id) for f in ("kbf_0", "kbf_1")]
+    cell = await store.get_cell(m.matrix_id, "kbf_1", col)
+    assert cell is not None and cell.verified and cell.edited_by_user and cell.seq == new[1][5]
+
+    # A verified cell that later failed can still be un-verified in bulk, like one by one.
+    await store.enqueue_cells(
+        m.matrix_id, [("kbf_5", col)], run_id="mxrun_c", workspace_id=WS, team_id=TEAM, column_versions={col: 1}, file_versions={}
+    )
+    await store.fail_cells(m.matrix_id, [("kbf_5", col)], fail_reason="timeout")
+    undo = await store.verify_cells(
+        m.matrix_id, keys, verified=False, workspace_id=WS, actor_user_id="u_rev", column_versions={col: 1}, file_versions=files
+    )
+    assert sorted(undo.changed) == [("kbf_0", col), ("kbf_1", col), ("kbf_5", col)]
+    assert undo.skipped == {"not_done": 0, "stale": 0, "already": 5}
+    assert undo.batch_id != outcome.batch_id
+    assert {e[2] for e in (await _events(store, m.matrix_id))[before + 2 :]} == {"verify_reverted"}
+    # Nothing to do writes nothing.
+    again = await store.verify_cells(
+        m.matrix_id, keys, verified=False, workspace_id=WS, actor_user_id="u_rev", column_versions={col: 1}, file_versions=files
+    )
+    assert again.changed == [] and again.skipped["already"] == 8
+    # Another Space's cells are never touched.
+    other = await store.verify_cells(
+        m.matrix_id, keys[:1], verified=True, workspace_id="ws_other", actor_user_id="u_rev", column_versions={col: 1}, file_versions=files
+    )
+    assert other.changed == [] and other.skipped["not_done"] == 1
+
+
+async def test_baseline_schema_without_history_still_writes_cells(tmp_path: Path) -> None:
+    """A store on the pre-0240 DDL (tests that skip the migration) writes cells and reports no history."""
+    bare = KbMatrixStore(tmp_path / "bare.db")
+    await bare.initialize()
+    m = await _mk_matrix(bare, n_files=1, n_cols=1)
+    col = m.columns[0]["column_id"]
+    assert await bare.edit_cell_value(m.matrix_id, "kbf_0", col, value="x", column=_QUESTION, workspace_id=WS, team_id=TEAM, actor_user_id="u1")
+    assert await bare.list_cell_events(m.matrix_id, "kbf_0", col) == []
+    assert await bare.last_cell_events(m.matrix_id) == {}

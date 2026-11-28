@@ -10,6 +10,8 @@ import anyio
 from bowhead_core.kb.eligibility import KbUseDecision, KbUseEligibility
 from bowhead_core.kb.generations import KbGenerationStore, now_iso, use_guard_enabled
 from bowhead_core.kb.ingestion import KnowledgeAction
+from bowhead_core.kb.knowledge_base_access import KNOWLEDGE_USE, KnowledgeLevels, named_knowledge_base_id
+from bowhead_core.kb.knowledge_base_store import home_for_scope
 from bowhead_core.kb.maintenance import KbMaintenanceStore
 from bowhead_core.kb.permission import KbPermission, ScopeContext
 
@@ -26,6 +28,18 @@ async def team_runtime(app, team_id):
     if runtime is None:
         raise ValueError("team runtime unavailable")
     return runtime
+
+
+def _maintenance_levels(file) -> KnowledgeLevels | None:
+    """Use on the file's own named knowledge base, for the physical scan only.
+
+    The scan observes source and index facts and grants nobody access; every read or execute
+    consumer authorizes its own viewer. A file in a home's default needs no levels.
+    """
+    named = named_knowledge_base_id(file)
+    if named is None:
+        return None
+    return KnowledgeLevels({named: KNOWLEDGE_USE}, {named: home_for_scope(file.scope, file.scope_id)})
 
 
 async def reconcile_page(app):
@@ -51,6 +65,7 @@ async def reconcile_page(app):
                     user_id=KbPermission.owner_of(file),
                     team_id=file.team_id,
                     workspace_id=file.scope_id if file.scope in {"space", "workspace"} else file.workspace_id,
+                    knowledge_levels=_maintenance_levels(file),
                 )
 
                 async def same_identity(current, original=file):
@@ -101,6 +116,70 @@ async def reconcile_page(app):
     return checked
 
 
+async def backfill_chunk_knowledge_base_keys(app, team_id, *, max_files=None):
+    """Advance one Team's resumable chunk key backfill in its current index.
+
+    Selecting knowledge bases for an Agent filters chunks by this key, so that mode must wait until
+    the Team's backfill reports ``completed``. Chat search does not depend on it. It is not
+    scheduled; :func:`chunk_key_backfill_state` starts it when someone wants that mode.
+    """
+    from bowhead_core.kb.knowledge_base_backfill import backfill_chunk_knowledge_base_ids
+
+    runtime = await team_runtime(app, team_id)
+    progress = await backfill_chunk_knowledge_base_ids(app.state.kb_files_store, runtime.kb_store, team_id, max_files=max_files)
+    log.info("kb.chunk_key_backfill team=%s completed=%s files=%d updated=%d", team_id, progress.completed, progress.files, progress.chunks_updated)
+    return progress
+
+
+#: Files per step of a background chunk key backfill; progress is saved after every page.
+_BACKFILL_STEP_FILES = 500
+
+
+async def chunk_key_backfill_state(app, team_id: str, *, start: bool = True) -> str:
+    """Whether the Team may select knowledge bases for Agents (C7), read cheaply.
+
+    ``ready``: the Team's backfill finished in its current index (one state row in
+    ``kb_maintenance_state``). ``preparing``: not yet; with ``start`` a background backfill
+    begins in this process (resumable, at most one per Team). ``unavailable``: the Team has no
+    knowledge runtime (index) to check.
+    """
+    from bowhead_core.kb.knowledge_base_backfill import chunk_key_backfill_completed
+
+    try:
+        runtime = await team_runtime(app, team_id)
+        index_version = runtime.kb_store.index_version
+    except Exception:
+        return "unavailable"
+    if await chunk_key_backfill_completed(app.state.kb_files_store._db_path, team_id, index_version):
+        return "ready"
+    if start:
+        start_chunk_key_backfill(app, team_id)
+    return "preparing"
+
+
+async def _run_chunk_key_backfill(app, team_id: str) -> None:
+    try:
+        while not (await backfill_chunk_knowledge_base_keys(app, team_id, max_files=_BACKFILL_STEP_FILES)).completed:
+            await anyio.sleep(0)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Progress is kept; the next readiness check starts it again.
+        log.exception("kb.chunk_key_backfill failed team=%s", team_id)
+
+
+def start_chunk_key_backfill(app, team_id: str) -> None:
+    """Start the Team's chunk key backfill in the background unless it is already running here."""
+    tasks = getattr(app.state, "kb_chunk_key_backfill_tasks", None)
+    if tasks is None:
+        tasks = app.state.kb_chunk_key_backfill_tasks = {}
+    if team_id in tasks and not tasks[team_id].done():
+        return
+    task = asyncio.create_task(_run_chunk_key_backfill(app, team_id), name="kb_chunk_key_backfill")
+    tasks[team_id] = task
+    task.add_done_callback(lambda _: tasks.pop(team_id, None))
+
+
 async def maintenance_loop(app):
     while True:
         if use_guard_enabled():
@@ -114,7 +193,7 @@ async def maintenance_loop(app):
 async def run_rebuild_job(app, job_id):
     files = app.state.kb_files_store
     jobs = KbMaintenanceStore(files._db_path)
-    authorize = kb_file_authorizer(app.state.user_store, getattr(app.state, "access_control_store", None))
+    authorize = kb_file_authorizer(app.state.user_store, getattr(app.state, "access_control_store", None), files_store=files)
     try:
         job = await jobs.get_job(job_id)
         if not job or job["state"] != "running":

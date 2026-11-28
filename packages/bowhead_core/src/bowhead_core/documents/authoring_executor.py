@@ -8,6 +8,7 @@ this client transports qualified worker bytes under its versioned context.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +144,44 @@ class HtmlView:
     scroll_height: int
     issues: tuple[str, ...]
     external_resources: bool
+    # The page's measured layout (``visual_layout.PageLayout.to_dict``); None from an older sandbox image or when
+    # the worker's layout did not validate. The capture stands either way.
+    layout: dict | None = None
+
+
+logger = logging.getLogger(__name__)
+
+_HTML_VIEW_KEYS = frozenset(
+    {
+        "profile",
+        "kind",
+        "control_sha256",
+        "source_sha256",
+        "png_sha256",
+        "text_sha256",
+        "scroll_width",
+        "scroll_height",
+        "issues",
+        "external_resources",
+    }
+)
+
+
+def _html_layout(output: Path, record: dict) -> dict | None:
+    """``layout.json`` bound to ``record``'s ``layout_sha256``, validated; None without one or when it fails."""
+    from bowhead_core.visual_layout import MAX_LAYOUT_BYTES, LayoutInvalid, parse_layout
+
+    expected = record.get("layout_sha256")
+    if expected is None:
+        return None
+    try:
+        raw = read_file(output / "layout.json", MAX_LAYOUT_BYTES)
+        if digest(raw) != expected:
+            raise LayoutInvalid("digest")
+        return parse_layout(raw).to_dict()
+    except (OfficePackageError, OSError, LayoutInvalid) as exc:
+        logger.info("html_view.layout_invalid error_type=%s reason=%s", type(exc).__name__, exc.args[0] if exc.args else "-")
+        return None
 
 
 class AuthoringExecutor(DocumentExecutor):
@@ -328,6 +367,39 @@ class AuthoringExecutor(DocumentExecutor):
 
         return await anyio.to_thread.run_sync(read_view)
 
+    async def view_document(self, source: bytes) -> bytes:
+        """A Word document's pages for the Results preview (docx inline edit design §5.1)."""
+        readiness = await self.capabilities()
+        if self.profile != WORD_PROFILE or readiness.get("results_preview_contract") != "docx-results-preview-v1":
+            raise OfficePackageError("document_runtime_unavailable")
+        source_sha256 = digest(source)
+        encoded = control("view", (source,), parent_sha256=source_sha256, profile=self.profile)
+        directory, _ = await self._dispatch(
+            digest(uuid4().bytes),
+            (WorkerInput("document.docx", "source", source),),
+            encoded,
+            expected_image_id=readiness["image_id"],
+            profile=self.profile,
+        )
+        output = directory / "output"
+
+        def read_view() -> bytes:
+            record = json.loads(read_file(output / "result.json", 8192))
+            control_sha256 = digest(encoded)
+            _raise_fixed_error(record, control_sha256=control_sha256, source_sha256=source_sha256)
+            pdf = read_file(output / "document.pdf", MAX_VIEW_PDF)
+            if not pdf.startswith(b"%PDF-") or record != {
+                "profile": self.profile,
+                "kind": "document_view",
+                "control_sha256": control_sha256,
+                "source_sha256": source_sha256,
+                "pdf_sha256": digest(pdf),
+            }:
+                raise OfficePackageError("document_authoring_output_invalid")
+            return pdf
+
+        return await anyio.to_thread.run_sync(read_view)
+
     async def view_html(self, kind: str, source: bytes, transform: bytes, *, readiness: dict | None = None) -> HtmlView:
         """Capture an HTML or SVG file in the sandbox (visual self-check slice B, html_view).
 
@@ -360,19 +432,9 @@ class AuthoringExecutor(DocumentExecutor):
             issues = record.get("issues")
             if (
                 not png.startswith(b"\x89PNG")
-                or set(record)
-                != {
-                    "profile",
-                    "kind",
-                    "control_sha256",
-                    "source_sha256",
-                    "png_sha256",
-                    "text_sha256",
-                    "scroll_width",
-                    "scroll_height",
-                    "issues",
-                    "external_resources",
-                }
+                # A sandbox image with the page layout adds ``layout_sha256`` (visual-geometry tech design §4).
+                or set(record) not in (_HTML_VIEW_KEYS, _HTML_VIEW_KEYS | {"layout_sha256"})
+                or ("layout_sha256" in record and not isinstance(record["layout_sha256"], str))
                 or record["profile"] != PROFILE
                 or record["kind"] != "html_view"
                 or record["control_sha256"] != control_sha256
@@ -393,6 +455,7 @@ class AuthoringExecutor(DocumentExecutor):
                 scroll_height=record["scroll_height"],
                 issues=tuple(issues),
                 external_resources=record["external_resources"],
+                layout=_html_layout(output, record),
             )
 
         return await anyio.to_thread.run_sync(read_view)

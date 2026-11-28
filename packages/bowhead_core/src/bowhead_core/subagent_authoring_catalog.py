@@ -22,6 +22,7 @@ from bowhead_core.custom_subagent_store import (
     DESTRUCTIVE_TOOL_PREFIXES,
     REPORT_WRITE_TOOLS,
 )
+from bowhead_core.resource_disable import runtime_tool_name
 from bowhead_core.team_tool_confirmation import resolve_team_mcp_category, team_tool_confirmation_enabled
 from bowhead_core.team_tool_loader import load_team_tool_entries
 from bowhead_core.tool_registry import build_default_registry
@@ -59,6 +60,9 @@ def native_allowlist_version() -> str:
 
 RISK_REGISTRY_VERSION = "subagent-risk-v1"
 APPROVAL_EXECUTOR_UNAVAILABLE = "approval_executor_unavailable"
+# A built-in Tool the team turned off: never offered for a new selection, kept where it was already selected
+# (the Turn drops it at run time). See docs/sprints/tools-page-2026-11-27/tech-design.md, slice A.
+TOOL_DISABLED_BY_TEAM = "tool_disabled_by_team"
 # Skill wrapper Tools are not Owner choices (agent-skill-gates D1). Each Skill's
 # grant decides them: the dependency compiler adds skill_read for any Skill and
 # skill_invoke for a runnable one, and ignores stored refs to all three. They
@@ -237,6 +241,9 @@ class AuthoringTool:
     operation_id: str | None = None
     method: str | None = None
     path: str | None = None
+    # The team turned this built-in Tool off. It is not discoverable for new selections, while the raw
+    # catalog keeps it so existing Agents and Plugins still compile and publish.
+    team_disabled: bool = False
 
     def for_selection(self) -> AuthoringTool:
         """Project current picking availability without changing dependency facts.
@@ -253,6 +260,7 @@ class AuthoringTool:
         value = asdict(self.for_selection())
         value["capability_classes"] = sorted(self.capability_classes)
         value["connection_id"] = value.pop("source_id", None)
+        value.pop("team_disabled", None)
         # The legacy picker keeps method/path for compatibility. The new
         # authoring DTO deliberately does not expose endpoint paths.
         value.pop("path", None)
@@ -274,6 +282,11 @@ class SubagentAuthoringCatalogSnapshot:
     @property
     def tools_by_ref(self) -> dict[str, AuthoringTool]:
         return {tool.stable_ref: tool for tool in (*self.native_tools, *self.team_tools)}
+
+    @property
+    def team_disabled_refs(self) -> tuple[str, ...]:
+        """Built-in Tools the team turned off; pickers keep them where already selected but never offer them."""
+        return tuple(tool.stable_ref for tool in self.native_tools if tool.team_disabled)
 
 
 def _safe_label(value: object, *, fallback: str, limit: int = 120) -> str:
@@ -420,6 +433,17 @@ def native_authoring_tools() -> tuple[AuthoringTool, ...]:
     return tuple(tools)
 
 
+async def team_turned_off_tools(store: object, team_id: str) -> frozenset[str]:
+    """The built-in Tools the team turned off, read the way each Turn reads them (runtime names)."""
+    from bowhead_core.resource_disable import load_disable_state
+
+    db_path = getattr(store, "db_path", None)
+    if not db_path or not team_id:
+        return frozenset()
+    state = await load_disable_state(str(db_path), team_id, None)
+    return frozenset(runtime_tool_name(name) for name in state.team_tools)
+
+
 def _fingerprint_payload(
     native_tools: tuple[AuthoringTool, ...],
     team_tools: tuple[AuthoringTool, ...],
@@ -462,10 +486,27 @@ class SubagentAuthoringCatalogService:
         actor_active: bool,
         mcp_entitled: bool,
     ) -> SubagentAuthoringCatalogSnapshot:
+        from bowhead_core.notion_knowledge import NOTION_KNOWLEDGE_TOOL_LABELS
+
         if not actor_active or not team_id or not actor_user_id:
             raise CatalogAccessDenied("active team membership required")
 
+        from bowhead_core.agents._generated.tool_names import WECOM_NOTIFY
+        from bowhead_core.capability_resolver import wecom_notification_available
+
         native_tools = native_authoring_tools()
+        if not await wecom_notification_available(store, team_id):
+            # Preserve dependencies of existing Agents while hiding unavailable selections.
+            native_tools = tuple(replace(tool, discoverable=False) if tool.stable_ref == WECOM_NOTIFY else tool for tool in native_tools)
+        turned_off = await team_turned_off_tools(store, team_id)
+        if turned_off:
+            # Same rule as the Turn (resource_disable.compute_turn_resources): hide new selections only.
+            native_tools = tuple(
+                replace(tool, discoverable=False, team_disabled=True)
+                if tool.discoverable and runtime_tool_name(tool.stable_ref) in turned_off
+                else tool
+                for tool in native_tools
+            )
 
         entries, sources = await load_team_tool_entries(team_id, store)
         team_tools_list: list[AuthoringTool] = []
@@ -523,7 +564,13 @@ class SubagentAuthoringCatalogService:
                     # An OpenAPI operation dispatches on its `teammcp.<source>.<op>` reference; people know it
                     # by its operation ID, the name the Tools page shows. MCP tools keep the server's own name.
                     display_name=_safe_label(
-                        entry.op.operation_id if entry.op is not None else entry.dispatch_name,
+                        NOTION_KNOWLEDGE_TOOL_LABELS[entry.dispatch_name]
+                        if entry.notion_knowledge_binding
+                        else f"n8n · {entry.n8n_workflow.name}"
+                        if entry.n8n_workflow is not None
+                        else entry.op.operation_id
+                        if entry.op is not None
+                        else entry.dispatch_name,
                         fallback=entry.advertised_name,
                         limit=120,
                     ),
@@ -618,6 +665,8 @@ __all__ = [
     "is_platform_only_skill",
     "RISK_REGISTRY_VERSION",
     "SubagentAuthoringCatalogService",
+    "TOOL_DISABLED_BY_TEAM",
+    "team_turned_off_tools",
     "SubagentAuthoringCatalogSnapshot",
     "classify_mcp_risk",
     "classify_native_risk",

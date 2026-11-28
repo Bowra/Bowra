@@ -53,6 +53,7 @@ import {
   createSource,
   previewSource,
   proposeDescriptions,
+  teamMcpOAuthRecovery,
   type OpSummary,
   type PreviewResult,
   type AuthType,
@@ -60,6 +61,8 @@ import {
 
 import { Tab as UiTab, TabList, Tabs } from "@/components/ui/tabs";
 import { ErrorDiagnosticsInline, type ShownError, shownError } from "@/components/error-notice";
+import { appPath } from "@/lib/base-path";
+import { teamSettingsPath } from "@/lib/team-settings-paths";
 import PresetDirectory, { type ConnectorPreset } from "./preset-directory";
 import { CharIcon } from "@/components/char-icon";
 
@@ -577,8 +580,12 @@ export function CreateToolCard({
   const [busy, setBusy] = useState(false);
   // Show only issue and remedy; raw API text, status codes, and request IDs go in "复制诊断".
   const [error, setError] = useState<ShownError | null>(null);
-  const showToolFailure = (step: "parse" | "authorize" | "create", cause: unknown) =>
-    setError(shownError(t(createToolFailureKey(step, cause)), cause));
+  const tTools = useTranslations("settings.tools");
+  const oauthRecovery = error ? teamMcpOAuthRecovery(error.error) : null;
+  const showToolFailure = (step: "parse" | "authorize" | "create", cause: unknown) => {
+    const recovery = step === "authorize" ? teamMcpOAuthRecovery(cause) : null;
+    setError(shownError(recovery ? tTools(recovery) : t(createToolFailureKey(step, cause)), cause));
+  };
   const [routeAway, setRouteAway] = useState<{ kind: string; hint: string } | null>(null);
 
   // parsed source
@@ -1113,7 +1120,7 @@ export function CreateToolCard({
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
               spellCheck={false}
-              autoComplete="off"
+              autoComplete="new-password"
               placeholder={t("mcp_token_placeholder")}
               aria-label={t("mcp_token_label")}
               style={{ flex: 1, border: "none", outline: "none", background: "transparent", padding: "11px 0", fontSize: "0.78125rem", color: "var(--c-ink)" }}
@@ -1212,9 +1219,13 @@ export function CreateToolCard({
           <div style={{ fontSize: "0.71875rem", color: "var(--c-ink-3)", display: "inline-flex", alignItems: "center", gap: 6, lineHeight: 1.5 }}>
             <Icon name="lock" s={13} />{t("oauth_leave_note", { provider: providerLabel })}
           </div>
+          <p style={{ color: "var(--c-ink-2)", fontSize: "0.8125rem", margin: 0 }}>{tTools("oauth_shared_access")}</p>
           {error ? (
             <Callout tone="err" icon="alertTriangle">
-              <b style={{ fontWeight: 600 }}>{t("create_failed")}</b> {error.message}
+              {error.message}
+              {oauthRecovery === "oauth_callback_rejected" ? (
+                <> <a href={appPath(teamSettingsPath("public-entries"))} target="_blank" rel="noreferrer">{tTools("oauth_public_entry_action")}</a></>
+              ) : null}
             </Callout>
           ) : null}
           {error ? <ErrorDiagnosticsInline error={error.error} surface="settings" /> : null}

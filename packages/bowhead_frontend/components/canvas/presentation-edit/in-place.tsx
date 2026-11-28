@@ -9,7 +9,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { ElementBox, InventoryElement, PendingEdit } from "@/lib/presentation-edit";
+import { isNumberText, type ElementBox, type InventoryElement, type PendingEdit } from "@/lib/presentation-edit";
 import {
   alignment,
   cellRect,
@@ -290,7 +290,8 @@ export type InPlaceTarget =
   // methods land in it from the first key; editing shows the same field (design §13.4).
   | { kind: "text"; key: string; paragraph: number; typed?: string; armed?: boolean }
   | { kind: "cell"; key: string; row: number; col: number; typed?: string; armed?: boolean }
-  | { kind: "chart"; key: string };
+  // `typed`: a digit typed on the selected chart, which lands in its first value (design §13.7).
+  | { kind: "chart"; key: string; typed?: string };
 
 export type CellMove = "up" | "down" | "next" | "previous";
 
@@ -319,6 +320,9 @@ function armedKeyDown(event: KeyboardEvent<HTMLElement>, armed: ArmedProps): boo
   // Enter, or Space as on a button, starts editing without adding a line break or a space.
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
+    // A number cell holds its value selected for typing over; Enter edits it from the end instead.
+    const field = event.currentTarget;
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) field.setSelectionRange(field.value.length, field.value.length);
     armed.onStart();
   } else if (event.key === "Tab") {
     armed.onTabAway();
@@ -330,21 +334,25 @@ function armedKeyDown(event: KeyboardEvent<HTMLElement>, armed: ArmedProps): boo
   return true;
 }
 
-/** On opening: focus the field, add the character that opened it, and put the caret at the end. */
-function useOpenField(ref: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>, typed: string | undefined, onChange: (value: string) => void) {
+/**
+ * On opening: focus the field, add the character that opened it, and put the caret at the end. With
+ * `replace` (a number cell) the value is selected instead, and a typed character takes its place.
+ */
+function useOpenField(ref: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>, typed: string | undefined, onChange: (value: string) => void, replace = false) {
   const typedRef = useRef(typed);
   useLayoutEffect(() => {
     const field = ref.current;
     if (!field) return;
     field.focus();
-    // The caret goes to the end at once: an input method can start composing before the next frame.
-    field.setSelectionRange(field.value.length, field.value.length);
     const extra = typedRef.current;
     typedRef.current = undefined;
-    if (extra) onChange(field.value + extra);
+    const selectAll = replace && !extra;
+    // The caret goes to the end at once: an input method can start composing before the next frame.
+    field.setSelectionRange(selectAll ? 0 : field.value.length, field.value.length);
+    if (extra) onChange(replace ? extra : field.value + extra);
     const frame = requestAnimationFrame(() => {
       const end = field.value.length;
-      field.setSelectionRange(end, end);
+      field.setSelectionRange(selectAll ? 0 : end, end);
     });
     return () => cancelAnimationFrame(frame);
     // Runs once, when the field opens.
@@ -414,8 +422,10 @@ function TextField({ element, paragraph, value, typed, look, ground, geometry, l
   );
 }
 
-function CellField({ value, typed, look, ground, rect, fontSize, align, padLeft, label, onChange, onMove, onClose, ...armed }: ArmedProps & {
+function CellField({ value, typed, replace, look, ground, rect, fontSize, align, padLeft, label, onChange, onMove, onClose, ...armed }: ArmedProps & {
   value: string;
+  /** The cell holds a number: typing replaces it. */
+  replace: boolean;
   typed?: string;
   look: GlyphLook | undefined;
   ground: Backdrop;
@@ -430,8 +440,15 @@ function CellField({ value, typed, look, ground, rect, fontSize, align, padLeft,
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const movedRef = useRef(false);
-  useOpenField(ref, typed, onChange);
-  useLayoutEffect(() => { if (armed.armed) movedRef.current = false; }, [armed.armed]);
+  useOpenField(ref, typed, onChange, replace);
+  useLayoutEffect(() => {
+    if (!armed.armed) return;
+    movedRef.current = false;
+    // Back to the selection (Esc): a number is selected again for typing over.
+    const field = ref.current;
+    if (replace && field && document.activeElement === field) field.setSelectionRange(0, field.value.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed.armed]);
   return (
     <input
       ref={ref}
@@ -500,13 +517,31 @@ export interface InPlaceLayerProps {
   onTabAway: () => void;
   /** Read with a selection's hidden field: how to start editing it. */
   armedHint: string;
+  /** A changed chart's values, written on the chart (「1 月 905 → 1,000」). */
+  chartMarks?: (edit: Extract<PendingEdit, { kind: "chart" }>) => string[];
+  /** The bottom of each element's painted text, in fractions of the page, when it runs past the box. */
+  onPaintedBottoms?: (bottoms: Record<string, number>) => void;
 }
 
 /** Pending text painted over the old render, and the open field. */
 export function InPlaceLayer({
   elements, layout, texts, tables, pending, page, editing, labelFor, onText, onCell, onMove, onClose, onStart, onDisarm, onTabAway, armedHint,
+  chartMarks, onPaintedBottoms,
 }: InPlaceLayerProps) {
   const hintId = useId();
+  const paintedRef = useRef<HTMLDivElement>(null);
+  // A painted text longer than its box: the element's outline grows to the painted height (design §13.7).
+  useLayoutEffect(() => {
+    const layer = paintedRef.current;
+    if (!layer || !onPaintedBottoms || page.height <= 0) return;
+    const bottoms: Record<string, number> = {};
+    for (const node of layer.querySelectorAll<HTMLElement>("[data-painted-key]")) {
+      const key = node.dataset.paintedKey ?? "";
+      const bottom = (node.offsetTop + node.offsetHeight) / page.height;
+      bottoms[key] = Math.max(bottoms[key] ?? 0, bottom);
+    }
+    onPaintedBottoms(bottoms);
+  });
   const armedProps = { armed: editing?.kind !== "chart" && Boolean(editing?.armed), onStart, onDisarm, onTabAway, describedBy: hintId };
   const byKey = useMemo(() => new Map(elements.map((element) => [element.key, element])), [elements]);
   // Looks are read from the render once per element and page draw.
@@ -572,7 +607,7 @@ export function InPlaceLayer({
       const style = looked.styles[paragraphIndex];
       const geometry = paragraphGeometry(element, paragraph, page);
       painted.push(
-        <div key={`t:${edit.key}:${edit.paragraph}`} className={styles.painted} data-painted="text" data-draft={!looked.ground.solid || undefined} aria-hidden="true"
+        <div key={`t:${edit.key}:${edit.paragraph}`} className={styles.painted} data-painted="text" data-painted-key={edit.key} data-draft={!looked.ground.solid || undefined} aria-hidden="true"
           style={{ ...geometryStyle(geometry), background: css(looked.ground.rgb) }}>
           {styledRuns(edit.expect, edit.text, style.chars).map((run, index) => (
             <span key={index} style={lookStyle(run.glyph === null ? majorityLook(paragraph, looks) : style.table[run.glyph])}>{run.text}</span>
@@ -594,10 +629,24 @@ export function InPlaceLayer({
           {edit.text}
         </div>,
       );
+    } else if (edit.kind === "chart" && chartMarks && element.box) {
+      // The new values are written on the chart; its drawing changes with the new render after a save.
+      const lines = chartMarks(edit);
+      if (!lines.length) continue;
+      const [x, y, w] = element.box;
+      const shown = lines.slice(0, 4);
+      painted.push(
+        <div key={`g:${edit.key}`} className={styles.chartMarks} data-painted="chart" aria-hidden="true"
+          style={{ right: Math.max(4, page.width - (x + w) * page.width + 4), top: y * page.height + 4, maxWidth: Math.max(120, w * page.width - 8) }}>
+          {shown.map((line) => <span key={line}>{line}</span>)}
+          {lines.length > shown.length ? <span>{`+${lines.length - shown.length}`}</span> : null}
+        </div>,
+      );
     }
   }
 
   let field: React.ReactNode = null;
+  let cellTarget: React.ReactNode = null;
   if (editing?.kind === "text") {
     const element = byKey.get(editing.key);
     const text = texts.get(editing.key);
@@ -622,18 +671,21 @@ export function InPlaceLayer({
       const value = edit && edit.kind === "cell" ? edit.text : element.rows?.[editing.row]?.[editing.col]?.text ?? "";
       // A small cell's field grows to readable text while it is open; the painted value keeps the rendered size.
       field = (
-        <CellField key={`${editing.key}:${editing.row}:${editing.col}`} value={value} typed={editing.typed} look={cell.look} ground={cell.ground}
+        <CellField key={`${editing.key}:${editing.row}:${editing.col}`} value={value} typed={editing.typed} replace={isNumberText(value)} look={cell.look} ground={cell.ground}
           rect={cell.rect} fontSize={Math.max(cell.fontSize, 13)} align={cell.align} padLeft={cell.padLeft} label={labelFor(element, editing)}
           onChange={(next) => onCell(element, editing.row, editing.col, next)}
           onMove={(move) => onMove(element, editing.row, editing.col, move)} onClose={onClose} {...armedProps} />
       );
+      // The hidden field of a selected table: the cell that takes typing is outlined. A sibling of the
+      // field, so starting to type does not remount the field under the first key.
+      if (editing.armed) cellTarget = <span className={styles.cellTarget} aria-hidden="true" style={{ left: cell.rect[0], top: cell.rect[1], width: cell.rect[2], height: cell.rect[3] }} />;
     }
   }
 
   return (
     <>
-      <div className={styles.paintedLayer}>{painted}</div>
-      {field ? <div className={styles.fieldLayer}>{field}<span id={hintId} className="sr-only">{armedHint}</span></div> : null}
+      <div className={styles.paintedLayer} ref={paintedRef}>{painted}</div>
+      {field ? <div className={styles.fieldLayer}>{field}{cellTarget}<span id={hintId} className="sr-only">{armedHint}</span></div> : null}
     </>
   );
 }

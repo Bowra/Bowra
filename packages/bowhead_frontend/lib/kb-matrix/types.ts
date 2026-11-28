@@ -25,6 +25,8 @@ export interface MatrixCellVM {
   sourceExcerpt?: string;
   chunkId?: string;
   page?: number;
+  /** Position of the quoted chunk; shown as the paragraph when there is no page (step 1 S7). */
+  chunkIndex?: number;
   confidence?: number;
   extractedAt?: string;
   /** record.edited_by_user includes this field name → AI never overwrites. */
@@ -48,6 +50,38 @@ export interface MatrixCellVM {
   // ── M3 additive ──
   /** Primary-variant cross-verification agreement (absent = disabled, side panel omits row). */
   selfConsistencyAgree?: number;
+  // ── Document matrix step 1 (S4) ──
+  /** The cell's latest change (server `last_event`); absent for cells without history and unreadable rows. */
+  lastEvent?: MatrixCellLastEvent;
+}
+
+/** Kinds of cell history (`kb_matrix_cell_events.kind`). The last three are AI writes and name no person. */
+export type MatrixCellEventKind =
+  | "edited"
+  | "kept_as_text"
+  | "edit_reverted"
+  | "verified"
+  | "verify_reverted"
+  | "ai_value"
+  | "edit_superseded"
+  | "auto_retried";
+
+export const AI_CELL_EVENT_KINDS: ReadonlySet<MatrixCellEventKind> = new Set(["ai_value", "edit_superseded", "auto_retried"]);
+
+export interface MatrixCellLastEvent {
+  kind: MatrixCellEventKind;
+  /** Null for AI writes and for people whose name cannot be resolved (for example after account deletion). */
+  actorName: string | null;
+  /** ISO time. */
+  at: string;
+}
+
+/** One entry of a cell's history (GET …/cells/{file}/{col}/events, newest first). */
+export interface MatrixCellEvent extends MatrixCellLastEvent {
+  eventId: string;
+  runId: string | null;
+  /** Shared by the cells of one bulk verify. */
+  batchId: string | null;
 }
 
 /** M2 run state (snapshot run field; null = never run). */
@@ -68,6 +102,11 @@ export interface MatrixRunVM {
   scopeColumnId?: string;
   /** Server authoritative (FR-34: members cancel own runs only; FE no shadow-role decisions). */
   canCancel?: boolean;
+  // ── Document matrix step 1 (S3) ──
+  /** A run limited to a few rows (trial); the banner says so. */
+  trial?: boolean;
+  /** Rows the trial covers. */
+  trialFiles?: number;
 }
 
 export interface MatrixRowVM {
@@ -103,6 +142,9 @@ export interface MatrixColumnVM {
   crossVerify?: boolean;
 }
 
+/** Who can see a matrix (step 1 S8): every member of its Space, or only its creator. */
+export type MatrixVisibility = "space" | "private";
+
 export interface MatrixSnapshot {
   matrixId: string; // M1: `tpl_${doc_type_id}` synthetic id; M2: real mx_*
   title: string;
@@ -113,8 +155,16 @@ export interface MatrixSnapshot {
   // ── M2 additive ──
   /** Server-authoritative can_edit (rank≥member; e2e-plan P2-1 implemented, FE shadow decision retired). */
   canEdit?: boolean;
+  /** Server-authoritative: creator or Space/Team admin (deletes the matrix, removes rows with edited or verified cells). */
+  canManage?: boolean;
+  /** Step 1 S8: who can see the matrix ("private": its creator only; may hold the creator's personal files). */
+  visibility?: MatrixVisibility;
+  /** Server-authoritative: the caller created the matrix and only-me matrices are enabled. */
+  canChangeVisibility?: boolean;
   /** Structure version: server returns full snapshot when since_seq < structureSeq. */
   structureSeq?: number;
+  /** Step 1 S6: digest of everything in this projection a delta cannot carry; polls send it back with seq. */
+  projectionDigest?: string;
   /** Poll interval (server supplies BOWHEAD_KB_MATRIX_POLL_MS, FR-22). */
   pollMs?: number;
   /**
@@ -161,6 +211,72 @@ export function cellChoiceList(cell: MatrixCellVM): string[] {
  * columns untrimmed, original matrix row order preserved (pure function shared by filtered view/empty-state detection). */
 export function rowsWithFailedCell(rows: MatrixRowVM[]): MatrixRowVM[] {
   return rows.filter((r) => Object.values(r.cells).some((c) => c?.status === "failed"));
+}
+
+/** What removing these rows deletes (S2 confirmation): cells with a row, and how many are edited or verified. */
+export function rowRemovalCounts(rows: MatrixRowVM[]): { cells: number; edited: number; verified: number } {
+  let cells = 0;
+  let edited = 0;
+  let verified = 0;
+  for (const row of rows) {
+    for (const cell of Object.values(row.cells)) {
+      if (!cell) continue;
+      cells++;
+      if (cell.edited) edited++;
+      if (cell.verified) verified++;
+    }
+  }
+  return { cells, edited, verified };
+}
+
+/** Rows a trial runs first (server `TRIAL_FILE_COUNT`). */
+export const TRIAL_FILE_COUNT = 3;
+
+/** Run menu counts (display only; the estimate is authoritative). */
+export interface RunMenuCounts {
+  /** all_pending: empty cells and failed cells without an edit. */
+  pending: number;
+  /** Stale cells without an edit. */
+  stale: number;
+  /** Failed cells without an edit. */
+  failed: number;
+  /** Rows a trial would run: the first TRIAL_FILE_COUNT rows with pending cells. */
+  trialFiles: number;
+  /** Rerun all keeps these: verified cells that hold a value, and edited cells. */
+  keptVerified: number;
+  keptEdited: number;
+}
+
+/** Mirrors the server's scope selection (engine `select_targets`) over the snapshot. */
+export function runMenuCounts(rows: MatrixRowVM[], columns: MatrixColumnVM[]): RunMenuCounts {
+  const counts: RunMenuCounts = { pending: 0, stale: 0, failed: 0, trialFiles: 0, keptVerified: 0, keptEdited: 0 };
+  let pendingRows = 0;
+  for (const row of rows) {
+    let rowPending = false;
+    for (const col of columns) {
+      const cell = row.cells[col.columnId];
+      if (!cell) {
+        counts.pending++;
+        rowPending = true;
+        continue;
+      }
+      if (cell.edited) {
+        counts.keptEdited++;
+        continue;
+      }
+      if (cell.status === "failed") {
+        counts.pending++;
+        counts.failed++;
+        rowPending = true;
+      } else if (cell.verified && cell.status !== "queued" && cell.status !== "running") {
+        counts.keptVerified++;
+      }
+      if (cell.stale) counts.stale++;
+    }
+    if (rowPending) pendingRows++;
+  }
+  counts.trialFiles = Math.min(TRIAL_FILE_COUNT, pendingRows);
+  return counts;
 }
 
 /** Filter-chip count: all failed cells in matrix (“{n} 格”). */

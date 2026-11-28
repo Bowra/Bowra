@@ -756,34 +756,96 @@ async def delete_shopify(tool_id: str, request: Request, user: User = Depends(_R
 
 @router.get("/plugin-templates")
 async def list_plugin_templates(request: Request, response: Response, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> dict[str, Any]:
-    """Preset Team Plugins for the team's active built-in connections, for the Plugin editor's create form.
+    """Preset Team Plugins for the Plugin editor's create form.
 
     Nothing is saved here: the editor fills its form and saves through the ordinary Plugin create route.
     A template whose Skill this caller's catalog does not offer is left out.
     """
     from bowhead_core.builtin_tool_providers import active_by_provider
+    from bowhead_core.mcp_oauth import notion_knowledge_binding_from_ref
+    from bowhead_core.n8n_workflows import N8N_WORKFLOWS_SKILL, N8N_WORKFLOWS_TEMPLATE, is_n8n_source, n8n_workflow_tools_enabled
+    from bowhead_core.notion_knowledge import (
+        NOTION_KNOWLEDGE_SKILL,
+        NOTION_KNOWLEDGE_TEMPLATE,
+        NOTION_RESEARCH_OPERATIONS,
+        is_notion_oauth_source,
+        notion_knowledge_tool_ref,
+    )
 
+    from bowhead_gateway._entitlement_gate import is_feature_licensed_request
     from bowhead_gateway.routes.agents import agent_authoring_catalog
 
     response.headers["Cache-Control"] = "private, no-store"
     store = _store(request)
     active = active_by_provider(await store.list_team_builtin_tools(user.team_id), None)
     pending = [(provider, tool, template) for provider, tools in active for tool in tools for template in provider.plugin_templates(tool)]
-    if not pending:
+    notion_licensed = await is_feature_licensed_request(request, "mcp")
+    enabled_sources = await store.list_team_tool_sources(user.team_id, only_enabled=True) if notion_licensed else []
+    notion_sources = [
+        source for source in enabled_sources if is_notion_oauth_source(source.kind, source.auth_type, source.base_url) and source.auth_ref
+    ]
+    n8n_sources = (
+        [source for source in enabled_sources if is_n8n_source(source.kind, source.base_url, source.tools_schema)]
+        if n8n_workflow_tools_enabled()
+        else []
+    )
+    if not pending and not notion_sources and not n8n_sources:
+        if notion_licensed:
+            return {"templates": [], "notion_setup_required": True}
         return {"templates": []}
     catalog = await agent_authoring_catalog(request, Response(), user, store)
     grants = {str(skill["name"]): skill["grant"] for skill in catalog["skills"] if skill["source_kind"] == "builtin"}
-    return {
-        "templates": [
-            {
-                "id": f"{template.kind}:{tool.id}",
-                "kind": template.kind,
-                "connection_id": tool.id,
-                "connection_name": tool.display_name,
-                "tool_refs": [provider.tool_ref(tool.id, operation) for operation in template.operations],
-                "skill_grants": [grants[template.skill]],
-            }
-            for provider, tool, template in pending
-            if template.skill in grants and template.operations
-        ]
-    }
+    templates = [
+        {
+            "id": f"{template.kind}:{tool.id}",
+            "kind": template.kind,
+            "connection_id": tool.id,
+            "connection_name": tool.display_name,
+            "tool_refs": [provider.tool_ref(tool.id, operation) for operation in template.operations],
+            "skill_grants": [grants[template.skill]],
+        }
+        for provider, tool, template in pending
+        if template.skill in grants and template.operations
+    ]
+    notion_grant = grants.get(NOTION_KNOWLEDGE_SKILL)
+    notion_ready = False
+    if notion_grant and notion_sources:
+        selectable = {item["stable_ref"] for item in catalog["tools"] if item["selectable"]}
+        for source in notion_sources:
+            binding = notion_knowledge_binding_from_ref(source.auth_ref, require_active=True)
+            if not binding:
+                continue
+            refs = [notion_knowledge_tool_ref(source.id, operation, binding) for operation in NOTION_RESEARCH_OPERATIONS]
+            if not set(refs[:2]) <= selectable:
+                continue
+            templates.append(
+                {
+                    "id": f"{NOTION_KNOWLEDGE_TEMPLATE}:{source.id}",
+                    "kind": NOTION_KNOWLEDGE_TEMPLATE,
+                    "connection_id": source.id,
+                    "connection_name": source.name,
+                    "tool_refs": [ref for ref in refs if ref in selectable],
+                    "skill_grants": [notion_grant],
+                }
+            )
+            notion_ready = True
+    n8n_grant = grants.get(N8N_WORKFLOWS_SKILL)
+    if n8n_grant and n8n_sources:
+        for source in n8n_sources:
+            refs = [
+                str(item["stable_ref"])
+                for item in catalog["tools"]
+                if item["selectable"] and item.get("connection_id") == source.id and str(item.get("operation_id") or "").startswith("n8n_wf_")
+            ]
+            if refs:
+                templates.append(
+                    {
+                        "id": f"{N8N_WORKFLOWS_TEMPLATE}:{source.id}",
+                        "kind": N8N_WORKFLOWS_TEMPLATE,
+                        "connection_id": source.id,
+                        "connection_name": source.name,
+                        "tool_refs": sorted(refs),
+                        "skill_grants": [n8n_grant],
+                    }
+                )
+    return {"templates": templates, **({"notion_setup_required": True} if notion_licensed and not notion_ready else {})}

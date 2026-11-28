@@ -2,6 +2,7 @@
 
 Community-Quellstände haben eine eigene Historie. Eine Anwendungsversion bedeutet nicht, dass Images oder ein gehosteter Dienst veröffentlicht wurden.
 
+- [v1.7.95](releases/v1.7.95.de-DE.md) — Bibliotheksdateien anhängen, laufende Ergebnisse verfolgen und Notion- sowie n8n-Tools verbinden.
 - [v1.7.76](releases/v1.7.76.de-DE.md) — Gewinnschwellen interaktiv erkunden, mehrere Folien referenzieren und Modellrückmeldungen verbessern.
 - [v1.7.75](releases/v1.7.75.de-DE.md) — Unterstützte PowerPoint-Inhalte bearbeiten und überarbeitete Uploads mit dem Original verknüpfen.
 - [v1.7.73](releases/v1.7.73.de-DE.md) — Ergebnisse an die Seitenleiste anheften und Diagramme, Berichte und lange Gespräche verbessern.

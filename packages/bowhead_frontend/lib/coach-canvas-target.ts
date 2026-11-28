@@ -1,4 +1,5 @@
 import type { CoachResourceReference } from "./coach-resource-editors";
+import type { DraftFieldKey } from "./agent-trial";
 
 export type CoachCanvasResourceTarget =
   | { kind: "skill"; id: string; source_kind: "user" | "team" | "builtin"; revision: string }
@@ -16,6 +17,10 @@ export type CoachEditorPort = {
   save?: () => Promise<boolean>;
   /** Discard the editor's input after the editor's own confirmation; resolves whether it was discarded. */
   discard?: () => Promise<boolean>;
+  /** The Agent editor's unsaved field groups (Owner draft trial save rule); absent for other editors. */
+  dirtyFields?: () => readonly DraftFieldKey[];
+  /** Why the Agent editor's input can't be saved yet (its 「还不能保存」 reason), or null; absent for other editors. */
+  saveBlockedProblem?: () => string | null;
 };
 
 export class CoachCanvasNotReadyError extends Error {

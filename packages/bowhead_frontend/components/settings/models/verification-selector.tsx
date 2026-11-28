@@ -32,8 +32,16 @@ export function VerificationSelector({
   workflow,
   onBack,
   error,
+  initialSelected,
+  title,
+  description,
 }: {
   error?: string | null;
+  /** Keys selected on open; defaults to the recommended candidates. */
+  initialSelected?: string[];
+  /** Heading and description when the selector is scoped (for example to one connection). */
+  title?: string;
+  description?: string;
   workflow?: React.ReactNode;
   onBack?: () => void;
   candidates: VerificationCandidate[];
@@ -49,7 +57,7 @@ export function VerificationSelector({
   const [recommendedOnly, setRecommendedOnly] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(
     () => new Set(
-      candidates
+      initialSelected ?? candidates
         .filter((candidate) => candidate.recommended)
         .map(verificationCandidateKey),
     ),
@@ -94,8 +102,8 @@ export function VerificationSelector({
       <header className="verification-selector-head">
         <div>
           <span>{t("selection_kicker")}</span>
-          <h2 id="mset-verification-selector-title">{t("selection_title")}</h2>
-          <p id="mset-verification-selector-description">{t("selection_body")}</p>
+          <h2 id="mset-verification-selector-title">{title ?? t("selection_title")}</h2>
+          <p id="mset-verification-selector-description">{description ?? t("selection_body")}</p>
         </div>
         <button ref={closeRef} type="button" className="iconbtn" onClick={onClose} aria-label={t("close")}>
           <XSm size={15} />

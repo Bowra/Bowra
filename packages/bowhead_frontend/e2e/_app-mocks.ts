@@ -9,6 +9,7 @@ type MockAuthedAppOptions = {
   subagentManagement?: boolean;
   kbHealthObservation?: boolean;
   kbUseGuard?: boolean;
+  fileLibrary?: boolean;
 };
 
 const defaultCatalog = {
@@ -163,7 +164,8 @@ export async function mockAuthedApp(page: Page, options: MockAuthedAppOptions = 
       team_id: "team_smoke",
       team_role: subagentManagement ? "owner" : undefined,
       is_team_admin: subagentManagement,
-      capabilities: planning || submissionProtocol || subagentManagement || options.kbHealthObservation ? {
+      capabilities: planning || submissionProtocol || subagentManagement || options.kbHealthObservation || options.fileLibrary ? {
+        file_library: options.fileLibrary ?? false,
         ...(submissionProtocol ? {
           composer: {
             model_panel_v2: false,

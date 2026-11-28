@@ -126,37 +126,6 @@ def _normalize_for_match(s: str) -> str:
     return re.sub(r"\s+", "", s)
 
 
-def backfill_chunk_ids(fields: dict, chunks: list[tuple[str, str]]) -> int:
-    """Provenance path B: set ``field['chunk_id']`` by locating the origin chunk.
-
-    For each field with a ``source_snippet``, whitespace-insensitive substring-match
-    the snippet (first ``MAX_SNIPPET_MATCH_CHARS``) against each chunk's content;
-    the first containing chunk's id is recorded. Best-effort — empty snippet / no
-    match leaves chunk_id absent (→ None downstream). Mutates ``fields`` in place;
-    returns the number of fields bound (for observability). Reuses the same
-    normalization as ``_ground_citation`` so behavior matches citation grounding.
-    """
-    if not chunks or not isinstance(fields, dict):
-        return 0
-    norm_chunks = [(cid, _normalize_for_match(content or "")) for cid, content in chunks]
-    bound = 0
-    for fdata in fields.values():
-        if not isinstance(fdata, dict):
-            continue
-        snippet = fdata.get("source_snippet")
-        if not snippet or not isinstance(snippet, str):
-            continue
-        key = _normalize_for_match(snippet[:MAX_SNIPPET_MATCH_CHARS])
-        if not key:
-            continue
-        for cid, norm in norm_chunks:
-            if cid and key in norm:
-                fdata["chunk_id"] = cid
-                bound += 1
-                break
-    return bound
-
-
 def _ground_citation(
     field_data: dict,
     source_text_normalized: str,

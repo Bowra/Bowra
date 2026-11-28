@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import traceback
 from collections.abc import Awaitable, Callable
@@ -22,6 +23,7 @@ from bowhead_core.account_deletion import (
     request_account_deletion,
 )
 from bowhead_core.account_erasure import erase_rows, freeze_rows, key_sql, protocol_receipts, reviewed_schema
+from bowhead_core.artifact_views import view_paths
 from bowhead_core.session_lifecycle import SessionLifecycleError
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
@@ -285,6 +287,17 @@ class AccountDeletionService:
                         "(SELECT row_key FROM account_deletion_rows WHERE operation_id=? AND table_name='artifacts'))",
                         (deletion.operation_id, deletion.operation_id, table, deletion.operation_id),
                     )
+                # Kept renders of the deleted files hold their content too (docx design §5.2).
+                async with db.execute(
+                    "SELECT row_key FROM account_deletion_rows WHERE operation_id=? AND table_name='artifacts'", (deletion.operation_id,)
+                ) as cur:
+                    artifact_keys = await cur.fetchall()
+                for (row_key,) in artifact_keys:
+                    for path in view_paths(self.artifacts.backend, str(json.loads(row_key)[0])):
+                        await db.execute(
+                            "INSERT OR IGNORE INTO account_deletion_objects(operation_id,storage_kind,object_key) VALUES (?,'artifact',?)",
+                            (deletion.operation_id, path),
+                        )
                 # Preserve protocol evidence before any independently committed domain erasure.
                 await protocol_receipts(db, deletion.user_id, secret=self.secret, erased_at=self.clock().isoformat())
                 await db.execute("UPDATE account_deletions SET state='purging' WHERE operation_id=?", (deletion.operation_id,))

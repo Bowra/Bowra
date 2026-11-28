@@ -138,6 +138,15 @@ async def validate_chat_attachment_access(
         except (ValueError, TypeError, KeyError, StopIteration) as exc:
             raise ChatAttachmentAccessError(409, "chart_selection_unavailable") from exc
 
+    if any(ref.get("documentSelection") is not None for ref in refs):
+        from bowhead_core.document_selection import resolve_document_selections
+
+        # Before the deck check: a reference carrying both selections is refused under this code.
+        try:
+            await resolve_document_selections(artifact_store, refs, user_id=user_id, workspace_id=workspace_id, session_id=session_id or "")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ChatAttachmentAccessError(409, "document_selection_unavailable") from exc
+
     if any(ref.get("presentationSelection") is not None for ref in refs):
         from bowhead_core.presentation_selection import resolve_presentation_selections
 

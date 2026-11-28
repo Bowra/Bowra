@@ -230,11 +230,13 @@ def render_selected_contexts(facts: Sequence[Mapping[str, Any]]) -> str:
     """Render bounded data, with full-file/selection scope explicitly separated.
 
     The list also carries presentation element facts (``presentation_selection.py``); they render
-    in their own block after the chart block.
+    in their own block after the chart block. Word paragraph and page facts
+    (``document_selection.py``) render in their own blocks after the deck blocks.
     """
+    from bowhead_core.document_selection import is_document_fact, render_document_selections
     from bowhead_core.presentation_selection import is_presentation_fact, render_presentation_selections
 
-    charts = [fact for fact in facts if not is_presentation_fact(fact)]
+    charts = [fact for fact in facts if not is_presentation_fact(fact) and not is_document_fact(fact)]
     blocks: list[str] = []
     if charts:
         blocks.append(
@@ -246,4 +248,7 @@ def render_selected_contexts(facts: Sequence[Mapping[str, Any]]) -> str:
     elements = render_presentation_selections(facts)
     if elements:
         blocks.append(elements)
+    documents = render_document_selections(facts)
+    if documents:
+        blocks.append(documents)
     return "\n".join(blocks)

@@ -94,6 +94,7 @@ const TAB_ICONS: Partial<Record<SettingsTabId, IconComponent>> = {
   license: Lock,
   openapi: Bolt,
   "team-appearance": Palette,
+  "file-retention": Database,
   "reference-retention": Database,
   workflows: Workflow,
   scheduled: CalendarClock,
@@ -179,6 +180,7 @@ export function useSettingsNavModel({
           capabilities: {
             access_requests: accessRequestsOn,
             feedback_loop: feedbackLoopOn,
+            file_library: Boolean(me?.capabilities?.file_library),
           },
           isLocalDeployment: deployment.local,
           teamOpenapiServed: deployment.openapi,

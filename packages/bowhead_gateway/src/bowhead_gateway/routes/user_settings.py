@@ -8,6 +8,7 @@ DELETE /api/v1/user-settings/{key}     → 删单个 key
 - pptx_template_artifact_id (V2.1)
 - appearance_theme_config (theme config M1)
 - kb_file_scope (knowledge-base file list: all | personal | space | team)
+- running_view_style (how the chat running view draws its work: list | chips | lanes | timeline)
 """
 
 from __future__ import annotations
@@ -44,6 +45,10 @@ NOTIFICATION_EMAIL_REMINDER_VALUES = frozenset({"on", "off"})
 KEY_KB_FILE_SCOPE = "kb_file_scope"
 # Values of GET /api/v1/kb/files ``scope`` the knowledge-base page may restore.
 KB_FILE_SCOPE_VALUES = frozenset({"all", "personal", "space", "team"})
+# Chat running state R3.2: one account setting written by the Appearance page and the running card's switcher.
+# Unset = "list"; resetting deletes the key.
+KEY_RUNNING_VIEW_STYLE = "running_view_style"
+RUNNING_VIEW_STYLE_VALUES = frozenset({"list", "chips", "lanes", "timeline"})
 
 
 _ALLOWED_KEYS = {
@@ -65,6 +70,8 @@ _ALLOWED_KEYS = {
     KEY_AGENT_COACH_AFTER_EDIT,
     # Reminder emails for items still waiting on you ("on" | "off"; unset = on).
     KEY_NOTIFICATION_EMAIL_REMINDERS,
+    # How the chat running view draws its work (unset = list).
+    KEY_RUNNING_VIEW_STYLE,
 }
 
 
@@ -113,6 +120,8 @@ def _validate_setting_value(key: str, value: str, request: Request | None = None
         raise HTTPException(400, f"invalid {KEY_NOTIFICATION_EMAIL_REMINDERS} (allowed: {sorted(NOTIFICATION_EMAIL_REMINDER_VALUES)})")
     if key == KEY_KB_FILE_SCOPE and value not in KB_FILE_SCOPE_VALUES:
         raise HTTPException(400, f"invalid {KEY_KB_FILE_SCOPE} (allowed: {sorted(KB_FILE_SCOPE_VALUES)})")
+    if key == KEY_RUNNING_VIEW_STYLE and value not in RUNNING_VIEW_STYLE_VALUES:
+        raise HTTPException(400, f"invalid {KEY_RUNNING_VIEW_STYLE} (allowed: {sorted(RUNNING_VIEW_STYLE_VALUES)})")
     return value
 
 

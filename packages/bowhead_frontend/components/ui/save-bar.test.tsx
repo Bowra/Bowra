@@ -201,3 +201,15 @@ describe("SaveBar", () => {
   });
 
 });
+
+describe("SaveBar and bottom-corner notices", () => {
+  it("publishes its height while visible so floating notices sit above it", () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ height: 56, width: 800, top: 0, left: 0, right: 800, bottom: 56, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    const { rerender } = renderWrapped(<SaveBar dirty onSave={vi.fn()} onDiscard={vi.fn()} />);
+    expect(document.documentElement.style.getPropertyValue("--ui-savebar-occupied")).toBe("56px");
+
+    rerender(<SaveBar dirty={false} onSave={vi.fn()} onDiscard={vi.fn()} />);
+    expect(document.documentElement.style.getPropertyValue("--ui-savebar-occupied")).toBe("");
+    rect.mockRestore();
+  });
+});

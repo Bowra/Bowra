@@ -67,9 +67,9 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["41
     const dialog = page.getByRole("dialog", { name: "这条回答哪里不好？" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("都可以不填，直接提交也会记下。")).toBeVisible();
-    const consent = dialog.getByRole("checkbox", { name: /允许智能体负责人用这一轮做评测用例（负责人会看到问题、回答和你的反馈）/ });
+    const consent = dialog.getByRole("checkbox", { name: /允许智能体的所有者用这一轮做评测用例（所有者会看到问题、回答和你的反馈）/ });
     await expect(consent).not.toBeChecked();
-    await expect(dialog.getByText("负责人：刘一鑫。之后可以在这条回答的「⋯」里撤回。")).toBeVisible();
+    await expect(dialog.getByText("所有者：刘一鑫。之后可以在这条回答的「⋯」里撤回。")).toBeVisible();
     // Two columns of reason checkboxes.
     const reasons = dialog.locator(".bh-feedback-dialog__option").filter({ hasNot: page.locator("small") });
     await expect(reasons).toHaveCount(7);
@@ -83,7 +83,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["41
 
     await dialog.getByRole("button", { name: "提交" }).click();
     await expect(dialog).toBeHidden();
-    const toast = page.getByText("已记下。负责人可以用这一轮改进智能体。");
+    const toast = page.getByText("已记下。所有者可以用这一轮改进智能体。");
     await expect(toast).toBeVisible();
     await expect(page.getByTestId("toast-info").getByRole("button", { name: "撤销", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "已标记为不好，再点一次撤销" })).toHaveAttribute("aria-pressed", "true");

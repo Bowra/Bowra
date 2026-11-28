@@ -1384,6 +1384,17 @@ async def _changed_canvas_this_turn(bus: Any, store: Any, turn_id: str, appended
         return None
 
 
+def _chat_text_with_report(text: str, lang: str) -> str:
+    """The chat answer of a Turn whose report surfaced: without pointer sentences (chat running state R2.2).
+
+    The web shows a report card from ``report_changes`` instead, and IM renderers append the localized pointer.
+    An answer that was only a pointer sentence keeps the canonical one, so it never falls to the silent-done notice.
+    """
+    from bowhead_core.report_chrome_text import chrome_text
+
+    return _strip_canvas_pointer(text).rstrip() or chrome_text("canvas_pointer", lang)
+
+
 async def _reconcile_canvas_pointer(
     bus: Any,
     turn_id: str,
@@ -4360,6 +4371,10 @@ async def _maybe_propose_plan(
     if getattr(sctx, "planning_mode", None) == "off":
         logger.info("plan_propose.refused turn=%s — 用户已选「不出计划」", getattr(sctx, "turn_id", None))
         return None
+    if getattr(runtime.parent_ctx, "owner_trial", None) is not None:
+        # Plan steps would admit the released version; an Owner draft trial answers without a plan (§4.5).
+        logger.info("plan_propose.refused turn=%s reason=agent_trial_plan_unavailable", getattr(sctx, "turn_id", None))
+        return None
     # Auto = neither explicit planning nor off. Used twice: ① zero-dependency-edges-is-not-project
     # criterion only Auto; ② Auto plan **executes this turn without approval**.
     from .prompts.lead import planning_auto_from_mode as _pa
@@ -5910,6 +5925,9 @@ async def _lead_loop(
             "\n<agent_authoring_support>\n"
             "For resource discovery, exploratory Agent authoring or a request to start a new Agent draft, delegate to agent-coach. "
             "It can inspect authorized resources, establish an owned draft and save focused suggestions on exact draft targets. "
+            "A request to install or add an enabled Team Plugin such as Notion Team Knowledge to the user's Agent is an Agent resource edit. "
+            "Delegate the Plugin name and intended Agent to agent-coach, even if the user calls it setup or configuration. "
+            "Coach can save the binding to an existing owned Agent's draft in the same Turn. Use its actual receipt; the Owner releases the change. "
             "For personal Skill creation/editing, delegate the user's goal, stable name and constraints to Coach's independent package Tools: "
             "inspect, author, validate, save and return the original operation receipt. A draft-only request stops before saving. "
             "Do not request an Agent draft, report or evaluation for a personal Skill. Search only for concrete missing dependencies. "
@@ -5920,7 +5938,7 @@ async def _lead_loop(
             "Supply the user's actual purpose and constraints. Draft creation does not create or publish an Agent; "
             "the user reviews fields and confirms private creation through the existing draft view. "
             "Do not call another generator to save the Coach's authored content. "
-            "For existing owned Agents, Coach can inspect the exact working copy and save a version-bound proposal for Owner review. "
+            "For existing owned Agents, Coach can inspect the exact working copy and save a version-bound change to the draft. "
             "Delegate a single authoring goal to one Coach at a time. Do not dispatch overlapping write tasks in parallel. "
             "When a proposal or resource operation is already saved, pass its full original IDs to any follow-up and request only the unfinished action. "
             "Preserve the user's output scope and stopping condition in the delegated task: a criterion-only question asks only for the saved criterion, "
@@ -5934,7 +5952,8 @@ async def _lead_loop(
             "Retain actual view_delivery in closeout: a returned view_action is not an invocation, and event_emitted is not proof of browser rendering. "
             "Keep those delivery distinctions internally; use a brief ordinary-language acknowledgment without raw IDs, protocol values or routine permission disclaimers. "
             "A follow-up to read or open an editor must not repeat the completed creation, edit or case-proposal goal. "
-            "Proposal creation does not apply changes. Resource creation and evaluations require separately supported domain actions.\n"
+            "Use the receipt to distinguish an existing-Agent draft write from a creation suggestion awaiting adoption. "
+            "Resource creation and evaluations require separately supported domain actions.\n"
             "</agent_authoring_support>"
         )
     if getattr(runtime.parent_ctx, "coach_canvas_target", None) is not None:
@@ -8337,9 +8356,12 @@ async def _lead_loop(
                         runtime.parent_ctx,
                         sctx.turn_id,
                     )
+                    await _inject_turn_changes(payload_dict, runtime.parent_ctx, sctx.turn_id)
 
                     if answer_card is not None:
                         payload_dict.update(answer_card=answer_card, execution_generation=runtime.parent_ctx.execution_generation)
+                    if _opened := open_for_reader_in(getattr(result, "open_for_reader", ""), payload_dict.get("inline_artifacts")):
+                        payload_dict["open_for_reader"] = _opened
                     await _emit_event(
                         runtime.parent_bus,
                         sctx.turn_id,
@@ -8655,12 +8677,12 @@ async def _lead_loop(
         result.tokens_cached += sum(u[2] for u in _compose_usage)
 
     # M2/2a(i): the Lead prompt no longer lets it claim "见画布" in its own streamed
-    # prose — assert the canvas pointer deterministically ONLY when a report actually
-    # surfaced (the composer emitted sections this turn). Strip any pointer the LLM
-    # still emitted inline (prompt is best-effort — dogfood saw qwen re-emit it) first,
-    # so we append EXACTLY ONE canonical pointer and never double it.
+    # prose. When a report actually surfaced (the composer emitted sections this turn),
+    # strip any pointer the LLM still emitted inline (prompt is best-effort — dogfood saw
+    # qwen re-emit it). Chat running state R2.2: the answer no longer gets the canonical
+    # pointer appended; the web shows a report card from `report_changes`, and IM
+    # renderers append the localized pointer themselves. Planning Mode keeps its pointer.
     from bowhead_core.report_chrome_text import chrome_lang as _chrome_lang
-    from bowhead_core.report_chrome_text import chrome_text as _chrome_text
 
     _chat_chrome_lang = _chrome_lang(getattr(runtime.parent_ctx, "language_context", None))
     # chrome-i18n: retraction(done branch) and append same language—pin on bus,
@@ -8674,7 +8696,7 @@ async def _lead_loop(
     # same semantics: report really persisted to canvas this turn.
     _report_surfaced = bool(composer_emitted_kinds) or bool(getattr(runtime.parent_bus, "_psi_compose_done", False))
     if text_for_chat and _report_surfaced:
-        text_for_chat = _strip_canvas_pointer(text_for_chat).rstrip() + "\n\n" + _chrome_text("canvas_pointer", _chat_chrome_lang)
+        text_for_chat = _chat_text_with_report(text_for_chat, _chat_chrome_lang)
     # M2/2a(ii): record whether the user-visible chat text claims a canvas pointer +
     # stash it, so the done-branch can retract a phantom if no report surfaces.
     runtime.parent_bus._canvas_pointer_claimed = _claims_canvas_pointer(text_for_chat)  # type: ignore[attr-defined]
@@ -8755,8 +8777,11 @@ async def _lead_loop(
                     _lookup_payload["inline_artifacts"] = _lookup_arts
                 if _lookup_outputs := await _collect_turn_outputs(runtime.parent_ctx, sctx.turn_id):
                     _lookup_payload["outputs"] = _lookup_outputs
+                await _inject_turn_changes(_lookup_payload, runtime.parent_ctx, sctx.turn_id)
                 if answer_card is not None:
                     _lookup_payload.update(answer_card=answer_card, execution_generation=runtime.parent_ctx.execution_generation)
+                if _opened := open_for_reader_in(getattr(result, "open_for_reader", ""), _lookup_payload.get("inline_artifacts")):
+                    _lookup_payload["open_for_reader"] = _opened
                 _lookup_art_count = len(_lookup_arts)
                 if streaming_enabled:
                     await _v4_emit_event("lead.final.payload", _lookup_payload)
@@ -9952,6 +9977,95 @@ _OUTPUT_KIND_BY_SUFFIX: dict[str, str] = {
 def _output_kind(filename: Any) -> str:
     suffix = str(filename or "").rsplit(".", 1)[-1].lower() if "." in str(filename or "") else ""
     return _OUTPUT_KIND_BY_SUFFIX.get(suffix, "file")
+
+
+#: Chat running state R2.2: sections named on the report card, per list.
+_REPORT_CHANGES_CAP = 20
+
+
+def _report_change_entries(sections: list[Any]) -> list[dict[str, str]]:
+    from bowhead_core.agents.report_tools import _outline_title
+
+    return [
+        {"section_id": section.id, "kind": str(section.kind or ""), "title": str(_outline_title(section) or "")[:120]}
+        for section in sections[:_REPORT_CHANGES_CAP]
+    ]
+
+
+def _report_change_kinds(sections: list[Any]) -> dict[str, int]:
+    """How many changed sections of each kind, beyond the entry cap: the card words chapters and charts apart."""
+    counts: dict[str, int] = {}
+    for section in sections:
+        kind = str(section.kind or "")
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+async def _inject_turn_changes(payload: dict[str, Any], parent_ctx: Any, turn_id: str) -> None:
+    """What the Turn changed in the report and how many work files it saved (chat running state slice 2).
+
+    ``report_changes`` names the report sections this Turn added and revised, so a report card can replace the
+    appended pointer sentence. It is written only when the Turn's sections stay in the report, the same decision as
+    the finished line's ``outputs``. ``work_files`` counts the files this Turn saved that the answer does not show:
+    work files and drafts nobody delivered. Stored with the answer, so reload and replay read the same. Best-effort:
+    a lookup failure leaves both out.
+    """
+    try:
+        canvas_store = getattr(parent_ctx, "canvas_store", None)
+        has_report = any(isinstance(o, dict) and o.get("kind") == "report" for o in payload.get("outputs") or [])
+        if canvas_store is not None and has_report:
+            from bowhead_core.canvas_store import _REPORT_SURFACE_EXCLUDED_KINDS
+
+            def shown(sections: list[Any]) -> list[Any]:
+                return [
+                    section
+                    for section in sections
+                    if not getattr(section, "superseded", False)
+                    and section.kind not in _REPORT_SURFACE_EXCLUDED_KINDS
+                    and section.kind != "sql_block"
+                ]
+
+            added = shown(await canvas_store.list_sections_appended_by_turn(turn_id))
+            added_ids = {section.id for section in added}
+            updated = [
+                section
+                for section in shown(await canvas_store.list_sections_appended_by_turn(turn_id, include_patches=True))
+                if section.id not in added_ids
+            ]
+            if added or updated:
+                payload["report_changes"] = {
+                    "added": _report_change_entries(added),
+                    "updated": _report_change_entries(updated),
+                    "added_kinds": _report_change_kinds(added),
+                    "updated_kinds": _report_change_kinds(updated),
+                    **({"added_omitted": len(added) - _REPORT_CHANGES_CAP} if len(added) > _REPORT_CHANGES_CAP else {}),
+                    **({"updated_omitted": len(updated) - _REPORT_CHANGES_CAP} if len(updated) > _REPORT_CHANGES_CAP else {}),
+                }
+        art_store = getattr(parent_ctx, "artifact_store", None)
+        if art_store is not None:
+            shown_files = {
+                item.get("id") for item in payload.get("inline_artifacts") or [] if isinstance(item, dict) and item.get("kind") in {"file", "image"}
+            }
+            saved = await art_store.list_result_artifacts_for_turn(turn_id)
+            work = [artifact for artifact in saved if artifact.id not in shown_files and getattr(artifact, "kind", None) != "deck_preview"]
+            if work:
+                payload["work_files"] = {"count": len(work)}
+    except Exception:
+        logger.warning("turn_changes.collect_failed turn=%s", turn_id, exc_info=True)
+
+
+def open_for_reader_in(chosen: Any, inline_artifacts: Any) -> str:
+    """The file Lead's review named for the reader, kept only when the answer shows it as a file item.
+
+    Chat running state R2.4: the interface opens Results on this file when the Turn ends. A file the final list left
+    out (an unselected draft, a superseded copy) opens nothing; reload and replay read the same payload.
+    """
+    if not isinstance(chosen, str) or not chosen or not isinstance(inline_artifacts, list):
+        return ""
+    for item in inline_artifacts:
+        if isinstance(item, dict) and item.get("kind") in {"file", "image"} and item.get("id") == chosen:
+            return chosen
+    return ""
 
 
 async def _collect_turn_outputs(parent_ctx: Any, turn_id: str) -> list[dict[str, Any]]:

@@ -112,6 +112,44 @@ def _run_pptx_edit_apply(control: dict[str, Any]) -> dict[str, Any]:
     return meta
 
 
+def _run_docx_edit_apply(control: dict[str, Any]) -> dict[str, Any]:
+    """Apply a person's Word edits; refusals are ordinary results so the gateway can name them."""
+    from bowhead_core.document_edit import DocumentUnreadable, EditRefused, apply_edits
+
+    try:
+        output, meta = apply_edits(Path(control["data_path"]).read_bytes(), control.get("edits"))
+    except EditRefused as exc:
+        return {"refused": exc.refusals}
+    except DocumentUnreadable as exc:
+        return {"unreadable": exc.code}
+    Path(control["result_data_path"]).write_bytes(output)
+    return meta
+
+
+#: More than any page's share of a reference (at most 6 KB of UTF-8), so a cut is never made here.
+_PAGE_TEXT_CHARS = 8_192
+
+
+def _run_docx_page_text(control: dict[str, Any]) -> dict[str, Any]:
+    """The text of some pages of a Word document's kept PDF render, in reading order (design §7.4).
+
+    ``pages`` lists page numbers counted from 1; a page past ``page_count`` is left out, so the
+    caller can refuse the reference. Each text is capped at ``_PAGE_TEXT_CHARS`` characters, and
+    ``chars`` is its whole length.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(control["data_path"])
+    count = len(reader.pages)
+    pages = []
+    for number in control.get("pages") or []:
+        if type(number) is not int or not 1 <= number <= count:
+            continue
+        text = (reader.pages[number - 1].extract_text() or "").strip()
+        pages.append({"page": number, "text": text[:_PAGE_TEXT_CHARS], "chars": len(text)})
+    return {"page_count": count, "pages": pages}
+
+
 def _run_template(control: dict[str, Any]) -> dict[str, Any]:
     from bowhead_core.template_clone import parse_template
 
@@ -156,6 +194,17 @@ def main() -> int:
                 result = {"unreadable": exc.code}
         elif kind == "pptx_edit_apply":
             result = _run_pptx_edit_apply(control)
+        elif kind == "docx_edit_inventory":
+            from bowhead_core.document_edit import DocumentUnreadable, build_inventory
+
+            try:
+                result = build_inventory(Path(control["data_path"]).read_bytes())
+            except DocumentUnreadable as exc:
+                result = {"unreadable": exc.code}
+        elif kind == "docx_edit_apply":
+            result = _run_docx_edit_apply(control)
+        elif kind == "docx_page_text":
+            result = _run_docx_page_text(control)
         elif kind == "pptx_structure":
             from bowhead_core.pptx_result_view import deck_structure
 

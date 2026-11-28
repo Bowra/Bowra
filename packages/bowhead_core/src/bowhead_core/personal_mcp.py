@@ -62,15 +62,6 @@ HUNG_SCHEMA_MAX_ENTRIES = 256
 log = structlog.get_logger(__name__)
 
 
-def personal_mcp_oauth_enabled() -> bool:
-    """Members may sign in to MCP services with their own account.
-
-    On unless the deployment sets ``FEATURE_PERSONAL_MCP_OAUTH=0`` (default on since 2026-11-25, the
-    maintainer's decision; see the rollout register).
-    """
-    return os.environ.get("FEATURE_PERSONAL_MCP_OAUTH", "1") != "0"
-
-
 # anyio's worker-process pool is per event loop, so the validation slot is too.
 _validation_slot: RunVar[anyio.Lock] = RunVar("personal_mcp_validation_slot")
 # Per-process; keys never contain arguments.
@@ -531,16 +522,10 @@ class PersonalMcpStore:
         identity = f"pcm_{uuid4().hex[:20]}"
         cipher = self.seal(owner, identity, "credentials", {})
         async with open_shared_ctx(self.db_path) as db:
-            try:
-                await db.execute(
-                    "INSERT INTO personal_mcp_connection VALUES (?,?,?,?,'oauth',?,'authorizing',1,?,?)",
-                    (identity, owner, name, endpoint, cipher, _now(), _now()),
-                )
-            except sqlite3.IntegrityError as error:
-                # A database below revision 0233 cannot store signed-in connections.
-                if "auth_type" in str(error) or "CHECK constraint" in str(error):
-                    raise PersonalMcpError("personal_mcp_oauth_unavailable") from None
-                raise
+            await db.execute(
+                "INSERT INTO personal_mcp_connection VALUES (?,?,?,?,'oauth',?,'authorizing',1,?,?)",
+                (identity, owner, name, endpoint, cipher, _now(), _now()),
+            )
             await db.commit()
         return identity
 
@@ -1033,8 +1018,6 @@ async def personal_oauth_headers(
 
     Raises ``OAuthGrantRejected`` when the sign-in is missing or ended (the connection is marked
     ``needs_reauth``) and ``OAuthRefreshUnavailable`` when a renewal could not complete."""
-    if not personal_mcp_oauth_enabled():
-        raise PersonalMcpError("personal_mcp_oauth_disabled")
     from bowhead_core.mcp_oauth import oauth_broker, oauth_grant_headers
 
     return await oauth_grant_headers(
@@ -1049,15 +1032,9 @@ def prime_personal_oauth(store: PersonalMcpStore, owner: str, identity: str, acc
     oauth_broker(store).prime(_grant_key(owner, identity), access_token, expires_in)
 
 
-def _sign_in_result(connection_name: str, failure: OAuthGrantRejected | OAuthRefreshUnavailable | None) -> dict[str, Any]:
+def _sign_in_result(connection_name: str, failure: OAuthGrantRejected | OAuthRefreshUnavailable) -> dict[str, Any]:
     """Model-facing result of a call that was not sent because of the connection's sign-in."""
     name = _safe(connection_name)
-    if failure is None:
-        return {
-            "ok": False,
-            "error_kind": "personal_mcp_oauth_disabled",
-            "error": f"Not run: sign-in connections such as {name} are turned off on this deployment. Do not retry.",
-        }
     if isinstance(failure, OAuthGrantRejected):
         return {
             "ok": False,
@@ -1311,7 +1288,7 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                     raise
                 if card_open and identity:
                     await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="unavailable")
-                if sign_in is not None or str(exc) == "personal_mcp_oauth_disabled":
+                if sign_in is not None:
                     return _sign_in_result(tool["connection_name"], sign_in)
                 if refused:
                     # Same answer as a later call to the connection the refusal marked for repair.

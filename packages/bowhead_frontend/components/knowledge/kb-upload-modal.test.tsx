@@ -12,7 +12,7 @@ import type { KbMeContext } from "./kb-me";
 
 const mocks = vi.hoisted(() => ({
   me: null as KbMeContext | null,
-  spaces: [] as Array<{ id: string; name: string; desc: string }>,
+  spaces: [] as Array<{ id: string; name: string; desc: string; role?: "admin" | "member" | "viewer" }>,
   spacesLoading: false,
   readiness: "ready" as "ready" | "missing" | "unavailable" | "checking",
 }));
@@ -161,6 +161,15 @@ describe("KbUploadModal · 范围卡片", () => {
     fireEvent.keyDown(screen.getByTestId("kb-scope-space"), { key: "Home" });
     expect(personal).toBeChecked();
     expect(document.activeElement).toBe(personal);
+  });
+
+  it("Space viewer: the Space card is disabled and explains why", () => {
+    mocks.spaces = [{ id: "ws_1", name: "商超零售场景", desc: "", role: "viewer" }];
+    renderModal({ defaultScope: "space" });
+    expect(screen.getByTestId("kb-scope-space")).toBeDisabled();
+    expect(screen.getByTestId("kb-scope-card-space")).toHaveTextContent(zhMessages.knowledge_base.upload_modal.scope_desc_space_read_only);
+    // An unavailable default Space scope falls back to Personal.
+    expect(screen.getByTestId("kb-scope-personal")).toBeChecked();
   });
 
   it("没有空间：空间卡片禁用并给出加入/创建空间入口", () => {

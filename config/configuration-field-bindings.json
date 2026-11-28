@@ -27,6 +27,13 @@
     "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
     "schema_revision": "4e126f5f592d54552cb8"
   },
+  "personal_appearance.runningView": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.runningView",
+    "reason": "The original radio cards read value-free metadata; saves go through the user settings key, also written by the running card's switcher.",
+    "schema_revision": "d56ea8d8b9c17d04603e"
+  },
   "personal_appearance.typeScale": {
     "kind": "control",
     "file": "components/settings/personal-appearance-settings.tsx",

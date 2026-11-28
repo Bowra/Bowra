@@ -2,13 +2,58 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { apiFetch } from "./api-client";
 import {
+  coachChangeEffects,
+  coachChangeGroups,
   coachOperationOpens,
   coachCaseEffects,
   coachOperationsVersion,
   parseCoachOperationReference,
   readCoachOperation,
+  uncoveredChangeOpens,
 } from "./coach-operations";
 import { dispatchToTurnStore } from "./turn-store-dispatch";
+
+const changeMeta = (receipts: Array<{ call_id: string; agent_id: string; proposal_id: string }>) => ({
+  result_meta: { coach_operations: { schema_version: 1, truncated: false, receipts: receipts.map((item) => ({
+    call_id: item.call_id, tool_name: "agent_change_propose", reported_ok: true,
+    operation_ref: { kind: "agent_change", agent_id: item.agent_id, proposal_id: item.proposal_id },
+  })) } },
+});
+
+it("projects Coach's draft writes from the run record once across live, step_done and replay", () => {
+  const payload = { card_id: "t_change", ...changeMeta([{ call_id: "call_a", agent_id: "osa_1", proposal_id: "acp_a" }]) };
+  dispatchToTurnStore("tool_result", payload, "live", "t_change");
+  dispatchToTurnStore("step_done", { ...payload, step_id: "tool_a", state: "success" }, "live", "t_change");
+  dispatchToTurnStore("tool_result", payload, "replay", "t_change");
+  expect(coachChangeEffects("t_change")).toEqual([{ turnId: "t_change", callId: "call_a", reportedOk: true, reference: { kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_a" } }]);
+  // Case receipts stay separate; another Tool's name or extra authority is not a draft write.
+  expect(coachCaseEffects("t_change")).toHaveLength(0);
+  const forged = { result_meta: { coach_operations: { schema_version: 1, truncated: false, receipts: [
+    { call_id: "x", tool_name: "agent_eval_case_propose", reported_ok: true, operation_ref: { kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_b" } },
+    { call_id: "y", tool_name: "agent_change_propose", reported_ok: true, operation_ref: { kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_c", recover: true } },
+  ] } } };
+  dispatchToTurnStore("tool_result", forged, "live", "t_change_forged");
+  expect(coachChangeEffects("t_change_forged")).toHaveLength(0);
+});
+
+it("groups a Turn's writes by Agent and keeps only the open events the run record lacks", () => {
+  dispatchToTurnStore("tool_result", changeMeta([
+    { call_id: "call_1", agent_id: "osa_1", proposal_id: "acp_1" },
+    { call_id: "call_2", agent_id: "osa_2", proposal_id: "acp_2" },
+    { call_id: "call_3", agent_id: "osa_1", proposal_id: "acp_3" },
+  ]), "live", "t_group");
+  const effects = coachChangeEffects("t_group");
+  expect(coachChangeGroups(effects)).toEqual([
+    { agentId: "osa_1", references: [{ kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_1" }, { kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_3" }] },
+    { agentId: "osa_2", references: [{ kind: "agent_change", agent_id: "osa_2", proposal_id: "acp_2" }] },
+  ]);
+  const open = (proposalId: string, requestId: string) => ({
+    requestId, turnId: "t_group", userId: "u_1", teamId: "team_1", workspaceId: "ws_1", sessionId: "s_1",
+    reference: { kind: "agent_change" as const, agent_id: "osa_1", proposal_id: proposalId },
+  });
+  expect(uncoveredChangeOpens([open("acp_1", "a".repeat(32)), open("acp_old", "b".repeat(32))], effects).map((item) => item.reference))
+    .toEqual([{ kind: "agent_change", agent_id: "osa_1", proposal_id: "acp_old" }]);
+});
 
 vi.mock("./api-client", async (original) => ({
   ...(await original<typeof import("./api-client")>()),

@@ -110,6 +110,7 @@
   "client_refresh_required": "This page version cannot safely start a new send. Keep the draft and refresh the page.",
   "chart_selection_unavailable": "This chart selection has changed or is unavailable. Reopen the chart, select the scope again, and resend your draft.",
   "presentation_selection_unavailable": "The presentation element you referenced has changed or is unavailable. Reopen the file, select the element again in Edit, and resend your draft.",
+  "document_selection_unavailable": "The Word paragraph or pages you referenced have changed or are unavailable. Reopen the file, reference the paragraph or pages again, and resend your draft.",
   "subagent_draft_unsaved_changes": "There are unsaved changes on the right. Save or discard them before sending this message; your input is kept.",
   "subagent_draft_store_unavailable": "Drafts are temporarily unavailable, possibly during a service upgrade. Try again later; your Agents are not affected.",
   "clock_tamper": "The server clock is invalid, so this action is unavailable. Ask your system administrator to check the system time.",
@@ -754,5 +755,5 @@
   "personal_mcp_sign_in_renewal_unavailable": "The service did not respond while Bowhead renewed your sign-in. Your sign-in is still valid; try again later.",
   "personal_mcp_oauth_endpoint_locked": "A signed-in connection keeps its address. To use another address, add a new connection.",
   "personal_mcp_oauth_sign_in_required": "This connection is created by signing in to the service. Choose Continue to Sign In.",
-  "personal_mcp_oauth_unavailable": "Sign-in connections are not available on this deployment."
+  "tool_disabled_by_team": "Your team has turned this built-in Tool off, so it can't be added to Agents or Plugins. Agents and Plugins that already include it stay unchanged and don't use it when they run. An owner or administrator can turn it back on under Capability Center → Tools."
 }

@@ -78,6 +78,11 @@ export interface StepOutputArtifact {
   dataRole?: "stdout" | "structured";
   /** Entry path of a declared nested sandbox file, e.g. `site/blog/index.html`. */
   path?: string;
+  /** Stored kind (chat running state R2.1): `deliverable` files show as cards while the Turn runs. */
+  kind?: string;
+  /** The file this version belongs to (its first version's id) and this version's number. */
+  lineageId?: string;
+  versionNo?: number;
 }
 
 /** Bounded executable source captured on step_started for durable Code results.
@@ -156,6 +161,10 @@ export interface StepView {
   summary?: string;
   /** Localized duration string — "0.4s" / "1.2s". */
   durationText?: string;
+  /** Start time from the step event (server clock), the same live and after replay. */
+  startedAtMs?: number;
+  /** Measured duration in milliseconds, when the step reported one. */
+  durationMs?: number;
   /** Expanded body content; renderers pick a sub-component by stepType. */
   detail?: StepDetail | null;
   /** Substeps — present for bi_query batch / subagent_spawn. */

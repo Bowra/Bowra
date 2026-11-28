@@ -19,6 +19,7 @@ import aiosqlite
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.kb.files_store import KbFilesStore
+from bowhead_core.kb.knowledge_base_store import default_knowledge_base_id
 from bowhead_core.session_store import SessionStore
 from bowhead_core.user_store import User
 from bowhead_gateway.error_handler import register_error_handlers
@@ -57,6 +58,7 @@ _EXEMPT = {
     ("GET", "/api/v1/canvas/by-session/{session_id}/artifacts/{artifact_id}/preview"): "report family",
     ("POST", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}/rerun"): "matrix-scoped; see test_kb_matrix_authz",
     ("PATCH", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}"): "matrix-scoped; see test_kb_matrix_authz",
+    ("GET", "/api/v1/kb/matrices/{matrix_id}/cells/{file_id}/{column_id}/events"): "matrix-scoped; see test_kb_matrix_review",
 }
 
 _BUSINESS_EXEMPT = {
@@ -112,12 +114,23 @@ _COVERED: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {
         "kb_file",
         {_JSON: {"expected_source_version": 1, "expected_generation_id": "gen_probe", "expected_revision": 0, "action_id": "probe_action"}},
     ),
+    # Knowledge bases (FEATURE_KNOWLEDGE_BASES): another member's My knowledge answers like an unknown ID.
+    ("GET", "/api/v1/kb/knowledge-bases/{knowledge_base_id}"): ("knowledge_base", {}),
+    ("PATCH", "/api/v1/kb/knowledge-bases/{knowledge_base_id}"): ("knowledge_base", {_JSON: {"revision": 1, "name": "probe"}}),
+    ("DELETE", "/api/v1/kb/knowledge-bases/{knowledge_base_id}"): ("knowledge_base", {"query": "?file_count=0"}),
+    ("GET", "/api/v1/kb/knowledge-bases/{knowledge_base_id}/members"): ("knowledge_base", {}),
+    (
+        "PUT",
+        "/api/v1/kb/knowledge-bases/{knowledge_base_id}/members",
+    ): ("knowledge_base", {_JSON: {"changes": [{"principal_type": "user", "principal_id": PROBER, "level": "use"}]}}),
+    ("POST", "/api/v1/kb/knowledge-bases/{knowledge_base_id}/transfer"): ("knowledge_base", {_JSON: {"user_id": PROBER}}),
+    ("GET", "/api/v1/kb/knowledge-bases/{knowledge_base_id}/files"): ("knowledge_base", {}),
 }
 _COVERED_IDS = [f"{method} {path}" for method, path in _COVERED]
 
 
 def _is_per_id(path: str) -> bool:
-    return "{artifact_id}" in path or "{file_id}" in path
+    return "{artifact_id}" in path or "{file_id}" in path or "{knowledge_base_id}" in path
 
 
 def test_every_per_id_route_is_covered_or_exempt() -> None:
@@ -244,15 +257,23 @@ async def env(initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch
         uploaded_by=OWNER,
         initial_parse_status="done",
     )
-    ids = {"artifact": art.id, "html_artifact": html_art.id, "kb_file": kb_file, "kb_artifact": kb_art.id}
+    # The owner's My knowledge: it exists (as every home's default does) and only the owner can use it.
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", "1")
+    ids = {
+        "artifact": art.id,
+        "html_artifact": html_art.id,
+        "kb_file": kb_file,
+        "kb_artifact": kb_art.id,
+        "knowledge_base": default_knowledge_base_id(TEAM, "personal", OWNER),
+    }
     return SimpleNamespace(client=TestClient(app, raise_server_exceptions=False), ids=ids, sessions=sessions)
 
 
 def _send(env, method: str, path: str, spec: tuple[str, dict[str, Any]], resource_id: str, user: str, headers: dict[str, str]):  # noqa: ANN001, ANN202
     kind, kwargs = spec
-    params = {key: value for key, value in kwargs.items() if key not in {_JSON, "files"}}
-    id_name = "artifact_id" if "{artifact_id}" in path else "file_id"
-    url = path.format(**{id_name: resource_id, **params})
+    params = {key: value for key, value in kwargs.items() if key not in {_JSON, "files", "query"}}
+    id_name = "artifact_id" if "{artifact_id}" in path else "knowledge_base_id" if "{knowledge_base_id}" in path else "file_id"
+    url = path.format(**{id_name: resource_id, **params}) + kwargs.get("query", "")
     extra = {key: kwargs[key] for key in (_JSON, "files") if key in kwargs}
     return env.client.request(method, url, headers={"X-Bowhead-User-Id": user, **headers}, **extra)
 
@@ -306,6 +327,8 @@ async def test_owner_still_reaches_each_family(env) -> None:
         f"/api/v1/kb/files/{env.ids['kb_file']}",
         f"/api/v1/kb/files/{env.ids['kb_file']}/download",
         f"/api/v1/kb/files/{env.ids['kb_file']}/extract_rows_status",
+        f"/api/v1/kb/knowledge-bases/{env.ids['knowledge_base']}",
+        f"/api/v1/kb/knowledge-bases/{env.ids['knowledge_base']}/members",
     ]
     for path in paths:
         response = env.client.get(path, headers=owner)

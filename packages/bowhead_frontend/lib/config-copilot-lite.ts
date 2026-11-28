@@ -14,6 +14,7 @@ import { notifyPersonalAppearanceSaved } from "@/lib/personal-appearance";
 import type { ConfigLiteProposePayload } from "@/lib/types";
 import { refreshEffectiveTheme } from "@/lib/use-theme-config";
 import { notifyWorkspaceInstructionsSaved, notifyWorkspaceMetadataSaved, notifyWorkspaceSettingsSaved } from "@/lib/workspace-settings-notifications";
+import { refreshRunningViewStyle } from "./running-view-style";
 
 export type LiteTerminalState = "applied" | "reverted" | "ignored";
 export type LiteServerState = LiteTerminalState | "proposed" | "stale";
@@ -179,6 +180,8 @@ export async function performLiteAction(proposal: ConfigLiteProposePayload, op: 
   if (proposal.form_id === "personal_appearance" && proposal.team_id) {
     notifyPersonalAppearanceSaved(proposal.team_id);
     void refreshEffectiveTheme(proposal.team_id).catch(() => undefined);
+    // The run view is its own account setting in the same form.
+    void refreshRunningViewStyle();
   }
   if (proposal.form_id === "workspace_i18n" && receipt.team_id && receipt.workspace_id && receipt.owner_user_id && (shouldNotify?.(receipt) ?? true)) {
     notifyWorkspaceSettingsSaved({ teamId: receipt.team_id, workspaceId: receipt.workspace_id, receipt });
@@ -199,6 +202,7 @@ export function showAgentSavedAppearance(proposalId: string): void {
   if (proposal?.status !== "applied" || proposal.form_id !== "personal_appearance" || !proposal.team_id) return;
   notifyPersonalAppearanceSaved(proposal.team_id);
   void refreshEffectiveTheme(proposal.team_id).catch(() => undefined);
+  void refreshRunningViewStyle();
 }
 
 /** Ignore: forward POST; failure silently retains propose (no side effects, click again). */

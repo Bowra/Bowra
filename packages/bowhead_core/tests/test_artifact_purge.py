@@ -108,6 +108,17 @@ async def test_manual_purge_is_scoped_idempotent_and_leaves_exact_tombstone(ctx:
     assert await _claim_row(ctx, art.id) == receipt
 
 
+async def test_a_purge_deletes_the_kept_renders_with_the_file(ctx: Context) -> None:
+    """Kept renders hold the file's content; they go with it (docx inline edit design §5.2)."""
+    from bowhead_core.artifact_views import view_paths, write_view
+
+    art = await _file(ctx)
+    await write_view(ctx.store.backend, art.id, "pptx-pdf", source="s", renderer="r", pdf=b"%PDF-1.7\nrender")
+    assert any(Path(path).exists() for path in view_paths(ctx.store.backend, art.id))
+    assert await ctx.store.purge_now([art.id], user_id="u_owner") == 1
+    assert not any(Path(path).exists() for path in view_paths(ctx.store.backend, art.id))
+
+
 @pytest.mark.parametrize("entry", ["manual", "gc"])
 async def test_committed_claim_blocks_restore_and_new_pins_before_blob_io_finishes(ctx, monkeypatch, entry) -> None:
     art = await _file(ctx)
@@ -244,7 +255,8 @@ async def test_gc_rechecks_restore_after_candidate_selection(ctx, monkeypatch) -
 
     monkeypatch.setattr(ctx.store.backend, "delete", restore_other)
     stats = await ctx.store.hard_delete_old_soft_deleted(days=0)
-    assert stats["rows_removed"] == 1 and deleted == [first.path]
+    # Purge also deletes the file's kept renders (docx design §5.2); this test is about the file itself.
+    assert stats["rows_removed"] == 1 and [path for path in deleted if ".view." not in path] == [first.path]
     assert await ctx.store.get(second.id) is not None
     assert Path(second.path).exists()
 
@@ -294,7 +306,8 @@ async def test_gc_rechecks_snapshot_created_after_candidate_selection(ctx, monke
 
     monkeypatch.setattr(ctx.store.backend, "delete", pin_other)
     stats = await ctx.store.hard_delete_old_soft_deleted(days=0)
-    assert stats["rows_removed"] == 1 and deleted == [first.path]
+    # Purge also deletes the file's kept renders (docx design §5.2); this test is about the file itself.
+    assert stats["rows_removed"] == 1 and [path for path in deleted if ".view." not in path] == [first.path]
     assert await ctx.store.get(second.id, include_deleted=True) is not None
     assert Path(second.path).exists()
 

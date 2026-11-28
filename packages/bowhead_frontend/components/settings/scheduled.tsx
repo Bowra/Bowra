@@ -51,6 +51,7 @@ import {
 import { readSpaces } from "@/lib/use-space";
 import { viewerTimeZone } from "@/lib/time-zone";
 import { ApiError } from "@/lib/api-client";
+import { getChatSendErrorMessage } from "@/lib/chat-send-errors";
 import { appPath } from "@/lib/base-path";
 import {
   normalizeErrorDiagnostics,
@@ -252,6 +253,8 @@ function useScheduledErrorPresentation() {
               featureFallback: "scheduling",
             });
             if (entitlementMessage) return entitlementMessage;
+            // An Owner draft trial can't anchor a schedule: it would run the released version.
+            if (code === "agent_trial_schedule_unavailable") return getChatSendErrorMessage(code);
             const key = SCHEDULED_ERROR_MESSAGE_KEYS[code];
             return key ? t(key) : null;
           },

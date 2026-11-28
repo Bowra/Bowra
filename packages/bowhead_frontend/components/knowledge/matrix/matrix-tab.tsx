@@ -58,7 +58,17 @@ function sectionUrl(section: MatrixSectionKey, extra = ""): string {
   return `/knowledge?tab=${section}${extra}`;
 }
 
-export function MatrixTab({ section }: { section: MatrixSectionKey }) {
+export function MatrixTab({
+  section,
+  knowledgeBasesLayout = false,
+}: {
+  section: MatrixSectionKey;
+  /**
+   * Knowledge bases switch on (Q1): Extraction tables (`records`) lists the extraction-table definitions with
+   * their results, and Templates (`templates`) only matrix templates. Off (default): today's three views.
+   */
+  knowledgeBasesLayout?: boolean;
+}) {
   const t = useTranslations("kbMatrix");
   const tRecords = useTranslations("records");
   const router = useAppRouter();
@@ -99,6 +109,9 @@ export function MatrixTab({ section }: { section: MatrixSectionKey }) {
   const [saving, setSaving] = useState(false);
   const toast = notify;
   const snapshot = useMatrixSnapshot();
+  // Knowledge bases layout: an extraction-table change in the Extraction tables tab reloads its results list.
+  const [listTick, setListTick] = useState(0);
+  const onTemplatesChanged = useCallback(() => setListTick((n) => n + 1), []);
 
   // ── list + role ──
   useEffect(() => {
@@ -131,7 +144,7 @@ export function MatrixTab({ section }: { section: MatrixSectionKey }) {
     return () => {
       cancelled = true;
     };
-  }, [ws, spacesLoading, viewId, newFlow, tRecords, hasDerivedPerms]);
+  }, [ws, spacesLoading, viewId, newFlow, tRecords, hasDerivedPerms, listTick]);
 
   useEffect(() => {
     if (!derivedPerms) return;
@@ -333,6 +346,7 @@ export function MatrixTab({ section }: { section: MatrixSectionKey }) {
           preselectedFileIds={fromDt ? [] : preselected}
           preset={preset}
           docTypes={docTypes}
+          privateOption={sessionMe?.capabilities?.kb_matrix_private === true}
           onCancel={() => {
             // review P2: cancel also clears selection residue (previously onCreated only; leftovers silently made later
             // ?new=1 entry skipFiles).
@@ -351,30 +365,43 @@ export function MatrixTab({ section }: { section: MatrixSectionKey }) {
 
   // ── M2 actual matrix view (mx_*) ──
   if (isMxView && viewId) {
-    return <MatrixViewM2 key={viewId} matrixId={viewId} onBack={backToList} />;
+    return <MatrixViewM2 key={viewId} matrixId={viewId} onBack={backToList} onHome={() => router.push("/knowledge")} />;
   }
+
+  const templateManagerProps = {
+    workspaceId: ws,
+    canEdit,
+    uid,
+    isAdmin,
+    onApplyTemplate: (dt: KbDocTypeDTO) => router.push(newMatrixUrl(`&from_dt=${encodeURIComponent(dt.doc_type_id)}`)),
+    onOpenMatrix: openView,
+    toast,
+    onNewMatrix: () => router.push(newMatrixUrl()),
+    onViewRecords: (dt: KbDocTypeDTO) => openView(`tpl_${dt.doc_type_id}`),
+  };
 
   // ── M4 template manager (?view=templates) ──
   if (isTplMgr) {
     return (
       <>
-        <TemplateManager
-          workspaceId={ws}
-          canEdit={canEdit}
-          uid={uid}
-          isAdmin={isAdmin}
-          onApplyTemplate={(dt) => router.push(newMatrixUrl(`&from_dt=${encodeURIComponent(dt.doc_type_id)}`))}
-          onOpenMatrix={openView}
-          toast={toast}
-          onNewMatrix={() => router.push(newMatrixUrl())}
-          onViewRecords={(dt) => openView(`tpl_${dt.doc_type_id}`)}
-        />
+        <TemplateManager {...templateManagerProps} groups={knowledgeBasesLayout ? "matrix" : "all"} />
       </>
     );
   }
 
   // ── list mode ──
   if (!viewId || !activeDocType) {
+    if (section === "records" && knowledgeBasesLayout) {
+      // Q1: Extraction tables = the extraction-table definitions (create, edit, delete) followed by their results.
+      return (
+        <TemplateManager
+          {...templateManagerProps}
+          groups="extraction"
+          onChanged={onTemplatesChanged}
+          trailing={<TemplateRecordsSection views={views} loading={loadingList} onOpen={openView} variant="group" />}
+        />
+      );
+    }
     return section === "records" ? (
       <TemplateRecordsSection views={views} loading={loadingList} onOpen={openView} />
     ) : (

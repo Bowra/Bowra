@@ -23,7 +23,7 @@ lookup can use the common rules below without loading an editing method.
 
 | Goal                                                                   | Reference                                                 |
 | ---------------------------------------------------------------------- | --------------------------------------------------------- |
-| Create an Agent, edit its configuration or bind resources              | [agents.md](references/agents.md)                         |
+| Create or edit an Agent, or add an enabled Team Plugin to it           | [agents.md](references/agents.md)                         |
 | Create/edit a personal Skill or shared Plugin; resolve a missing Tool  | [resources.md](references/resources.md)                   |
 | Propose new/saved-case changes or check a criterion with the Owner     | [evaluation-cases.md](references/evaluation-cases.md)     |
 | Diagnose results, check release availability, request or follow a test | [evaluation-results.md](references/evaluation-results.md) |

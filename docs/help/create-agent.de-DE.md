@@ -38,7 +38,7 @@ Im Erstellungsbereich rechts wird bei manueller Erstellung zunächst ein Entwurf
 - Der Entwurf im Canvas wird automatisch gespeichert; die Werkzeugleiste zeigt **Gespeichert** oder **Wird gespeichert**. Nur solange noch gespeichert wird oder das Speichern fehlgeschlagen ist, fragt das Schließen oder der Wechsel von Seite, Unterhaltung oder Bereich nach **Weiter bearbeiten** oder **Ungespeicherte Änderungen verwerfen**. Beim Verwerfen werden nur ungespeicherte Änderungen verworfen; der gespeicherte Entwurf bleibt erhalten. Schlägt das Speichern fehl, wählen Sie in der Werkzeugleiste **Erneut versuchen**.
 - Hat ein anderer Browser-Tab denselben Entwurf zuerst gespeichert, zeigt die Seite für jedes Feld den Wert vor der Bearbeitung, Ihre Eingabe und den neuesten gespeicherten Wert. Entscheiden Sie für jedes Feld und speichern Sie anschließend. So überschreiben Sie keine Änderungen aus dem anderen Tab.
 - Über den allgemeinen Erstellungsbereich können Sie einen unvollständigen Entwurf im aktuellen Bereich fortsetzen oder ausdrücklich einen neuen beginnen. Die Entwurfsliste zeigt Name, Quelle, Status, Zeitpunkt der letzten Speicherung und Ablaufdatum. So können Sie die Entwürfe unterscheiden. Wenn Sie einen manuellen Entwurf fortsetzen, öffnet sich direkt der manuelle Editor rechts.
-- Unter **Von mir erstellt** finden Sie bei Ihren Agents ebenfalls unvollständige KI- und manuelle Entwürfe, die fortgesetzt werden können. Ist ein Entwurf geöffnet, können Sie seine Adresse zum Aktualisieren der Seite verwenden und ihn weiter anzeigen.
+- Unter **Von mir erstellt** finden Sie bei Ihren Agents ebenfalls unvollständige KI- und manuelle Entwürfe, die fortgesetzt werden können. Jeder Entwurf nennt sein Ablaufdatum; mit **Löschen…** entfernen Sie einen nicht mehr benötigten Entwurf endgültig. Ist ein Entwurf geöffnet, können Sie seine Adresse zum Aktualisieren der Seite verwenden und ihn weiter anzeigen.
 - Wird der Entwurf nicht gefunden, prüfen Sie den aktuellen Bereich, wählen Sie **Meine Entwürfe anzeigen**, um andere Entwürfe zu finden, oder beginnen Sie erneut. Abgelaufene Entwürfe können nicht fortgesetzt werden. Schlägt das Laden vorübergehend fehl, versuchen Sie es über die Karte erneut.
 
 ## Mit KI einen Entwurf erstellen
@@ -61,6 +61,8 @@ Wenn Ihr Team Chat-Bearbeitung von Entwürfen anbietet, sind geprüfte KI-Entwü
 ## Nach der Erstellung
 
 Nach dem Erstellen des Agents wählen Sie **Agent verwalten**, um ihn direkt zu öffnen und die Konfiguration zu prüfen oder anzupassen. Sie können ihn später auch unter Ihren Agents finden. Dass er zu Ihrer persönlichen Liste hinzugefügt wurde, bedeutet nicht, dass Sie ihn eingestellt haben. Ältere Agents öffnen ihre ursprüngliche Konfigurationsseite; Agents mit Versionsverwaltung öffnen die Versionsarbeitsfläche.
+
+In „Meine Agenten“ hat jede Zeile eine Hauptschaltfläche: **Verwalten** für selbst erstellte Agents und **Nutzung starten** für hinzugefügte; die übrigen Aktionen stehen im Menü **⋯** der Zeile. Eine Markierung erscheint nur bei Ausnahmen: von Ihnen pausiert, nicht verfügbar oder vom Eigentümer archiviert. **Von mir erstellt** zeigt zuerst fortsetzbare Entwürfe, dann die nicht archivierten Agents; eine letzte Zeile verweist auf **Archiviert**. Sie können nach Name oder Beschreibung suchen, filtern und sortieren; bei vielen Agents umfasst die Suche höchstens die ersten 500. **Von mir hinzugefügt** zeigt zuerst die nutzbaren Agents; die übrigen stehen eingeklappt unter **Gerade nicht verfügbar**, jeweils mit Grund und einer Aktion. Teamverantwortliche und Administratoren sehen außerdem den Tab **Team-Freigaben** mit derselben Adresse und Anzahl.
 
 Die Versionsarbeitsfläche hat drei Tabs: **Konfigurieren**, **Evaluieren** und **Veröffentlichen**; angezeigt werden nur die Tabs, die Ihr Team aktiviert hat. Die früheren Tabs für Änderungsvorschläge, Prüfung und Veröffentlichung sowie Versionsverlauf sind darin aufgegangen; alte Links führen automatisch an die passende Stelle.
 
@@ -85,7 +87,7 @@ Sie können Coach auch selbst ansprechen: Geben Sie im Eingabefeld **@** ein und
 
 - Die Änderung landet nur im Entwurf; nichts wird veröffentlicht oder angewendet. Die neue Version gilt erst nach der Freigabeprüfung im Tab **Veröffentlichen**.
 - Hat der Canvas ungespeicherte Änderungen, wird Ihre Nachricht nicht an Coach gesendet und über dem Eingabefeld erscheint ein Hinweis: **Speichern und fortfahren** speichert den Canvas und sendet dann dieselbe Nachricht; **Änderungen verwerfen** verwirft die Canvas-Änderungen, danach können Sie erneut senden.
-- Jedes Mal, wenn Coach den Entwurf schreibt, zeigt eine Zeile unter der Antwort, wie viele Änderungen im Entwurf gelandet sind; **Im Canvas ansehen** öffnet den Agent.
+- Jedes Mal, wenn Coach den Entwurf schreibt, nennt eine Zeile unter der Antwort den Agent und die geänderten Felder, auch wenn Coach den Canvas nicht geöffnet hat und nach dem Neuladen. **Im Canvas ansehen** öffnet den Agent, **Auf der Verwaltungsseite testen und veröffentlichen** seine Verwaltungsseite; ist der Agent bereits im Canvas geöffnet, steht dort nur **Rechts geöffnet**. Sind Sie nicht mehr Eigentümer oder ist der Agent archiviert, bleibt nur der erste Teil ohne Schaltflächen.
 - Fügt Coach einen Skill hinzu, müssen die von ihm benötigten Skills mitkommen. Fehlen welche, schreibt Coach nichts und nennt die benötigten Skills.
 - Nachdem Coach den Entwurf geschrieben hat, wird ein geöffneter Editor dieses Agents aktualisiert, sofern er keine ungespeicherten Eingaben enthält.
 - Ist ein Tool oder Skill ungültig oder fehlt Ihnen die Berechtigung, beheben Sie das zuerst unter **Was er nutzen kann**.
@@ -108,6 +110,30 @@ Unter **Persönliche Einstellungen → Konto → Agents** oder im Menü **⋯** 
 - **Zuerst fragen**: Coach fordert die Prüfung nur an. Prüfen Sie den geschätzten Verbrauch und starten Sie sie über die Karte der Freigabeprüfung.
 
 In beiden Fällen veröffentlicht oder wendet eine bestandene Prüfung den Agent nicht von selbst an.
+
+## Die neue Agent-Seite: Konfigurieren
+
+Wenn Ihr Team die neue Agent-Seite nutzt, zeigt eine Veröffentlichungsleiste unter dem Namen des Agents, wo er gerade steht, und **Konfigurieren** ist in dieser Reihenfolge aufgebaut. Alles, was Sie vorher tun konnten, ist noch da; manches steht an anderer Stelle.
+
+- **Änderungen von Coach**: Felder, die Coach oder „Mit KI verbessern“ in den Entwurf geschrieben hat, stehen zuerst, aber nur, wenn es welche gibt. Jede Zeile hat **Vergleichen** (vorher und nachher nebeneinander) und **Rückgängig**.
+- **Was er tut**: Name, Kurzbeschreibung (der Hauptassistent entscheidet danach, wann er den Agent um Hilfe bittet; nach dem Teilen sehen sie auch andere), Anweisungen und Modell. Erlaubt das Team nur ein Modell, steht nur sein Name da; erlaubt es mehrere, können Sie wählen. Leitfaden für integrierte Werkzeuge, Hauptaufgabe und strukturierte Ausgabe liegen unter **Erweitert**; die eingeklappte Zeile nennt, was nicht festgelegt ist. Eine kleine Markierung neben einem Feld zeigt, wer es im gespeicherten Entwurf geändert hat.
+- **Was er nutzen kann**: nur die gewählten Plugins, Team-Verbindungen, Werkzeuge und Skills, jeweils mit **Entfernen**; **Plugin, Werkzeug oder Skill hinzufügen** öffnet den Katalog seitlich. Wissensquellen und optionale schreibgeschützte Methoden haben je eine Zeile; **Ändern** oder **Einrichten** öffnet die gewohnten Einstellungen seitlich. Eine Zeile darunter sagt, ob der Agent außerhalb schreibt oder löscht; **Verbindungen verwalten** öffnet persönliche Werkzeugverbindungen.
+- **Wer ihn nutzen kann**: standardmäßig offen. Bei ausgewählten Mitgliedern oder dem ganzen Team erklärt „Was nach dem Teilen passiert“: Jede Veröffentlichung muss den Test bestehen und freigegeben werden; niemand wird benachrichtigt, man stellt ihn unter **Mit mir geteilt** ein; er läuft mit den eigenen Datenrechten der jeweiligen Person.
+- **Weitere Einstellungen**: Eintrag (Kategorien, übersetzte Beschreibungen), ob andere ihn als eigene Version kopieren dürfen, und offene Vorschläge (Vorschläge externer Pipelines und Daumen-runter von Mitgliedern). **Ändern** öffnet jeweils die gewohnten Einstellungen.
+
+Gespeichert wird über die Veröffentlichungsleiste: Bei ungespeicherten Änderungen ist **Entwurf speichern** ihre Hauptaktion. Kann der Entwurf noch nicht gespeichert werden, nennt die Leiste, was fehlt, und verlinkt den passenden Abschnitt.
+
+### Anweisungen mit KI verbessern
+
+**Mit KI verbessern** neben den Anweisungen formuliert nur dieses Feld klarer und besser gegliedert. Um zu ändern, was der Agent nutzen kann oder wer ihn nutzen kann, verwenden Sie **Coach um Änderung bitten**. Der Agent-Editor im Canvas hat dieselbe Schaltfläche.
+
+1. Schreiben Sie ein paar Sätze Anweisungen und wählen Sie **Mit KI verbessern**; bei leeren Anweisungen ist die Schaltfläche nicht verfügbar.
+2. Zuerst wird der Entwurf gespeichert: Wurden nur die Anweisungen geändert, sofort; wurden auch andere Felder geändert, fragt die Seite vorher und nennt sie.
+3. Während des Wartens sind die Anweisungen schreibgeschützt, meist etwa 5 Sekunden. Nach 30 Sekunden erscheinen „Wird noch verbessert…“ und **Nicht mehr warten**; das Ergebnis erscheint trotzdem unter den Anweisungen, auch nach einem Neuladen.
+4. Das Ergebnis steht nebeneinander: links die aktuelle Fassung, rechts der KI-Vorschlag; von der KI ergänzte Sätze sind mit „Neu“ markiert. Bei sehr kurzen Anweisungen oder wenn sie ein Werkzeug oder Daten nennen, die der Agent nicht hat, weist ein Hinweis darüber darauf hin.
+5. **Diese Fassung verwenden** schreibt den Vorschlag in den Entwurf, **Verwerfen** lässt ihn fallen. Danach können Sie die Änderung unter „Änderungen von Coach“ vergleichen oder rückgängig machen und mit **Entwurf ausprobieren** prüfen, ob die Antworten besser werden.
+
+Der Entwurf ändert sich erst mit **Diese Fassung verwenden**, und kein Fehler ändert ihn; die Meldung nennt den Grund und wer ihn beheben kann. Es läuft immer nur eine Verbesserung. Hat der Agent noch keinen Entwurf, wird zuerst einer gespeichert, der der veröffentlichten Version gleicht; er bleibt auch nach dem Verwerfen.
 
 ## Beschreiben, was eine gute Antwort tut
 
@@ -150,6 +176,22 @@ Wenn der Composer Schnellverweise anbietet:
 - Ist ein Skill in der `/`-Liste grau, lesen Sie den darunter angezeigten Grund. „Dieser Skill enthält noch keine schreibgeschützten Inhalte für Schnellverweise“ bedeutet, dass Sie ihn derzeit nicht im Composer auswählen können, auch wenn der Agent ihn normalerweise lesen kann. Die betreuende Person des Skills muss zuerst referenzierbare Inhalte hinzufügen.
 
 Wenn Sie eine Formel Schritt für Schritt berechnet haben möchten, schreiben Sie das in die Frage. Stellt der ausgewählte Agent eine überprüfbare Umformung bereit, zeigt die Chatantwort die Formel und das gesetzte Ergebnis an. Breite Formeln lassen sich horizontal scrollen. Nicht überprüfbare Formeln werden nicht automatisch ausgefüllt.
+
+## Wissensquellen, wenn Wissensdatenbanken aktiviert sind
+
+Nutzt Ihr Team Wissensdatenbanken, bieten die Wissensquellen eines Agents drei Möglichkeiten: **Lesbares Wissen im aktuellen Kontext** (mit dem Zugriff der jeweiligen Person), **Ausgewählte Wissensdatenbanken** und **Ausgewählte Dateien** (bis zu 64 feste Dateien).
+
+1. Wählen Sie **Ausgewählte Wissensdatenbanken** und dann **Wissensdatenbank hinzufügen**.
+2. Markieren Sie die gewünschten Wissensdatenbanken, höchstens 32. Die Liste zeigt nur die, die Sie nutzen können, gruppiert nach „Meine Wissensdatenbanken“, jedem Ihrer Bereiche und „Team“.
+3. Speichern Sie den Entwurf und veröffentlichen Sie ihn wie gewohnt. Später hinzugefügte Dateien werden beim nächsten Lauf automatisch durchsucht; entfernte Dateien werden nicht mehr gelesen.
+
+Gut zu wissen:
+
+- Nutzt jemand anderes den Agent, durchsucht er nur die Teile dieser Wissensdatenbanken, die diese Person selbst nutzen kann. Wissensdatenbanken eines Bereichs gelten nur in diesem Bereich, und Ihr persönliches Wissen gilt nie für andere. Prüfen Sie vor dem Teilen, ob die Nutzer diese Wissensdatenbanken verwenden können.
+- Direkt nach dem Einschalten kann die Option melden, dass die Wissensdatenbanken noch für Agents vorbereitet werden. Wählen Sie nach einigen Minuten **Erneut prüfen**; bis dahin nutzen Sie eine der anderen beiden Möglichkeiten.
+- Eine Wissensdatenbank, die Sie nicht mehr nutzen können, erscheint als nummerierter Platzhalter. Entfernen Sie sie oder beantragen Sie Zugriff, bevor Sie speichern.
+- Der Wechsel von ausgewählten Dateien zu ausgewählten Wissensdatenbanken oder eine zusätzliche Wissensdatenbank wird in der Freigabeprüfung als erweiterte Wissensquelle angezeigt. Das Entfernen von Wissensdatenbanken schränkt sie ein.
+- Werden Wissensdatenbanken wieder ausgeschaltet, gilt die gespeicherte Auswahl nicht mehr: Der Agent liest nichts daraus, und beim Ausführen wird der Grund angezeigt. Wählen Sie eine andere Wissensquelle, damit der Agent weiter Wissen nutzt.
 
 ## Wenn die Erstellung fehlschlägt
 

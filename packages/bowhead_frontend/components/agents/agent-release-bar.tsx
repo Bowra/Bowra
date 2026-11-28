@@ -11,6 +11,7 @@ import { Check, Clock, Info, Minus, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { useAgentTrialLayout } from "./agent-trial-layout";
 import type {
   ReleaseBarAction,
   ReleaseBarState,
@@ -51,6 +52,7 @@ export function AgentReleaseBar({
   variant?: "page" | "canvas";
 }) {
   const t = useTranslations("agents_marketplace");
+  const trialLayout = useAgentTrialLayout();
   const titleId = useId();
   const stepsId = useId();
   // Narrow screens show the status and actions; the steps open on request.
@@ -89,7 +91,7 @@ export function AgentReleaseBar({
       </h2>
       <div className="am-rb-head">
         <div className="am-rb-text">
-          <p className="am-rb-status">{status}</p>
+          <p className="am-rb-status" tabIndex={-1}>{status}</p>
           {meta || results ? (
             <p className="am-rb-meta">
               {meta}
@@ -134,7 +136,8 @@ export function AgentReleaseBar({
             ))}
             {primary ? (
               <Button
-                variant="primary"
+                // In a trial chat Send is the screen's only primary action; the Canvas band steps down.
+                variant={trialLayout && variant === "canvas" ? "secondary" : "primary"}
                 size="sm"
                 disabled={primary.disabled}
                 loading={primary.loading}

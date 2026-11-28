@@ -1,0 +1,168 @@
+/* Knowledge bases (FEATURE_KNOWLEDGE_BASES, organization phase 1 slice 4): knowledge-base-move. Tokens only; font sizes in rem.
+ * Target picker ("Add to" in upload and Add from Files, the move dialog's list), the move dialog, and the file details rows
+ * "Knowledge base" / "Who has access". */
+
+/* ── Target picker (RadioGroup → .ui-radio-cards) ───────────── */
+.kb-target-picker {
+  display: grid;
+  gap: 12px;
+}
+.kb-target-group {
+  display: grid;
+  gap: 6px;
+}
+.kb-target-group__label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--c-ink-3);
+}
+.kb-target-picker .kb-target-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+  font: inherit;
+  color: var(--c-ink);
+}
+.kb-target-option__dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+}
+.kb-target-option[aria-checked="true"] .kb-target-option__dot {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+.kb-target-option__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.kb-target-option__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+.kb-target-option__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kb-target-option__meta {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+.kb-target-option__reason {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+}
+/* A disabled option keeps its reason readable: dim the name and the dot, not the whole card. */
+:root:root .kb-target-picker.ui-radio-cards [role="radio"]:disabled {
+  opacity: 1;
+  background-color: var(--c-fill-1);
+}
+.kb-target-option:disabled .kb-target-option__name,
+.kb-target-option:disabled .kb-target-option__meta,
+.kb-target-option:disabled .kb-target-option__dot {
+  opacity: 0.55;
+}
+.kb-target-empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+}
+
+/* Upload dialog and Files page "Add to knowledge base": a long list scrolls inside the dialog body. */
+.kb-up-target,
+.kb-add-target {
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 2px;
+}
+.kb-up-from-files {
+  margin: 10px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+.kb-up-from-files a {
+  color: var(--c-accent-text);
+}
+.kb-add-target-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--c-err-ink);
+}
+
+/* ── Move dialog ────────────────────────────────────────────── */
+.kb-move {
+  display: grid;
+  gap: 12px;
+}
+.kb-move__desc {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+.kb-move__label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.kb-move__preview {
+  display: grid;
+  gap: 8px;
+}
+.kb-move__preview:empty {
+  display: none;
+}
+.kb-move__hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-3);
+}
+.kb-move__list-title {
+  display: block;
+  font-weight: 600;
+}
+.kb-move__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.kb-move__outcome {
+  display: grid;
+  gap: 8px;
+}
+
+/* ── File details rows ──────────────────────────────────────── */
+.kb-drawer-panel .meta .kb-drawer-kb-link,
+.kb-drawer-panel .meta .kb-drawer-members-link {
+  color: var(--c-accent-text);
+  text-decoration: none;
+}
+.kb-drawer-panel .meta .kb-drawer-kb-link:hover,
+.kb-drawer-panel .meta .kb-drawer-members-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.kb-drawer-panel .meta .kb-drawer-members-link {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+}
+.kb-drawer-kb-loading {
+  color: var(--c-ink-4);
+}

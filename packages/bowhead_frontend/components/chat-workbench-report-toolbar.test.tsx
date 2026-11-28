@@ -23,6 +23,9 @@ const canvasState = {
   status: "done" as string,
   currentTurnId: null as string | null,
   streamingSectionIds: new Set<string>(),
+  // Real `CanvasState` fields the live report card reads (chat running state R2.1).
+  bufferedLeadSectionIds: new Set<string>(),
+  turnPatched: null,
 };
 
 vi.mock("@/lib/canvas-store", async (importOriginal) => ({
@@ -114,6 +117,9 @@ beforeEach(() => {
   media.matches = true;
   paneWidth = 0;
   const store = new Map<string, string>();
+  // These tests read the report pane: the reader left Results open in these conversations (chat running state R2.7,
+  // where a report no longer opens Results by itself).
+  store.set("bowhead.results_open.v1", JSON.stringify(Object.fromEntries(["s_1", "s_2", "s_stop"].map((id) => [id, { state: "open", at: 1 }]))));
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: {
@@ -200,6 +206,15 @@ describe("chart reference draft admission", () => {
     act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ tuples: [["West"]] }) }); });
     await waitFor(() => expect(container.querySelector(".v2-workspace.canvas-maxed")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".composer-v2 textarea")));
+  });
+  it("opens a conversation with a report as the reader left it, closed without a record (chat running state R2.5/R2.7)", async () => {
+    window.localStorage.removeItem("bowhead.results_open.v1");
+    const { container } = renderWorkbench();
+    await waitFor(() => expect(container.querySelector(".v2-ws-edge--canvas")).not.toBeNull());
+    expect(container.querySelector(".v2-workspace")?.className).not.toContain("canvas-maxed");
+    // Reopening records the choice for this conversation.
+    fireEvent.click(container.querySelector(".v2-ws-edge--canvas")!);
+    expect(JSON.parse(window.localStorage.getItem("bowhead.results_open.v1") ?? "{}").s_1?.state).toBe("open");
   });
   it("keeps the chat-only layout, so a follow-up from a chart in chat does not open Results", async () => {
     chartReferences.read.mockResolvedValue(reference);

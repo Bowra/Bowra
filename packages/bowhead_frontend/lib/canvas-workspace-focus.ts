@@ -10,6 +10,20 @@ import { trackInteraction as track } from "./metrics";
 export const CANVAS_FOCUS_DATA_EVENT = "bowhead:canvas-focus-data";
 export const CANVAS_FOCUS_DATA_RESULT_EVENT = "bowhead:canvas-focus-data-result";
 export const CANVAS_OPEN_RESULT_EVENT = "bowhead:results-open";
+/** Chat running state R2.3: open Results listing only the files one Turn saved. */
+export const RESULTS_TURN_FILES_EVENT = "bowhead:results-turn-files";
+
+export interface ResultsTurnFilesDetail {
+  turnId: string;
+}
+
+/** Ask the workbench to open Results on one Turn's files; false when nothing listens or it declined. */
+export function requestResultsTurnFiles(turnId: string): boolean {
+  if (typeof window === "undefined" || !turnId) return false;
+  return window.dispatchEvent(
+    new CustomEvent<ResultsTurnFilesDetail>(RESULTS_TURN_FILES_EVENT, { detail: { turnId }, cancelable: true }),
+  );
+}
 
 export interface CanvasReportReturnContext {
   label: string;

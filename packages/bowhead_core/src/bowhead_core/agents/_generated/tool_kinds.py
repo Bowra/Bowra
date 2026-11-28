@@ -128,6 +128,7 @@ TOOL_KINDS: dict[str, ToolKind] = {
     "web_fetch": "tool",
     "web_map": "tool",
     "web_search": "tool",
+    "wecom_notify": "tool",
     "write_report": "tool",
 }
 
@@ -180,6 +181,7 @@ TOOL_RISKS: dict[str, ToolRisk] = {
     "web_fetch": "read",
     "web_map": "read",
     "web_search": "read",
+    "wecom_notify": "external_write",
     "write_report": "artifact_write",
 }
 

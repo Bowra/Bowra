@@ -12,6 +12,11 @@ import "../../styles/report-canvas.css";
 import "../../styles/save-to-memory.css";
 import "../../styles/kb-management.css";
 import "../../styles/kb-nav.css";
+// FEATURE_KNOWLEDGE_BASES: the directory, one knowledge base's page, its members and sharing, and moves.
+import "../../styles/knowledge-bases.css";
+import "../../styles/knowledge-base-page.css";
+import "../../styles/knowledge-base-members.css";
+import "../../styles/knowledge-base-move.css";
 import "../../styles/plan-card.css";
 import "../../styles/plan-graph.css";
 import "../../styles/models-settings.css";
@@ -21,6 +26,10 @@ import "../../styles/chart-style-settings.css";
 import "../../styles/brand-identity.css";
 import "@/edition/global-styles.css";
 import "../../styles/agent-marketplace.css";
+// Owner draft trial: the trial list, the trial chat band, labels and composer chip.
+import "../../styles/agent-trial.css";
+// FEATURE_AGENT_RELEASE_BAR: My Agents rows and groups, and the reviewer page.
+import "../../styles/agent-list-v2.css";
 import "../../styles/agent-charts.css";
 import "../../styles/agent-dashboard.css";
 import "../../styles/personal-mcp.css";

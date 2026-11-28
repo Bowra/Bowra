@@ -17,7 +17,7 @@ afterEach(cleanup);
 const steps: StepView[] = [];
 
 function actionText(container: HTMLElement): string {
-  return container.querySelector(".bh-band__act")?.textContent ?? "";
+  return container.querySelector(".bh-band__txt")?.textContent ?? "";
 }
 
 describe("model retry copy", () => {

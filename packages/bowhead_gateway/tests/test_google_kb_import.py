@@ -89,6 +89,28 @@ async def test_imports_picked_files_as_the_caller_with_office_export(ready) -> N
     assert export.url.params["mimeType"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+@pytest.mark.parametrize("switch", ["0", "1"])
+async def test_the_target_knowledge_base_reaches_the_shared_checks_only_while_knowledge_bases_are_on(ready, monkeypatch, switch) -> None:
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", switch)
+    seen: list[dict] = []
+
+    async def authorize(_request, user, *, scope, scope_id, **target):
+        seen.append(target)
+        return SimpleNamespace(user_id=user.id, scope=scope, scope_id=scope_id)
+
+    async def ingest(_request, _tasks, user, ctx, *, raw, filename, client_mime, scope, scope_id, use_llm=False, doc_type_id=None, route, **target):
+        seen.append(target)
+        return SimpleNamespace(file_id="kbf_1", filename=filename)
+
+    monkeypatch.setattr(kb_routes, "authorize_kb_scope_write", authorize)
+    monkeypatch.setattr(kb_routes, "ingest_kb_file_bytes", ingest)
+    ready.google.token_responses.append((200, {"access_token": "admin-access", "expires_in": 3600}))
+    body = routes.KbImportBody(file_ids=[_PDF], scope="personal", scope_id="usr_x", knowledge_base_id="kbase_" + "a" * 24)
+    assert (await routes.kb_import(body, ready.env.request, BackgroundTasks(), ready.env.admin))["results"][0]["ok"]
+    expected = {"knowledge_base_id": "kbase_" + "a" * 24} if switch == "1" else {}
+    assert seen == [expected, expected]
+
+
 async def test_member_without_own_grant_cannot_borrow_anyone_elses(ready) -> None:
     with pytest.raises(HTTPException) as exc:
         await routes.kb_import(_body(_DOC), ready.env.request, BackgroundTasks(), ready.env.member)

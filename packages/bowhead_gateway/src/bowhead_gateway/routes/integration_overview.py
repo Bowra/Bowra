@@ -48,6 +48,9 @@ async def overview(
     teams_store = getattr(request.app.state, "teams_store", None)
     teams_connection = await teams_store.get_connection_for_team(str(admin.team_id)) if teams_store is not None else None
 
+    wecom_store = getattr(request.app.state, "wecom_store", None)
+    wecom = await wecom_store.connection(team_id=str(admin.team_id)) if wecom_store is not None else None
+
     return IntegrationOverview(
         items=[
             IntegrationOverviewItem(
@@ -70,6 +73,13 @@ async def overview(
                 configured=teams_connection is not None,
                 enabled=bool(teams_connection and teams_connection.status == "enabled"),
                 healthy=bool(teams_connection and teams_connection.status == "enabled"),
+            ),
+            IntegrationOverviewItem(
+                provider="wecom",
+                available=wecom_store is not None,
+                configured=wecom is not None,
+                enabled=bool(wecom and wecom.enabled),
+                healthy=bool(wecom and wecom.enabled and wecom.api_verified and wecom.callback_verified),
             ),
         ],
     )

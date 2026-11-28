@@ -229,3 +229,26 @@ async def test_forged_space_header_cannot_read_status(env) -> None:
     await _kb_row(kb, art, scope="space", scope_id="ws_foreign", ws="ws_foreign")
     r = client.get("/api/v1/files/?source=all", headers=_h(space="ws_foreign"))
     assert r.status_code in (403, 404)
+
+
+async def test_kb_status_names_its_knowledge_base_only_while_knowledge_bases_are_on(env, monkeypatch) -> None:
+    """Knowledge bases (FEATURE_KNOWLEDGE_BASES): the Knowledge column names the knowledge base; off keeps today's fields."""
+    from bowhead_core.kb.knowledge_base_store import default_knowledge_base_id
+
+    client, artifacts, kb = env
+    personal = await _art(artifacts, "mine.pdf")
+    space = await _art(artifacts, "space.pdf")
+    await _kb_row(kb, personal, scope="personal", scope_id=_UID)
+    await _kb_row(kb, space, scope="space", scope_id=_WS, ws=_WS)
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", "0")
+    off = _items(client, _h())
+    assert "knowledge_base_id" not in off[personal.id]["kb"]
+    assert "knowledge_base_id" not in off[space.id]["kb"]
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", "1")
+    on = _items(client, _h())
+    assert on[personal.id]["kb"]["knowledge_base_id"] == default_knowledge_base_id(_TEAM, "personal", _UID)
+    assert on[space.id]["kb"]["knowledge_base_id"] == default_knowledge_base_id(_TEAM, "space", _WS)
+    # Everything else is unchanged.
+    assert {key: value for key, value in on[space.id]["kb"].items() if key != "knowledge_base_id"} == off[space.id]["kb"]

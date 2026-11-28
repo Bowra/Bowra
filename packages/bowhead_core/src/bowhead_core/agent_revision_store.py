@@ -73,7 +73,7 @@ from bowhead_core.resource_dependency_projection import (
 from bowhead_core.scrubber import scrub_with_count
 from bowhead_core.secret_redaction import extract_secrets
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
-from bowhead_core.subagent_authoring_catalog import APPROVAL_EXECUTOR_UNAVAILABLE, SubagentAuthoringCatalogService
+from bowhead_core.subagent_authoring_catalog import APPROVAL_EXECUTOR_UNAVAILABLE, TOOL_DISABLED_BY_TEAM, SubagentAuthoringCatalogService
 from bowhead_core.subagent_write_boundary import _issue_team_subagent_transaction_token
 from bowhead_core.team_plugin_store import TeamPluginError, expand_plugins_conn, selected_plugin_ids
 from bowhead_core.user_store import UserStore
@@ -903,10 +903,14 @@ class AgentRevisionStore:
         eval_gate: AgentPublicationEvalGate | None = None,
         clock: _Clock | None = None,
         knowledge_source_validator: Any | None = None,
+        knowledge_base_validator: Any | None = None,
         behavior_authoring: AgentBehaviorAuthoringService | None = None,
         behavior_materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
         self._knowledge_source_validator = knowledge_source_validator
+        # Selected knowledge bases: (ids, team_id, actor_user_id) -> None; raises KnowledgeAccessError
+        # (not prepared yet, or one generic error for unknown and unusable IDs).
+        self._knowledge_base_validator = knowledge_base_validator
         self.db_path = str(domain_database_path(db_path, "core"))
         self._validator = validator
         self._eval_gate = eval_gate
@@ -1209,6 +1213,8 @@ class AgentRevisionStore:
         _names_from_listing(listing_value)
         audience_json = _canonical_json(audience.to_dict())
         timestamp = self._now()
+        # Selected knowledge bases are checked before the writer lock (they read other stores).
+        knowledge_bases_checked = await self._validate_knowledge_bases(definition_value, team_id=team_id, actor_user_id=actor_user_id)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -1224,7 +1230,9 @@ class AgentRevisionStore:
                 behavior_intent = self._behavior_authoring.validate_definition_intent(
                     definition_value,
                 )
-                await self._validate_knowledge_write(db, definition_value, team_id=team_id, actor_user_id=actor_user_id)
+                await self._validate_knowledge_write(
+                    db, definition_value, team_id=team_id, actor_user_id=actor_user_id, knowledge_bases_checked=knowledge_bases_checked
+                )
                 await require_extension_policy_write(db, definition_value, audience_mode=audience.mode)
                 validation_json = _canonical_json(
                     behavior_intent.working_copy_validation(),
@@ -1273,6 +1281,10 @@ class AgentRevisionStore:
                         # only approval availability is inspected here.
                         mcp_entitled=True,
                     )
+                    turned_off = sorted(ref for ref, tool in catalog.tools_by_ref.items() if ref in additions and tool.team_disabled)
+                    if turned_off:
+                        # Saved selections of a Tool the team turned off stay; adding one is refused.
+                        raise AgentPublicationBlockedError(TOOL_DISABLED_BY_TEAM, details={"tool_ref": turned_off[0]})
                     if any(
                         tool.for_selection().locked_reason == APPROVAL_EXECUTOR_UNAVAILABLE
                         for ref, tool in catalog.tools_by_ref.items()
@@ -4450,18 +4462,45 @@ class AgentRevisionStore:
             ),
         )
 
-    async def _validate_knowledge_write(self, db, definition, *, team_id, actor_user_id) -> None:
+    async def _validate_knowledge_bases(self, definition, *, team_id, actor_user_id) -> bool:
+        """Check a selected-knowledge-bases policy against the actor's current access, outside this store's transaction.
+
+        The validator reads other stores (knowledge bases, Spaces, grants), so callers that know the
+        definition before ``BEGIN IMMEDIATE`` run it first and pass ``knowledge_bases_checked=True`` to
+        :meth:`_validate_knowledge_write`. Returns whether a check ran. Only runs when the mode can be admitted
+        (bindings and the switch on), so a closed admission keeps its own error inside the transaction.
+        Every execution re-resolves the selection at call time, so a check before the write is enough.
+        """
+        policy = require_supported_knowledge_access(definition)
+        if policy is None or policy.knowledge_base_ids is None or not source_bindings_enabled():
+            return False
+        from bowhead_core.agent_knowledge_policy import require_knowledge_base_mode
+
+        require_knowledge_base_mode(policy)
+        if self._knowledge_base_validator is None:
+            raise KnowledgeAccessError("agent_knowledge_base_unavailable")
+        await self._knowledge_base_validator(policy.knowledge_base_ids, team_id, actor_user_id)
+        return True
+
+    async def _validate_knowledge_write(self, db, definition, *, team_id, actor_user_id, knowledge_bases_checked: bool = False) -> None:
         policy = require_supported_knowledge_access(definition)
         if policy is None:
             return
         if not source_bindings_enabled():
             raise KnowledgeAccessError("agent_knowledge_access_admission_closed")
-        from bowhead_core.agent_knowledge_policy import require_knowledge_migration
+        from bowhead_core.agent_knowledge_policy import require_knowledge_admission
 
-        await require_knowledge_migration(db)
+        await require_knowledge_admission(db, policy)
         if policy.file_ids:
             if self._knowledge_source_validator is None or not await self._knowledge_source_validator(policy.file_ids, team_id, actor_user_id):
                 raise KnowledgeAccessError("agent_knowledge_source_unavailable")
+        if policy.knowledge_base_ids is not None and not knowledge_bases_checked:
+            # Also for an empty selection: the mode itself waits for the Team's chunk key backfill (C7).
+            # Release, publication and proposal writes read their definition inside the transaction, so
+            # they still check here (like the selected-files validator above).
+            if self._knowledge_base_validator is None:
+                raise KnowledgeAccessError("agent_knowledge_base_unavailable")
+            await self._knowledge_base_validator(policy.knowledge_base_ids, team_id, actor_user_id)
 
     async def _validate_with_current_skills(
         self,

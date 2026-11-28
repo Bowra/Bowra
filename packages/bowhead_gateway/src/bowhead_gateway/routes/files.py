@@ -48,6 +48,7 @@ from bowhead_core.documents.package_io import (
 )
 from bowhead_core.results_artifact_policy import is_results_internal_artifact
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_skill.execution_policy import LARGE_SANDBOX_OUTPUT_BYTES, LARGE_SANDBOX_OUTPUT_MIMES, STANDARD_SANDBOX_OUTPUT_BYTES
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 
@@ -62,6 +63,7 @@ from bowhead_gateway.access_context import (
 from bowhead_gateway.artifact_representations import (
     ArtifactRepresentationDTO,
     RepresentationRequest,
+    build_document_view,
     build_presentation_view,
     build_representation,
     representation_error,
@@ -397,8 +399,17 @@ async def upload(
     inspect_office = mime in OFFICE_MIMES.values()
     if mime not in ALLOWED_MIME and not inspect_office and producer_text is None:
         raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
-    limit = MAX_OFFICE_BYTES if inspect_office else MAX_SIZE
-    content = await file.read(limit + 1)
+    stream_output = (
+        effective_source == "python_sandbox"
+        and file.size is not None
+        and file.size > STANDARD_SANDBOX_OUTPUT_BYTES
+        and mime in LARGE_SANDBOX_OUTPUT_MIMES
+        and await producer_output_bound()
+    )
+    limit = LARGE_SANDBOX_OUTPUT_BYTES if stream_output else MAX_OFFICE_BYTES if inspect_office else MAX_SIZE
+    if file.size is not None and file.size > limit:
+        raise _file_error(status.HTTP_413_CONTENT_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
+    content = b"" if stream_output else await file.read(limit + 1)
     if len(content) > limit:
         raise _file_error(status.HTTP_413_CONTENT_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
     if producer_text is not None:
@@ -524,7 +535,8 @@ async def upload(
 
         try:
             art = await artifact_store.put_bytes(
-                content=content,
+                content=file.file if stream_output else content,
+                content_size=file.size if stream_output else None,
                 filename=file.filename or "upload",
                 mime=mime,
                 source=effective_source,
@@ -578,7 +590,11 @@ async def upload(
     # via art.created_by -> team_id (/upload has no user:User=Depends(...), so cannot obtain team_id,
     # but created_by is already available and used at :341-345).
     _classify_kinds = {"user_upload", "deliverable"}
-    if (getattr(art, "kind", None) or "tool_data") in _classify_kinds and not defer_office_content(filename=art.filename, mime=art.mime):
+    if (
+        art.size <= MAX_SIZE
+        and (getattr(art, "kind", None) or "tool_data") in _classify_kinds
+        and not defer_office_content(filename=art.filename, mime=art.mime)
+    ):
         import asyncio as _aio
 
         _bg = _aio.create_task(_classify_uploaded_artifact(request.app, art))
@@ -1362,14 +1378,18 @@ async def _in_kb_ids(request: Request, artifact_ids: list[str]) -> set[str]:
         return set()
 
 
-async def _kb_read_context(request: Request, workspace_id: str) -> tuple[Any, dict[str, Any] | None] | None:
+async def _kb_read_context(request: Request, workspace_id: str, *, knowledge_levels: bool = False) -> tuple[Any, dict[str, Any] | None] | None:
     """调用方在 KB 侧、针对**某个空间**（或无空间）的读上下文 + 授权快照。
 
     空间来自 KB 行本身而不是请求头：文件页不属于任何空间，请求不带 `X-Space-Id`。
     `build_access_context` 校验该空间属于本团队且调用方是成员；不是成员 → None（该空间的行不可见）。
     缺 RBAC hook 的旧测试 harness 退回轻量路径：只认请求头里的空间（无法验成员资格，不扩大可见面）。
+    ``knowledge_levels`` also resolves the caller's knowledge base levels in that context (needed
+    only for rows in named knowledge bases, which are refused without them).
     """
     from bowhead_core.kb.permission import ScopeContext
+
+    from bowhead_gateway.kb_authorization import knowledge_levels_for
 
     user_id = _user_id(request)
     if has_workspace_access_source(request):
@@ -1385,6 +1405,13 @@ async def _kb_read_context(request: Request, workspace_id: str) -> tuple[Any, di
         except AccessContextError:
             return None
         ctx = ScopeContext(user_id=user_id, workspace_id=access.workspace_id, team_id=access.team_id, role="user")
+        if knowledge_levels:
+            ctx.knowledge_levels = await knowledge_levels_for(
+                access,
+                files_store=getattr(request.app.state, "kb_files_store", None),
+                user_store=request.app.state.user_store,
+                access_store=getattr(request.app.state, "access_control_store", None),
+            )
         return ctx, access_context_to_dict(access)
     header_ws = request.headers.get("X-Space-Id") or request.headers.get("X-Workspace-Id") or ""
     if workspace_id and workspace_id != header_ws:
@@ -1411,13 +1438,15 @@ async def _kb_rows_readable(request: Request, rows: list[Any]) -> list[Any]:
     这里是列表徽章，不记 runtime_denied 审计。
     """
     from bowhead_core.access_control import resource_grants_enforce_enabled
+    from bowhead_core.kb.knowledge_base_access import named_knowledge_base_id
     from bowhead_core.kb.permission import KbPermission
 
     from bowhead_gateway.routes.kb import _kb_scope_resource_id
 
     contexts: dict[str, tuple[Any, dict[str, Any] | None] | None] = {}
+    named_spaces = {_kb_row_space(r) for r in rows if named_knowledge_base_id(r)}
     for ws in sorted({_kb_row_space(r) for r in rows}):
-        contexts[ws] = await _kb_read_context(request, ws)
+        contexts[ws] = await _kb_read_context(request, ws, knowledge_levels=ws in named_spaces)
     access_store = getattr(request.app.state, "access_control_store", None)
     enforce = access_store is not None and resource_grants_enforce_enabled()
     scope_ok: dict[str, bool] = {}
@@ -1459,20 +1488,28 @@ async def _kb_member_ids(request: Request, artifact_ids: list[str]) -> set[str]:
     return out
 
 
-async def _kb_overlays(request: Request, artifact_ids: list[str]) -> tuple[set[str], dict[str, FileKbStatusDTO]]:
+async def _kb_overlays(request: Request, artifact_ids: list[str], *, require_membership: bool = False) -> tuple[set[str], dict[str, FileKbStatusDTO]]:
     """知识库体验整治 FR7：一页 artifact 的 `in_kb` 与知识库状态，KB 库只查一次。
 
     - `in_kb` 语义不变：有任何活跃 KB 行即为 True（删除防护、类别徽章依赖它）。
     - 状态只来自调用方按 KB 读权限**看得到**的行；看不到的行不透露状态、file_id、范围。
     - KB store 缺失或查询失败 → 同 `_in_kb_ids` 降级为「都不在 KB」；可见性判定失败 → 只丢状态。
+    - ``knowledge_base_id`` names the row's knowledge base (NULL means the scope's default); the DTO
+      drops it from responses while knowledge bases are off.
     """
+    from bowhead_core.kb.knowledge_base_store import knowledge_base_key
+
     kb_store = getattr(request.app.state, "kb_files_store", None)
+    if require_membership and kb_store is None and artifact_ids:
+        raise HTTPException(503, "Knowledge membership unavailable")
     if kb_store is None or not artifact_ids:
         return set(), {}
     try:
         rows = await kb_store.active_for_artifacts(artifact_ids)
     except Exception as e:  # noqa: BLE001 - degraded badge beats a 500 list
         log.warning("files.in_kb_lookup_failed error=%s", e)
+        if require_membership:
+            raise HTTPException(503, "Knowledge membership unavailable") from e
         return set(), {}
     in_kb = {r.artifact_id for r in rows}
     try:
@@ -1492,6 +1529,7 @@ async def _kb_overlays(request: Request, artifact_ids: list[str]) -> tuple[set[s
             parse_progress_pct=row.parse_progress_pct,
             parse_stuck=row.parse_stuck,
             parse_error_code=row.parse_error_code,
+            knowledge_base_id=knowledge_base_key(row) or None,
         )
     return in_kb, status
 
@@ -1860,11 +1898,10 @@ async def file_representation(
 ) -> ArtifactRepresentationDTO | Response:
     store = _store(request)
     art = await _read_representation_artifact(request, store, artifact_id)
-    if representation == "pptx-pdf":
+    if representation in ("pptx-pdf", "docx-pdf"):
         service = getattr(request.app.state, "document_service", None)
-        view = await build_presentation_view(
-            store, art, getattr(service, "executor", None), getattr(request.app.state, "presentation_previews", None)
-        )
+        build_view = build_presentation_view if representation == "pptx-pdf" else build_document_view
+        view = await build_view(store, art, getattr(service, "executor", None), getattr(request.app.state, "presentation_previews", None))
         current = await _read_representation_artifact(request, store, artifact_id)
         if (current.path, current.size) != (art.path, art.size):
             raise representation_error("unavailable")
@@ -2044,6 +2081,25 @@ async def _html_share_owner_context(
 
 class HtmlShareAudience(_BaseModel):
     audience: Literal["private", "custom", "team_wide"]
+
+
+async def _refuse_trial_output_share(request: Request, art: Artifact) -> None:
+    """TD3: a file produced in an Owner draft trial stays with its Owner.
+
+    The Owner can view and download it; sharing would hand out output of an unreleased
+    definition (trial-tech-design §5, decision TD3). Narrowing or removing a share stays allowed.
+    """
+    from bowhead_core.agent_owner_trial import session_is_owner_trial, turn_is_owner_trial
+
+    db_path = getattr(getattr(request.app.state, "session_store", None), "db_path", None)
+    if db_path is None:
+        return
+    # A trial output records its Turn; a session-scoped file may also carry its session.
+    session_id = getattr(art, "session_id", None)
+    if await turn_is_owner_trial(db_path, turn_id=getattr(art, "created_by_turn", None)) or await session_is_owner_trial(
+        db_path, session_id=session_id
+    ):
+        raise _file_error(status.HTTP_409_CONFLICT, "agent_trial_file_share_unavailable")
 
 
 _HTML_SHARE_PRINCIPALS = frozenset({"user", "group", "team"})
@@ -2248,6 +2304,7 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
         operation=SpaceOperation.WRITE,
         user_id=user_id,
     )
+    await _refuse_trial_output_share(request, art)
     if body.subject_kind in {"user", "group"}:
         recipient_id = body.subject_id.strip()
         await _write_html_share(request, art, "add", (body.subject_kind, recipient_id))
@@ -2348,6 +2405,8 @@ async def set_html_share_audience(artifact_id: str, body: HtmlShareAudience, req
     if art is None or art.created_by != user_id:
         raise _file_not_found()
     await _require_artifact_visible(request, store, art, operation=SpaceOperation.WRITE, user_id=user_id)
+    if body.audience != "private":
+        await _refuse_trial_output_share(request, art)
     await _write_html_share(request, art, body.audience)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -2577,6 +2636,14 @@ async def download(artifact_id: str, request: Request):  # type: ignore[no-untyp
     # Inline and attachment share identical authorization. Allowlist only safe raster types and videos
     # native media elements decode; SVG/GIF/HTML etc. still force attachment.
     _inline = request.query_params.get("disposition") == "inline" and (art.mime or "").lower() in INLINE_MEDIA_MIMES
+
+    if _fetch_sub is None and request.query_params.get("transport") == "proxy":
+        # Composer imports fetch the authorized body on the app origin.
+        from bowhead_gateway.artifact_streaming import artifact_streaming_response
+
+        response = await artifact_streaming_response(request, store, art, inline=False)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     # S3 / MinIO -> 302 to presigned URL for direct browser access.
     url = await store.download_url(

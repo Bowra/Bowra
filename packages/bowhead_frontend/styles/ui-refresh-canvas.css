@@ -1421,6 +1421,29 @@
   font-family: var(--font-control);
   font-size: var(--fs-sm);
 }
+/* Chat running state R2.3: the Turn filter set from a chat work-file line; one tag that clears it. */
+:root:root .results-explorer-turn-filter {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  min-height: var(--control-h-md);
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-accent-soft);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+:root:root .results-explorer-turn-filter:hover {
+  background: var(--c-fill-3);
+}
+:root:root .results-explorer-turn-filter:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
 /* Compact filters: a secondary button (filled, no border) with an accent count badge */
 :root:root .results-explorer-compact-filters > summary {
   min-height: var(--control-h-md);
@@ -1887,6 +1910,11 @@
   gap: 12px;
   border-bottom: var(--hairline) solid var(--c-separator);
   background: transparent;
+}
+/* The full view fills the window: its header keeps the deck editor's padding, so the title does not jump
+   on entering or leaving editing (pptx inline edit §13.7). */
+:root:root .result-file-viewer > .artifact-viewer.artifact-viewer--fullscreen > .artifact-viewer-head {
+  padding: 11px max(12px, env(safe-area-inset-right)) 11px max(12px, env(safe-area-inset-left));
 }
 :root:root :is(.result-file-viewer .artifact-viewer-title strong, .result-file-viewer .artifact-details-head strong) {
   color: var(--c-ink);

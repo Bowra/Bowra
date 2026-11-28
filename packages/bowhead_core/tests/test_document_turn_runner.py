@@ -123,6 +123,8 @@ async def make_native(ctx, monkeypatch, tmp_path, *, scope=SCOPE, turn_id="t_doc
         answer = result.responses.pop(0)
         if isinstance(answer, BaseException):
             raise answer
+        if isinstance(answer, httpx2.Response):
+            return answer
         message = answer if isinstance(answer, dict) else {"role": "assistant", "content": answer}
         finish = "tool_calls" if message.get("tool_calls") else getattr(result, "finish_reason", "stop")
         usage = {"prompt_tokens": 600, "completion_tokens": 100}

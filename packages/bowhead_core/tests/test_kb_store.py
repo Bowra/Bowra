@@ -618,3 +618,131 @@ async def test_source_preview_reads_only_opening_chunks_of_current_generation(st
     assert all(row[2]["generation_id"] == "published" for row in rows)
     file.active_generation_id = None
     assert await store.preview_current_chunks(file) == []
+
+
+# ─── knowledge base exclusion pre-filter (phase 1 slice 2) ──
+
+
+def _knowledge_chunk(file_id: str, content: str, knowledge_base_id: str, *, scope: str = "workspace", seed: int = 0) -> KbChunk:
+    owner = "user_a" if scope == "personal" else "team_5" if scope == "team" else "ws_42"
+    chunk = _make_chunk(file_id, 1, content, scope=scope, scope_owner=owner, workspace_id="" if scope == "team" else "ws_42", embedding_seed=seed)
+    chunk.metadata.knowledge_base_id = knowledge_base_id
+    return chunk
+
+
+@pytest.mark.asyncio
+async def test_chromadb_matches_chunks_without_the_knowledge_base_key_with_nin(store: KbStore) -> None:
+    """Pin chromadb's missing-key semantics: the exclusion pre-filter needs no chunk backfill only while this holds."""
+    file = _make_file()
+    await store.add_chunks(
+        file, [_make_chunk(file.file_id, 1, "legacy, no key", embedding_seed=1), _knowledge_chunk(file.file_id, "named", "kbase_named")]
+    )
+    coll = store._open_collection(store._ws_collection_name("ws_42"), create=False)
+
+    def contents(where: dict) -> set[str]:
+        return set(coll.get(where=where, include=["documents"])["documents"])
+
+    assert contents({"knowledge_base_id": {"$nin": ["kbase_named"]}}) == {"legacy, no key"}
+    assert contents({"knowledge_base_id": {"$nin": ["kbase_other"]}}) == {"legacy, no key", "named"}
+    # Inclusion does not match a missing key (selected-knowledge-base mode needs the chunk backfill).
+    assert contents({"knowledge_base_id": {"$in": ["kbase_named"]}}) == {"named"}
+
+
+@pytest.mark.asyncio
+async def test_search_leaves_out_named_knowledge_bases_the_caller_cannot_use(store: KbStore) -> None:
+    from bowhead_core.kb.knowledge_base_access import KnowledgeLevels
+    from bowhead_core.kb.knowledge_base_store import default_knowledge_base_id
+
+    space_chunks = [
+        _make_chunk("kbf_legacy", 1, "legacy space chunk", embedding_seed=1),
+        _knowledge_chunk("kbf_space", "space default chunk", default_knowledge_base_id("team_5", "space", "ws_42"), seed=2),
+        _knowledge_chunk("kbf_secret", "members-only space chunk", "kbase_secret", seed=3),
+        _knowledge_chunk("kbf_open", "usable named space chunk", "kbase_open", seed=4),
+        _knowledge_chunk("kbf_mine", "my chunk", "kbase_my", scope="personal", seed=5),
+    ]
+    await store.add_chunks(_make_file("kbf_space"), space_chunks)
+    team_chunks = [
+        _knowledge_chunk("kbf_team", "team default chunk", default_knowledge_base_id("team_5", "team", "team_5"), scope="team", seed=6),
+        _knowledge_chunk("kbf_legal", "members-only team chunk", "kbase_legal", scope="team", seed=7),
+    ]
+    await store.add_chunks(_make_file("kbf_team", scope="team", scope_id="team_5", workspace_id=""), team_chunks)
+    homes = {"kbase_secret": ("space", "ws_42"), "kbase_open": ("space", "ws_42"), "kbase_legal": ("team", "team_5")}
+    outsider = KnowledgeLevels({"kbase_open": 1}, homes, frozenset({"kbase_secret", "kbase_legal"}))
+    member = KnowledgeLevels({"kbase_open": 1, "kbase_secret": 1, "kbase_legal": 1}, homes)
+
+    async def found(levels) -> set[str]:
+        ctx = ScopeContext(user_id="user_a", workspace_id="ws_42", team_id="team_5", knowledge_levels=levels)
+        return {r["content"] for r in await store.search(ctx, _make_emb(100), top_k=20)}
+
+    everything = {chunk.content for chunk in space_chunks + team_chunks}
+    assert await found(member) == everything
+    assert await found(outsider) == everything - {"members-only space chunk", "members-only team chunk"}
+    # Without levels nothing can be excluded here; the SQL post-filter refuses named files instead.
+    assert await found(None) == everything
+
+
+@pytest.mark.asyncio
+async def test_search_query_is_unchanged_when_nothing_is_excluded(store: KbStore, monkeypatch) -> None:
+    from bowhead_core.kb.knowledge_base_access import KnowledgeLevels
+
+    await store.add_chunks(_make_file(), [_make_chunk("kbf_test", 1, "space doc", embedding_seed=1)])
+    seen: list[tuple[str, dict]] = []
+    real_query = store._query_if_exists
+
+    def capture(name, **query):
+        seen.append((name, query["where"]))
+        return real_query(name, **query)
+
+    monkeypatch.setattr(store, "_query_if_exists", capture)
+
+    async def wheres(levels) -> list[tuple[str, dict]]:
+        seen.clear()
+        ctx = ScopeContext(user_id="user_a", workspace_id="ws_42", team_id="team_5", extra_personal_workspaces=["ws_old"], knowledge_levels=levels)
+        await store.search(ctx, _make_emb(1), top_k=5)
+        return list(seen)
+
+    today = await wheres(None)
+    assert len(today) == 3
+    assert today == await wheres(KnowledgeLevels({"kbase_x": 1}, {"kbase_x": ("space", "ws_42")}))
+    assert "knowledge_base_id" not in repr(today)
+    # Only the collection of the excluded knowledge base's home gains the clause.
+    team_name = store._team_collection_name("team_5")
+    team_only = dict(await wheres(KnowledgeLevels({}, {"kbase_legal": ("team", "team_5")}, frozenset({"kbase_legal"}))))
+    assert team_only[team_name] == {"$and": [{"is_active": True}, {"scope": "team"}, {"knowledge_base_id": {"$nin": ["kbase_legal"]}}]}
+    assert {name: where for name, where in team_only.items() if name != team_name} == {name: where for name, where in today if name != team_name}
+
+
+# ─── an Agent's selected knowledge bases (phase 1 slice 5) ──
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_only_the_selected_knowledge_bases(store: KbStore) -> None:
+    from bowhead_core.kb.knowledge_base_access import HomeSelection, KnowledgeBaseSelection
+    from bowhead_core.kb.knowledge_base_store import default_knowledge_base_id
+
+    space_chunks = [
+        _make_chunk("kbf_legacy", 1, "legacy space chunk", embedding_seed=1),
+        _knowledge_chunk("kbf_space", "space default chunk", default_knowledge_base_id("team_5", "space", "ws_42"), seed=2),
+        _knowledge_chunk("kbf_secret", "members-only space chunk", "kbase_secret", seed=3),
+        _knowledge_chunk("kbf_open", "selected named space chunk", "kbase_open", seed=4),
+        _knowledge_chunk("kbf_mine", "my chunk", default_knowledge_base_id("team_5", "personal", "user_a"), scope="personal", seed=5),
+    ]
+    await store.add_chunks(_make_file("kbf_space"), space_chunks)
+    team_chunks = [
+        _knowledge_chunk("kbf_team", "team default chunk", default_knowledge_base_id("team_5", "team", "team_5"), scope="team", seed=6),
+        _knowledge_chunk("kbf_legal", "named team chunk", "kbase_legal", scope="team", seed=7),
+    ]
+    await store.add_chunks(_make_file("kbf_team", scope="team", scope_id="team_5", workspace_id=""), team_chunks)
+
+    async def found(selection: KnowledgeBaseSelection) -> set[str]:
+        ctx = ScopeContext(user_id="user_a", workspace_id="ws_42", team_id="team_5", knowledge_base_selection=selection)
+        return {r["content"] for r in await store.search(ctx, _make_emb(100), top_k=20)}
+
+    # A named knowledge base matches its chunk key only.
+    assert await found(KnowledgeBaseSelection(space=HomeSelection(only=("kbase_open",)))) == {"selected named space chunk"}
+    # A selected default takes old chunks without the key, but not the home's unselected named ones.
+    default = KnowledgeBaseSelection(space=HomeSelection(default=True, excluded=("kbase_secret",)), team=HomeSelection(only=("kbase_legal",)))
+    assert await found(default) == {"legacy space chunk", "space default chunk", "selected named space chunk", "named team chunk"}
+    both = KnowledgeBaseSelection(space=HomeSelection(only=("kbase_open",)), personal=HomeSelection(default=True))
+    assert await found(both) == {"selected named space chunk", "my chunk"}
+    assert await found(KnowledgeBaseSelection()) == set()

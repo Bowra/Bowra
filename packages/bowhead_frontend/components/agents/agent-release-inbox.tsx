@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { listAgentReleaseInbox, type AgentReleaseInboxItem } from "@/lib/agents-api";
 import { appPath } from "@/lib/base-path";
 import { formatDateTime } from "@/lib/locale";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
 import { agentArtworkStyle } from "./agent-artwork";
 import { agentMark } from "./agent-mark";
 
@@ -16,6 +17,8 @@ function formatDate(value: string, locale: string): string {
 export function AgentReleaseInbox({ totalCount = 0 }: { totalCount?: number }) {
   const t = useTranslations("agents_marketplace");
   const locale = useLocale();
+  // FEATURE_AGENT_RELEASE_BAR: 开始审批 is a secondary action on every row (design §9).
+  const queueV2 = useAgentReleaseBarCapability();
   const [items, setItems] = useState<AgentReleaseInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -43,7 +46,7 @@ export function AgentReleaseInbox({ totalCount = 0 }: { totalCount?: number }) {
         <strong>{t("release_inbox_count", { count: Math.max(totalCount, items.length) })}</strong>
       </header>
       {error ? <div className="am-release-inbox-empty"><p>{t("release_inbox_failed")}</p><button type="button" onClick={() => setReloadToken((value) => value + 1)}>{t("retry")}</button></div> : loading ? <div className="am-release-inbox-loading"><i /><i /></div> : items.length ? (
-        <div className="am-release-inbox-list">
+        <div className="am-release-inbox-list" data-layout={queueV2 ? "v2" : undefined}>
           {items.map((item) => (
             <a key={item.candidate_id} href={appPath(`${item.detail_url}&agent_id=${encodeURIComponent(item.agent_id)}`)}>
               <span className="am-management-mark" style={agentArtworkStyle(`${item.agent_id}:${item.display_name}`)}>{agentMark(item.display_name)}</span>

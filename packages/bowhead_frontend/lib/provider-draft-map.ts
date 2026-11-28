@@ -70,9 +70,13 @@ export function mapProviderDraftToConnect(fields: ProviderDraftFields): MappedCo
       .filter((model) => typeof model?.id === "string" && model.id.trim())
       .map((model) => {
         const overrides = model.request_body_overrides;
+        const caps = Array.isArray(model.caps) ? model.caps.filter((cap) => typeof cap === "string") : [];
+        // A chat model also gets tool calling by default (2026-11-25 decision): main and fallback models need both,
+        // and verification shows whether the service really supports it. The administrator can untick it.
+        if (caps.includes("chat") && !caps.includes("tool")) caps.push("tool");
         const row: NonNullable<MappedConnectPatch["models"]>[number] = {
           id: model.id!.trim(),
-          caps: Array.isArray(model.caps) ? model.caps.filter((cap) => typeof cap === "string") : [],
+          caps,
           source: "manual", // Absent in DTO, required by host.
         };
         if (typeof model.deployment === "string" && model.deployment) row.deployment = model.deployment;

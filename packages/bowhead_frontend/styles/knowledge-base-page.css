@@ -1,0 +1,234 @@
+/* Knowledge bases (FEATURE_KNOWLEDGE_BASES, organization phase 1 slice 4): knowledge-base-page. Tokens only; font sizes in rem. */
+
+/* ── One knowledge base's page (components/knowledge/bases/kb-page.tsx, mockups ② ⑩ ⑫) ── */
+.kbp-crumb {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+}
+.kbp-crumb a {
+  color: var(--c-ink-3);
+  text-decoration: none;
+}
+.kbp-crumb a:hover {
+  color: var(--c-ink);
+  text-decoration: underline;
+}
+.kbp-crumb a:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+.kbp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.kbp-updated {
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+}
+.kbp-header .ui-page-header__copy {
+  flex: 1 1 auto;
+}
+.kbp-use-only {
+  margin: 0 0 12px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* Tabs: underline (shared), one row that scrolls sideways when it does not fit. */
+.kbp-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  margin: 0 0 16px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.kbp-tabs::-webkit-scrollbar {
+  display: none;
+}
+.kbp-tabs [role="tab"] {
+  flex: none;
+  white-space: nowrap;
+}
+.kbp-panel:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* "Added by" column of the file table (KbFilesManager knowledge base mode). */
+.kb-added-by-cell {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ⑩a not found / load failure: the page title stays, the state explains and offers one way back. */
+.kbp-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 32px 24px;
+  border: var(--hairline) solid var(--c-separator);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+}
+.kbp-state__title {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.kbp-state__body {
+  margin: 0 0 8px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+
+/* ── Settings tab (kb-settings-panel.tsx) ── */
+.kbp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 640px;
+}
+.kbp-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kbp-settings__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.kbp-settings__form textarea {
+  resize: vertical;
+}
+.kbp-settings__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.kbp-settings__label {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+.kbp-settings__value {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.kbp-settings__hint {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.kbp-settings__fixed,
+.kbp-settings__owner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kbp-settings__danger {
+  padding: 12px 16px;
+  border: var(--hairline) solid var(--c-err-line);
+  border-radius: var(--r-2);
+}
+.kbp-settings__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.kbp-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.kbp-transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.kbp-transfer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kbp-transfer__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  text-align: left;
+}
+.kbp-transfer__option span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+.kbp-transfer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.kbp-transfer__empty p {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+}
+
+/* ── Phone (< 768 the shared header hides; ⑫): crumb, badges and wrapped actions in the body ── */
+.kbp-phone-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.kbp-phone-head .kbp-meta {
+  margin-top: 0;
+}
+.kbp-phone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kbp-phone-actions .ui-page-action {
+  min-height: 44px;
+}
+@media (max-width: 767.98px) {
+  .kbp-tabs [role="tab"] {
+    min-height: 44px;
+  }
+  .kbp-crumb a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  /* The ⋯ menu sits in the phone top bar with the other 44 px actions. */
+  .ui-page-mobile-actions .kbp-more {
+    width: 44px;
+    height: 44px;
+  }
+  .kbp-settings__actions .settings-button,
+  .kbp-settings__row .settings-button {
+    min-height: 44px;
+  }
+}

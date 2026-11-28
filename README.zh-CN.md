@@ -37,7 +37,7 @@ ChromaDB 仍有未修复的上游依赖安全公告，详见[当前评估和部�
 
 ## 当前源码版本
 
-**Bowra 1.7.76** 新增交互式盈亏平衡情景卡、多张幻灯片引用，并改进模型验证与保存反馈、个人 MCP 登录。[发布说明](docs/help/release-notes/releases/v1.7.76.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
+**Bowra 1.7.95** 新增文件库附件和实时成果视图，整理工具及工具来源入口，接入 Notion 与已审阅的 n8n 工作流，并改进文档矩阵及前端安全。[发布说明](docs/help/release-notes/releases/v1.7.95.zh-CN.md) · [升级说明](deploy/README.zh-CN.md)
 
 SQLite 升级统一协调十二个数据库文件。升级前停止全部写入，并备份实例密钥、数据库和存储对象。自动迁移备份只包含登记的 SQLite 文件与布局元数据，完整恢复快照需单独保存。恢复账号删除前的快照可能恢复该账号。Community 保留已审核沙箱源码与基础文档技能，原生模板创作 helper 需要单独验证执行环境。
 

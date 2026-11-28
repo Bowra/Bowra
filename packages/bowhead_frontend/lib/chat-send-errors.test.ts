@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AGENT_TRIAL_REFUSAL_CODES,
   CHAT_SEND_BACKEND_CODES,
   CHAT_SEND_REASON_CODES,
   getChatSendErrorMessage,
@@ -9,6 +10,30 @@ import {
 
 afterEach(() => {
   document.documentElement.lang = "";
+});
+
+describe("Owner draft trial refusals", () => {
+  it("maps every trial code to its own copy, not to a status fallback", () => {
+    for (const code of AGENT_TRIAL_REFUSAL_CODES) {
+      expect(CHAT_SEND_BACKEND_CODES).toContain(code);
+      expect(resolveChatSendErrorReason(code, 409)).toBe(code);
+    }
+  });
+
+  it.each(["zh-CN", "en-US", "de-DE", "fr-FR"] as const)("gives each trial refusal distinct, actionable copy in %s", (locale) => {
+    document.documentElement.lang = locale;
+    const messages = AGENT_TRIAL_REFUSAL_CODES.map((code) => getChatSendErrorMessage(code));
+    expect(new Set(messages).size).toBe(messages.length);
+    for (const message of messages) expect(message).not.toBe(getChatSendErrorMessage("chat_send_conflict"));
+  });
+
+  it("names the Owner as 所有者 and never calls a trial a sandbox", () => {
+    document.documentElement.lang = "zh-CN";
+    expect(getChatSendErrorMessage("agent_trial_owner_required")).toContain("所有者");
+    for (const code of AGENT_TRIAL_REFUSAL_CODES) expect(getChatSendErrorMessage(code)).not.toMatch(/沙盒|沙箱/);
+    document.documentElement.lang = "en-US";
+    for (const code of AGENT_TRIAL_REFUSAL_CODES) expect(getChatSendErrorMessage(code)).not.toMatch(/sandbox/i);
+  });
 });
 
 describe("chat send HTTP error mapping", () => {

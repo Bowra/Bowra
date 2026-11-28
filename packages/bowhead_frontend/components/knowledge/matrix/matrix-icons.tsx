@@ -9,10 +9,12 @@ import {
   ChevronLeft as LucideChevronLeft,
   ChevronRight as LucideChevronRight,
   Clock as LucideClock,
+  Download as LucideDownload,
   Ellipsis as LucideEllipsis,
   File as LucideFile,
   Folder as LucideFolder,
   LoaderCircle as LucideLoaderCircle,
+  Lock as LucideLock,
   Pencil as LucidePencil,
   Play as LucidePlay,
   Plus as LucidePlus,
@@ -57,9 +59,12 @@ export const IcCaret = /* @__PURE__ */ icon(LucideChevronDown);
 export const IcPlus = /* @__PURE__ */ icon(LucidePlus);
 export const IcDots = /* @__PURE__ */ icon(LucideEllipsis);
 export const IcClock = /* @__PURE__ */ icon(LucideClock);
+export const IcDownload = /* @__PURE__ */ icon(LucideDownload);
 export const IcRefresh = /* @__PURE__ */ icon(LucideRefreshCw);
 export const IcSpark = /* @__PURE__ */ icon(LucideSparkles);
 export const IcFolder = /* @__PURE__ */ icon(LucideFolder);
+// Step 1 S8: only-me matrices.
+export const IcLock = /* @__PURE__ */ icon(LucideLock);
 
 export function IcSpin({ s = 14, style }: { s?: number; style?: CSSProperties }) {
   return renderRefreshSvg(LucideLoaderCircle, s, s, { className: "mx-spin", style, "aria-hidden": true });

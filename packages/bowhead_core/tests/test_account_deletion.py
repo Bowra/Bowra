@@ -151,6 +151,23 @@ async def test_due_erasure_removes_content_and_preserves_same_email_new_identity
         assert (await (await db.execute("SELECT state FROM account_deletions")).fetchone())[0] == "completed"
 
 
+async def test_due_erasure_removes_the_kept_renders_of_erased_files(store: UserStore, service) -> None:
+    """A kept render holds the file's content, so erasure inventories it with the file (docx design §5.2)."""
+    from bowhead_core.artifact_views import view_paths, write_view
+
+    old_file = await service.artifacts.put_bytes(
+        content=b"private deck", filename="old.pptx", mime="application/octet-stream", created_by="usr_old", kind="user_upload", scope="user"
+    )
+    await write_view(service.artifacts.backend, old_file.id, "pptx-pdf", source="s", renderer="r", pdf=b"%PDF-1.7\nprivate render")
+    assert any(Path(path).exists() for path in view_paths(service.artifacts.backend, old_file.id))
+    service.clock = lambda: datetime.now(UTC) - timedelta(days=31)
+    await service.request("usr_old")
+    service.clock = lambda: datetime.now(UTC)
+    assert await service.run_once() == {"completed": 1, "failed": 0}
+    assert not Path(old_file.path).exists()
+    assert not any(Path(path).exists() for path in view_paths(service.artifacts.backend, old_file.id))
+
+
 @pytest.mark.parametrize("closed", [False, True], ids=["running-protocol", "committed-protocol"])
 async def test_protocol_accounts_are_erased_without_inventing_outcomes(tmp_path: Path, closed: bool) -> None:
     from unittest.mock import AsyncMock

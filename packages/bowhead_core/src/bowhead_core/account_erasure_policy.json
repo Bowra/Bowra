@@ -114,6 +114,7 @@
     "team_members",
     "team_openapi_call_logs",
     "team_openapi_keys",
+    "team_file_retention",
     "team_reference_retention_policies",
     "team_settings",
     "team_skill",
@@ -8492,6 +8493,16 @@
       ],
       "owner_columns": []
     },
+    "team_file_retention": {
+      "columns": [
+        "team_id",
+        "version",
+        "days",
+        "effective_at",
+        "existing_candidates"
+      ],
+      "owner_columns": []
+    },
     "team_reference_retention_policies": {
       "columns": [
         "team_id",
@@ -9378,9 +9389,18 @@
     "teams_activity_dedup": {
       "columns": [
         "activity_id",
-        "received_at"
+        "received_at",
+        "claim_owner",
+        "claim_until",
+        "delivery",
+        "delivery_user_id",
+        "delivery_seq",
+        "delivery_due",
+        "delivery_owner"
       ],
-      "owner_columns": []
+      "owner_columns": [
+        "delivery_user_id"
+      ]
     },
     "teams_connections": {
       "columns": [
@@ -9413,7 +9433,8 @@
         "bowhead_user_id",
         "team_id",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "confirmed_at"
       ],
       "owner_columns": [
         "bowhead_user_id"
@@ -9425,7 +9446,8 @@
         "conversation_id",
         "entra_oid",
         "workspace_id",
-        "updated_at"
+        "updated_at",
+        "team_id"
       ],
       "owner_columns": []
     },
@@ -10549,6 +10571,43 @@
         "user_id"
       ]
     },
+    "file_retention_reviews": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "version",
+        "days",
+        "effective_days",
+        "created_at",
+        "candidates",
+        "applied_version",
+        "applied_existing"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "file_retention_state": {
+      "columns": [
+        "artifact_id",
+        "kept",
+        "trashed_at",
+        "policy_version"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
     "user_result_pins": {
       "columns": [
         "user_id",
@@ -10749,7 +10808,8 @@
         "source_absent",
         "source_observation_json",
         "membership_revision",
-        "ingestion_action_id"
+        "ingestion_action_id",
+        "knowledge_base_id"
       ],
       "kb_file_generations": [
         "generation_id",
@@ -10867,6 +10927,30 @@
         "error_code",
         "created_at",
         "updated_at"
+      ],
+      "kb_knowledge_bases": [
+        "id",
+        "team_id",
+        "home",
+        "home_id",
+        "is_default",
+        "name",
+        "description",
+        "audience",
+        "audience_level",
+        "owner_user_id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "deleted_at"
+      ],
+      "kb_knowledge_base_members": [
+        "knowledge_base_id",
+        "principal_type",
+        "principal_id",
+        "level",
+        "added_by",
+        "created_at"
       ]
     },
     "kb_doc_types.db": {
@@ -10998,7 +11082,22 @@
         "created_at",
         "updated_at",
         "last_run_at",
-        "soft_deleted_at"
+        "soft_deleted_at",
+        "visibility"
+      ],
+      "kb_matrix_cell_events": [
+        "event_id",
+        "matrix_id",
+        "file_id",
+        "column_id",
+        "workspace_id",
+        "team_id",
+        "kind",
+        "actor_user_id",
+        "run_id",
+        "cell_seq",
+        "batch_id",
+        "created_at"
       ],
       "kb_matrix_cells": [
         "matrix_id",

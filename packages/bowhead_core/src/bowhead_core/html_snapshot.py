@@ -22,6 +22,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 _LOG = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class HtmlSnapshot:
     scroll_height: int
     issues: tuple[str, ...]
     external_resources: bool
+    layout: dict[str, Any] | None = None  # visual_layout.PageLayout.to_dict(); None without a measured layout
 
 
 def transform_path() -> Path:
@@ -148,4 +150,5 @@ async def capture(kind: str, content: bytes) -> HtmlSnapshot:
         scroll_height=view.scroll_height,
         issues=view.issues,
         external_resources=view.external_resources,
+        layout=view.layout,
     )

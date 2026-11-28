@@ -9,14 +9,16 @@
  * [重跑此格]/[按原话保留为文本] arrive with M2 (hidden here).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { ListTime } from "@/components/ui/list-time";
 import { useKbChunkContent } from "@/lib/canvas-pm-adapter/kb-chunk-cache";
-import type { MatrixCellVM, MatrixColumnVM, MatrixRowVM } from "@/lib/kb-matrix/types";
-import { cellChoiceList } from "@/lib/kb-matrix/types";
+import { CROSS_CHECK_DISAGREE_AT_MOST } from "@/lib/kb-matrix/review";
+import type { MatrixCellEvent, MatrixCellLastEvent, MatrixCellVM, MatrixColumnVM, MatrixRowVM } from "@/lib/kb-matrix/types";
+import { AI_CELL_EVENT_KINDS, cellChoiceList } from "@/lib/kb-matrix/types";
 
-import { locateExcerpt } from "./cite-popover";
+import { locateExcerpt, sourcePlaceLabel } from "./cite-popover";
 import { IcCheck, IcChevR, IcClock, IcDoc, IcPencil, IcRefresh, IcWarn, IcX } from "./matrix-icons";
 import { KbSourceDrawer } from "../kb-source-drawer";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
@@ -36,12 +38,98 @@ export interface SidePanelProps {
   onMarkVerified: () => void;
   /** M2: rerun one cell (FR-12b runs in place without a dialog; failed state uses primary [重试此格], FR-11). */
   onRerunCell?: () => void;
+  /** Step 1 (S3): estimated credits of that rerun, shown on its button (null while unknown). */
+  rerunCredits?: number | null;
   /** M2: keep verbatim as text (FR-10, shown only in needs_review). */
   onKeepAsText?: () => void;
   /** M3: undo verification (FR-12 r5; replaces [标记已核] when verified, also available in the failed branch). */
   onUnverify?: () => void;
   /** M3: undo edited marker (FR-9 r5; shown when edited, allowing later runs to overwrite it). */
   onRevertEdited?: () => void;
+  /** Step 1 (S4): the cell's history, newest first (absent: no history section, e.g. template views). */
+  loadHistory?: () => Promise<{ items: MatrixCellEvent[]; more: boolean }>;
+}
+
+/** One history line: who (the AI, the system, a person or "a member" when the name is unknown), what, when. */
+function HistoryLine({ event }: { event: MatrixCellLastEvent & { batchId?: string | null } }) {
+  const t = useTranslations("kbMatrix");
+  const who =
+    event.kind === "auto_retried"
+      ? t("history_system")
+      : AI_CELL_EVENT_KINDS.has(event.kind)
+        ? t("history_ai")
+        : (event.actorName ?? t("history_someone"));
+  const bulk = !!event.batchId && (event.kind === "verified" || event.kind === "verify_reverted");
+  const what = t(`history_${event.kind}${bulk ? "_bulk" : ""}` as never);
+  return (
+    <li>
+      <b>{who}</b> {what} · <ListTime value={event.at} />
+    </li>
+  );
+}
+
+/** Side-panel history (mockup ⑧): the snapshot's latest change at once, the full list (at most 50) once loaded. */
+function CellHistory({
+  load,
+  seq,
+  lastEvent,
+}: {
+  load: () => Promise<{ items: MatrixCellEvent[]; more: boolean }>;
+  /** Reload when the cell changes (own action or a poll). */
+  seq?: number;
+  lastEvent?: MatrixCellLastEvent;
+}) {
+  const t = useTranslations("kbMatrix");
+  const [state, setState] = useState<{ status: "loading" | "ready" | "error"; items: MatrixCellEvent[]; more: boolean }>({
+    status: "loading",
+    items: [],
+    more: false,
+  });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setState((cur) => ({ ...cur, status: "loading" }));
+    load()
+      .then((res) => {
+        if (!cancelled) setState({ status: "ready", items: res.items, more: res.more });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ status: "error", items: [], more: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [load, seq, attempt]);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  return (
+    <section className="mx-history" aria-labelledby="kb-matrix-history-label" data-testid="kb-matrix-history">
+      <div className="mx-seclabel" id="kb-matrix-history-label">{t("sec_history")}</div>
+      {state.status === "ready" && state.items.length > 0 ? (
+        <ul className="mx-hist">
+          {state.items.map((e) => (
+            <HistoryLine key={e.eventId} event={e} />
+          ))}
+        </ul>
+      ) : state.status === "ready" ? (
+        <p className="mx-hist-note">{t("history_empty")}</p>
+      ) : state.status === "error" ? (
+        <p className="mx-hist-note" role="status">
+          {t("history_error")}{" "}
+          <button type="button" className="mx-viewsrc" onClick={retry}>
+            {t("history_retry")}
+          </button>
+        </p>
+      ) : lastEvent ? (
+        // While the list loads, the snapshot already says who changed the cell last.
+        <ul className="mx-hist" aria-busy="true">
+          <HistoryLine event={lastEvent} />
+        </ul>
+      ) : (
+        <p className="mx-hist-note" aria-busy="true">{t("history_loading")}</p>
+      )}
+      {state.status === "ready" && state.more && <p className="mx-hist-note">{t("history_more", { n: state.items.length })}</p>}
+    </section>
+  );
 }
 
 function typedInput(type: string, isReview: boolean): "text" | "number" | "date" {
@@ -176,9 +264,11 @@ export function SidePanel({
   onSaveValue,
   onMarkVerified,
   onRerunCell,
+  rerunCredits = null,
   onKeepAsText,
   onUnverify,
   onRevertEdited,
+  loadHistory,
 }: SidePanelProps) {
   const t = useTranslations("kbMatrix");
   const [edit, setEdit] = useState(false);
@@ -193,6 +283,7 @@ export function SidePanel({
 
   const chunk = useKbChunkContent(row.fileId, cell.chunkId, undefined, { single: true });
   const located = chunk.status === "ready" ? locateExcerpt(chunk.content, cell.sourceExcerpt) : null;
+  const place = sourcePlaceLabel(t, cell.page, cell.chunkIndex);
   const review = cell.status === "needs_review";
   const failed = cell.status === "failed";
   const isChoice = isChoiceCol(col.type);
@@ -246,12 +337,13 @@ export function SidePanel({
               {t("fail_prefix")}
               {t(`fail_${cell.failReason ?? "llm_invoke_failed"}` as never)}
             </div>
+            {loadHistory && <CellHistory load={loadHistory} seq={cell.seq} lastEvent={cell.lastEvent} />}
           </div>
           <div className="mx-panel-foot">
             {canEdit && onRerunCell && (
               <button type="button" className="kb-btn kb-btn-primary" style={{ flex: 1 }} disabled={saving} onClick={onRerunCell}>
                 <IcRefresh s={14} />
-                {t("retry_cell")}
+                {rerunCredits !== null ? t("retry_cell_cost", { n: rerunCredits }) : t("retry_cell")}
               </button>
             )}
             {/* failed+verified is reachable (force/stale rerun fails on verified cells, G-P2-3); provide the undo entry. */}
@@ -343,7 +435,7 @@ export function SidePanel({
               <IcDoc s={13} />
               <span>
                 {row.missing ? t("file_missing") : row.fileName}
-                {cell.page != null ? ` · ${t("page_n", { n: cell.page })}` : ""}
+                {place ? ` · ${place}` : ""}
               </span>
             </div>
             {!located && cell.sourceExcerpt && <div className="mx-fallback">{t("cite_fallback")}</div>}
@@ -374,8 +466,7 @@ export function SidePanel({
                   {v.is_primary && <span className="mtag">{t("primary_value")}</span>}
                 </div>
                 <div className="smeta">
-                  {v.extracted_by}
-                  {v.page != null ? ` · ${t("page_n", { n: v.page })}` : ""}
+                  {[v.extracted_by, sourcePlaceLabel(t, v.page, v.chunk_index)].filter(Boolean).join(" · ")}
                 </div>
               </div>
             ))}
@@ -403,13 +494,14 @@ export function SidePanel({
             {/* M3 §4.7: cross-check agreement rate (presentation-only; agree≤0.5 → suggest manual verification). */}
             {cell.selfConsistencyAgree != null && (
               <>
-                {cell.selfConsistencyAgree <= 0.5 ? <CharIconText ch="⚠" at="end">{t("cv_agree_bad")}</CharIconText> : <CharIconText ch="✓" at="end">{t("cv_agree_ok")}</CharIconText>}
+                {cell.selfConsistencyAgree <= CROSS_CHECK_DISAGREE_AT_MOST ? <CharIconText ch="⚠" at="end">{t("cv_agree_bad")}</CharIconText> : <CharIconText ch="✓" at="end">{t("cv_agree_ok")}</CharIconText>}
                 <br />
               </>
             )}
             {cell.extractedAt && t("extracted_at_row", { at: cell.extractedAt.slice(0, 16).replace("T", " ") })}
           </div>
         </div>
+        {!edit && loadHistory && <CellHistory load={loadHistory} seq={cell.seq} lastEvent={cell.lastEvent} />}
       </div>
 
       <div className="mx-panel-foot">
@@ -473,7 +565,7 @@ export function SidePanel({
               {onRerunCell && (
                 <button type="button" className="kb-btn kb-btn-secondary" disabled={saving} onClick={onRerunCell}>
                   <IcRefresh s={13} />
-                  {t("rerun_cell")}
+                  {rerunCredits !== null ? t("rerun_cell_cost", { n: rerunCredits }) : t("rerun_cell")}
                 </button>
               )}
               {review && onKeepAsText && (

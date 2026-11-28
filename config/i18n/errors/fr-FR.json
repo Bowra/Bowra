@@ -110,6 +110,7 @@
   "client_refresh_required": "Cette version de la page ne peut pas lancer un nouvel envoi de façon sûre. Conservez le brouillon et actualisez la page.",
   "chart_selection_unavailable": "Cette sélection a changé ou est indisponible. Rouvrez le graphique, sélectionnez à nouveau la portée et renvoyez votre brouillon.",
   "presentation_selection_unavailable": "L’élément de présentation cité a changé ou est indisponible. Rouvrez le fichier, sélectionnez de nouveau l’élément dans Modifier, puis renvoyez votre brouillon.",
+  "document_selection_unavailable": "Le paragraphe ou les pages Word cités ont changé ou sont indisponibles. Rouvrez le fichier, citez de nouveau le paragraphe ou les pages, puis renvoyez votre brouillon.",
   "subagent_draft_unsaved_changes": "Des modifications à droite ne sont pas enregistrées. Enregistrez-les ou abandonnez-les avant d’envoyer ce message. Votre saisie est conservée.",
   "subagent_draft_store_unavailable": "Les brouillons sont temporairement indisponibles, peut-être en raison d’une mise à jour du service. Réessayez plus tard ; vos Agents ne sont pas affectés.",
   "clock_tamper": "L’horloge du serveur n’est pas valide ; cette action est donc indisponible. Demandez à votre administrateur système de vérifier l’heure du système.",
@@ -754,5 +755,5 @@
   "personal_mcp_sign_in_renewal_unavailable": "Le service n’a pas répondu pendant que Bowhead renouvelait votre connexion. Votre connexion reste valide ; réessayez plus tard.",
   "personal_mcp_oauth_endpoint_locked": "Une connexion authentifiée conserve son adresse. Pour utiliser une autre adresse, ajoutez une nouvelle connexion.",
   "personal_mcp_oauth_sign_in_required": "Cette connexion se crée en se connectant au service. Choisissez « Continuer vers la connexion ».",
-  "personal_mcp_oauth_unavailable": "Les connexions par authentification ne sont pas disponibles sur ce déploiement."
+  "tool_disabled_by_team": "Votre équipe a désactivé cet outil intégré : il ne peut donc pas être ajouté aux agents ni aux plugins. Les agents et plugins qui l’incluent déjà restent inchangés et ne l’utilisent pas lors de leur exécution. Un propriétaire ou un administrateur peut le réactiver dans Centre de capacités → Outils."
 }

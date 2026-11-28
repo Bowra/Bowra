@@ -981,6 +981,21 @@ tools:
     risk: external_write
     allowed_roles: [lead]
 
+  - canonical: wecom_notify
+    display_zh: 发送企业微信通知
+    display_en: Send WeCom notification
+    display_de: WeCom-Benachrichtigung senden
+    display_fr: Envoyer une notification WeCom
+    blurb_zh: "在网页对话中向当前用户已关联的企业微信发送通知。"
+    blurb_en: "Send a notification to the current user's linked WeCom account during a web chat."
+    blurb_de: "Im Web-Chat eine Benachrichtigung an das verknüpfte WeCom-Konto der aktuellen Person senden."
+    blurb_fr: "Envoyer une notification au compte WeCom lié de l’utilisateur pendant une conversation sur le Web."
+    sigil: "🔔"
+    category: orchestrate
+    kind: tool
+    risk: external_write
+    allowed_roles: [lead]
+
   - canonical: routine_notify
     display_zh: 提醒任务所有者
     display_en: Notify Task Owner

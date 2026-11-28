@@ -136,6 +136,7 @@ vi.mock("@/lib/use-autocomplete", () => ({
 
 // Import AFTER mocks register so they apply.
 import { V2Composer, type ComposerDraftControl, type ComposerDraftSubmissionContext } from "./v2-composer";
+import { AgentTrialChatContext, type AgentTrialChatValue } from "./agent-trial-chat";
 import { uploadFile } from "@/lib/api";
 import type { AttachmentRef } from "@/lib/types";
 import { ApiError } from "@/lib/api-client";
@@ -380,6 +381,50 @@ describe("Same-scope composer handoff", () => {
 });
 
 describe("Chat upload context", () => {
+  it.each([false, true])("attaches a pasted screenshot with reference input enabled: %s", async (referenceInputEnabled) => {
+    recoveryMocks.read.mockResolvedValue({ message: "Describe the screenshot", attachments: [], revision: "rev_text", updatedAt: "2026-11-27T00:00:00Z" });
+    const onSend = vi.fn();
+    const view = render(<V2Composer onSend={onSend} draftPersistenceScope={DRAFT_SCOPE}
+      referenceInputEnabled={referenceInputEnabled} />);
+    const input = await waitFor(() => {
+      const editor = view.container.querySelector<HTMLElement>(referenceInputEnabled
+        ? '[role="combobox"][contenteditable="true"]'
+        : 'textarea:not([readonly])');
+      expect(editor).not.toBeNull();
+      expect(editor instanceof HTMLTextAreaElement ? editor.value : editor?.textContent).toBe("Describe the screenshot");
+      return editor!;
+    });
+    const file = new File(["screenshot"], "screenshot.png", { type: "image/png" });
+    vi.mocked(uploadFile).mockResolvedValueOnce({
+      file_id: "art_screenshot", filename: file.name, mime: file.type, size: file.size, url: "/file",
+    });
+
+    const clipboardData = referenceInputEnabled
+      ? { files: [], items: [{ kind: "file", type: file.type, getAsFile: () => file }] }
+      : { files: [file] };
+    expect(fireEvent.paste(input, { clipboardData: {
+      ...clipboardData, types: ["Files", "text/plain"], getData: () => "Image URL",
+    } })).toBe(false);
+
+    await screen.findByText(file.name);
+    expect(uploadFile).toHaveBeenCalledExactlyOnceWith(file, expect.objectContaining({
+      spaceHeaders: expect.objectContaining({ "X-Space-Id": DRAFT_SCOPE.workspaceId }),
+    }));
+    expect(input instanceof HTMLTextAreaElement ? input.value : input.textContent).toBe("Describe the screenshot");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("blocks pasted image uploads in read-only mode", async () => {
+    const view = render(<V2Composer onSend={vi.fn()} draftPersistenceScope={DRAFT_SCOPE} readOnly />);
+    const input = await screen.findByRole("textbox");
+    const file = new File(["screenshot"], "screenshot.png", { type: "image/png" });
+
+    fireEvent.paste(input, { clipboardData: { files: [file] } });
+
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(view.container.querySelector(".v2-chip")).toBeNull();
+  });
+
   it("adds the same file only once, outlining the existing chip and announcing it (D10)", async () => {
     vi.mocked(uploadFile).mockImplementation(async (file) => ({
       file_id: `art_${file.name}`, filename: file.name, size: file.size, mime: file.type, url: "/file",
@@ -2720,13 +2765,14 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
-    it("opens the native upload picker directly in the compact composer", async () => {
+    it("opens the native upload picker from the compact composer's Add menu", async () => {
       const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
       const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
       const pick = vi.spyOn(input, "click");
-      const trigger = screen.getByRole("button", { name: "附件" });
+      const trigger = screen.getByRole("button", { name: "add_menu_label" });
       await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
       fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole("menuitem", { name: "upload_file" }));
       expect(pick).toHaveBeenCalledTimes(1);
     });
 
@@ -3600,5 +3646,143 @@ describe("Reference editor accessible name (2026-11-08 dogfood F11)", () => {
     render(<V2Composer {...props} draftPersistenceScope={DRAFT_SCOPE} readOnly />);
     expect(await screen.findByRole("combobox", { name: "readonly_placeholder" })).toBeTruthy();
     await waitFor(() => expect(visiblePrompt()).toBe("readonly_placeholder"));
+  });
+});
+
+describe("Owner draft trial", () => {
+  const reference = { agentId: "osa_1", label: "门店周报", candidateId: "arc_2", revisionRef: "arv_2" };
+  function trialValue(overrides: Partial<AgentTrialChatValue> = {}): AgentTrialChatValue {
+    return {
+      agentId: "osa_1",
+      agentName: "门店周报",
+      reference,
+      candidateKind: "draft",
+      liveVersion: 2,
+      endedVersion: null,
+      unavailable: false,
+      notice: null,
+      preparing: false,
+      prepareSend: vi.fn(async () => reference),
+      backToAgent: vi.fn(),
+      openEditor: null,
+      startReleased: vi.fn(),
+      askReleased: vi.fn(),
+      saveAsCase: vi.fn(async () => undefined),
+      dismissNotice: vi.fn(),
+      unsavedFields: [],
+      ...overrides,
+    };
+  }
+  function renderTrial(value: AgentTrialChatValue, extra: Partial<Parameters<typeof V2Composer>[0]> = {}) {
+    const onSend = vi.fn(async (..._args: unknown[]) => true);
+    const view = render(
+      <AgentTrialChatContext.Provider value={value}>
+        <V2Composer onSend={onSend} draftPersistenceScope={DRAFT_SCOPE} referenceInputEnabled {...extra} />
+      </AgentTrialChatContext.Provider>,
+    );
+    return { onSend, view };
+  }
+
+  it("shows the locked Agent chip and sends the typed question as the trial reference after the save rule", async () => {
+    const value = trialValue();
+    const { onSend } = renderTrial(value);
+    expect(screen.getByText("composer_chip")).toBeTruthy();
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("composer_placeholder");
+    fireEvent.change(input, { target: { value: "本周销售怎么样？" } });
+    await waitFor(() => expect((screen.getByLabelText("发送") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByLabelText("发送"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(value.prepareSend).toHaveBeenCalledOnce();
+    expect(onSend.mock.calls[0][0]).toBe("@门店周报 本周销售怎么样？");
+    const context = onSend.mock.calls[0][3] as ComposerDraftSubmissionContext;
+    expect(context.referenceInputDocument?.nodes).toEqual([
+      expect.objectContaining({
+        type: "reference",
+        label: "门店周报",
+        resource: { kind: "agent", source_kind: "team", id: "osa_1", version: "arv_2", trial_candidate_id: "arc_2" },
+      }),
+      { type: "text", text: " 本周销售怎么样？" },
+    ]);
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("keeps the question when the draft couldn't be saved or frozen", async () => {
+    const value = trialValue({ prepareSend: vi.fn(async () => null) });
+    const { onSend } = renderTrial(value);
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "上周哪个品类最好？" } });
+    await waitFor(() => expect((screen.getByLabelText("发送") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByLabelText("发送"));
+    await waitFor(() => expect(value.prepareSend).toHaveBeenCalledOnce());
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input.value).toBe("上周哪个品类最好？");
+  });
+
+  it("lists plan mode, MCP references and methods as unavailable with their reasons", async () => {
+    renderTrial(trialValue());
+    const trigger = screen.getByRole("button", { name: "add_menu_label" });
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(trigger);
+    for (const feature of ["plan", "mcp", "methods"]) {
+      const item = screen.getByRole("menuitem", { name: new RegExp(`feature_${feature}`) });
+      expect(item.getAttribute("aria-disabled")).toBe("true");
+      expect(item.textContent).toContain(`feature_${feature}_reason`);
+    }
+    expect(screen.getByRole("menuitem", { name: /upload_file/ })).toBeTruthy();
+  });
+
+  it("offers no steer follow-up while a trial Turn runs", async () => {
+    const onSteer = vi.fn();
+    renderTrial(trialValue(), { running: true, onSteer, onCancel: vi.fn(), disabled: true });
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("composer_running_placeholder");
+    expect(screen.queryByTestId("composer-steer-send")).toBeNull();
+  });
+
+  it("can't send once the draft was released", () => {
+    renderTrial(trialValue({ endedVersion: 3 }));
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("ended_composer");
+  });
+
+  it("points to @ in a new conversation when 开始使用 isn't offered (F22)", () => {
+    renderTrial(trialValue({ endedVersion: 3, startReleased: null }));
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("ended_composer_mention");
+  });
+
+  it("can't send in a trial whose draft is gone, and says what to do (F34)", () => {
+    renderTrial(trialValue({ unavailable: true }));
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("unavailable_composer");
+  });
+
+  it("leaves an ordinary composer unchanged", () => {
+    render(<V2Composer onSend={vi.fn()} draftPersistenceScope={DRAFT_SCOPE} />);
+    expect(screen.queryByText("composer_chip")).toBeNull();
+    expect(screen.getByLabelText("发送")).toBeTruthy();
+  });
+
+  it("says above the input that unsaved 工作说明 will be saved, and names Send accordingly", () => {
+    renderTrial(trialValue({ unsavedFields: ["instructions"] }));
+    const hint = screen.getByText("send_hint_instructions");
+    const input = screen.getByRole("textbox");
+    expect(input.getAttribute("aria-describedby")).toBe(hint.id);
+    expect(screen.getByLabelText("send_save_label")).toBeTruthy();
+    expect(screen.queryByLabelText("发送")).toBeNull();
+  });
+
+  it("names the other unsaved fields and says sending asks first", () => {
+    renderTrial(trialValue({ unsavedFields: ["instructions", "audience"] }));
+    expect(screen.getByText("send_hint_fields")).toBeTruthy();
+    expect(screen.getByLabelText("send_save_label")).toBeTruthy();
+  });
+
+  it("shows no hint while everything is saved", () => {
+    renderTrial(trialValue());
+    expect(screen.queryByText(/send_hint_/)).toBeNull();
+    expect(screen.getByRole("textbox").getAttribute("aria-describedby")).toBeNull();
+    expect(screen.getByLabelText("发送")).toBeTruthy();
   });
 });

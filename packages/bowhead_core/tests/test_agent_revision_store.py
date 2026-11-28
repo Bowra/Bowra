@@ -488,6 +488,42 @@ async def test_working_copy_rejects_new_approval_tools_but_preserves_existing_bi
         await save(definition, removed.row_version)
 
 
+async def test_working_copy_keeps_a_tool_the_team_turned_off_and_refuses_adding_one(tmp_path) -> None:
+    db_path = _db(tmp_path)
+    _seed(db_path)
+    store = AgentRevisionStore(str(db_path), validator=_Validator(), clock=_Clock())
+    definition = {**_definition(), "tool_refs": ["bi_query", "web_search"]}
+
+    async def save(definition, version, description="A useful specialist."):
+        return await store.save_working_copy(
+            team_id="team_release",
+            agent_id="osa_release",
+            actor_user_id="user_owner",
+            definition=definition,
+            listing={**_listing(), "description": description},
+            audience=AgentAudience("private"),
+            expected_row_version=version,
+        )
+
+    initial = await save(definition, None)
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "INSERT INTO team_settings(team_id,key,value,updated_at,updated_by) VALUES (?,?,?,?,?)",
+            (
+                "team_release",
+                "builtin_tool_states",
+                json.dumps({"web_search": {"enabled": False}, "image_generate": {"enabled": False}}),
+                _TIME,
+                "user_owner",
+            ),
+        )
+    retained = await save(definition, initial.row_version, "Description only")
+    assert retained.definition["tool_refs"] == ["bi_query", "web_search"]
+    with pytest.raises(AgentPublicationBlockedError, match="tool_disabled_by_team") as refused:
+        await save({**definition, "tool_refs": ["bi_query", "web_search", "image_generate"]}, retained.row_version)
+    assert refused.value.details == {"tool_ref": "image_generate"}
+
+
 def _listing(name: str = "New Agent") -> dict:
     return {"description": "A useful specialist.", "display_name": name}
 

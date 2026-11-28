@@ -141,8 +141,11 @@ describe("a streamed text delta and the Markdown already on the page", () => {
     const state = runner({ archivedTurns: [earlierTurn()] });
     startLiveTurn();
     const view = render(<TurnContainer runner={state} />);
-    // Positive control: every block was parsed once for the first paint.
-    expect(parsed).toEqual(expect.arrayContaining([EARLIER_ANSWER, LEAD_IN, FIRST_REPLY, REWRITE_START]));
+    // Positive control: every Markdown block on the page was parsed once for the first paint. The lead-in and the
+    // first reply are followed by steps, so they are folded notes in the running card (chat running state R1.9),
+    // parsed only when opened.
+    expect(parsed).toEqual(expect.arrayContaining([EARLIER_ANSWER, REWRITE_START]));
+    expect(parsed).not.toContain(LEAD_IN);
 
     parsed.length = 0;
     act(() => send("narrative.delta", { card_id: LIVE, delta: "- 重写的要点二\n" }));
@@ -150,9 +153,9 @@ describe("a streamed text delta and the Markdown already on the page", () => {
     expect(parsed).toEqual([`${REWRITE_START}- 重写的要点二\n`]);
     const text = view.container.textContent ?? "";
     expect(text).toContain("重写的要点二");
-    // The blocks that were skipped are still on the page.
+    // The blocks that were skipped are still on the page: the earlier answer, and the draft as a note.
     expect(text).toContain("上一轮的要点二");
-    expect(text).toContain("第一份的要点二");
+    expect(view.container.querySelectorAll('[data-row-kind="note"]')).toHaveLength(2);
   });
 
   it("parses nothing when the page renders again and no text changed", () => {

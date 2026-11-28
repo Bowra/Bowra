@@ -56,7 +56,7 @@ import { EntitlementReadOnlyChip } from "./entitlement-banner";
 import { RevisionTargetBar } from "./revision-target-bar";
 import { PlanIcon, type PlanIconName } from "./plan-card";
 import { usePlanningModePref } from "@/lib/planning-mode-pref";
-import { COMPOSER_MENU_MAX_HEIGHT, focusComposerFallback, useComposerFocusFallback } from "@/lib/composer-menu";
+import { COMPOSER_MENU_MAX_HEIGHT, composerFocusFallbackTarget, focusComposerFallback, useComposerFocusFallback } from "@/lib/composer-menu";
 import { MENU_DESCRIPTION_ATTR, MenuFloating, MenuItemReason, useMenu, useMenuItem } from "@/components/ui/menu";
 import {
   canonicalizeComposerAttachmentRef,
@@ -102,10 +102,19 @@ import {
   Square as LucideSquare,
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
-import { referencedSlides, toggleSlide } from "@/lib/presentation-selection";
+import { referencedSlides, toggleSlide, type PresentationSelection } from "@/lib/presentation-selection";
+import { referencedDocumentPages, toggleDocumentPage, type DocumentSelection } from "@/lib/document-selection";
 import { ComposerNotices, orderComposerNotices, type ComposerNoticeItem } from "./composer-notices";
+import { useAgentTrialChat, useTrialSendHint } from "./agent-trial-chat";
+import { trialInputDocument, type TrialReference } from "@/lib/agent-trial";
 import { useComposerFileDrop, type ComposerDropVerdict } from "./use-composer-file-drop";
 import { CharIcon } from "@/components/char-icon";
+import { libraryFileKey, rememberComposerLibraryFile, type ComposerLibraryFile } from "@/lib/composer-library";
+
+const ComposerLibraryPicker = dynamic(
+  () => import("./composer-library-picker").then((module) => module.ComposerLibraryPicker),
+  { ssr: false },
+);
 
 /** Office refusals about the kind of file, as opposed to a damaged package. */
 const OFFICE_TYPE_REFUSALS: ReadonlySet<string> = new Set(["file_office_type_mismatch", "file_office_active_content_unsupported"]);
@@ -205,7 +214,18 @@ interface Props {
    * 「引用这一页」: add `page` to the page set of `file`'s chip, or remove it (the last page removes the
    * chip). An element reference of the file gives way to the page. Applied once per `nonce`.
    */
-  slideToggleRequest?: { file: AttachmentRef; page: number; nonce: number } | null;
+  /**
+   * A deck reference change that keeps focus where it is: toggle one page, or (with `selection`) set the
+   * file's whole reference, as an element reference from the editor or an undo restoring pages does.
+   */
+  slideToggleRequest?: {
+    file: AttachmentRef;
+    page: number;
+    nonce: number;
+    selection?: PresentationSelection | null;
+    /** A Word file's paragraph or page set (docx inline edit design §7.4); set instead of `selection`. */
+    documentSelection?: DocumentSelection | null;
+  } | null;
   /** The pages of each deck file the draft references, by file ID; drives the pages' 「已引用」. */
   onReferencedSlidesChange?: (slides: Record<string, number[]>) => void;
   /** Phase 1.4 Steer mode — when present + running=true, submitting text
@@ -269,6 +289,11 @@ type AcceptedDraftCleanup = {
   scopeSignature: string;
   revision: string;
   transient: InputDraftContent & { expectedRevision: string };
+  /**
+   * What the input showed when it was sent, when that differs from the saved draft: a trial question is typed as
+   * plain text but saved as "@Agent question". The input is cleared only while it still shows this.
+   */
+  presented?: InputDraftContent;
 };
 
 function mkLocalId(): string {
@@ -282,6 +307,11 @@ function attachmentIdentity(attachment: Pick<AttachmentRef, "fileId" | "bundleAr
   ]);
 }
 
+/** A Word file, whose references carry documentSelection instead of a deck's presentationSelection. */
+function isWordReference(file: AttachmentRef): boolean {
+  return file.mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(file.filename);
+}
+
 function attachmentRefToItem(attachment: AttachmentRef): AttachmentItem {
   return {
     localId: mkLocalId(),
@@ -292,6 +322,7 @@ function attachmentRefToItem(attachment: AttachmentRef): AttachmentItem {
     status: "done",
     ...(attachment.selectedContext ? { selectedContext: attachment.selectedContext } : {}),
     ...(attachment.presentationSelection ? { presentationSelection: attachment.presentationSelection } : {}),
+    ...(attachment.documentSelection ? { documentSelection: attachment.documentSelection } : {}),
     kind: attachment.bundleArtifactIds?.length ? "bundle" : "file",
     ...(attachment.referenceKind
       ? { referenceKind: attachment.referenceKind }
@@ -311,6 +342,7 @@ function attachmentItemToRef(item: AttachmentItem): AttachmentRef {
     ...(item.referenceKind ? { referenceKind: item.referenceKind } : {}),
     ...(item.selectedContext ? { selectedContext: item.selectedContext } : {}),
     ...(item.presentationSelection ? { presentationSelection: item.presentationSelection } : {}),
+    ...(item.documentSelection ? { documentSelection: item.documentSelection } : {}),
     ...(item.bundleArtifactIds?.length
       ? { bundleArtifactIds: [...item.bundleArtifactIds] }
       : {}),
@@ -465,17 +497,23 @@ function ComposerAddMenu({
   fallbackFocusRef,
   onUpload,
   onPickGoogleDrive,
+  onPickLibrary,
   onOpen,
+  trialUnavailable = false,
 }: {
   disabled: boolean;
   uploadDisabled: boolean;
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   onUpload: () => void;
-  onPickGoogleDrive: () => void;
+  onPickGoogleDrive?: () => void;
+  onPickLibrary?: () => void;
   onOpen: () => void;
+  /** Owner draft trial: list the features a trial can't use, disabled with the reason (C4), instead of hiding them. */
+  trialUnavailable?: boolean;
 }) {
   const t = useTranslations("composer");
   const tDrive = useTranslations("google_drive");
+  const tTrial = useTranslations("agent_trial");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const returnFocusFallback = useComposerFocusFallback(wrapRef, fallbackFocusRef);
@@ -489,7 +527,7 @@ function ComposerAddMenu({
     placement: "top-start",
     maxHeight: COMPOSER_MENU_MAX_HEIGHT,
     returnFocusFallback,
-    // Two source actions stay anchored, including in narrow desktop columns.
+    // Source actions stay anchored, including in narrow desktop columns.
     // The existing upload input must remain outside an inert modal background.
     presentation: "popover",
   });
@@ -523,7 +561,17 @@ function ComposerAddMenu({
             disabledReason={uploadDisabled ? t("upload_file_disabled_reason") : undefined}
             onSelect={onUpload}
           />
-          <ComposerAddMenuItem label={tDrive("composer_entry")} description={tDrive("composer_entry_hint")} onSelect={onPickGoogleDrive} />
+          {onPickLibrary ? <ComposerAddMenuItem label={t("library.choose")} onSelect={onPickLibrary} /> : null}
+          {onPickGoogleDrive ? <ComposerAddMenuItem label={tDrive("composer_entry")} description={tDrive("composer_entry_hint")} onSelect={onPickGoogleDrive} /> : null}
+          {trialUnavailable ? (["plan", "mcp", "methods"] as const).map((feature) => (
+            <ComposerAddMenuItem
+              key={feature}
+              label={tTrial(`feature_${feature}`)}
+              disabled
+              disabledReason={tTrial(`feature_${feature}_reason`)}
+              onSelect={() => undefined}
+            />
+          )) : null}
         </div>
       </MenuFloating>
     </div>
@@ -606,6 +654,22 @@ function PlanningMenuItem({ mode, on, onSelect }: { mode: PlanningMode; on: bool
 export function V2Composer(props: Props) {
   const auth = useOptionalAuthSession();
   const referenceInputEnabled = props.referenceInputEnabled ?? auth?.me?.capabilities?.composer?.reference_input === true;
+  // Owner draft trial: no steer follow-ups while a Turn runs (they re-prepare against the live release), and the
+  // composer says what to do while the trial runs or after it ended.
+  const trialChat = useAgentTrialChat();
+  const tTrial = useTranslations("agent_trial");
+  const trialEnded = trialChat?.endedVersion ?? null;
+  const trialProps: Partial<Props> = trialChat ? {
+    onSteer: undefined,
+    // Without 开始使用 vN (no `agent_start_use`) the ended trial points to @ in a new conversation instead.
+    placeholder: trialEnded !== null
+      ? trialChat.startReleased
+        ? tTrial("ended_composer", { version: `v${trialEnded}` })
+        : tTrial("ended_composer_mention", { agent: trialChat.agentName })
+      : trialChat.unavailable ? tTrial("unavailable_composer")
+        : props.running ? tTrial("composer_running_placeholder") : tTrial("composer_placeholder"),
+    disabled: Boolean(props.disabled) || trialEnded !== null || trialChat.unavailable,
+  } : {};
   const scopeKey = composerDraftScopeSignature(props.draftPersistenceScope ?? null);
   // A new draft scope gets a fresh composer instance, except for the first
   // scope adopted after mounting without one: the home composer mounts while
@@ -623,6 +687,7 @@ export function V2Composer(props: Props) {
   return <ComposerReferenceTransferBoundary key={`composer-scope-${identity.generation}`} scope={props.draftPersistenceScope ?? null} consumeReferenceTransient={referenceInputEnabled} allowHandoffAcceptance={referenceInputEnabled && !props.readOnly && !props.recoveryLocked}>
     {(locked, transferNotice) => <V2ComposerScope
       {...props}
+      {...trialProps}
       transferNotice={transferNotice}
       referenceInputEnabled={referenceInputEnabled}
       recoveryLocked={props.recoveryLocked || locked}
@@ -804,6 +869,15 @@ function V2ComposerScope({
   const sendPendingRef = useRef(false);
   // Mirrors steerPending for the autosave timer, which must not write while an instruction is on its way.
   const steerPendingRef = useRef(false);
+  // Owner draft trial (trial-tech-design §7): a locked Agent chip, plain-text questions, the draft saved and
+  // frozen before each message.
+  const trialChat = useAgentTrialChat();
+  const tTrial = useTranslations("agent_trial");
+  // Unsaved Canvas edits: say above the input that sending saves them first (canvas ⑪).
+  const trialSendHint = useTrialSendHint();
+  const trialHintId = useId();
+  const [trialPreparing, setTrialPreparing] = useState(false);
+  const trialPreparingRef = useRef(false);
   const submitRef = useRef<() => void>(() => undefined);
   const handledSubmitRequest = useRef(submitRequest ?? 0);
   useEffect(() => {
@@ -1556,9 +1630,30 @@ function V2ComposerScope({
     if (recoveryLocked || ordinaryDraftHydrating || draftReadBlocked || draftConflict) return;
     appliedSlideToggleRef.current = slideToggleRequest.nonce;
     const { file, page } = slideToggleRequest;
+    // Word files keep their page set or paragraph in documentSelection (docx inline edit design §7.4).
+    if (isWordReference(file)) {
+      setItems((prev) => {
+        const index = prev.findIndex((item) => item.fileId === file.fileId && !item.bundleArtifactIds?.length);
+        const { selection, outcome } = slideToggleRequest.documentSelection !== undefined
+          ? { selection: slideToggleRequest.documentSelection, outcome: "added" as const }
+          : toggleDocumentPage(index >= 0 ? prev[index].documentSelection : undefined, file.fileId, page);
+        if (outcome === "limit") return prev;
+        if (!selection) return prev.filter((_, position) => position !== index);
+        const { presentationSelection: _dropped, ...plain } = file;
+        void _dropped;
+        const updated = attachmentRefToItem({ ...plain, documentSelection: selection });
+        if (index < 0) return [...prev, updated];
+        const next = [...prev];
+        next[index] = { ...updated, localId: prev[index].localId };
+        return next;
+      });
+      return;
+    }
     setItems((prev) => {
       const index = prev.findIndex((item) => item.fileId === file.fileId && !item.bundleArtifactIds?.length);
-      const { selection, outcome } = toggleSlide(index >= 0 ? prev[index].presentationSelection : undefined, file.fileId, page);
+      const { selection, outcome } = slideToggleRequest.selection !== undefined
+        ? { selection: slideToggleRequest.selection, outcome: "added" as const }
+        : toggleSlide(index >= 0 ? prev[index].presentationSelection : undefined, file.fileId, page);
       if (outcome === "limit") return prev;
       if (!selection) return prev.filter((_, position) => position !== index);
       const updated = attachmentRefToItem({ ...file, presentationSelection: selection });
@@ -1569,7 +1664,8 @@ function V2ComposerScope({
     });
   }, [draftConflict, draftReadBlocked, ordinaryDraftHydrating, recoveryLocked, slideToggleRequest]);
   const referencedSlidesKey = JSON.stringify(items.flatMap((item) => {
-    const pages = item.fileId && item.presentationSelection ? referencedSlides(item.presentationSelection) : [];
+    const pages = item.fileId && item.presentationSelection ? referencedSlides(item.presentationSelection)
+      : item.fileId && item.documentSelection ? referencedDocumentPages(item.documentSelection) : [];
     return pages.length ? [[item.fileId, pages]] : [];
   }));
   useEffect(() => {
@@ -1663,12 +1759,13 @@ function V2ComposerScope({
     const currentAttachments = currentItemsRef.current
       .filter((item) => item.status === "done" && item.fileId)
       .map(attachmentItemToRef);
+    const owned = cleanup.presented ?? cleanup.transient;
     const stillOwnsSnapshot = ordinaryDraftFingerprint(
       currentValueRef.current,
       currentAttachments,
       inputDocumentRef.current ?? undefined,
       documentRevisionRef.current,
-    ) === ordinaryDraftFingerprint(cleanup.transient.message, cleanup.transient.attachments, cleanup.transient.input_document, cleanup.transient.documentRevision);
+    ) === ordinaryDraftFingerprint(owned.message, owned.attachments, owned.input_document, owned.documentRevision);
     if (stillOwnsSnapshot) {
       currentValueRef.current = "";
       currentItemsRef.current = [];
@@ -1925,6 +2022,14 @@ function V2ComposerScope({
   const uploadDisabled = Boolean(
     (disabled && !inSteerMode) || controlsMutationLocked || !completeComposerScope(draftPersistenceScope),
   );
+  const [libraryScope, setLibraryScope] = useState<ComposerDraftScope | null>(null);
+  const libraryReturnFocusRef = useRef<HTMLElement | null>(null);
+  const libraryAvailable = !trialChat && completeComposerScope(draftPersistenceScope);
+  const libraryAddAllowed = useRef(false);
+  libraryAddAllowed.current = libraryAvailable && !uploadDisabled && !effectiveHidden;
+  useEffect(() => {
+    if (!libraryAvailable || uploadDisabled || effectiveHidden) setLibraryScope(null);
+  }, [libraryAvailable, uploadDisabled, effectiveHidden]);
   // An existing upload may settle its own chip during a draft CAS conflict.
   // Send and persistence remain locked until explicit merge; recovery and
   // scope/auth cancellation still fence callbacks from older renders.
@@ -2036,13 +2141,13 @@ function V2ComposerScope({
   }
 
   /** Drive a single file through validate → upload → status transitions. */
-  const addFile = (file: File, attachmentCount: number) => {
+  const addFile = (file: File, attachmentCount: number, library?: { sourceKey: string; onUploaded: () => void }) => {
     if (uploadDisabled || mutationIsBlocked()) return;
     const existing = currentItemsRef.current.find(
-      (item) => item.status !== "error"
-        && item.filename === file.name
-        && item.size === file.size
-        && (item.lastModified === undefined || item.lastModified === file.lastModified),
+      (item) => item.status !== "error" && (library
+        ? item.librarySourceKey === library.sourceKey
+        : item.filename === file.name && item.size === file.size
+          && (item.lastModified === undefined || item.lastModified === file.lastModified)),
     );
     if (existing) {
       setDuplicateFlashId(existing.localId);
@@ -2087,6 +2192,7 @@ function V2ComposerScope({
       ...p,
       {
         localId, filename: file.name, size: file.size, mime: file.type, lastModified: file.lastModified,
+        librarySourceKey: library?.sourceKey,
         kind, status: "uploading", progressPct: 0,
       },
     ]);
@@ -2096,10 +2202,10 @@ function V2ComposerScope({
     // Freeze the draft identity before any asynchronous auth, hashing or transfer.
     const uploadContext = { ...draftPersistenceScope! };
     abortControllers.current.set(localId, ctrl);
-    void runUpload(file, localId, isLargeFile, uploadContext, ctrl.signal);
+    void runUpload(file, localId, isLargeFile, uploadContext, ctrl.signal, library?.onUploaded);
   };
 
-  function runUpload(file: File, localId: string, isLargeFile: boolean, context: ComposerDraftScope, signal?: AbortSignal) {
+  function runUpload(file: File, localId: string, isLargeFile: boolean, context: ComposerDraftScope, signal?: AbortSignal, onUploaded?: () => void) {
     return (async () => {
       try {
         if (!uploadResponseAllowed(signal)) {
@@ -2153,6 +2259,7 @@ function V2ComposerScope({
         );
         if (uploadResponseAllowed(signal)) {
           trackAttachmentAction("upload", "success", "file", file.size);
+          onUploaded?.();
         }
       } catch (e) {
         if (!uploadResponseAllowed(signal)) return;
@@ -2170,6 +2277,18 @@ function V2ComposerScope({
       }
     })();
   }
+
+  const addLibraryFile = (source: ComposerLibraryFile, file: File): boolean => {
+    if (!libraryScope || !libraryAddAllowed.current || !uploadResponseAllowed() || mutationIsBlocked() || draftDiscardedForResetRef.current) return false;
+    const attachmentCount = currentItemsRef.current.length;
+    if (attachmentCount >= UPLOAD_MAX_PER_MESSAGE) return false;
+    onInputInteraction?.();
+    addFile(file, attachmentCount, {
+      sourceKey: libraryFileKey(source),
+      onUploaded: () => rememberComposerLibraryFile(libraryScope, source),
+    });
+    return true;
+  };
 
 
   /** Re-trigger upload for a chip in recoverable error state (auth/network).
@@ -2203,6 +2322,42 @@ function V2ComposerScope({
     for (let i = 0; i < files.length; i++) addFile(files[i], items.length + i);
     // Reset input so selecting the same-named file again still triggers change.
     e.target.value = "";
+  };
+
+  const addPastedImages = (clipboard: DataTransfer | null): boolean => {
+    if (!clipboard || uploadDisabled || mutationIsBlocked()) return false;
+    const images = Array.from(clipboard.files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (images.length === 0) {
+      for (const item of Array.from(clipboard.items ?? [])) {
+        if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+        const file = item.getAsFile();
+        if (file) images.push(file);
+      }
+    }
+    images.forEach((file, index) => addFile(file, items.length + index));
+    return images.length > 0;
+  };
+
+  // A page taken out of a deck chip's page set; the last page takes the chip with it.
+  const removeSlide = (localId: string, page: number) => {
+    if (mutationIsBlocked()) return;
+    setItems((prev) => {
+      const index = prev.findIndex((item) => item.localId === localId);
+      const item = prev[index];
+      if (!item?.fileId) return prev;
+      if (item.documentSelection) {
+        const { selection } = toggleDocumentPage(item.documentSelection, item.fileId, page);
+        if (!selection) return prev.filter((_, position) => position !== index);
+        const next = [...prev];
+        next[index] = { ...item, documentSelection: selection };
+        return next;
+      }
+      const { selection } = toggleSlide(item.presentationSelection, item.fileId, page);
+      if (!selection) return prev.filter((_, position) => position !== index);
+      const next = [...prev];
+      next[index] = { ...item, presentationSelection: selection };
+      return next;
+    });
   };
 
   const removeItem = (localId: string) => {
@@ -2296,7 +2451,11 @@ function V2ComposerScope({
       )
     : null;
 
-  const submit = () => {
+  /**
+   * `trialReference`: an Owner draft trial message. The typed question becomes "@Agent question" naming the frozen
+   * draft (the only document a trial message may carry), sent through the ordinary reference path.
+   */
+  const submit = (trialReference?: TrialReference) => {
     if (
       readOnly
       || mutationLocked
@@ -2306,18 +2465,35 @@ function V2ComposerScope({
       || compositionFencedRef.current
     ) return;
     const revisionBinding = documentRevisionRef.current ? copyComposerDocumentRevision(documentRevisionRef.current) : undefined;
-    const sourceDocument = inputDocumentRef.current ? parseInputDocument(inputDocumentRef.current) : null;
+    // A retained trial draft (a refused send keeps "@Agent question") is resent with the current candidate.
+    const trialTextOf = (current: string): string | null => {
+      const document = inputDocumentRef.current;
+      if (!document) return current;
+      const onlyTrialAgent = trialReference && document.nodes.every((node) => node.type === "text"
+        || node.resource.kind === "agent" && node.resource.id === trialReference.agentId);
+      return onlyTrialAgent ? inputDocumentTextContent(document) : null;
+    };
+    const trialText = trialReference ? trialTextOf(currentValueRef.current)?.trim() ?? "" : "";
+    const trialDocument = trialReference && trialText ? trialInputDocument(trialReference, trialText) : null;
+    // What the input shows now (a trial question is plain text), so an accepted send clears exactly that.
+    const shownDraft: InputDraftContent | null = trialDocument ? {
+      message: currentValueRef.current,
+      attachments: completedItems.map((item) => attachmentItemToRef({ ...item, fileId: item.fileId ?? `bundle:${item.localId}` })),
+      ...(inputDocumentRef.current ? { input_document: parseInputDocument(inputDocumentRef.current) } : {}),
+    } : null;
+    const sourceDocument: InputDocument | null = trialDocument ?? (inputDocumentRef.current ? parseInputDocument(inputDocumentRef.current) : null);
     const referenceDocument = sourceDocument?.nodes.some((node) => node.type === "reference") ? sourceDocument : null;
     if (revisionBinding && (running || !draftPersistenceScope || draftPersistenceUnavailableRef.current || draftSaveFailed ||
       revisionBinding.target.session_id !== draftPersistenceScope.requestedSessionId || referenceDocument || currentItemsRef.current.length > 0)) {
       setInputNotice(t("document_revision_mode_conflict"));
       return;
     }
-    const presentationText = currentValueRef.current;
+    // The wire text of a trial message names the Agent ("@Agent question"), like any @ message.
+    const presentationText = trialDocument ? inputDocumentDisplayText(trialDocument) : currentValueRef.current;
     const text = referenceDocument || revisionBinding ? presentationText : presentationText.trim();
     if (referenceDocument) {
       if (!referenceInputEnabled || !draftPersistenceScope || draftPersistenceUnavailableRef.current
-        || referencePlanningUnavailable) {
+        || (referencePlanningUnavailable && !trialDocument)) {
         setInputNotice(t("reference_entry_unavailable"));
         return;
       }
@@ -2518,6 +2694,7 @@ function V2ComposerScope({
               scopeSignature: submissionScopeSignature,
               revision,
               transient: cleanup,
+              ...(shownDraft ? { presented: shownDraft } : {}),
             };
             if (await settleAcceptedDraftCleanup(
               acceptedCleanupRef.current,
@@ -2567,9 +2744,11 @@ function V2ComposerScope({
       if (!fenceStaleDraftReads(submissionScopeSignature)) return;
       latestOrdinaryDraftRef.current = null;
       setVal((current) => {
-        const matches = referenceDocument
-          ? ordinaryDraftFingerprint(current, refs, inputDocumentRef.current ?? undefined, documentRevisionRef.current) === ordinaryDraftFingerprint(presentationText, refs, sourceDocument ?? undefined, revisionBinding)
-          : current.trim() === text;
+        const matches = trialDocument
+          ? (trialTextOf(current)?.trim() ?? null) === trialText
+          : referenceDocument
+            ? ordinaryDraftFingerprint(current, refs, inputDocumentRef.current ?? undefined, documentRevisionRef.current) === ordinaryDraftFingerprint(presentationText, refs, sourceDocument ?? undefined, revisionBinding)
+            : current.trim() === text;
         const next = matches ? "" : current;
         currentValueRef.current = next;
         return next;
@@ -2819,12 +2998,38 @@ function V2ComposerScope({
       finishSubmission();
     }
   };
-  submitRef.current = submit;
+  /**
+   * Owner draft trial: before each message the page saves the editor per the rule and makes sure the newest saved
+   * draft is frozen (C5); a refusal there keeps the question in the input and says why above it.
+   */
+  const submitTrial = async () => {
+    if (!trialChat || trialPreparingRef.current) return;
+    if (readOnly || mutationLocked || sendPendingRef.current || stopRequested || compositionFencedRef.current || anyUploading) return;
+    const typed = (inputDocumentRef.current ? inputDocumentTextContent(inputDocumentRef.current) : currentValueRef.current).trim();
+    if (!typed) return;
+    trialPreparingRef.current = true;
+    setTrialPreparing(true);
+    try {
+      const reference = await trialChat.prepareSend();
+      if (reference && composerMountedRef.current) submit(reference);
+    } catch {
+      // The question stays in the input; the trial band already says why the draft couldn't be prepared.
+    } finally {
+      trialPreparingRef.current = false;
+      if (composerMountedRef.current) setTrialPreparing(false);
+    }
+  };
+  const submitEntry = () => {
+    if (trialChat) void submitTrial();
+    else submit();
+  };
+  submitRef.current = submitEntry;
 
   const [planningMode] = usePlanningModePref();
   const referencePlanningUnavailable = composerCapabilities.planning && planningMode === "planning"
     && authSession?.me?.capabilities?.composer?.reference_plan !== true;
-  const showReferenceEditor = Boolean(draftPersistenceScope && referenceInputEnabled || inputDocument?.nodes.some((node) => node.type === "reference"));
+  // A trial takes a plain question: the Agent is fixed (the chip above) and no @ or / reference may join it.
+  const showReferenceEditor = Boolean(draftPersistenceScope && referenceInputEnabled && !trialChat || inputDocument?.nodes.some((node) => node.type === "reference"));
   // One visible prompt for both inputs: read-only (licensing §13.2, sending disabled), steering (prod-bug-bash-038 #11:
   // mid-turn Enter adds an instruction) or ordinary. The input's accessible name follows it, without the decorative
   // steering glyph. ⚠ Both the textarea and the reference editor read these: real deployments render the reference
@@ -2839,7 +3044,7 @@ function V2ComposerScope({
   const hasTaskText = hasInputReferences ? Boolean(inputDocumentTextContent(inputDocument!).trim()) : Boolean(val.trim());
   const referenceEntryBlocked = hasInputReferences && (!referenceInputEnabled || referencePlanningUnavailable);
   const revisionEntryBlocked = Boolean(documentRevision && (draftSaveFailed || draftPersistenceUnavailable || running || items.length > 0 || documentRevision.target.session_id !== draftPersistenceScope?.requestedSessionId));
-  const sendDisabled = revisionEntryBlocked || referenceEntryBlocked || readOnly || mutationLocked || stopPending || (inSteerMode
+  const sendDisabled = revisionEntryBlocked || referenceEntryBlocked || readOnly || mutationLocked || stopPending || trialPreparing || (inSteerMode
     ? (!hasTaskText && !hasCompletedAttachments) || anyUploading || steerPending || compositionFenced
     : disabled
       || sendPending
@@ -3126,7 +3331,7 @@ function V2ComposerScope({
       className="v2-send-btn"
       data-testid="composer-steer-send"
       disabled={sendDisabled}
-      onClick={submit}
+      onClick={() => submitEntry()}
       title={t("steer_send_title")}
       aria-label={t("steer_send_label")}
       aria-describedby={actionTooltipId}
@@ -3140,9 +3345,10 @@ function V2ComposerScope({
         type="button"
         className="v2-send-btn"
         disabled={sendDisabled}
-        onClick={submit}
+        onClick={() => submitEntry()}
         title={t("send_title")}
-        aria-label={t("send_btn")}
+        // A trial message saves the Canvas editor first; the button says so.
+        aria-label={trialSendHint ? tTrial("send_save_label") : t("send_btn")}
         aria-describedby={sendDisabled && shownNotice?.textId ? `${actionTooltipId} ${shownNotice.textId}` : actionTooltipId}
       >
         <ComposerGlyph kind="send" />
@@ -3156,7 +3362,7 @@ function V2ComposerScope({
     ? stopStatus ?? t("stop_title")
     : t("send_title");
 
-  return (
+  return (<>
     <div ref={composerWrapRef} onInputCapture={onInputInteraction} className="v2-composer-wrap" hidden={effectiveHidden} style={effectiveHidden ? { display: "none" } : undefined}>
       {dropOverlay}
       <span
@@ -3246,6 +3452,7 @@ function V2ComposerScope({
                 onRemove={removeItem}
                 onCancel={removeItem}
                 onRetry={retryItem}
+                onRemoveSlide={removeSlide}
                 flash={duplicateFlashId === it.localId}
               />
             ))}
@@ -3277,6 +3484,15 @@ function V2ComposerScope({
           document={referenceConflict.input_document ?? inputDocumentFromText(referenceConflict.message)}
           attachments={referenceConflict.attachments}
         /> : null}
+        {trialChat ? (
+          <div className="composer-v2__trial-chip-row">
+            <span className="bh-trial-chip" data-kind={trialChat.candidateKind}>
+              {tTrial(trialChat.candidateKind === "submitted" ? "composer_chip_submitted" : "composer_chip", { agent: trialChat.agentName })}
+            </span>
+            {trialPreparing ? <span className="composer-v2__trial-preparing" role="status">{tTrial("composer_preparing")}</span> : null}
+          </div>
+        ) : null}
+        {trialSendHint ? <p id={trialHintId} className="composer-v2__trial-hint">{trialSendHint}</p> : null}
         <div style={{ position: "relative" }}>
           {showReferenceEditor ? (
             <ReferenceEditor
@@ -3289,6 +3505,7 @@ function V2ComposerScope({
               accessibleName={inputName}
               hasAttachments={hasCompletedAttachments}
               entryMode={inSteerMode ? "steer" : composerCapabilities.planning && planningMode === "planning" ? "plan" : "ordinary"}
+              onPasteImages={addPastedImages}
               onCompositionStateChange={(blocked, scope) => {
                 if (composerDraftScopeSignature(scope) !== draftScopeSignatureRef.current) return;
                 compositionFencedRef.current = blocked;
@@ -3308,7 +3525,7 @@ function V2ComposerScope({
               }}
               onSubmitIntent={(document, scope) => {
                 if (composerDraftScopeSignature(scope) !== draftScopeSignatureRef.current || JSON.stringify(document) !== JSON.stringify(inputDocumentRef.current ?? inputDocumentFromText(currentValueRef.current))) return;
-                submit();
+                submitEntry();
               }}
               ghostText={controlsMutationLocked ? null : suggestion}
               ghostHint={t("tab_complete_hint")}
@@ -3331,6 +3548,10 @@ function V2ComposerScope({
             aria-disabled={mutationLocked || undefined}
             // The name follows the visible prompt (read-only, steering, ordinary); the steering glyph is not read aloud.
             aria-label={inputName}
+            aria-describedby={trialSendHint ? trialHintId : undefined}
+            onPaste={(event) => {
+              if (addPastedImages(event.clipboardData)) event.preventDefault();
+            }}
             onChange={(e) => {
               chartPrefillRef.current = null;
               const nextValue = e.target.value;
@@ -3447,7 +3668,7 @@ function V2ComposerScope({
 
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                submitEntry();
               }
             }}
             placeholder={inputPrompt}
@@ -3493,13 +3714,19 @@ function V2ComposerScope({
               <EntitlementReadOnlyChip />
             ) : (
               <>
-                {googleDriveAvailable ? (
+                {googleDriveAvailable || trialChat || libraryAvailable ? (
                   <ComposerAddMenu
                     disabled={controlsMutationLocked || effectiveHidden}
                     uploadDisabled={uploadDisabled}
                     fallbackFocusRef={textareaRef}
                     onUpload={pickFiles}
-                    onPickGoogleDrive={pickFromGoogleDrive}
+                    onPickLibrary={libraryAvailable && draftPersistenceScope ? () => {
+                      if (!libraryAddAllowed.current || mutationIsBlocked()) return;
+                      libraryReturnFocusRef.current = composerFocusFallbackTarget(composerRef.current, textareaRef.current);
+                      setLibraryScope({ ...draftPersistenceScope });
+                    } : undefined}
+                    onPickGoogleDrive={googleDriveAvailable ? pickFromGoogleDrive : undefined}
+                    trialUnavailable={Boolean(trialChat)}
                     onOpen={() => {
                       trackComposerEvent({
                         event_name: "composer_tools_opened",
@@ -3525,7 +3752,8 @@ function V2ComposerScope({
                   fallbackFocusRef={textareaRef}
                   telemetry={{ surface, composerMode: layoutMode }}
                 />
-                {composerCapabilities.planning ? (
+                {/* A trial lists plan mode as unavailable in the + menu instead (its steps would run the release). */}
+                {composerCapabilities.planning && !trialChat ? (
                   <PlanningControl
                     compact={layoutMode !== "comfortable"}
                     disabled={controlsMutationLocked}
@@ -3557,5 +3785,14 @@ function V2ComposerScope({
       </div>
       <ComposerNotices notices={composerNotices} />
     </div>
-  );
+    {libraryAvailable && libraryScope && !uploadDisabled && !effectiveHidden ? (
+      <ComposerLibraryPicker
+        context={libraryScope}
+        onClose={() => setLibraryScope(null)}
+        onAdd={addLibraryFile}
+        atLimit={items.length >= UPLOAD_MAX_PER_MESSAGE}
+        returnFocusRef={libraryReturnFocusRef}
+      />
+    ) : null}
+  </>);
 }

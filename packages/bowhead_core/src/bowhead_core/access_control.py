@@ -185,6 +185,7 @@ class GroupRecord:
     created_at: str = ""
     updated_at: str = ""
     member_count: int = 0
+    directory_managed: bool = False
 
 
 @dataclass(frozen=True)
@@ -295,7 +296,8 @@ def _row_to_group(row: Any) -> GroupRecord:
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        member_count=int(row["member_count"] or 0) if "member_count" in row else 0,
+        member_count=int(row["member_count"] or 0) if "member_count" in row.keys() else 0,  # noqa: SIM118
+        directory_managed="directory_managed" in row.keys() and bool(row["directory_managed"]),  # noqa: SIM118
     )
 
 
@@ -592,6 +594,8 @@ class AccessControlStore:
                 group = await self._get_group_conn(db, team_id, group_id)
                 if group is None:
                     raise KeyError("group_not_found")
+                if group.directory_managed:
+                    raise ValueError("Edit this group in its connected directory.")
                 await self._assert_user_in_team_conn(db, user_id, team_id)
                 if group.workspace_id:
                     await self._assert_workspace_member_conn(db, group.workspace_id, user_id)
@@ -614,8 +618,12 @@ class AccessControlStore:
     async def remove_group_member(self, team_id: str, group_id: str, user_id: str) -> bool:
         now = _now()
         async with diagnostic_connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
+                group = await self._get_group_conn(db, team_id, group_id)
+                if group and group.directory_managed:
+                    raise ValueError("Edit this group in its connected directory.")
                 cur = await db.execute(
                     "UPDATE group_memberships SET status='removed', removed_at=? "
                     "WHERE team_id=? AND group_id=? AND principal_type='user' "
@@ -829,6 +837,40 @@ class AccessControlStore:
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
         return [_row_to_grant(r) for r in rows]
+
+    async def page_resource_grants(
+        self,
+        team_id: str,
+        *,
+        resource_kinds: tuple[str, ...],
+        limit: int,
+        before: tuple[str, str] | None = None,
+    ) -> tuple[list[ResourceGrantRecord], int]:
+        """One page of a Team's unrevoked grants on ``resource_kinds``, newest first, and their total.
+
+        Keyset order is ``(created_at, id)`` descending, which upserts do not change, so pages
+        never repeat or skip a grant. ``before`` is the last ``(created_at, id)`` of the previous
+        page. Up to ``limit + 1`` rows are returned so the caller can tell whether more follow.
+        """
+        if not team_id or not resource_kinds or limit < 1:
+            return [], 0
+        kinds = ",".join("?" for _ in resource_kinds)
+        where = f"team_id=? AND revoked_at IS NULL AND resource_kind IN ({kinds})"
+        params: list[Any] = [team_id, *resource_kinds]
+        page_where, page_params = where, list(params)
+        if before is not None:
+            page_where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+            page_params.extend([before[0], before[0], before[1]])
+        async with open_pooled_read_ctx(self.db_path) as db:
+            async with db.execute(f"SELECT COUNT(*) FROM resource_grants WHERE {where}", params) as cur:  # noqa: S608 -- Placeholders only.
+                total = int((await cur.fetchone())[0])
+            async with db.execute(
+                f"SELECT * FROM resource_grants WHERE {page_where} ORDER BY created_at DESC, id DESC LIMIT ?",  # noqa: S608 -- Placeholders only.
+                [*page_params, limit + 1],
+            ) as cur:
+                cur.row_factory = aiosqlite.Row
+                rows = await cur.fetchall()
+        return [_row_to_grant(row) for row in rows], total
 
     async def revoke_resource_grant(
         self,
@@ -1662,13 +1704,10 @@ class AccessControlStore:
         user_id: str,
         team_id: str,
     ) -> None:
-        async with db.execute(
-            "SELECT 1 FROM users WHERE id=? AND team_id=? AND status='active'",
-            (user_id, team_id),
-        ) as cur:
-            if await cur.fetchone():
-                return
-        raise ValueError("user_not_in_team")
+        from bowhead_core.user_store import _read_team_role_in_tx
+
+        if not await _read_team_role_in_tx(db, user_id=user_id, team_id=team_id, require_active_principal=True):
+            raise ValueError("user_not_in_team")
 
     async def _assert_workspace_in_team_conn(
         self,

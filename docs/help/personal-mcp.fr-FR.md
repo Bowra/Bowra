@@ -12,7 +12,7 @@ Les identifiants enregistrés ne sont pas relisibles. Laissez les champs vides p
 
 ## Vous authentifier sur un service avec votre propre compte
 
-Certains services MCP ne fournissent pas de jeton et demandent de vous authentifier avec votre propre compte, par exemple Notion, Linear, Sentry ou n8n. Si votre déploiement le propose, choisissez **Se connecter au service** sous **Authentification**. Si vous laissez **Aucune authentification** et que le service demande une authentification, la boîte de dialogue bascule sur cette option et indique où vous vous authentifierez.
+Certains services MCP ne fournissent pas de jeton et demandent de vous authentifier avec votre propre compte, par exemple Notion, Linear, Sentry ou n8n. Choisissez **Se connecter au service** sous **Authentification**. Si vous laissez **Aucune authentification** et que le service demande une authentification, la boîte de dialogue bascule sur cette option et indique où vous vous authentifierez.
 
 1. Saisissez un nom et l’adresse MCP distante, puis choisissez **Continuer vers la connexion**.
 2. Authentifiez-vous sur le service et approuvez l’accès demandé. Certains services permettent de restreindre ce que Bowhead peut faire (par exemple en lecture seule) ; les outils disponibles ensuite suivent ce choix.
@@ -24,12 +24,12 @@ Une authentification annulée ou inachevée affiche **Authentification non termi
 
 Certains services n’acceptent que les applications enregistrées par leur administrateur (par exemple GitHub, Google et Microsoft). Bowhead ne peut pas encore s’y authentifier ; utilisez un jeton personnel ou une clé d’API si le service en propose.
 
-| Situation                                                                       | Où se connecter                           | Compte vu par le service                                      |
-| ------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------- |
-| L’équipe partage un compte de service géré par un administrateur                | Paramètres de l’équipe → Sources d’outils | L’authentification de l’administrateur, partagée par l’équipe |
-| Chaque personne doit agir en son nom et le service propose une authentification | Mes connexions → Se connecter au service  | Le vôtre                                                      |
-| Le service vous fournit un jeton personnel ou une clé d’API                     | Mes connexions → Bearer Token / API Key   | Le vôtre                                                      |
-| Slack                                                                           | Mes connexions → Connecter votre Slack    | Le vôtre, via l’application Slack de l’équipe                 |
+| Situation                                                                       | Où se connecter                                           | Compte vu par le service                                      |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
+| L’équipe partage un compte de service géré par un administrateur                | Centre de capacités → Outils → Gérer les sources d’outils | L’authentification de l’administrateur, partagée par l’équipe |
+| Chaque personne doit agir en son nom et le service propose une authentification | Mes connexions → Se connecter au service                  | Le vôtre                                                      |
+| Le service vous fournit un jeton personnel ou une clé d’API                     | Mes connexions → Bearer Token / API Key                   | Le vôtre                                                      |
+| Slack                                                                           | Mes connexions → Connecter votre Slack                    | Le vôtre, via l’application Slack de l’équipe                 |
 
 ## Connecter votre Slack
 

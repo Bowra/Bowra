@@ -3,6 +3,7 @@ import { localizedToolText } from "./tool-display";
 /** Shared reason copy for all Agent authoring pickers; the server owns eligibility. */
 export function toolSelectionLockedReasonKey(reason: string) {
   if (reason === "approval_executor_unavailable") return "draft_locked_approval_executor";
+  if (reason === "tool_disabled_by_team") return "draft_locked_disabled_by_team";
   if (reason === "mcp_feature_unlicensed") return "draft_locked_mcp";
   if (reason === "risk_metadata_unknown") return "draft_locked_risk_unknown";
   if (reason === "precise_skill_scope_required") return "draft_locked_precise_skill_scope";

@@ -86,7 +86,8 @@ def _effective_kb_retriever(orch: Any, request: Any) -> Any:
 
 async def _resolve_unconfigured_capability_tools(orch: Any, request: Any) -> frozenset[str]:
     """Turn adapter for the shared discovery/execution readiness resolver."""
-    from bowhead_core.capability_resolver import resolve_unconfigured_capability_tools
+    from bowhead_core.agents._generated.tool_names import WECOM_NOTIFY
+    from bowhead_core.capability_resolver import resolve_unconfigured_capability_tools, wecom_notification_registered
 
     unconfigured = await resolve_unconfigured_capability_tools(orch, getattr(request, "team_id", "") or "")
     if not getattr(request, "config_lite_supported", False):
@@ -94,6 +95,10 @@ async def _resolve_unconfigured_capability_tools(orch: Any, request: Any) -> fro
         from bowhead_core.google_delivery_tool import TOOL_NAMES as GOOGLE_DELIVERY_TOOLS
 
         unconfigured = unconfigured | frozenset(GOOGLE_DELIVERY_TOOLS)
+    if wecom_notification_registered(orch) and (
+        not getattr(request, "config_lite_supported", False) or getattr(request, "scheduled_run", None) is not None
+    ):
+        unconfigured = unconfigured | {WECOM_NOTIFY}
     if getattr(request, "scheduled_run", None) is None:
         # Only a scheduled task run may alert its owner: the positive run reference, not a channel guess.
         from bowhead_core.routine_notify_tool import TOOL_NAME as ROUTINE_NOTIFY
@@ -1408,6 +1413,25 @@ async def _resource_disable_prefetch(orch: Any, request: Any) -> Any | None:
     return await load_disable_state(str(db_path), team_id, getattr(request, "user_id", None))
 
 
+async def _owner_trial_prefetch(orch: Any, request: Any) -> Any | None:
+    """The Owner draft trial this Turn runs, read once per turn (trial-tech-design §4.5).
+
+    ``None`` for every other Turn and when no database is available; a failed read is logged
+    and treated as no trial, which only leaves the ordinary Turn behaviour in place.
+    """
+    from bowhead_core.agent_owner_trial import read_owner_trial
+
+    db_path = getattr(getattr(orch, "session_store", None), "db_path", None)
+    turn_id = getattr(request, "turn_id", None)
+    if not db_path or not turn_id or not isinstance(db_path, str | os.PathLike):
+        return None
+    try:
+        return await read_owner_trial(db_path, turn_id=str(turn_id))
+    except Exception:
+        logger.warning("turn.owner_trial_prefetch_failed turn=%s", turn_id, exc_info=True)
+        return None
+
+
 async def _run_limits_prefetch(orch: Any, request: Any) -> Any | None:
     """Resolve the Team's agent run limits once per turn, for every channel.
 
@@ -2612,6 +2636,7 @@ class TurnRunner:
         _pre_mark("builtin_overrides")
         _resource_disable = await _resource_disable_prefetch(orch, request)
         _pre_mark("resource_disable")
+        _owner_trial = await _owner_trial_prefetch(orch, request)
         _run_limits = await _run_limits_prefetch(orch, request)
         from bowhead_core.agent_run_limits import get_runtime_controls
 
@@ -2741,6 +2766,7 @@ class TurnRunner:
             # Builtin subagent management: team deltas on system builtins (_builtin_override_prefetch above).
             builtin_subagent_overrides=_builtin_overrides,
             resource_disable_state=_resource_disable,
+            owner_trial=_owner_trial,
             agent_run_limits=_run_limits,
             agent_runtime_budget=_runtime_budget,
             execution_limits=_execution_limits,
@@ -2841,6 +2867,22 @@ class TurnRunner:
                 _peer_ctx._chart_selected_facts = [
                     *(getattr(_peer_ctx, "_chart_selected_facts", None) or []),
                     *await resolve_presentation_selections(
+                        getattr(orch, "artifact_store", None),
+                        _chart_source.attachment_refs,
+                        user_id=request.user_id,
+                        workspace_id=request.workspace_id,
+                        session_id=request.session_id,
+                    ),
+                ]
+            if _chart_source is not None and any(ref.get("documentSelection") is not None for ref in _chart_source.attachment_refs):
+                from bowhead_core.document_selection import resolve_document_selections
+
+                if _chart_source.session_id != request.session_id or list(_chart_source.attachment_ids) != request.attachments:
+                    raise ValueError("document_selection_unavailable")
+                # Word paragraph and page facts follow the deck facts in the same list.
+                _peer_ctx._chart_selected_facts = [
+                    *(getattr(_peer_ctx, "_chart_selected_facts", None) or []),
+                    *await resolve_document_selections(
                         getattr(orch, "artifact_store", None),
                         _chart_source.attachment_refs,
                         user_id=request.user_id,

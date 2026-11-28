@@ -13,11 +13,13 @@ from bowhead_core.agent_dependency_compiler import AgentDependencyCompiler, Skil
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.resource_access import builtin_capability_ids_for_skill, resource_grant_targets_for_tool
+from bowhead_core.resource_disable import KEY_TEAM_PLUGINS_DISABLED, disabled_names
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.skill_read_resolution import build_reference_skill_sources
-from bowhead_core.subagent_authoring_catalog import SubagentAuthoringCatalogService, builtin_skill_offered_for_selection
+from bowhead_core.subagent_authoring_catalog import TOOL_DISABLED_BY_TEAM, SubagentAuthoringCatalogService, builtin_skill_offered_for_selection
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.team_tool_loader import load_team_tool_entries
+from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.user_store import User, UserStore
 from fastapi import Request
 
@@ -100,9 +102,12 @@ class AuthoringResourceCatalog:
             )
             schemas = await self._tool_schemas()
             for tool in (*catalog.native_tools, *catalog.team_tools):
-                if not tool.discoverable:
+                if not tool.discoverable and not tool.team_disabled:
                     continue
                 row = tool.to_public_dict()
+                if tool.team_disabled:
+                    # Listed only so Coach keeps an existing selection; it is never offered as a new one.
+                    row = {**row, "selectable": False, "locked_reason": TOOL_DISABLED_BY_TEAM}
                 identity = row["stable_ref"]
                 if not await self._allowed(actor, resource_grant_targets_for_tool(identity, include_argument_targets=False)):
                     continue
@@ -166,16 +171,19 @@ class AuthoringResourceCatalog:
                     break
                 offset = page["next_offset"]
         elif kind == "capability":
+            raw_state = await UserSettingsStore(self.store.db_path).get(self.user.id, KEY_TEAM_PLUGINS_DISABLED)
+            disabled = disabled_names(raw_state, KEY_TEAM_PLUGINS_DISABLED)
             for row in await TeamPluginStore(self.store.db_path).list(self.user.team_id):
                 if row["status"] != "active":
                     continue
+                disabled_for_user = row["id"] in disabled
                 items.append(
                     {
                         "reference": {"kind": kind, "id": row["id"], "revision": str(row["revision"])},
                         "name": row["name"],
                         "description": row["description"],
-                        "can_select": None,
-                        "restriction": "dependency_validation_required",
+                        "can_select": False if disabled_for_user else None,
+                        "restriction": "disabled_by_me" if disabled_for_user else "dependency_validation_required",
                         "can_author": actor.is_team_admin,
                         "tool_count": len(row["tool_refs"]),
                         "skill_count": len(row["skill_grants"]),
@@ -278,17 +286,32 @@ class AuthoringResourceCatalog:
             await source.revalidate(prepared.proof)
         elif kind == "capability":
             bundle = await TeamPluginStore(self.store.db_path).get(self.user.team_id, identity)
-            if bundle is None or str(bundle["revision"]) != reference["revision"]:
+            if bundle is None or bundle["status"] != "active" or str(bundle["revision"]) != reference["revision"]:
                 return {"ok": False, "error": "resource_unavailable_or_changed"}
             tools, _ = await self._items("tool")
-            skills, _ = await self._items("skill")
-            visible_tools = {item["reference"]["id"] for item in tools}
-            visible_skills = {(item["reference"]["id"], item["reference"]["revision"]) for item in skills}
-            if not set(bundle["tool_refs"]) <= visible_tools or any(
-                (grant["skill_ref"]["id"], grant["revision"]) not in visible_skills for grant in bundle["skill_grants"]
+            grants = bundle["skill_grants"]
+            skills = []
+            if grants:
+                required_skills = {(grant["skill_ref"]["kind"], grant["skill_ref"]["id"]) for grant in grants}
+                skills, _ = await self._items("skill", skill_identities=required_skills)
+            visible_tools = {tool["reference"]["id"]: tool for tool in tools}
+            visible_skills = {(skill["reference"]["source_kind"], skill["reference"]["id"], skill["reference"]["revision"]) for skill in skills}
+            if not set(bundle["tool_refs"]) <= visible_tools.keys() or any(
+                (grant["skill_ref"]["kind"], grant["skill_ref"]["id"], grant["revision"]) not in visible_skills for grant in grants
             ):
                 return {"ok": False, "error": "resource_dependencies_unavailable"}
-            detail.update(tool_refs=bundle["tool_refs"], skill_grants=bundle["skill_grants"], affected_agent_count=bundle["agent_count"])
+            restriction = None
+            if item["can_select"] is False:
+                restriction = item["restriction"]
+            elif any(not visible_tools[ref]["can_select"] for ref in bundle["tool_refs"]):
+                restriction = "not_ready"
+            detail.update(
+                tool_refs=bundle["tool_refs"],
+                skill_grants=grants,
+                affected_agent_count=bundle["agent_count"],
+                can_select=restriction is None,
+                restriction=restriction,
+            )
         else:
             from bowhead_core.agent_release_read_store import AgentReleaseReadStore
 

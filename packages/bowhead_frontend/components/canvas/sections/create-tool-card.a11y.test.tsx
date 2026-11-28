@@ -8,6 +8,7 @@ import { CreateToolCard } from "./create-tool-card";
 
 vi.mock("@/lib/team-tool-sources-api", () => ({
   authorizeSource: vi.fn(),
+  teamMcpOAuthRecovery: vi.fn(() => null),
   createSource: vi.fn(),
   previewSource: vi.fn(),
   proposeDescriptions: vi.fn(),

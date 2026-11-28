@@ -48,7 +48,7 @@ tools:
     - clarification_dismiss
     - feedback_escalate
     - send_email
-    # FEATURE_ROUTINE_NOTIFY: in a scheduled task run only, flag the result for the task owner (registered only with the switch on).
+    # In a scheduled task run only, flag the result for the task owner (registered while the notification center is on).
     - routine_notify
     - get_current_user
     - google_doc_write

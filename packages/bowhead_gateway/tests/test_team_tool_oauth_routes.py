@@ -237,6 +237,26 @@ def test_authorize_allows_http_public_callback_in_prod(tmp_path: Any, monkeypatc
     assert query["redirect_uri"] == ["http://bowhead.example/api/v1/team-tool-sources/oauth/callback"]
 
 
+def test_callback_registration_rejection_returns_an_actionable_code(tmp_path: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    store = UserStore(str(tmp_path / "u.db"))
+    _run(store.initialize())
+    src = _mcp_source()
+    _run(store.create_team_tool_source(src))
+    idp = _full_idp()
+
+    def reject_registration(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/register":
+            return httpx2.Response(400, json={"error": "invalid_redirect_uri", "error_description": "Private provider details"})
+        return idp(request)
+
+    _patch_idp(monkeypatch, reject_registration)
+    client = _client(store, User(id="u", team_id="team_a", email="a@x.com"))
+    response = client.post(f"/api/v1/team-tool-sources/{src.id}/oauth/authorize")
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"error": {"code": "team_mcp_oauth_callback_rejected"}}}
+
+
 def test_authorize_happy_path_mints_pending_and_url(tmp_path: Any, monkeypatch: Any) -> None:
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     store = UserStore(str(tmp_path / "u.db"))
@@ -493,29 +513,65 @@ def test_callback_prompt_refresh_does_not_overwrite_concurrent_admin_refresh(
     assert current.prompts_schema == [prompt_b]
 
 
-def test_full_loop_create_authorize_callback(tmp_path: Any, monkeypatch: Any) -> None:
-    """The complete loop the FE drives: create an oauth source (empty tools) → authorize (mints the
-    pending + URL) → callback (exchange + store). Proves the three HTTP endpoints compose end-to-end."""
+def test_oauth_discovery_requires_an_explicit_selection_and_enablement(tmp_path: Any, monkeypatch: Any) -> None:
+    from bowhead_core.team_tool_loader import load_team_tool_entries
+
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     store = UserStore(str(tmp_path / "u.db"))
     _run(store.initialize())
     _patch_idp(monkeypatch, _full_idp())
     admin = _client(store, User(id="u_admin", team_id="team_a", email="a@x.com"))
+    tools = [
+        {"name": "search", "annotations": {"readOnlyHint": True}},
+        {"name": "delete", "annotations": {"readOnlyHint": False, "destructiveHint": True}},
+        {"name": "unclassified"},
+    ]
+    discovery_fails = False
+
+    async def enumerate_tools(*args, **kwargs):
+        if discovery_fails:
+            raise RuntimeError("MCP list failed")
+        return tools.copy()
+
+    monkeypatch.setattr("bowhead_core.openapi_tool_source.enumerate_remote_mcp_tools", enumerate_tools)
 
     # 1) create oauth source, no tools yet
     src_id = admin.post("/api/v1/team-tool-sources", json={"kind": "mcp", "name": "gh", "base_url": _PUB, "auth_type": "oauth"}).json()["id"]
+    path = f"/api/v1/team-tool-sources/{src_id}"
 
-    # 2) authorize → auth URL + a single-use pending record
-    q = parse_qs(urlparse(admin.post(f"/api/v1/team-tool-sources/{src_id}/oauth/authorize").json()["authorization_url"]).query)
-    state = q["state"][0]
+    def authorize():
+        q = parse_qs(urlparse(admin.post(f"{path}/oauth/authorize").json()["authorization_url"]).query)
+        response = _cb_client(store).get(_CB, params={"code": "authcode", "state": q["state"][0]}, follow_redirects=False)
+        assert response.status_code == 303 and "oauth=success" in response.headers["location"]
+        return parse_qs(urlparse(response.headers["location"]).query)
 
-    # 3) callback (unauthenticated; state IS the auth) → exchange + store tokens → success redirect
-    r = _cb_client(store).get(_CB, params={"code": "authcode", "state": state}, follow_redirects=False)
-    assert r.status_code == 303 and "oauth=success" in r.headers["location"], r.headers.get("location")
-    from bowhead_core.mcp_oauth import FernetTokenStorage
+    assert authorize() == {"oauth": ["success"], "source": [src_id]}
+    source = admin.get(path).json()
+    assert source["oauth_authorized"] is True and source["status"] == "disabled" and source["op_count"] == 0
+    catalog = admin.get(f"{path}/tools").json()
+    assert catalog["imports_all"] is False
+    assert [(tool["imported"], tool["category"]) for tool in catalog["items"]] == [(False, "read"), (False, "destructive"), (False, "unknown")]
+    assert admin.patch(path, json={"status": "enabled"}).status_code == 422
+    assert admin.patch(path, json={"auth_type": "none"}).status_code == 422
+    _run(store.update_team_tool_source_meta("team_a", src_id, status="enabled"))
+    assert _run(load_team_tool_entries("team_a", store))[0] == []
+    _run(store.update_team_tool_source_meta("team_a", src_id, status="disabled"))
 
-    tok = _run(FernetTokenStorage(store, "team_a", src_id).get_tokens())
-    assert tok is not None and tok.access_token == "at_final"
+    assert admin.patch(path, json={"selected_op_ids": ["search"]}).json()["status"] == "disabled"
+    assert admin.patch(path, json={"status": "enabled"}).json()["status"] == "enabled"
+    assert [entry.dispatch_name for entry in _run(load_team_tool_entries("team_a", store))[0]] == ["search"]
+    authorize()
+    assert admin.get(path).json()["selected_op_ids"] == ["search"]
+
+    discovery_fails = True
+    assert authorize()["reason"] == ["discovery_failed"]
+    assert admin.get(path).json()["selected_op_ids"] == ["search"]
+
+    discovery_fails = False
+    tools.clear()
+    assert authorize()["reason"] == ["no_tools"]
+    source = admin.get(path).json()
+    assert source["oauth_authorized"] is True and source["status"] == "disabled" and source["op_count"] == 0
 
 
 @pytest.mark.parametrize("prefix", ["", "/bowhead", "/ai/apps/bowhead"])

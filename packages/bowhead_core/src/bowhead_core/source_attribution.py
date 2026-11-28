@@ -130,6 +130,8 @@ class KbFileAccess:
     file_name: str | None = None
     scope: str | None = None
     space_id: str | None = None  # File's space when scope=space.
+    # The file's knowledge base, for "Open in knowledge base"; set only when readable.
+    knowledge_base_id: str | None = None
 
 
 def _owned(reason: str, *, anchor_id: str | None = None, exit_candidate: str | None = None) -> Verdict:
@@ -341,6 +343,8 @@ class _KbChunkResolver:
                 kb_ref["kb_scope"] = access.scope
             if access.space_id:
                 kb_ref["kb_space_id"] = access.space_id
+            if access.knowledge_base_id:
+                kb_ref["kb_knowledge_base_id"] = access.knowledge_base_id
             return Verdict(
                 Attribution.OWNED,
                 "kb_file_readable",

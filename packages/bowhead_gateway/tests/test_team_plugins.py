@@ -75,6 +75,35 @@ async def test_plugin_accepts_selectable_builtin_third_party_tool(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_plugin_keeps_a_tool_the_team_turned_off_but_refuses_adding_it(tmp_path, monkeypatch, initialize_migrated_core_database):
+    path = tmp_path / "bowhead.db"
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
+    _seed(path)
+    store = UserStore(path)
+    current = User(id="user_1", team_id="team_1", email="user_1@example.com", status="active")
+    catalog = {"tools": [{"stable_ref": "web_search", "selectable": True}], "team_disabled_tools": [], "skills": []}
+    monkeypatch.setattr(agents, "agent_authoring_catalog", AsyncMock(side_effect=lambda *_args: catalog))
+    app = FastAPI()
+    app.include_router(team_plugins.router, prefix="/api/v1/team-capabilities")
+    app.dependency_overrides[_current_user] = lambda: current
+    app.dependency_overrides[_store] = lambda: store
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/v1/team-capabilities", json={"name": "Research", "tool_refs": ["web_search"]})
+        assert created.status_code == 200, created.text
+        # The team turns 网络搜索 off: the catalog stops offering it and names it as turned off.
+        catalog.update(tools=[], team_disabled_tools=["web_search"])
+        renamed = await client.put(
+            f"/api/v1/team-capabilities/{created.json()['id']}",
+            json={"name": "Research desk", "tool_refs": ["web_search"], "row_version": created.json()["row_version"]},
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["tool_refs"] == ["web_search"]
+        refused = await client.post("/api/v1/team-capabilities", json={"name": "Search", "tool_refs": ["web_search"]})
+    assert refused.status_code == 422
+    assert refused.json()["detail"]["code"] == "tool_disabled_by_team"
+
+
+@pytest.mark.asyncio
 async def test_plugin_errors_reach_the_browser_as_localized_catalog_copy(tmp_path, monkeypatch, initialize_migrated_core_database):
     from bowhead_core.error_catalog import default_error_catalog_dir, load_error_catalog
     from bowhead_gateway.error_handler import register_error_handlers

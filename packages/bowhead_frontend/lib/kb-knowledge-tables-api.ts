@@ -89,6 +89,8 @@ export interface Variant {
   source_excerpt: string | null;
   chunk_id: string | null;
   page: number | null;
+  /** Position (1-based) of the chunk the quote was found in; written since document matrix S7. */
+  chunk_index?: number | null;
   edited_by_user?: boolean;
   /** kb-matrix M3 additive: cross-verification agreement rate (wrap passthrough, cross_verify columns only). */
   self_consistency_agree?: number | null;
@@ -102,6 +104,7 @@ export interface FieldExtraction {
   // provenance path B: origin chunk of source_snippet (backfilled at extract time);
   // present when the snippet matched an indexed chunk, undefined otherwise.
   chunk_id?: string;
+  chunk_index?: number;
   confidence?: number;
   citation_verified?: boolean;
   edited_by_user?: boolean;
@@ -157,6 +160,7 @@ export function getPrimaryField(
     source_snippet: primary.source_excerpt ?? undefined,
     source_page: primary.page ?? undefined,
     chunk_id: primary.chunk_id ?? undefined,
+    chunk_index: primary.chunk_index ?? undefined,
     confidence: primary.confidence ?? undefined,
     edited_by_user: primary.edited_by_user,
   };

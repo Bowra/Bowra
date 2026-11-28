@@ -1,10 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PresentationInventory } from "@/lib/presentation-edit";
-import { PresentationEditor } from "./presentation-editor";
+import { appNavigationAllowed } from "@/lib/use-app-router";
+import { toast } from "@/lib/use-toast";
+import { setDocxInlineEditCapabilityForTest } from "@/lib/use-docx-inline-edit-capability";
+import { placeChartPopover, PresentationEditor } from "./presentation-editor";
+
+vi.mock("@/lib/use-toast", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/use-toast")>()),
+  toast: vi.fn(() => "toast_1"),
+}));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => (values ? `${key}:${JSON.stringify(values)}` : key),
@@ -138,6 +146,26 @@ describe("PresentationEditor", () => {
     expect(screen.queryByRole("button", { name: "save_version" })).not.toBeInTheDocument();
   });
 
+  it("tells the host about the saved version while the editor stays open", async () => {
+    stubServer({
+      "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })],
+      "/presentation-edits": () => ({ status: 201, body: { artifact_id: "art_v4", version_no: 4, filename: "季度复盘.pptx", new_file: false } }),
+    });
+    const onSaved = vi.fn();
+    const onExit = vi.fn();
+    render(
+      <div role="dialog">
+        <PresentationEditor sessionId="s_1" artifactId="art_v3" filename="季度复盘.pptx" downloadHref="/api/v1/files/art_v3"
+          initialPdfData={new ArrayBuffer(8)} onExit={onExit} onSaved={onSaved} />
+      </div>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ }));
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
+    fireEvent.click(screen.getByRole("button", { name: "save_version" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("art_v4"));
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
   it("on a newer version, re-applies only the edits whose target did not change", async () => {
     const latest = { artifact_id: "art_v4", version_no: 4, created_at: "2026-11-24T06:32:00Z", produced_by: "agent", request_excerpt: "把总结页改成三条要点" };
     stubServer({
@@ -162,9 +190,12 @@ describe("PresentationEditor", () => {
     expect(screen.getByRole("button", { name: "save_version" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "discard_mine" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: 'reapply:{"version":4,"count":1}' }));
-    expect(await screen.findByText('reapplied:{"version":4,"count":1}')).toBeInTheDocument();
-    expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument();
+    // The row that cannot be re-applied offers a choice; 「用我的」 counts it in (design §13.7).
+    const choice = screen.getByRole("radiogroup", { name: /conflict_choice_label/ });
+    fireEvent.click(within(choice).getByRole("radio", { name: "conflict_use_mine" }));
+    fireEvent.click(screen.getByRole("button", { name: 'reapply:{"version":4,"count":2}' }));
+    expect(await screen.findByText('reapplied:{"version":4,"count":2}')).toBeInTheDocument();
+    expect(screen.getByText('pending_count:{"count":2}')).toBeInTheDocument();
     expect(fetchPresentationPdf).toHaveBeenCalledWith("/api/v1/files/art_v4/representations/pptx-pdf", expect.any(AbortSignal));
   });
 
@@ -255,6 +286,33 @@ describe("PresentationEditor", () => {
     expect(screen.getByText('redo_announce:{"page":1,"name":"季度复盘"}')).toBeInTheDocument();
   });
 
+  it("discards a single change without asking, with an undo in the toast", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    renderEditor();
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    fireEvent.click(hit);
+    fireEvent.keyDown(hit, { key: "Enter" });
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
+    fireEvent.click(screen.getByRole("button", { name: "discard" }));
+    await waitFor(() => expect(screen.queryByText('pending_count:{"count":1}')).not.toBeInTheDocument());
+    const call = vi.mocked(toast).mock.calls.at(-1)?.[0] as { text: string; action: { label: string; onAction: () => void } };
+    expect(call).toMatchObject({ text: "discarded_one", action: { label: "undo_discard" } });
+    act(() => call.action.onAction());
+    expect(await screen.findByText('pending_count:{"count":1}')).toBeInTheDocument();
+  });
+
+  it("says before saving which older version the save pushes out, and has one way out in the Results panel", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck({ drops_on_save: [1] }) })] });
+    renderEditor();
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    fireEvent.click(hit);
+    fireEvent.keyDown(hit, { key: "Enter" });
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
+    expect(screen.getByText('pending_count:{"count":1}message_separatorsave_drops_versions:{"versions":"1"}')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "exit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "close_full_view" })).not.toBeInTheDocument();
+  });
+
   it("explains a picture and offers the ways out", async () => {
     stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
     renderEditor();
@@ -292,32 +350,75 @@ describe("PresentationEditor", () => {
     stubServer({
       "/presentation-edit/inventory": [() => ({ status: 200, body: deck({
         artifact_id: "art_up", version_no: 1, edit_mode: "new_file", new_filename: "季度复盘（已修改）.pptx",
-        edited_copies: [{ artifact_id: "art_copy_v2", filename: "季度复盘（已修改）.pptx", version_no: 2 }],
+        edited_copies: [{ artifact_id: "art_copy_v2", filename: "季度复盘（已修改）.pptx", version_no: 2, made_by: "you" }],
       }) })],
     });
     const onExit = renderEditor();
 
     expect(await screen.findByText('guide_upload:{"filename":"季度复盘（已修改）.pptx"}')).toBeInTheDocument();
+    expect(screen.getByText('edited_copy_exists:{"filename":"季度复盘（已修改）.pptx"}')).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "open_edited_copy" }));
     await waitFor(() => expect(onExit).toHaveBeenCalledWith({ artifactId: "art_copy_v2", pdfData: undefined, close: false, edit: true }));
   });
 
-  it("references a picture with its slide in chat after leaving the editor", async () => {
+  it("says the AI made the copy when a helper revised the upload", async () => {
+    stubServer({
+      "/presentation-edit/inventory": [() => ({ status: 200, body: deck({
+        artifact_id: "art_up", version_no: 1, edit_mode: "new_file", new_filename: "季度复盘（已修改）.pptx",
+        edited_copies: [{ artifact_id: "art_ai_copy", filename: "季度复盘（已修改）.pptx", version_no: 1, made_by: "ai" }],
+      }) })],
+    });
+    renderEditor();
+
+    expect(await screen.findByText('edited_copy_exists_ai:{"filename":"季度复盘（已修改）.pptx"}')).toBeInTheDocument();
+    expect(screen.queryByText(/^edited_copy_exists:/)).not.toBeInTheDocument();
+  });
+
+  it("asks before another part of the app leads away from unsaved edits, and docks waiting confirmations above Save", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ }));
+    expect(screen.getByTestId("tool-confirmation-notice-slot")).toBeInTheDocument();
+    const clean = vi.fn();
+    expect(appNavigationAllowed("/?session=s_other", clean)).toBe(true);
+
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    const proceed = vi.fn();
+    expect(appNavigationAllowed("/?session=s_other", proceed)).toBe(false);
+    // The guard says 「退出编辑」 and counts the changes (design §13.7).
+    let guard = await screen.findByRole("alertdialog").catch(() => screen.findByRole("dialog", { name: /leave_guard_title/ }));
+    expect(guard).toHaveTextContent('leave_guard_body:{"count":1,"filename":"季度复盘.pptx"}');
+    fireEvent.click(within(guard).getByRole("button", { name: "guard_keep" }));
+    await waitFor(() => expect(screen.queryByText("leave_guard_title")).not.toBeInTheDocument());
+    expect(proceed).not.toHaveBeenCalled();
+    expect(screen.getByText('pending_count:{"count":1}')).toBeInTheDocument();
+
+    expect(appNavigationAllowed("/?session=s_other", proceed)).toBe(false);
+    guard = await screen.findByRole("alertdialog").catch(() => screen.findByRole("dialog", { name: /leave_guard_title/ }));
+    fireEvent.click(within(guard).getByRole("button", { name: "leave_guard_confirm" }));
+    await waitFor(() => expect(proceed).toHaveBeenCalledTimes(1));
+  });
+
+  it("references a picture with its slide in chat and stays in the editor", async () => {
     stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
     const onReferenceElement = vi.fn();
-    // The viewer runs `then` once it shows the file, so the reference lands after the view settles.
-    const onExit = renderEditor(vi.fn((exit: { then?: () => void } | null) => exit?.then?.()), onReferenceElement);
+    const onExit = renderEditor(vi.fn(), onReferenceElement);
 
     fireEvent.click(await screen.findByRole("button", { name: /kind_picturelabel_separatorLOGO · unsupported_badge/ }));
     expect(screen.getByText('reference_element_note:{"page":1,"name":"LOGO"}')).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "reference_element" }));
-    await waitFor(() => expect(onReferenceElement).toHaveBeenCalledWith({
+    // Like 「引用这一页」, editing goes on (design §13.7).
+    expect(onReferenceElement).toHaveBeenCalledWith({
       fileId: "art_v3", filename: "季度复盘.pptx", size: 4096, referenceKind: "result",
       mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       presentationSelection: { version: 1, artifactId: "art_v3", slideId: 256, slideIndex: 1, elementKey: "256:5", elementName: "LOGO", elementKind: "picture" },
-    }));
-    expect(onExit).toHaveBeenCalledWith({ artifactId: "art_v3", close: true, page: 1, then: expect.any(Function) });
-    expect(onExit.mock.invocationCallOrder[0]).toBeLessThan(onReferenceElement.mock.invocationCallOrder[0]);
+    }, { stay: true });
+    expect(onExit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("presentation-editor")).toBeInTheDocument();
   });
 
   it("on a phone lists a slide's elements in a sheet, edits in a sheet, and keeps wide tables read-only", async () => {
@@ -348,3 +449,135 @@ describe("PresentationEditor", () => {
     expect(screen.getByText('pending_count:{"count":2}')).toBeInTheDocument();
   });
 });
+
+describe("PresentationEditor in the editor shell (PPT design §13.8, canvas Google 式排列)", () => {
+  beforeEach(() => setDocxInlineEditCapabilityForTest(true));
+  afterEach(() => setDocxInlineEditCapabilityForTest(null));
+
+  it("on a phone names the unsaved changes in the save bar and opens 修改记录 as a sheet with save inside (canvas G9)", async () => {
+    narrow.value = true;
+    const calls = stubServer({
+      "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })],
+      "/presentation-edits": () => ({ status: 201, body: { artifact_id: "art_v4", version_no: 4, filename: "季度复盘.pptx", new_file: false } }),
+    });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: 'phone_edit_page:{"page":1,"count":3}' }));
+    const list = await screen.findByRole("dialog", { name: 'page_list_title:{"page":1}' });
+    fireEvent.click(within(list).getByRole("button", { name: /季度复盘/ }));
+    const sheet = await screen.findByRole("dialog", { name: "季度复盘" });
+    fireEvent.change(within(sheet).getByRole("textbox"), { target: { value: "年度复盘" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "季度复盘" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /phone_summary_label/ }));
+    const changes = await screen.findByRole("dialog", { name: /panel_changes/ });
+    expect(within(changes).getByText("年度复盘")).toBeInTheDocument();
+    fireEvent.click(within(changes).getByRole("button", { name: "save_version" }));
+    await waitFor(() => expect(calls.some((call) => call.path.endsWith("/presentation-edits"))).toBe(true));
+  });
+
+  it("saves from the top bar, lists each change in 修改记录 and has no permanent inspector", async () => {
+    const calls = stubServer({
+      "/presentation-edit/inventory": [() => ({ status: 200, body: deck() }), () => ({ status: 200, body: deck({ artifact_id: "art_v4", version_no: 4 }) })],
+      "/presentation-edits": () => ({ status: 201, body: { artifact_id: "art_v4", version_no: 4, filename: "季度复盘.pptx", new_file: false } }),
+    });
+    renderEditor();
+
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.getByRole("group", { name: "page_group" })).toHaveTextContent('page_label:{"page":1}');
+    fireEvent.click(hit);
+    // The toolbar names the selection; the text is not on the render here, so Enter opens it beside the element.
+    expect(await screen.findByRole("group", { name: /selection_group/ })).toHaveTextContent("季度复盘");
+    fireEvent.keyDown(hit, { key: "Enter" });
+    const field = await screen.findByRole("textbox");
+    await waitFor(() => expect(field).toHaveFocus());
+    fireEvent.change(field, { target: { value: "年度复盘" } });
+
+    expect(screen.getByText(/editing_version.* · pending_count:\{"count":1\}/)).toBeInTheDocument();
+    const changes = screen.getByRole("button", { name: 'rail_changes_count:{"count":1}' });
+    fireEvent.click(changes);
+    const panel = screen.getByRole("complementary", { name: /panel_changes/ });
+    expect(within(panel).getByText("年度复盘")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: 'change_undo_label:{"number":1}' })).toBeInTheDocument();
+    expect(within(panel).getByText('changes_footer_dirty:{"next":4,"base":3}')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_version" }));
+    const again = await screen.findByRole("button", { name: "edit_again" });
+    await waitFor(() => expect(again).toHaveFocus());
+    expect(screen.getByText('saved_summary:{"count":1,"version":4,"previous":3}')).toBeInTheDocument();
+    expect(calls.find((call) => call.path.endsWith("/presentation-edits"))?.body).toEqual({
+      artifact_id: "art_v3",
+      edits: [{ kind: "text", key: "256:2", paragraph: 0, expect: "季度复盘", text: "年度复盘" }],
+    });
+  });
+
+  it("opens 修改记录 by itself when a newer version refuses the save, with the re-apply in the top bar", async () => {
+    const latest = { artifact_id: "art_v4", version_no: 4, created_at: "2026-11-24T06:32:00Z", produced_by: "agent", request_excerpt: "把总结页改成三条要点" };
+    stubServer({
+      "/presentation-edit/inventory": [() => ({ status: 200, body: deck() }), () => ({ status: 200, body: deck({ artifact_id: "art_v4", version_no: 4 }) })],
+      "/presentation-edits": () => ({ status: 409, body: { detail: { error: { code: "version_target_not_latest", latest } } } }),
+    });
+    renderEditor();
+    const hit = await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    fireEvent.click(hit);
+    fireEvent.keyDown(hit, { key: "Enter" });
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "年度复盘" } });
+    fireEvent.click(screen.getByRole("button", { name: "save_version" }));
+
+    const panel = await screen.findByRole("complementary", { name: /panel_changes/ });
+    expect(within(panel).getByText(/^conflict_agent:/)).toHaveTextContent("把总结页改成三条要点");
+    await within(panel).findByText("conflict_applicable");
+    expect(screen.getByText('conflict_bar:{"version":4}')).toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /^reapply/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: 'reapply:{"version":4,"count":1}' }));
+    expect(await screen.findByText('reapplied:{"version":4,"count":1}')).toBeInTheDocument();
+  });
+
+  it("offers the selection's actions in the toolbar: a picture can be referenced or downloaded", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    const onReferenceElement = vi.fn();
+    renderEditor(vi.fn(), onReferenceElement);
+    fireEvent.click(await screen.findByRole("button", { name: /kind_picturelabel_separator/ }));
+    const group = await screen.findByRole("group", { name: /selection_group/ });
+    expect(within(group).getByText("unsupported_badge")).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "tool_download" })).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("button", { name: "tool_reference_item" }));
+    expect(onReferenceElement).toHaveBeenCalledWith(expect.objectContaining({ fileId: "art_v3" }), { stay: true });
+    expect(screen.getByText("tool_hint_unsupported")).toBeInTheDocument();
+  });
+
+  it("lists the page's items in 本页内容, and Esc closes the panel back to its rail button", async () => {
+    stubServer({ "/presentation-edit/inventory": [() => ({ status: 200, body: deck() })] });
+    renderEditor();
+    await screen.findByRole("button", { name: /kind_textlabel_separator季度复盘/ });
+    const items = screen.getByRole("button", { name: "panel_items" });
+    fireEvent.click(items);
+    const panel = screen.getByRole("complementary", { name: /panel_items/ });
+    expect(within(panel).getByRole("heading", { name: /panel_items/ })).toHaveFocus();
+    expect(within(panel).getAllByRole("button").map((button) => button.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("季度复盘")]));
+    fireEvent.keyDown(within(panel).getByRole("heading", { name: /panel_items/ }), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).toBeNull();
+    await waitFor(() => expect(items).toHaveFocus());
+  });
+});
+
+describe("where a chart's data opens", () => {
+  const element = (key: string, box: [number, number, number, number], kind: "chart" | "text" = "text") => ({
+    key, shape_id: 1, name: key, kind, box, editable: true, reason: null,
+    ...(kind === "chart" ? { chart: { type: "COLUMN_CLUSTERED", categories: ["1", "2", "3", "4", "5", "6"], series: [] } } : {}),
+  }) as unknown as Parameters<typeof placeChartPopover>[0];
+
+  it("opens beside the chart below a note in the way, not over it (116 dogfood on 1.7.77)", () => {
+    const chart = element("c", [0.06, 0.21, 0.49, 0.6], "chart");
+    const note = element("n", [0.58, 0.21, 0.36, 0.16]);
+    const spot = placeChartPopover(chart, [chart, note], 1000, 562);
+    expect([spot.left, spot.top, spot.width].map(Math.round)).toEqual([562, 220, 320]);
+  });
+
+  it("opens level with the chart when nothing is beside it", () => {
+    const chart = element("c", [0.06, 0.21, 0.49, 0.6], "chart");
+    const spot = placeChartPopover(chart, [chart], 1000, 562);
+    expect([spot.left, spot.top, spot.width].map(Math.round)).toEqual([562, 118, 320]);
+  });
+});
+

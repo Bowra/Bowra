@@ -86,7 +86,7 @@ import {
   useCiFormat,
   type CiFormat,
 } from "./agent-ci-shared";
-import { agentReleaseBlockedText, agentReleaseErrorKey, agentReleaseReasonKey } from "./agent-release-reason";
+import { agentReleaseBlockedText, agentReleaseErrorKey, agentReleaseReasonKey, blockedReasonCodes } from "./agent-release-reason";
 import { CoachCIPanel } from "./coach-ci-panel";
 import { AgentThisChangeCard, testStateLabelKey } from "./agent-this-change-card";
 import { AttemptPointVerdicts, PointCalibrationNotices, UnmetPointsList, quotedToolNames } from "./agent-eval-point-verdicts";
@@ -96,6 +96,10 @@ import type { CiMerge } from "@/lib/agent-ci-merges";
 import { ciRunTimeline, type CiTimelineStep } from "@/lib/agent-ci-timeline";
 import { AgentReleaseBar, type ReleaseBarActionView } from "./agent-release-bar";
 import { releaseBarState, type ReleaseBarAction } from "./release-bar-state";
+import type { DraftFieldKey } from "@/lib/agent-trial";
+import { useAgentTrialStart, useDraftSaveConfirm } from "./agent-trial-start";
+import { AgentTrialList } from "./agent-trial-list";
+import { useAgentTrialLayout } from "./agent-trial-layout";
 
 const ACTIVE_EXECUTION = new Set(["queued", "running", "finalizing"]);
 
@@ -116,6 +120,30 @@ export interface ReleaseBarHost {
   onCopyLink: () => void;
   /** "canvas": a band at the top of the Canvas-hosted editor, whose own save bar keeps saving and discarding. */
   variant?: "page" | "canvas";
+  /** FEATURE_AGENT_DRAFT_TRIAL_V1: the Owner can try the draft (试用草稿 on the bar, 试用记录 on 测试用例). */
+  trial?: ReleaseBarTrialHost | null;
+  /** Redesigned Configure: what keeps the draft from saving, and a link to the section that fixes it. */
+  saveBlockedLink?: { problem: string; label: string; onSelect: () => void } | null;
+  /**
+   * Redesigned 测试用例: unsaved case edits. 测试这次修改 then asks first (只用已保存的用例测试 / 保存并测试), because
+   * unsaved cases don't take part in the test.
+   */
+  cases?: { dirtyCount: number; save: () => Promise<boolean> } | null;
+}
+
+/** What the start flow needs from the page that holds the Configure edits (trial-tech-design §7). */
+export interface ReleaseBarTrialHost {
+  /** Unsaved Configure fields: only 工作说明 is saved without asking. */
+  dirtyFields: readonly DraftFieldKey[];
+  /** The saved draft equals the released version, so "use only the saved draft" has nothing to try. */
+  savedDraftEqualsRelease: boolean;
+  /** Save the Configure edits the way Save does; resolves whether they were saved. */
+  saveDraft: () => Promise<boolean>;
+  onOpenSection?: (section: "does" | "uses" | "who") => void;
+  /** 测试用例: where the 试用记录 section renders, below the cases. */
+  listSlot?: HTMLElement | null;
+  /** Bumped by the suite menu's 只跑基础安全检查, which leaves the bar while 试用草稿 is its secondary action. */
+  safetyTestRequest?: number;
 }
 
 /** The reviewer's reasons (agent-release-review.tsx), named with the reviewer's own labels. */
@@ -235,7 +263,9 @@ export function testChangeState(
   if (kind === "blocked") return "regressions";
   if (kind === "risks") return "risks";
   if (kind === "ready") return "passed";
-  if (!candidate && !workbench.next_draft_identity) return "nothing";
+  // A saved draft with no field that differs from the release (e.g. an old Agent's draft that only gained empty
+  // defaults when saved) has nothing to test or release.
+  if (!candidate && (!workbench.next_draft_identity || workbench.draft_changes?.length === 0)) return "nothing";
   if (!options.hasOwnerCases) return "no_cases";
   return "not_tested";
 }
@@ -504,6 +534,7 @@ export function AgentVersionValidation({
   onAddCases,
   onTestState,
   releaseBar = null,
+  lastReleaseTest = null,
 }: {
   agentId: string;
   agentName: string;
@@ -514,7 +545,7 @@ export function AgentVersionValidation({
   liveActivatedAt: string | null;
   reload: () => Promise<void>;
   onChanged: () => Promise<void>;
-  onOpenConfig?: () => void;
+  onOpenConfig?: (section?: "does" | "uses" | "who" | "more") => void;
   onOpenEvaluate?: () => void;
   /** Evaluate surface only: where advisory risks and the per-case details are handled. */
   onOpenRelease?: () => void;
@@ -543,8 +574,13 @@ export function AgentVersionValidation({
    * dialogs; the card then leaves out the buttons the bar offers, so the page has one primary action.
    */
   releaseBar?: ReleaseBarHost | null;
+  /** The live release's test, for 最近一次测试 once the tested draft was released (S12). */
+  lastReleaseTest?: { sequence: number } | null;
 }) {
   const t = useTranslations("agents_marketplace");
+  const tv = useTranslations("agent_config_v2");
+  const tc = useTranslations("agent_cases_v2");
+  const { ask: askCases, dialog: casesDialog } = useDraftSaveConfirm();
   const format = useCiFormat();
   const { activeId: workspaceId, loading: workspaceLoading } = useSpaceSelection();
   const { confirm, dialog } = useCiConfirm();
@@ -728,6 +764,27 @@ export function AgentVersionValidation({
     }
   };
 
+  /**
+   * 测试这次修改 from the bar (redesigned 测试用例): unsaved cases don't take part, so the Owner chooses first between
+   * the saved cases and 保存并测试 (focused). A failed save stops here; the suite shows why.
+   */
+  const testWithSavedCases = async () => {
+    const cases = releaseBar?.cases;
+    if (cases && cases.dirtyCount > 0) {
+      const choice = await askCases({
+        title: tc("test_confirm_title", { count: cases.dirtyCount }),
+        body: tc("test_confirm_body"),
+        cancel: tc("test_confirm_cancel"),
+        savedOnly: tc("test_confirm_saved_only"),
+        confirm: tc("test_confirm_save"),
+        focusConfirm: true,
+      }, { offerSavedOnly: true });
+      if (choice === "cancel") return;
+      if (choice === "save" && !await cases.save()) return;
+    }
+    await test();
+  };
+
   const progress = execution?.progress;
   const cancelComparison = async () => {
     const description = progress
@@ -894,6 +951,41 @@ export function AgentVersionValidation({
     </>
   );
 
+  // Owner draft trial (FEATURE_AGENT_DRAFT_TRIAL_V1): 试用草稿 on the bar and 新的试用 on 测试用例 run one flow.
+  // Inside a trial chat's Canvas the trial is already open, so the bar there doesn't offer another one.
+  const trialLayout = useAgentTrialLayout();
+  const trialHost = releaseBar?.trial && !readOnly && !(trialLayout && releaseBar.variant === "canvas") ? releaseBar.trial : null;
+  const trialStart = useAgentTrialStart({
+    agentId,
+    agentName,
+    live: sequenceLabel(live),
+    workspaceId: workspaceId ?? null,
+    dirtyFields: trialHost?.dirtyFields ?? [],
+    savedDraftEqualsRelease: trialHost?.savedDraftEqualsRelease ?? true,
+    save: trialHost?.saveDraft ?? (async () => false),
+    // The bar's 「还不能保存：…」 reason: trying names it instead of offering 保存并试用 (F8).
+    saveBlocked: releaseBar?.saveBlocked && releaseBar.saveBlockedLink
+      ? { problem: releaseBar.saveBlockedLink.problem, fixLabel: releaseBar.saveBlockedLink.label, onFix: releaseBar.saveBlockedLink.onSelect } : null,
+    onOpenSection: trialHost?.onOpenSection,
+    onOpenConfig,
+  });
+  // 只跑基础安全检查 moved to the suite menu: its request starts the same test as the bar did.
+  const safetyRequest = trialHost?.safetyTestRequest ?? 0;
+  const lastSafetyRequest = useRef(safetyRequest);
+  useEffect(() => {
+    if (lastSafetyRequest.current === safetyRequest) return;
+    lastSafetyRequest.current = safetyRequest;
+    if (surface === "evaluate") void testWithSavedCases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per request
+  }, [safetyRequest]);
+  const trialUi = <>
+    {trialStart.dialogs}
+    {trialHost?.listSlot && evaluate ? createPortal(
+      <AgentTrialList trials={workbench.recent_trials ?? []} busy={trialStart.busy} onNewTrial={() => void trialStart.start()} />,
+      trialHost.listSlot,
+    ) : null}
+  </>;
+
   // Release bar (FEATURE_AGENT_RELEASE_BAR): this card's state and actions, shown once above the tabs.
   const barState = releaseBar ? releaseBarState({
     workbench,
@@ -904,6 +996,7 @@ export function AgentVersionValidation({
     dirty: releaseBar.dirty,
     archived: false,
     shared: releaseBar.shared,
+    trial: Boolean(trialHost),
   }) : null;
   const onResultsTab = surface === "release";
   const showResults = () => {
@@ -931,6 +1024,7 @@ export function AgentVersionValidation({
   const barMeta = (() => {
     if (!barState || !releaseBar || barState.id === "no_change") return null;
     if (barState.id === "unsaved") {
+      if (releaseBar.saveBlocked && releaseBar.saveBlockedLink) return tv("bar_blocked_meta", { problem: releaseBar.saveBlockedLink.problem });
       return t(releaseBar.saveBlocked ? "release_bar_meta_unsaved_blocked" : releaseBar.shared ? "release_bar_meta_unsaved_shared" : "release_bar_meta_unsaved", barValues);
     }
     if (barState.id === "testing") return t(releaseBar.shared ? "release_bar_meta_testing_shared" : "release_bar_meta_testing");
@@ -952,13 +1046,14 @@ export function AgentVersionValidation({
       disabled: busy !== null || readOnly || (privateRelease ? !canReleasePrivately : !workbench.primary_action.enabled),
     },
     submit: { label: t("release_bar_action_submit"), onSelect: () => setReleasing(true), loading: busy === "submit", disabled: busy !== null || readOnly || !workbench.primary_action.enabled },
-    test: { label: t("release_bar_action_test"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
-    retest: { label: t("release_bar_action_retest"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
-    test_safety_only: { label: t("release_bar_action_test_safety_only"), onSelect: () => void test(), loading: busy === "test", disabled: testDisabled },
+    test: { label: t("release_bar_action_test"), onSelect: () => void testWithSavedCases(), loading: busy === "test", disabled: testDisabled },
+    retest: { label: t("release_bar_action_retest"), onSelect: () => void testWithSavedCases(), loading: busy === "test", disabled: testDisabled },
+    test_safety_only: { label: t("release_bar_action_test_safety_only"), onSelect: () => void testWithSavedCases(), loading: busy === "test", disabled: testDisabled },
     ...(addCasesTarget ? { add_cases: { label: t("release_bar_action_add_cases"), onSelect: addCasesTarget } } : {}),
     ...(onOpenConfig ? {
-      edit_config: { label: t("release_bar_action_edit_config"), onSelect: onOpenConfig },
-      rebase: { label: t("release_bar_action_rebase"), onSelect: onOpenConfig },
+      // A decline for a too-wide audience is fixed in 谁能用; other reasons start at the top of Configure.
+      edit_config: { label: t("release_bar_action_edit_config"), onSelect: () => onOpenConfig(workbench.latest_decision?.reason_code === "audience_too_broad" ? "who" : undefined) },
+      rebase: { label: t("release_bar_action_rebase"), onSelect: () => onOpenConfig() },
     } : {}),
     accept_risks: {
       label: t("release_bar_action_accept_risks"),
@@ -984,6 +1079,15 @@ export function AgentVersionValidation({
         onSelect: () => window.location.assign(appPath(`/agents/manage/?release_candidate=${encodeURIComponent(decision.candidate_id)}&agent_id=${encodeURIComponent(agentId)}`)),
       },
     } : {}),
+    ...(trialHost ? {
+      try_draft: {
+        // In review the trial runs the submitted version, which is what the reviewer sees.
+        label: t(barState?.id === "in_review" ? "release_bar_action_try_review" : "release_bar_action_try_draft"),
+        onSelect: () => void trialStart.start(),
+        loading: trialStart.busy,
+        disabled: trialStart.busy || busy !== null,
+      },
+    } : {}),
     copy_link: { label: t("release_bar_action_copy_link"), onSelect: releaseBar.onCopyLink },
     copy_diagnostics: { label: t("release_bar_action_copy_diagnostics"), onSelect: () => void copyDiagnosticRecord(diagnostics(), t("version_copy_diagnostics_prompt")) },
   } : {};
@@ -992,7 +1096,9 @@ export function AgentVersionValidation({
       state={barState}
       status={barStatus}
       meta={barMeta}
-      results={barState.resultsLink ? { label: t("release_bar_results"), onSelect: showResults } : null}
+      results={barState.id === "unsaved" && releaseBar.saveBlocked && releaseBar.saveBlockedLink
+        ? { label: releaseBar.saveBlockedLink.label, onSelect: releaseBar.saveBlockedLink.onSelect }
+        : barState.resultsLink ? { label: t("release_bar_results"), onSelect: showResults } : null}
       actions={barActions}
       variant={releaseBar?.variant ?? "page"}
     />,
@@ -1006,7 +1112,7 @@ export function AgentVersionValidation({
         if (evaluate) return <p className="am-ci-note">{t("eval_no_config_changes", { live: sequenceLabel(live) })}</p>;
         return <>
           {head({ icon: <ListChecks size={16} />, title: t("version_test_nothing_title"), body: t("version_test_nothing_body", { live: sequenceLabel(live) }) })}
-          {onOpenConfig ? <div className="am-ci-acts"><Button variant="secondary" onClick={onOpenConfig}>{t("version_change_go_config")}</Button></div> : null}
+          {onOpenConfig ? <div className="am-ci-acts"><Button variant="secondary" onClick={() => onOpenConfig?.()}>{t("version_change_go_config")}</Button></div> : null}
         </>;
       case "no_cases": {
         // §9 as amended: adding cases is the primary action on both surfaces; testing stays possible (secondary),
@@ -1188,7 +1294,7 @@ export function AgentVersionValidation({
               <Button variant="primary" onClick={() => onAskCoach(reasons.map((code) => t(gateReasonKey(code) as never)))}>{t("version_ask_coach_fix")}</Button>
             ) : null}
             {evaluate && onOpenRelease ? <Button variant="secondary" onClick={onOpenRelease}>{t(regressed ? "version_test_view_details" : "version_test_view_failures")}</Button> : null}
-            {!evaluate && onOpenConfig ? <Button variant="secondary" onClick={onOpenConfig}>{t("version_fix_in_draft")}</Button> : null}
+            {!evaluate && onOpenConfig ? <Button variant="secondary" onClick={() => onOpenConfig?.()}>{t("version_fix_in_draft")}</Button> : null}
             {releaseButton("ghost")}
           </div>
         </>;
@@ -1231,14 +1337,15 @@ export function AgentVersionValidation({
           {head({ icon: <TriangleAlert size={16} />, tone: "warning", title: t("version_card_rebase_title", { live: sequenceLabel(live) }), body: t("version_card_rebase_body", { live: sequenceLabel(live) }) })}
           {onOpenConfig ? (
             <div className="am-ci-acts" data-dock={dock}>
-              <Button variant={pv("primary")} onClick={onOpenConfig}>{t("version_fix_in_draft")}</Button>
+              <Button variant={pv("primary")} onClick={() => onOpenConfig?.()}>{t("version_fix_in_draft")}</Button>
             </div>
           ) : null}
         </>;
     }
   })();
 
-  const releaseChanges = barOn ? summarizeDraftChanges(workbench.draft_changes ?? []) : [];
+  // The bar exists only on the redesigned page, whose Configure sections the summary names.
+  const releaseChanges = barOn ? summarizeDraftChanges(workbench.draft_changes ?? [], "v2") : [];
   const testLine = privateRelease ? releaseTestLine(privateRelease.test_state, privateRelease.reason_codes, changes, (key, values) => t(key as never, values as never)) : null;
   const releaseDialog = releasing ? (
     <Dialog
@@ -1266,7 +1373,7 @@ export function AgentVersionValidation({
           <ul>
             {releaseChanges.map((item) => (
               <li key={item.section}>
-                {t("version_change_section_count", { section: t(`version_config_section_${item.section}` as never), count: item.count })}
+                {t("version_change_section_count", { section: tv(`section_${item.section}` as never), count: item.count })}
                 {item.sources.map((source) => (
                   <span key={source.tag} className="am-change-source" data-source={source.tag}>
                     {t("version_change_source_count", { source: t(`version_change_source_${source.tag}` as never), count: source.count })}
@@ -1345,6 +1452,8 @@ export function AgentVersionValidation({
     return (
       <>
         {dialog}
+        {casesDialog}
+        {trialUi}
         {releaseDialog}
         {bar}
       </>
@@ -1356,9 +1465,22 @@ export function AgentVersionValidation({
       <>
         {bar}
         {dialog}
+        {casesDialog}
+        {trialUi}
         {releaseDialog}
         <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
-        {testCard}
+        {/* Redesigned 测试用例: a summary of the last test (Q2); its details stay on 版本. */}
+        {barOn ? (
+          <LatestTestCard
+            state={state}
+            workbench={workbench}
+            changes={changes}
+            suites={suites ?? []}
+            lastReleaseTest={lastReleaseTest}
+            onOpenRelease={onOpenRelease}
+            onOpenHistory={onOpenHistory}
+          />
+        ) : testCard}
         {answersDialog}
       </>
     );
@@ -1388,6 +1510,8 @@ export function AgentVersionValidation({
     <div className="am-ci-split" data-coach={coachVisible ? "true" : undefined}>
       {bar}
       {dialog}
+      {casesDialog}
+      {trialUi}
       {releaseDialog}
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <div className="am-ci-col">
@@ -1697,17 +1821,6 @@ export function fixtureExpiredText(
   return suite ? t("version_fixture_expired", { ...values, suite: suite.name }) : t("version_fixture_expired_unknown_suite", values);
 }
 
-/** Reason codes of a blocked publication, safe to show by code. The gateway sends them as
- * `detail.error.details.reason_codes`; the flatter shapes are kept for older responses. */
-function blockedReasonCodes(cause: ApiError): string[] {
-  const body = cause.body as {
-    detail?: { reason_codes?: unknown; error?: { details?: { reason_codes?: unknown } } };
-    reason_codes?: unknown;
-  } | null | undefined;
-  const details = cause.details as { reason_codes?: unknown } | null | undefined;
-  const raw = body?.detail?.error?.details?.reason_codes ?? body?.detail?.reason_codes ?? body?.reason_codes ?? details?.reason_codes;
-  return Array.isArray(raw) ? raw.filter((code): code is string => typeof code === "string" && code.length > 0) : [];
-}
 
 const GATE_SCORER_LABELS: Record<string, string> = {
   terminal_contract: "version_gate_scorer_terminal_contract",
@@ -2059,6 +2172,87 @@ export function ComparisonOverviewLine({ overview, live, format, undecided = 0 }
       <span>{rate(t("version_rail_change"), overview.candidate_pass_rate)}</span>
       <span>{rate(`v${live}`, overview.live_pass_rate)}</span>
     </p>
+  );
+}
+
+/** 变好 / 持平 / 变差 over the Owner's quality cases, and whether the platform safety check failed (design §6). */
+export function latestTestCounts(
+  changes: Pick<AgentVersionCaseChanges, "items">,
+  suites: readonly Pick<AgentEvalSuite, "suite_kind" | "state" | "revision">[],
+): { better: number; same: number; worse: number; safetyFailed: boolean } {
+  // Platform and benchmark suites change rarely, so an item outside them is a quality case even after the Owner
+  // saved a new suite revision.
+  const otherRevisions = new Set(suites.filter((suite) => suite.suite_kind !== "owner_quality").map((suite) => suite.revision?.suite_revision_id).filter(Boolean));
+  const quality = changes.items.filter((item) => !otherRevisions.has(item.suite_revision_id));
+  const ownerCases = suites.filter((suite) => suite.suite_kind === "owner_quality" && suite.state !== "archived").reduce((total, suite) => total + (suite.revision?.case_count ?? 0), 0);
+  return {
+    better: quality.filter((item) => item.change === "better").length,
+    worse: quality.filter((item) => item.change === "worse").length,
+    same: Math.max(0, ownerCases - quality.length),
+    safetyFailed: changes.items.some((item) => otherRevisions.has(item.suite_revision_id) && (item.change === "worse" || item.change === "required_failure")),
+  };
+}
+
+/**
+ * 最近一次测试 on the redesigned 测试用例 (Q2, slices-2-5-tech-design §4): the candidate's finished comparison in
+ * quality counts with the safety check on its own line, the progress while testing, and one line otherwise. After a
+ * release the workbench holds no comparison (S12), so the card points at the version history.
+ */
+function LatestTestCard({ state, workbench, changes, suites, lastReleaseTest, onOpenRelease, onOpenHistory }: {
+  state: TestChangeState;
+  workbench: AgentVersionWorkbench;
+  changes: AgentVersionCaseChanges | null;
+  suites: AgentEvalSuite[];
+  lastReleaseTest: { sequence: number } | null;
+  onOpenRelease?: () => void;
+  onOpenHistory?: () => void;
+}) {
+  const t = useTranslations("agents_marketplace");
+  const tc = useTranslations("agent_cases_v2");
+  const format = useCiFormat();
+  const titleId = useId();
+  const snapshot = workbench.active_snapshot_identity;
+  const progress = workbench.active_execution_summary?.progress;
+  const heading = <h3 id={titleId} className="am-ci-card-title">{tc("latest_title")}</h3>;
+  if (state === "testing") {
+    return (
+      <section className="am-ci-card am-ev-latest" aria-labelledby={titleId} data-state="testing">
+        {heading}
+        <p className="am-ci-note" role="status">{progress
+          ? t("release_bar_status_testing", { completed: progress.cases.completed, total: progress.cases.total })
+          : t("release_bar_status_testing_preparing")}</p>
+      </section>
+    );
+  }
+  if (workbench.candidate_identity && snapshot) {
+    const counts = changes ? latestTestCounts(changes, suites) : null;
+    const baseline = changes?.baseline?.release_sequence ?? workbench.live_identity.release_sequence;
+    return (
+      <section className="am-ci-card am-ev-latest" aria-labelledby={titleId} data-state={state}>
+        <div className="am-ci-irow">
+          {heading}
+          <span className="am-ci-sp" />
+          <span className="am-ci-note">{tc("latest_meta", { time: format.dateTime(snapshot.created_at), live: `v${baseline}` })}</span>
+        </div>
+        {counts ? (
+          <p className="am-ci-meta am-ev-latest-counts">
+            <span>{tc("latest_better", { count: counts.better })}</span>
+            <span>{tc("latest_same", { count: counts.same })}</span>
+            <span>{tc("latest_worse", { count: counts.worse })}</span>
+            <span data-tone={counts.safetyFailed ? "danger" : undefined}>{tc(counts.safetyFailed ? "latest_safety_failed" : "latest_safety_passed")}</span>
+          </p>
+        ) : null}
+        {state === "stale" ? <p className="am-ci-note" data-tone="warning">{tc("latest_stale")}</p> : null}
+        {onOpenRelease ? <div className="am-ci-acts"><Button size="sm" variant="ghost" onClick={onOpenRelease}>{tc("latest_view_all")}</Button></div> : null}
+      </section>
+    );
+  }
+  return (
+    <section className="am-ci-card am-ev-latest" aria-labelledby={titleId} data-state="none">
+      {heading}
+      <p className="am-ci-note">{lastReleaseTest ? tc("latest_released", { version: `v${lastReleaseTest.sequence}` }) : tc("latest_none")}</p>
+      {lastReleaseTest && onOpenHistory ? <div className="am-ci-acts"><Button size="sm" variant="ghost" onClick={onOpenHistory}>{tc("latest_history")}</Button></div> : null}
+    </section>
   );
 }
 

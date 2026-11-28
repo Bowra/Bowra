@@ -133,6 +133,15 @@ class CoachPluginAuthoring:
             candidate["tool_refs"] = [reference["id"] for reference in patch["tools"]]
         name, description, tools, grants = _validate_contents(**candidate)
         candidate = {"name": name, "description": description, "tool_refs": list(tools), "skill_grants": list(grants)}
+        added = set(candidate["tool_refs"]) - set(current["tool_refs"] if current else ())
+        if added:
+            from bowhead_core.resource_disable import runtime_tool_name
+            from bowhead_core.subagent_authoring_catalog import TOOL_DISABLED_BY_TEAM, team_turned_off_tools
+
+            # Same rule as the Plugin editor: a Tool the team turned off stays where it was, never a new pick.
+            turned_off = await team_turned_off_tools(self.plugins, self.scope.team_id)
+            if any(runtime_tool_name(ref) in turned_off for ref in added):
+                raise ValueError(TOOL_DISABLED_BY_TEAM)
         return candidate, impact, current
 
     async def validate(self, *, target: dict | None, patch: dict, expected_impact: str | None) -> dict:

@@ -28,6 +28,8 @@ import { formatDateTime } from "@/lib/locale";
 import { resultDisplayTitle } from "@/lib/results-workspace-model";
 import type { ResultsCompletedView } from "@/lib/use-results-query";
 import { CharIcon } from "@/components/char-icon";
+import { LucideGlyph } from "@/components/icon-refresh";
+import { X as LucideX } from "lucide-react";
 import { ResultsStateIcon } from "@/components/canvas/results-state-icon";
 
 type GroupId = "deliverables" | "evidence" | "evidence:data" | "evidence:code" | "evidence:input";
@@ -88,7 +90,8 @@ export function buildResultsExplorerRows({
   items,
   query,
 }: Pick<Props, "expandedGroups" | "filters" | "groupCounts" | "items" | "query">): ResultsExplorerRow[] {
-  if (query.trim() || filters.secondary !== "all") {
+  // One Turn's files are few: a flat list, as for a search.
+  if (query.trim() || filters.secondary !== "all" || filters.turn_id) {
     return items.map((item) => ({ kind: "item", key: item.key, item }));
   }
   const counts = groupCounts ?? {
@@ -203,11 +206,13 @@ export function ResultsExplorer(props: Props) {
     || displayedFilters.lens !== filters.lens
     || displayedFilters.primary !== filters.primary
     || displayedFilters.secondary !== filters.secondary
-    || displayedFilters.technical_only !== filters.technical_only;
+    || displayedFilters.technical_only !== filters.technical_only
+    || (displayedFilters.turn_id ?? null) !== (filters.turn_id ?? null);
   const conditionsLabel = (value: ResultsFiltersDTO, search: string) => [
     primaryFilterTitle(value.primary, t),
     value.secondary !== "all" ? secondaryFilterTitle(value.secondary, t) : null,
     value.lens !== "all" ? t("explorer_current_report") : null,
+    value.turn_id ? t("explorer_turn_files") : null,
     value.technical_only ? t("explorer_technical") : null,
     search.trim() ? `“${search.trim()}”` : null,
   ].filter(Boolean).join(" · ");
@@ -362,10 +367,11 @@ export function ResultsExplorer(props: Props) {
     || displayedFilters.lens !== "all"
     || displayedFilters.primary !== "all"
     || displayedFilters.secondary !== "all"
-    || displayedFilters.technical_only,
+    || displayedFilters.technical_only
+    || displayedFilters.turn_id,
   );
   const targetConditionsActive = Boolean(query.trim() || filters.lens !== "all"
-    || filters.primary !== "all" || filters.secondary !== "all" || filters.technical_only);
+    || filters.primary !== "all" || filters.secondary !== "all" || filters.technical_only || filters.turn_id);
   // A locate error also covers missing/unavailable objects. An unfiltered view
   // cannot possibly prove a filter mismatch; an unloaded page proves nothing.
   const anchorError = !loading && error === "results_anchor_not_in_view"
@@ -472,9 +478,23 @@ export function ResultsExplorer(props: Props) {
     (displayedFilters.lens !== "all" ? 1 : 0)
     + (displayedFilters.secondary !== "all" || displayedFilters.primary !== "all" ? 1 : 0)
     + (displayedFilters.technical_only ? 1 : 0)
+    + (displayedFilters.turn_id ? 1 : 0)
   );
   const renderFilterSet = () => (
     <>
+      {filters.turn_id ? (
+        // Chat running state R2.3: set from a Turn's work-file line; it can only be cleared here.
+        <button
+          type="button"
+          className="results-explorer-turn-filter"
+          aria-busy={loading && (displayedFilters.turn_id ?? null) !== filters.turn_id}
+          aria-label={t("explorer_turn_files_clear")}
+          onClick={() => onFiltersChange({ ...filters, turn_id: null })}
+        >
+          <span>{t("explorer_turn_files")}</span>
+          <LucideGlyph icon={LucideX} size={12} aria-hidden="true" />
+        </button>
+      ) : null}
       <SegmentedControl
         className="results-explorer-filter-row"
         aria-label={t("explorer_primary_filters")}

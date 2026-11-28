@@ -669,6 +669,9 @@ async def materialize_reference_steer_head(
         raise ValueError("reference_steer_adapter_unavailable")
     materialized_receiver = agents[0] if agents else receiver
     assert materialized_receiver is not None
+    if materialized_receiver.trial_candidate_id is not None:
+        # Re-preparation admits the released version; an Owner draft trial takes no queued follow-up (§4.5).
+        raise ValueError("agent_trial_steer_unavailable")
     lead_peer_profile = None
     if receiver is not None:
         from bowhead_gateway.chat_reference_start import (

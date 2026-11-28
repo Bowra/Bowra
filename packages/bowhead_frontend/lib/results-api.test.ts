@@ -137,6 +137,16 @@ describe("results-api", () => {
     });
   });
 
+  it("sends a Turn filter only when one is set (chat running state R2.3)", async () => {
+    appFetchMock.mockImplementation(async () => new Response(JSON.stringify(responseBody()), { status: 200 }));
+    const filters = { lens: "all", primary: "all", secondary: "all", technical_only: false } as const;
+    await queryResults({ sessionId: "s_1", scope: "session", request: { surface: "explorer", filters: { ...filters, turn_id: "t_1" } } });
+    await queryResults({ sessionId: "s_1", scope: "session", request: { surface: "explorer", filters: { ...filters, turn_id: null } } });
+    const sent = appFetchMock.mock.calls.slice(-2).map((call) => JSON.parse(String(call[1]?.body)).filters);
+    expect(sent[0]).toEqual({ ...filters, turn_id: "t_1" });
+    expect(sent[1]).toEqual(filters);
+  });
+
   it("uses the report closure route and forwards AbortSignal", async () => {
     appFetchMock.mockResolvedValue(
       new Response(JSON.stringify(responseBody()), { status: 200 }),

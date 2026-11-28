@@ -83,12 +83,17 @@ class ChunkMetadata:
     is_active: bool = True
     deleted_at_iso: str = ""  # ISO timestamp=soft-deleted, empty string=active.
     generation_id: str = ""
+    # The file's knowledge base (0239). Empty means unknown: chunks written before the key existed
+    # carry none until the per-Team chunk backfill has run.
+    knowledge_base_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for chromadb metadata.
 
         chromadb 接受 str / int / float / bool / None — 这里全 str/int/bool, 不 None.
+        An unknown knowledge base is left out rather than stored empty, like legacy chunks.
         """
+        knowledge_base = {"knowledge_base_id": self.knowledge_base_id} if self.knowledge_base_id else {}
         return {
             "file_id": self.file_id,
             "file_name": self.file_name,
@@ -108,6 +113,7 @@ class ChunkMetadata:
             "is_active": self.is_active,
             "deleted_at_iso": self.deleted_at_iso,
             "generation_id": self.generation_id,
+            **knowledge_base,
         }
 
 

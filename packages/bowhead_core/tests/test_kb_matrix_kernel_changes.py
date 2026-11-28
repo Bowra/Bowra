@@ -171,7 +171,7 @@ async def test_get_ordered_chunks_for_file_sorts_by_chunk_index(tmp_path: Path) 
     ordered = await kb_store.get_ordered_chunks_for_file(file)
     assert [c for _, c, _ in ordered] == ["第一段", "第二段", "第三段"]
     assert [i for _, _, i in ordered] == [1, 2, 3]
-    # Tuple projection compatible with backfill_chunk_ids input (§5.3 review P2).
+    # Tuple projection of (chunk_id, content) pairs (§5.3 review P2).
     two = [(cid, content) for cid, content, _ in ordered]
     assert all(isinstance(cid, str) and isinstance(content, str) for cid, content in two)
 

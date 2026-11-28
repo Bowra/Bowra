@@ -19,6 +19,8 @@ export type HelpArticleCapability =
   | "shopify_plugin"
   | "account_deletion"
   | "agent_eval_alignment"
+  | "agent_draft_trial"
+  | "docx_inline_edit"
   | "notification_reach"
   | "routine_notify"
   | "notification_delivery";
@@ -265,6 +267,22 @@ export const HELP_ARTICLE_DEFINITIONS: readonly HelpArticleDefinition[] = [
      "fr-FR": "Ajouter des fichiers, ajuster les résultats et utiliser le clavier ou relancer une réécriture", },
     group: "interface",
     source: "conversation-workbench-actions.zh-CN.md",
+  },
+  {
+    id: "edit-word-files",
+    title: {
+      "zh-CN": "在成果里修改 Word 文件",
+      "en-US": "Edit Word files in Results",
+      "fr-FR": "Modifier un fichier Word dans les résultats",
+    },
+    description: {
+      "zh-CN": "在页面上直接改段落和表格、编辑器的布局、哪些不能在这里改、保存版本与冲突",
+      "en-US": "Change paragraphs and table cells on the page, the editor layout, what can't be edited here, saved versions and conflicts",
+      "fr-FR": "Modifier paragraphes et cellules sur la page, la disposition de l’éditeur, ce qui ne se modifie pas ici, les versions et les conflits",
+    },
+    group: "interface",
+    source: "edit-word-files.zh-CN.md",
+    requiresCapability: "docx_inline_edit",
   },
   {
     id: "settings-save",
@@ -745,11 +763,27 @@ export const HELP_ARTICLE_DEFINITIONS: readonly HelpArticleDefinition[] = [
     requiresCapability: "agent_eval_alignment",
   },
   {
+    id: "try-agent-draft",
+    title: {
+      "zh-CN": "在对话里试用智能体的草稿",
+      "en-US": "Try an Agent's draft in a chat",
+      "fr-FR": "Essayer le brouillon d’un Agent dans une conversation",
+    },
+    description: {
+      "zh-CN": "发布前用草稿真正对话：哪些会真的执行、怎么扣额度、哪些不能用、在哪找回试用",
+      "en-US": "Chat with the draft before release: what runs for real, credits, limits and where trials are listed",
+      "fr-FR": "Discuter avec le brouillon avant publication : ce qui s’exécute vraiment, les crédits, les limites et où retrouver les essais",
+    },
+    group: "agents_skills",
+    source: "try-agent-draft.zh-CN.md",
+    requiresCapability: "agent_draft_trial",
+  },
+  {
     id: "builtin-tools",
     title: {
-      "zh-CN": "内置第三方工具",
-      "en-US": "Built-in third-party tools",
-     "fr-FR": "Outils tiers intégrés", },
+      "zh-CN": "内置服务",
+      "en-US": "Built-in services",
+     "fr-FR": "Services intégrés", },
     description: {
       "zh-CN": "接入 Tavily 与北极九章并分配给智能体",
       "en-US": "Connect Tavily and Datarc, then assign them to Agents",
@@ -961,6 +995,14 @@ const GERMAN_HELP_METADATA: Record<
   "agent-evaluation-with-coach": {
     title: "Einen Agent mit Coach verbessern",
     description: "Sagen, was nicht stimmt, Coachs Urteile an echten Antworten prüfen und zurückgehaltene Testfälle nutzen",
+  },
+  "try-agent-draft": {
+    title: "Den Entwurf eines Agent im Chat ausprobieren",
+    description: "Vor der Veröffentlichung mit dem Entwurf chatten: was wirklich läuft, Kontingent, Grenzen und wo Sie es wiederfinden",
+  },
+  "edit-word-files": {
+    title: "Word-Dateien in den Ergebnissen bearbeiten",
+    description: "Absätze und Tabellenzellen auf der Seite ändern, Aufbau des Editors, was hier nicht bearbeitet werden kann, Versionen und Konflikte",
   },
   "google-workspace": {
     title: "Google Workspace verbinden",

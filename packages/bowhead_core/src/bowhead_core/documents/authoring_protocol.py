@@ -51,7 +51,7 @@ def control(operation: str, inputs: tuple[bytes, ...], *, parent_sha256: str, pr
         or operation not in {"inspect", "material", "compute", "execute", "render", "view", "html_view"}
         or not (
             (operation == "render" and len(inputs) == (2 if profile == WORD_PROFILE else 1))
-            or (operation == "view" and profile == PROFILE and len(inputs) == 1)
+            or (operation == "view" and len(inputs) == 1)
             or (operation == "html_view" and profile == PROFILE and len(inputs) == 3)
             or (operation in {"inspect", "material"} and len(inputs) == 2)
             or (operation in {"compute", "execute"} and 2 <= len(inputs) <= 9)

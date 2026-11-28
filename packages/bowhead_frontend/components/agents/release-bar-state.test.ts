@@ -409,7 +409,7 @@ describe("releaseBarState: one row per bar state", () => {
       id: "declined",
       tone: "bad",
       primary: "add_cases",
-      secondary: "view_decision",
+      secondary: "test,view_decision",
       steps: "draft:done test:now* review:bad release:todo",
     });
     expect(releaseBarState(declined("audience_too_broad"))?.primary).toBe(
@@ -483,6 +483,110 @@ describe("releaseBarState: one row per bar state", () => {
         expect(state).not.toBeNull();
         expect(state!.steps.filter((step) => step.current)).toHaveLength(1);
         expect(state!.secondary).not.toContain(state!.primary);
+      }
+    }
+  });
+});
+
+describe("releaseBarState: 试用草稿 (Owner draft trial)", () => {
+  const trial = (
+    test: TestChangeState,
+    overrides: Parameters<typeof input>[1] = {},
+  ) => summary(releaseBarState(input(test, { trial: true, ...overrides })));
+
+  it.each([
+    // [label, test, overrides, id, primary, secondary, quiet]
+    ["unsaved edits", "not_tested", { dirty: true }, "unsaved", "save", "discard", "try_draft"],
+    ["private, not tested", "not_tested", {}, "private_not_tested", "release", "test", "try_draft"],
+    ["private, passed", "passed", {}, "private_passed", "release", "", "try_draft"],
+    ["private, risks", "risks", {}, "private_risks", "release", "view_results", "try_draft"],
+    ["private, worse cases", "regressions", {}, "private_worse", "release", "view_regressions", "try_draft"],
+    ["private, stale", "stale", {}, "private_stale", "release", "retest", "try_draft"],
+    ["private, could not run", "could_not_run", {}, "private_could_not_run", "release", "retest", "try_draft"],
+    ["testing", "testing", {}, "testing", null, "", "try_draft"],
+    ["shared, not tested", "not_tested", { shared: true }, "shared_not_tested", "test", "", "try_draft"],
+    ["shared without the Owner's cases (cases stay secondary)", "no_cases", { shared: true, hasOwnerCases: false }, "shared_no_cases", "test", "add_cases", "try_draft"],
+    ["shared, worse cases", "regressions", { shared: true }, "shared_worse", "view_regressions", "ask_coach_fix", "try_draft"],
+    ["shared, could not run", "could_not_run", { shared: true }, "shared_could_not_run", "retest", "copy_diagnostics", "try_draft"],
+    ["in review (labelled 试用审批中的版本 by the host)", "review", { shared: true }, "in_review", null, "withdraw", "try_draft"],
+  ] as const)("is quiet: %s", (_label, test, overrides, id, primary, secondary, quiet) => {
+    expect(trial(test, overrides)).toMatchObject({ id, primary, secondary, quiet });
+  });
+
+  it("is the secondary action for a private Agent without the Owner's cases; the safety-only test leaves the bar", () => {
+    expect(trial("no_cases", { hasOwnerCases: false })).toMatchObject({
+      id: "private_no_cases",
+      primary: "release",
+      secondary: "try_draft",
+      quiet: "add_cases",
+    });
+    expect(trial("passed", { hasOwnerCases: false })).toMatchObject({
+      id: "private_safety_only",
+      primary: "release",
+      secondary: "try_draft",
+      quiet: "add_cases",
+    });
+  });
+
+  it("stays quiet after a decline", () => {
+    const declined = releaseBarState(
+      input("not_tested", {
+        trial: true,
+        shared: true,
+        workbench: {
+          latest_decision: {
+            candidate_id: "arc_9",
+            decided_at: null,
+            reason_code: "insufficient_evidence",
+            state: "rejected",
+          },
+        },
+      }),
+    );
+    expect(declined).toMatchObject({ id: "declined", quiet: ["try_draft"] });
+  });
+
+  it("is absent with no change, when archived, and while the draft must be rebased", () => {
+    expect(
+      trial("nothing", { workbench: { next_draft_identity: null } })?.quiet,
+    ).toBe("");
+    expect(trial("nothing", { shared: true })?.quiet).toBe("");
+    expect(trial("rebase")?.quiet).toBe("");
+    expect(
+      summary(
+        releaseBarState({
+          ...input("not_tested", { trial: true }),
+          workbench: null,
+          kind: null,
+          test: null,
+          archived: true,
+        }),
+      )?.quiet,
+    ).toBe("");
+  });
+
+  it("leaves every state unchanged while the capability is off", () => {
+    const tests: TestChangeState[] = ["not_tested", "no_cases", "passed", "testing", "stale"];
+    for (const test of tests) {
+      for (const shared of [false, true]) {
+        const off = releaseBarState(input(test, { shared, hasOwnerCases: test !== "no_cases" }));
+        expect(off?.quiet ?? []).not.toContain("try_draft");
+        expect(off?.secondary ?? []).not.toContain("try_draft");
+      }
+    }
+    expect(releaseBarState(input("no_cases", { hasOwnerCases: false }))?.quiet).toEqual(["test_safety_only"]);
+  });
+
+  it("never makes 试用草稿 the primary action", () => {
+    const tests: TestChangeState[] = ["not_tested", "no_cases", "passed", "risks", "regressions", "stale", "could_not_run", "review", "testing"];
+    for (const test of tests) {
+      for (const shared of [false, true]) {
+        for (const hasOwnerCases of [false, true]) {
+          const state = releaseBarState(input(test, { shared, hasOwnerCases, trial: true }));
+          expect(state?.primary).not.toBe("try_draft");
+          const placements = [...(state?.secondary ?? []), ...(state?.quiet ?? [])].filter((action) => action === "try_draft");
+          expect(placements).toHaveLength(1);
+        }
       }
     }
   });

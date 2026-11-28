@@ -423,6 +423,24 @@ async def test_summary_succeeded_with_warnings_on_caveats() -> None:
     summaries = [e for e in bus.events if e.event_type == "lead.subagent_summary"]
     assert len(summaries) == 1
     assert summaries[0].payload["status"] == "succeeded_with_warnings"
+    # Chat running state TD2: the running card names the caveat, as the Lead receives it.
+    assert summaries[0].payload["caveats"] == ["one source missing"]
+
+
+@pytest.mark.unit
+async def test_summary_without_caveats_carries_no_caveat_field() -> None:
+    result = SubagentResult(profile="compute", subagent_id="x", ok=True, final_answer="done", payload={"title": "x", "caveats": []})
+    bus = _FakeBus()
+    ctx = _FakeCtx(bus)
+    ctx.subagent_runner = _FakeRunner(result)
+    registry = ToolRegistry()
+    register_subagent_tool(registry)
+
+    await registry.execute("subagent_spawn", arguments={"profile": "compute", "task": "t"}, ctx=ctx)
+
+    summary = next(e for e in bus.events if e.event_type == "lead.subagent_summary")
+    assert summary.payload["status"] == "succeeded"
+    assert "caveats" not in summary.payload
 
 
 # ─────────────────────────────────────────────────────────────

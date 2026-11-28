@@ -27,6 +27,9 @@ from typing import Any, Final
 from urllib.parse import quote
 
 import jwt
+from bowhead_core.file_library import enabled as file_library_enabled
+from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
+from bowhead_core.kb.matrix_store import private_matrices_enabled
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
@@ -152,6 +155,20 @@ def _agent_eval_alignment_feature_on() -> bool:
 def _agent_release_bar_feature_on() -> bool:
     """FEATURE_AGENT_RELEASE_BAR: the Agent workbench shows the release bar (rollout register: Agent release bar)."""
     return os.environ.get("FEATURE_AGENT_RELEASE_BAR", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _agent_draft_trial_feature_on() -> bool:
+    """FEATURE_AGENT_DRAFT_TRIAL_V1: an Agent's Owner chats with the saved draft (rollout register: Owner draft trial)."""
+    from bowhead_core.agent_owner_trial import agent_draft_trial_enabled
+
+    return agent_draft_trial_enabled()
+
+
+def _docx_inline_edit_feature_on() -> bool:
+    """FEATURE_DOCX_INLINE_EDIT: Word page previews and in-browser editing (rollout register: Word inline edit)."""
+    from bowhead_core.docx_inline_edit_flag import docx_inline_edit_enabled
+
+    return docx_inline_edit_enabled()
 
 
 def _shopify_plugin_feature_on() -> bool:
@@ -1240,10 +1257,10 @@ async def _resolve_current_team(request: Request, user: User, store: UserStore) 
     if not _multi_team_authz_enabled():
         from bowhead_gateway.auth_policy import invite_only_activation_enabled
 
-        if invite_only_activation_enabled() and not await store.user_has_active_team_membership(
-            user.id,
-            user.team_id,
-        ):
+        if invite_only_activation_enabled():
+            if not await store.user_has_active_team_membership(user.id, user.team_id):
+                raise HTTPException(403, {"code": "team_membership_required"})
+        elif user.team_id and await store.team_membership_was_removed(user.id, user.team_id):
             raise HTTPException(403, {"code": "team_membership_required"})
         return user
     requested = (request.headers.get("X-Team-Id") or user.active_team_id or user.team_id).strip()
@@ -2709,6 +2726,11 @@ async def me(
             "space_admin_v2": False,
             "subagent_management_v2": False,
             "agent_release_bar": False,
+            "agent_draft_trial": False,
+            "file_library": False,
+            "docx_inline_edit": False,
+            "knowledge_bases": False,
+            "kb_matrix_private": False,
             "subagent_authoring": {
                 "authoring": False,
                 "draft_chat_edit": False,
@@ -2828,6 +2850,15 @@ async def me(
         "agent_eval_alignment": _agent_eval_alignment_feature_on(),
         # Deployment switch for the Agent workbench release bar (replaces the release cards and summaries).
         "agent_release_bar": _agent_release_bar_feature_on(),
+        # Deployment switch for the Owner draft trial: try the saved draft in a chat (trial-tech-design §8).
+        "agent_draft_trial": _agent_draft_trial_feature_on(),
+        # Deployment switch for Word page previews and in-browser Word editing (docx inline edit design §7).
+        "file_library": file_library_enabled(),
+        "docx_inline_edit": _docx_inline_edit_feature_on(),
+        # Deployment switch for named knowledge bases, their members and moves (knowledge base phase 1 §7).
+        "knowledge_bases": knowledge_bases_enabled(),
+        # Deployment switch for only-me document matrices (document matrix step 1 §8, FEATURE_KB_MATRIX_PRIVATE).
+        "kb_matrix_private": private_matrices_enabled(),
         # The notification center is on (BOWHEAD_NOTIFICATION_CENTER): the three keys gate the
         # Notifications help, the task form's "only when flagged" and the reminder-email switch.
         "notification_reach": _notification_center_on(),
@@ -3801,7 +3832,7 @@ async def forgot_password(
         from bowhead_gateway.identity_email import render_identity_email
 
         secret = _jwt_secret(request)
-        token = make_password_reset_token(user.id, secret, ttl_hours=24)
+        token = make_password_reset_token(user.id, secret, ttl_hours=24, sent_via_email=True)
         try:
             cfg = await resolve_smtp_config(user.team_id, store)
         except Exception:
@@ -3862,10 +3893,9 @@ async def reset_password(
     new_hash = hash_password(body.new_password)
     # Keep credential and revocation state in one transaction. The store
     # mutator also bumps pwd/session-token versions and Terminal v1 auth epoch.
-    if not await store.update_user_password(user_id, new_hash):
+    if not await store.update_user_password(user_id, new_hash, verify_email=payload.get("sent_via_email") is True):
         raise HTTPException(410, {"code": "recovery_invalid_or_expired"})
-    # A reset link proves control of the email address. Replace every prior
-    # session with one for the recovering user, so they can continue directly.
+    # Replace prior sessions so the recovering user can continue directly.
     await store.revoke_all_refresh_for_user(user_id)
     user = await store.get_user(user_id)
     if user is None or user.status != "active":

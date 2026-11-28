@@ -53,8 +53,8 @@ def test_high_risk_tools_stay_enabled_until_confirmation_ships(monkeypatch):
 
     assert default_disabled_tools() == set()
     monkeypatch.setattr(resource_disable, "HIGH_RISK_DEFAULT_OFF", True)
-    assert default_disabled_tools() == {"send_email", "google_doc_write", "google_sheet_write", "google_slides_write"}
-    assert team_disabled_tools({"send_email": {"enabled": True}}) == {"google_doc_write", "google_sheet_write", "google_slides_write"}
+    assert default_disabled_tools() == {"send_email", "google_doc_write", "google_sheet_write", "google_slides_write", "wecom_notify"}
+    assert team_disabled_tools({"send_email": {"enabled": True}}) == {"google_doc_write", "google_sheet_write", "google_slides_write", "wecom_notify"}
 
 
 def test_explicit_tool_states_override_the_defaults():

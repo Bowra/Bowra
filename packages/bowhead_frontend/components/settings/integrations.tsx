@@ -9,6 +9,7 @@ import {
   type IntegrationOverviewItemDTO,
   type IntegrationProviderId,
 } from "@/lib/api";
+import { teamSettingsPath } from "@/lib/team-settings-paths";
 import { useAppRouter } from "@/lib/use-app-router";
 
 import { withUiHooks } from "./ui-hook-classes";
@@ -21,32 +22,41 @@ const styles = withUiHooks(rawStyles, "ui-integ");
 // Copy keys all live under settings.integrations; resolve names and descriptions in the UI language, never hardcode them here.
 type ProviderDefinition = {
   id: IntegrationProviderId;
-  titleKey: "provider_feishu_name" | "provider_slack" | "provider_teams_name";
+  titleKey: "provider_feishu_name" | "provider_slack" | "provider_teams_name" | "provider_wecom";
   descriptionKey:
     | "provider_feishu_card"
     | "provider_slack_card"
-    | "provider_teams_card";
+    | "provider_teams_card"
+    | "provider_wecom_detail";
   href: string;
 };
+
+const integrationsPath = teamSettingsPath("integrations");
 
 const PROVIDERS: ProviderDefinition[] = [
   {
     id: "feishu",
     titleKey: "provider_feishu_name",
     descriptionKey: "provider_feishu_card",
-    href: "/team/settings/integrations/feishu/",
+    href: `${integrationsPath}feishu/`,
   },
   {
     id: "slack",
     titleKey: "provider_slack",
     descriptionKey: "provider_slack_card",
-    href: "/team/settings/integrations/slack/",
+    href: `${integrationsPath}slack/`,
   },
   {
     id: "teams",
     titleKey: "provider_teams_name",
     descriptionKey: "provider_teams_card",
-    href: "/team/settings/integrations/teams/",
+    href: `${integrationsPath}teams/`,
+  },
+  {
+    id: "wecom",
+    titleKey: "provider_wecom",
+    descriptionKey: "provider_wecom_detail",
+    href: `${integrationsPath}wecom/`,
   },
 ];
 
@@ -137,10 +147,6 @@ export function SettingsIntegrations() {
         {t("overview_coming_soon")}
       </h2>
       <div className={styles.plannedGrid}>
-        <PlannedCard
-          name={t("provider_wecom")}
-          detail={t("provider_wecom_detail")}
-        />
         <PlannedCard
           name={t("provider_dingtalk")}
           detail={t("provider_dingtalk_detail")}

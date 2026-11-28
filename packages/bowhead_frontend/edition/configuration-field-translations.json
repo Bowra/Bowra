@@ -201,7 +201,8 @@
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
       "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
       "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
-      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff",
+      "personal_appearance.runningView": "3871a37c5617612ed08f"
     },
     "de-DE": {
       "personal_appearance.density": "fb786b2502f26f4eb94f",
@@ -404,7 +405,8 @@
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
       "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
       "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
-      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff",
+      "personal_appearance.runningView": "3871a37c5617612ed08f"
     },
     "fr-FR": {
       "personal_appearance.density": "fb786b2502f26f4eb94f",
@@ -607,7 +609,8 @@
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
       "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
       "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
-      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff",
+      "personal_appearance.runningView": "3871a37c5617612ed08f"
     }
   },
   "fields": {
@@ -626,6 +629,10 @@
     "personal_appearance.radius": {
       "key": "d_6ac5abf7b86f3996037a",
       "revision": "ef0f5b6ba9b0ab8e0261"
+    },
+    "personal_appearance.runningView": {
+      "key": "d_fd0b9c571bc3179df664",
+      "revision": "3871a37c5617612ed08f"
     },
     "personal_appearance.typeScale": {
       "key": "d_8ad08efdcf2109b87bb2",

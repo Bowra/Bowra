@@ -501,6 +501,7 @@ async def _approve_decision(
             tool_registry=orch.tool_registry,
             datarc=datarc,
             active_datarc_project=_active_project,
+            datarc_binding=datarc_ctx.connection_binding,
             approver_member_uid=_approver_member,
             datarc_unavailable=datarc_ctx.datarc_unavailable,
             vector_client=datarc_ctx.vector_client,

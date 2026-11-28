@@ -1,12 +1,15 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { renderIntl } from "@/__tests__/intl-render";
 import { setAgentReleaseBarCapabilityForTest } from "@/lib/use-agent-release-bar-capability";
 import {
   getAgentAuthoringCatalog,
+  getAgentChangeProposal,
   getAgentEvalManager,
+  getAgentKnowledgeSources,
   getAgentOptionalSkillCatalog,
   getAgentForkSettings,
   getAgentWorkingCopy,
@@ -28,12 +31,17 @@ import { listTeamPlugins } from "@/lib/team-plugins-api";
 import { AgentReleaseManager, agentManagerLocation } from "./agent-release-manager";
 import { handoffAgentToNewChat } from "@/lib/composer-handoff";
 
-const versionWorkbenchMock = vi.hoisted(() => ({ availability: "disabled" as "enabled" | "disabled", resultAt: null as string | null }));
+const versionWorkbenchMock = vi.hoisted(() => ({
+  availability: "disabled" as "enabled" | "disabled",
+  resultAt: null as string | null,
+  workbench: null as Record<string, unknown> | null,
+}));
 const personalMcpMock = vi.hoisted(() => ({ api: vi.fn() }));
 
-vi.mock("./agent-eval-panel", () => ({ AgentEvalPanel: () => {
+vi.mock("./agent-eval-panel", () => ({ AgentEvalPanel: ({ onUnsavedChange, redesigned }: { onUnsavedChange?: (count: number) => void; redesigned?: boolean }) => {
   const [draftCase, setDraftCase] = useState("");
-  return <input aria-label="评测用例草稿" value={draftCase} onChange={(event) => setDraftCase(event.target.value)} />;
+  // Like the real suite editor, the redesigned page hears how many cases are unsaved.
+  return <input aria-label="评测用例草稿" data-redesigned={redesigned || undefined} value={draftCase} onChange={(event) => { setDraftCase(event.target.value); onUnsavedChange?.(event.target.value ? 1 : 0); }} />;
 } }));
 vi.mock("@/lib/feedback-candidates-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/feedback-candidates-api")>("@/lib/feedback-candidates-api");
@@ -42,12 +50,16 @@ vi.mock("@/lib/feedback-candidates-api", async () => {
 vi.mock("@/lib/composer-handoff", () => ({ handoffAgentToNewChat: vi.fn() }));
 vi.mock("./agent-localization-panel", () => ({ AgentLocalizationPanel: () => null }));
 vi.mock("./agent-taxonomy-panel", () => ({ AgentTaxonomyPanel: () => null }));
-vi.mock("./agent-version-workbench", () => ({ AGENT_PENDING_ANCHOR: "agent-pending-changes", AgentVersionWorkbenchPanel: ({ onAvailability, onResultWaiting, view, agentName, releaseBar }: { onAvailability: (availability: "enabled" | "disabled") => void; onResultWaiting?: (resultAt: string | null) => void; view: string; agentName: string; releaseBar?: { shared: boolean; dirty: boolean } | null }) => {
+vi.mock("./agent-version-workbench", () => ({ AGENT_PENDING_ANCHOR: "agent-pending-changes", AgentVersionWorkbenchPanel: ({ onAvailability, onResultWaiting, onWorkbench, view, agentName, releaseBar, layout, proposalsSlot }: { onAvailability: (availability: "enabled" | "disabled") => void; onResultWaiting?: (resultAt: string | null) => void; onWorkbench?: (workbench: never) => void; view: string; agentName: string; releaseBar?: { shared: boolean; dirty: boolean } | null; layout?: string; proposalsSlot?: HTMLElement | null }) => {
   // Like the real workbench, availability is probed once when the panel mounts.
   const [availability] = useState(() => versionWorkbenchMock.availability);
   useEffect(() => onAvailability(availability), [availability, onAvailability]);
   useEffect(() => onResultWaiting?.(versionWorkbenchMock.resultAt), [onResultWaiting]);
-  return <div data-testid="version-workbench-view" data-view={view} data-agent-name={agentName} data-release-bar={releaseBar ? (releaseBar.shared ? "shared" : "private") : "off"} />;
+  useEffect(() => { if (versionWorkbenchMock.workbench) onWorkbench?.(versionWorkbenchMock.workbench as never); }, [onWorkbench]);
+  return <>
+    {proposalsSlot ? createPortal(<p data-testid="pending-proposals">pending proposals</p>, proposalsSlot) : null}
+    <div data-testid="version-workbench-view" data-view={view} data-agent-name={agentName} data-layout={layout} data-release-bar={releaseBar ? (releaseBar.shared ? "shared" : "private") : "off"} />
+  </>;
 } }));
 
 vi.mock("@/lib/content-share-api", () => ({
@@ -61,6 +73,7 @@ vi.mock("@/lib/agents-api", () => ({
   getAgentAuthoringCatalog: vi.fn(),
   getAgentEvalManager: vi.fn(),
   getAgentKnowledgeSources: vi.fn().mockResolvedValue({ enabled: false, available: true, items: [], selected_items: [], total: 0, max_selected: 64 }),
+  getAgentChangeProposal: vi.fn(),
   getAgentOptionalSkillCatalog: vi.fn().mockResolvedValue({ kind: "agent_optional_skill_catalog", schema_version: 1, agent_id: "osa_1", items: [], next_offset: null }),
   getAgentForkSettings: vi.fn(),
   getAgentWorkingCopy: vi.fn(),
@@ -237,6 +250,7 @@ describe("AgentReleaseManager", () => {
     window.history.replaceState(null, "", "/agents/manage/?agent_id=osa_1");
     versionWorkbenchMock.availability = "disabled";
     versionWorkbenchMock.resultAt = null;
+    versionWorkbenchMock.workbench = null;
     personalMcpMock.api.mockImplementation(async (path: string) => path === "/agents/bindings" ? { agents: [] } : { enabled: false });
     vi.mocked(getAgentOptionalSkillCatalog).mockResolvedValue({ kind: "agent_optional_skill_catalog", schema_version: 1, agent_id: "osa_1", items: [], next_offset: null });
     vi.mocked(getAgentWorkingCopy).mockResolvedValue(detail());
@@ -1253,6 +1267,27 @@ describe("AgentReleaseManager", () => {
     })));
   });
 
+  it("keeps a Tool the team turned off without offering it or asking to remove it", async () => {
+    vi.mocked(getAgentAuthoringCatalog).mockResolvedValue({ ...CATALOG, team_disabled_tools: ["web_search"] });
+    const storedDetail = detail();
+    storedDetail.live.definition = {
+      ...storedDetail.live.definition,
+      tool_refs_json: JSON.stringify(["bi_query", "web_search"]),
+    };
+    vi.mocked(getAgentWorkingCopy).mockResolvedValue(storedDetail);
+    renderIntl(<AgentReleaseManager agentId="osa_1" />);
+
+    const save = await screen.findByRole("button", { name: "保存草稿" });
+    expect(screen.queryByText("需要处理的旧 Tool")).toBeNull();
+    await openResourceCatalog();
+    expect(screen.queryByRole("checkbox", { name: /web_search|网络搜索/ })).toBeNull();
+    closeResourceCatalog();
+    fireEvent.click(save);
+    await waitFor(() => expect(saveAgentWorkingCopy).toHaveBeenCalledWith("osa_1", expect.objectContaining({
+      definition: expect.objectContaining({ tool_refs: ["bi_query", "web_search"] }),
+    })));
+  });
+
   it("notes beside a runnable Skill that this deployment does not run Skill scripts", async () => {
     vi.mocked(getAgentAuthoringCatalog).mockResolvedValue({
       ...CATALOG,
@@ -1691,6 +1726,132 @@ describe("AgentReleaseManager", () => {
     await waitFor(() => expect(proceed).toHaveBeenCalledOnce());
   });
 
+  describe("redesigned Configure (FEATURE_AGENT_RELEASE_BAR)", () => {
+    beforeEach(() => setAgentReleaseBarCapabilityForTest(true));
+    afterEach(() => setAgentReleaseBarCapabilityForTest(null));
+
+    const sectionTitles = () => [...document.querySelectorAll(".am-config-disclosure > header > button strong")].map((node) => node.textContent);
+
+    it("orders Configure into its sections with Coach's slot first, every section open", async () => {
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      await screen.findByDisplayValue("Analyze the monthly result.");
+      expect(sectionTitles()).toEqual(["它做什么", "它能用什么", "谁能用", "更多设置"]);
+      expect(document.querySelector(".am-cfg2-coach-slot")).not.toBeNull();
+      expect([...document.querySelectorAll(".am-config-disclosure > header > button")].every((node) => node.getAttribute("aria-expanded") === "true")).toBe(true);
+      expect(screen.getByTestId("version-workbench-view").dataset.layout).toBe("v2");
+      // 谁能用 says the private path in one line; the old inline catalogs are gone.
+      expect(screen.getByText("仅自己：改完就能发布，测试只是参考，不需要审批。")).toBeTruthy();
+      expect(document.querySelector(".am-config-resource-guide")).toBeNull();
+    });
+
+    it("lists what the Agent uses as rows that remove through the same toggles; the drawer adds them back", async () => {
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      const rows = await screen.findByRole("list", { name: "它能用的插件、工具和技能" });
+      expect(within(rows).getByText("Query data")).toBeTruthy();
+      fireEvent.click(within(rows).getByRole("button", { name: "移除 Presentations" }));
+      expect(within(rows).queryByText("Presentations")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "添加插件、工具或技能" }));
+      const drawer = await screen.findByRole("dialog", { name: "从目录添加" });
+      fireEvent.click(within(drawer).getByRole("checkbox", { name: /Presentations/ }));
+      fireEvent.click(within(drawer).getByRole("button", { name: "取消" }));
+      expect(within(rows).getByText("Presentations")).toBeTruthy();
+      expect(screen.getByText("会对外写入或删除：无")).toBeTruthy();
+    });
+
+    it("opens knowledge sources and optional methods from their rows", async () => {
+      vi.mocked(getAgentKnowledgeSources).mockResolvedValue({ enabled: true, available: true, items: [], selected_items: [], total: 0, max_selected: 64, top_k_min: 1, top_k_max: 20 });
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      expect(await screen.findByText("当前上下文中能读到的知识 · 每次搜索结果数用团队默认值")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "修改知识来源" }));
+      const knowledge = await screen.findByRole("dialog", { name: "知识来源" });
+      expect(await within(knowledge).findByRole("combobox", { name: "来源范围" })).toBeTruthy();
+      fireEvent.click(within(knowledge).getByRole("button", { name: "完成" }));
+      expect(screen.getByText("没有配置 · 用户可以在单个任务里指定使用")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "配置可选只读方法" }));
+      expect(await screen.findByRole("dialog", { name: "可选只读方法" })).toBeTruthy();
+    });
+
+    it("keeps the model select when the Team allows several roles", async () => {
+      vi.mocked(getAgentAuthoringCatalog).mockResolvedValue({ ...CATALOG, model_policy: { ...CATALOG.model_policy, locked: false, allowed_roles: ["analyst", "writer"] } });
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      expect(await screen.findByRole("combobox", { name: "模型角色" })).toBeTruthy();
+    });
+
+    it("opens each 更多设置 row's existing panel, with the pending proposals portaled into their row", async () => {
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "打开允许别人复制成自己的版本" }));
+      expect(await screen.findByText("谁可以复制为自己的版本？")).toBeTruthy();
+      const pending = screen.getByRole("button", { name: "打开待处理的建议（外部流水线、成员反馈）" });
+      expect(screen.getByTestId("pending-proposals").closest("[hidden]")).not.toBeNull();
+      fireEvent.click(pending);
+      expect(screen.getByTestId("pending-proposals").closest("[hidden]")).toBeNull();
+      expect(screen.getByText("现在没有待处理的建议。")).toBeTruthy();
+    });
+
+    it("opens 更多设置 from config_section=more and pending links on their row", async () => {
+      window.history.replaceState(null, "", "/agents/manage/?agent_id=osa_1&section=config#agent-pending-changes");
+      versionWorkbenchMock.availability = "enabled";
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "收起待处理的建议（外部流水线、成员反馈）" }).getAttribute("aria-expanded")).toBe("true"));
+    });
+
+    it("offers AI 优化 beside 工作说明 only on a versioned Agent the Owner can edit", async () => {
+      versionWorkbenchMock.availability = "enabled";
+      const view = renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      expect(await screen.findByRole("button", { name: "AI 优化" })).toBeTruthy();
+      view.unmount();
+      versionWorkbenchMock.availability = "disabled";
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      await screen.findByDisplayValue("Analyze the monthly result.");
+      expect(screen.queryByRole("button", { name: "AI 优化" })).toBeNull();
+    });
+
+    it("guards leaving the page while test cases are unsaved", async () => {
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      fireEvent.click(await screen.findByRole("tab", { name: "测试用例" }));
+      const cases = await screen.findByRole("textbox", { name: "评测用例草稿" });
+      const proceed = vi.fn();
+      const { BEFORE_APP_NAVIGATION_EVENT } = await import("@/lib/use-app-router");
+      let allowed = true;
+      act(() => { allowed = window.dispatchEvent(new CustomEvent(BEFORE_APP_NAVIGATION_EVENT, { cancelable: true, detail: { href: "/skills/", proceed } })); });
+      expect(allowed).toBe(true);
+      fireEvent.change(cases, { target: { value: "看一下静安店本周的销售情况" } });
+      act(() => { allowed = window.dispatchEvent(new CustomEvent(BEFORE_APP_NAVIGATION_EVENT, { cancelable: true, detail: { href: "/skills/", proceed } })); });
+      expect(allowed).toBe(false);
+      fireEvent.click(await screen.findByRole("button", { name: "继续编辑" }));
+      expect(proceed).not.toHaveBeenCalled();
+    });
+
+    it("counts suggested cases on the 测试用例 tab", async () => {
+      versionWorkbenchMock.workbench = {
+        change_proposals: [{
+          proposal_id: "acp_cases", agent_id: "osa_1", source_type: "coach", source_ref: "owner:k", status: "open", operations: [], atomic_groups: [],
+          base: { release_id: "arl_1", working_copy_id: null, working_copy_row_version: null, suite_revision_id: "aev_1" },
+          suggested_cases: [{ id: "a", decision_status: "pending" }, { id: "b", decision_status: "pending" }, { id: "c", decision_status: "accepted" }],
+        }],
+        draft_changes: [],
+      };
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      const tab = await screen.findByRole("tab", { name: /测试用例/ });
+      await waitFor(() => expect(tab.textContent).toContain("2 条建议"));
+    });
+
+    it("marks fields by who changed them, AI 优化 included", async () => {
+      vi.mocked(getAgentChangeProposal).mockResolvedValue({ proposal_id: "acp_ai", source_type: "coach", source_ref: "ai_optimize:system_prompt:u1" } as never);
+      versionWorkbenchMock.workbench = {
+        change_proposals: [],
+        draft_changes: [
+          { path: "/listing/description", live: "a", draft: "b", source: "manual" },
+          { path: "/definition/system_prompt", live: "old", draft: "new", source: "coach", coach: { state: "applied", proposal_id: "acp_ai", group_ids: ["g1"], before: "old", value: "new", conflict: false } },
+        ],
+      };
+      renderIntl(<AgentReleaseManager agentId="osa_1" />);
+      expect(await screen.findByText("你改过")).toBeTruthy();
+      expect(await screen.findByText("AI 优化过")).toBeTruthy();
+      expect(getAgentChangeProposal).toHaveBeenCalledWith("osa_1", "acp_ai");
+    });
+  });
+
 });
 
 describe("agentManagerLocation", () => {
@@ -1709,5 +1870,13 @@ describe("agentManagerLocation", () => {
     ["?section=unknown", { task: "config", section: null, anchor: null, legacy: false }],
   ])("maps %s", (search, expected) => {
     expect(agentManagerLocation(search)).toEqual(expected);
+  });
+
+  it.each([
+    ["?section=config&config_section=more", "v2", "more"],
+    ["?section=config&config_view=market", "v2", "more"],
+    ["?section=config&config_section=more", "legacy", null],
+  ] as const)("maps %s in the %s layout to section %s", (search, layout, section) => {
+    expect(agentManagerLocation(search, layout).section).toBe(section);
   });
 });

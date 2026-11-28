@@ -286,8 +286,8 @@ describe("TurnContainer F2 · fast-path empty step list gate", () => {
     fireEvent.click(
       container.querySelector('[data-testid="running-band-bar"]') as HTMLElement,
     );
-    // Yielding means the **three rows** give way to the full trace (retain the disclosure row as the collapse entry since 2026-08-15).
-    expect(container.querySelector(".bh-band__now")).toBeNull();
+    // Yielding means the card body gives way to the full trace (retain the disclosure row as the collapse entry since 2026-08-15).
+    expect(container.querySelector(".bh-band__hist")).toBeNull();
     expect(container.querySelector('[data-testid="assistant-working-indicator"]')).toBeTruthy();
   });
 

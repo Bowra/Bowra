@@ -1911,12 +1911,12 @@ async def test_bridge_threads_team_datarc_client_into_turn_request(
     initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
-    team_datarc_client = object()
+    team_datarc_client = FakeDatarcMembers("member_1")
     factory = FakeDatarcClientFactory(team_datarc_client)
-    fixture.bridge.app.state.datarc_connection_store = FakeDatarcConnectionStore(
-        auth_key="team-key",
-    )
+    connections = FakeDatarcConnectionStore(auth_key="team-key")
+    fixture.bridge.app.state.datarc_connection_store = connections
     fixture.bridge.app.state.datarc_client_factory = factory
+    fixture.bridge.app.state.member_resolver = MemberUidResolver()
 
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"}))
 
@@ -1926,8 +1926,13 @@ async def test_bridge_threads_team_datarc_client_into_turn_request(
     assert req.datarc_client is team_datarc_client
     assert req.datarc_unavailable is False
     assert req.vector_client is None
-    assert factory.calls == [("https://org.datarc.example", "team-key")] * 2
     await _wait_for_dispatch_settlement_and_close(fixture.orchestrator, req.turn_id)
+    assert req.datarc_binding.client is team_datarc_client
+    assert req.datarc_source_evidence["connection_revision"] == req.datarc_binding.revision
+    assert req.datarc_source_evidence["member_uid"] == "member_1"
+    assert factory.calls == [("https://org.datarc.example", "team-key")]
+    assert connections.listed_team_ids == [fixture.user.team_id]
+    assert team_datarc_client.calls == [(fixture.datarc_workspace_ids[0], fixture.user.email)]
 
 
 @pytest.mark.asyncio
@@ -1944,6 +1949,58 @@ async def test_bridge_fails_closed_when_team_datarc_connection_is_broken(
 
     assert result["status"] == "denied"
     assert fixture.orchestrator.requests == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_feishu_resume_rebinds_the_pinned_datarc_source(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
+) -> None:
+    from bowhead_gateway import turn_service
+
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
+    store = ClarificationStore(fixture.feishu_store.db_path)
+    await store.initialize()
+    fixture.bridge.app.state.clarification_store = store
+    datarc_client = FakeDatarcMembers("member_1")
+    fixture.bridge.app.state.datarc_client_factory = FakeDatarcClientFactory(datarc_client)
+    fixture.bridge.app.state.member_resolver = MemberUidResolver()
+    clarification = await store.put(
+        turn_id="t_legacy_datarc",
+        user_id=fixture.user.id,
+        workspace_id=fixture.workspace_ids[0],
+        token="metric",
+        rationale="Choose a metric",
+        candidates=[ClarificationCandidate(value="revenue", label="Revenue")],
+        kind="options",
+        resume_context={
+            "session_id": "feishu:legacy",
+            "team_id": fixture.user.team_id,
+            "user_text": "Compare sales",
+            "active_datarc_project": fixture.datarc_workspace_ids[0],
+            "member_uid": "legacy_member",
+        },
+    )
+    await store.resolve(clarification.request_id, "revenue")
+    captured = []
+
+    async def spawn(_orchestrator, request, **_kwargs):
+        captured.append(request)
+        return SimpleNamespace(execution_generation=2)
+
+    monkeypatch.setattr(turn_service, "spawn_resume_turn", spawn)
+    assert await fixture.bridge._resume_clarification_turn(clarification.request_id, team_router=object()) is None
+    assert len(captured) == 1
+    request = captured[0]
+    assert request.active_datarc_project == fixture.datarc_workspace_ids[0]
+    assert request.member_uid == "member_1"
+    assert request.datarc_binding.client is request.datarc_client
+    assert request.datarc_source_evidence["connection_revision"] == request.datarc_binding.revision
+
+    datarc_client.member_uid = ""
+    assert await fixture.bridge._resume_clarification_turn(clarification.request_id, team_router=object()) == "terminal_protocol_surface_unavailable"
+    assert len(captured) == 1
 
 
 @pytest.mark.asyncio
@@ -3455,7 +3512,7 @@ class StaticMemberResolver:
     def __init__(self, member_uid: str) -> None:
         self.member_uid = member_uid
 
-    async def resolve(self, identity: str, workspace_id: str) -> str:
+    async def resolve(self, identity: str, workspace_id: str, *, datarc: object) -> str:
         return self.member_uid
 
 
@@ -3470,9 +3527,11 @@ class FakeDatarcMembers:
 
 
 class BoomMemberResolver:
-    async def resolve(self, identity: str, workspace_id: str) -> str:
+    async def resolve(self, identity: str, workspace_id: str, *, datarc: object = None) -> str:
         del identity, workspace_id
-        raise RuntimeError("datarc timeout")
+        if datarc is None:
+            return "fallback_member"
+        raise TypeError("Datarc member lookup failed")
 
 
 class FakeDatarcConnectionStore:

@@ -16,6 +16,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import anyio
+from bowhead_skill.execution_policy import LARGE_SANDBOX_OUTPUT_BYTES, LARGE_SANDBOX_OUTPUT_MIMES, STANDARD_SANDBOX_OUTPUT_BYTES
 from bowhead_skill.index import substitute_args
 from bowhead_skill.loader import load_skill
 
@@ -38,6 +39,8 @@ from bowhead_skill.catalog import builtin_catalog_dir
 _PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke", "read_report"})
 RETAINED_READ_TOOLS = frozenset(name for name, risk in TOOL_RISKS.items() if risk == "read") - _PROOF_BEARING_READS
 _SESSION_INPUT_CONTRACTS = frozenset(f"ordinary-lead-loop.v{version}" for version in range(10, 16))
+_SANDBOX_MATERIAL_BYTES = 64 * 1024 * 1024
+_LARGE_SANDBOX_MATERIAL_BYTES = _SANDBOX_MATERIAL_BYTES + 2 * LARGE_SANDBOX_OUTPUT_BYTES
 
 
 # Canvas Tools whose persistent effect is a revision of the current Session's
@@ -288,6 +291,7 @@ async def artifact_evidence(
     prepared_pins: list[dict] | None = None,
     prepared_input_ids: tuple[str, ...] | None = None,
     retained_input: dict | None = None,
+    remaining_bytes: int = _LARGE_SANDBOX_MATERIAL_BYTES,
     connection=None,
 ) -> dict:
     if retained_input is not None and (
@@ -300,7 +304,12 @@ async def artifact_evidence(
     condition = "retained_input" if contract == "ordinary-lead-loop.v15" and retained_input is not None and not output else None
     store = ctx.artifact_store
     art = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True, connection=connection)
-    if art is None or art.status != "ready" or art.workspace_id != ctx.workspace_id or not 0 <= art.size <= 50 * 1024 * 1024:
+    if art is None or art.status != "ready" or art.workspace_id != ctx.workspace_id or art.size < 0:
+        raise OrdinaryContinuationUnavailable(condition=condition)
+    maximum_bytes = 50 * 1024 * 1024
+    if art.source == "python_sandbox":
+        maximum_bytes = LARGE_SANDBOX_OUTPUT_BYTES if art.mime in LARGE_SANDBOX_OUTPUT_MIMES else STANDARD_SANDBOX_OUTPUT_BYTES
+    if art.size > min(maximum_bytes, remaining_bytes):
         raise OrdinaryContinuationUnavailable(condition=condition)
     if art.created_by_turn != ctx.turn_id:
         if output:
@@ -333,18 +342,22 @@ async def artifact_evidence(
             else:
                 raise OrdinaryContinuationUnavailable(condition=condition)
     try:
-        content = await store.backend.read_bounded(art.path, limit=art.size)
+        if art.size > STANDARD_SANDBOX_OUTPUT_BYTES:
+            digest = await store.hash_artifact(art)
+        else:
+            content = await store.backend.read_bounded(art.path, limit=art.size)
+            if len(content) != art.size:
+                raise OrdinaryContinuationUnavailable(condition=condition)
+            digest = hashlib.sha256(content).hexdigest()
     except OSError as exc:
         if condition is not None:
             raise OrdinaryContinuationUnavailable(condition=condition) from exc
         raise
-    if len(content) != art.size:
-        raise OrdinaryContinuationUnavailable(condition=condition)
     evidence = {
         "artifact_id": artifact_id,
         "metadata_hash": _artifact_metadata_hash(art, contract=contract),
         "size": art.size,
-        "sha256": hashlib.sha256(content).hexdigest(),
+        "sha256": digest,
         "output": output,
     }
     if retained_input is not None and evidence != retained_input:
@@ -603,6 +616,7 @@ class OrdinarySkillObserver:
             if not isinstance(actual_inputs, dict) or len(actual_inputs) > 64:
                 return
             artifacts, expected = [], []
+            remaining_bytes = _LARGE_SANDBOX_MATERIAL_BYTES
             selected = tuple(dict.fromkeys(item["artifact_id"] for item in actual_inputs.values())) if uses_observed_inputs(ctx) else None
             for name, item in actual_inputs.items():
                 evidence = await artifact_evidence(
@@ -611,7 +625,9 @@ class OrdinarySkillObserver:
                     output=False,
                     prepared_pins=[] if selected is not None else getattr(ctx, "_psi_pinned_snapshot", None),
                     prepared_input_ids=selected if selected is not None else getattr(ctx, "_psi_pinned_input_ids", None),
+                    remaining_bytes=remaining_bytes,
                 )
+                remaining_bytes -= evidence["size"]
                 artifacts.append(evidence)
                 expected.append({"key": name, **{field: evidence[field] for field in ("artifact_id", "size", "sha256")}})
             sanitized = {name: value for name, value in inputs.items() if name not in {"_artifact_fetch_token", "_sandbox_executor_token"}}
@@ -716,10 +732,13 @@ class OrdinarySkillObserver:
                 outputs = result.get("output_artifacts")
                 if not isinstance(outputs, list) or len(outputs) > 64:
                     raise OrdinaryContinuationUnavailable()
+                remaining_bytes = _LARGE_SANDBOX_MATERIAL_BYTES - sum(item["size"] for item in record["artifacts"])
                 for item in outputs:
-                    evidence = await artifact_evidence(ctx, item["artifact_id"], output=True)
+                    evidence = await artifact_evidence(ctx, item["artifact_id"], output=True, remaining_bytes=remaining_bytes)
+                    remaining_bytes -= evidence["size"]
                     record["artifacts"].append(evidence)
-                if sum(item["size"] for item in record["artifacts"]) > 64 * 1024 * 1024:
+                sizes = [item["size"] for item in record["artifacts"]]
+                if not any(size > STANDARD_SANDBOX_OUTPUT_BYTES for size in sizes) and sum(sizes) > _SANDBOX_MATERIAL_BYTES:
                     raise OrdinaryContinuationUnavailable()
                 record.update(tool=tool, arguments_hash=content_hash(arguments), result_hash=content_hash(result))
                 await revalidate_tool_materials(

@@ -196,11 +196,15 @@ function parseFilters(value: unknown): ResultsFilters | null {
     || !["all", "data", "code", "input"].includes(String(record.secondary))
     || typeof record.technical_only !== "boolean"
   ) return null;
+  const turnId = typeof record.turn_id === "string" && record.turn_id.length > 0 && record.turn_id.length <= 128
+    ? record.turn_id
+    : null;
   return {
     lens: record.lens,
     primary: record.primary as ResultsFilters["primary"],
     secondary: record.secondary as ResultsFilters["secondary"],
     technical_only: record.technical_only,
+    ...(turnId ? { turn_id: turnId } : {}),
   };
 }
 

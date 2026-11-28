@@ -16,7 +16,7 @@ const grant: AgentExactSkillGrant = { skill_ref: { kind: "builtin", id: "builtin
 const plugin: TeamPlugin = { id: "tcap_original", team_id: "team_1", name: "Original Plugin", description: "Original purpose", status: "active", revision: 1, row_version: 1, content_hash: "original", tool_refs: [], skill_grants: [grant], agent_count: 1 };
 const newerGrant = { ...grant, revision: `sha256:${"b".repeat(64)}` };
 const catalog = { tools: [], skills: [{ name: "method", description: "Method", source_kind: "builtin", grant: newerGrant, allowed_audiences: ["teamwide"] }] } as unknown as AgentAuthoringCatalog;
-beforeEach(() => { vi.mocked(getAgentAuthoringCatalog).mockResolvedValue(catalog); vi.mocked(listTeamPluginTemplates).mockResolvedValue([]); });
+beforeEach(() => { vi.mocked(getAgentAuthoringCatalog).mockResolvedValue(catalog); vi.mocked(listTeamPluginTemplates).mockResolvedValue({ templates: [] }); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); auth.session = null; });
 function host() {
   return { plugin, readOnly: false, controllerRef: createRef<{ requestClose: () => void }>(), onClose: vi.fn(), onActivate: vi.fn(), onSaved: vi.fn() };
@@ -233,6 +233,15 @@ it("names a selection that is no longer available and lets it be removed", async
   expect(screen.getByText("已选 0 个工具、1 个技能")).toBeTruthy();
 });
 
+it("keeps a Tool the team turned off without listing it or calling it unavailable", async () => {
+  vi.mocked(getAgentAuthoringCatalog).mockResolvedValue({ ...catalog, tools: [builtinQuery], team_disabled_tools: ["web_search"] });
+  renderIntl(<TeamPluginsContent hosted={hostWith({ tool_refs: ["web_search"] })} />);
+  await ready();
+  expect(screen.queryByText("已失效的所选内容")).toBeNull();
+  expect(screen.queryByText(/web_search|网络搜索/)).toBeNull();
+  expect(screen.getByText("已选 1 个工具、1 个技能")).toBeTruthy();
+});
+
 it("hides New Plugin while a form is open", async () => {
   vi.mocked(listTeamPlugins).mockResolvedValue([]);
   renderIntl(<TeamPluginsContent />);
@@ -267,9 +276,15 @@ async function openCreateForm() {
   await waitFor(() => expect(screen.getByRole("textbox", { name: "名称" })).toBeTruthy());
 }
 
+it("shows the Notion setup link when the team lacks a reviewed source", async () => {
+  vi.mocked(listTeamPluginTemplates).mockResolvedValue({ templates: [], notion_setup_required: true });
+  await openCreateForm();
+  expect((await screen.findByRole("link", { name: "打开工具源" })).getAttribute("href")).toBe("/team/settings/tools/");
+});
+
 it("fills a new Plugin from a template, asks before replacing edits and saves through the ordinary create", async () => {
   withTools([shopContext]);
-  vi.mocked(listTeamPluginTemplates).mockResolvedValue([shopTemplate]);
+  vi.mocked(listTeamPluginTemplates).mockResolvedValue({ templates: [shopTemplate] });
   vi.mocked(createTeamPlugin).mockResolvedValue({ ...plugin, id: "tcap_new" });
   await openCreateForm();
   const choice = await screen.findByRole("combobox", { name: "从模板开始" });
@@ -294,7 +309,7 @@ it("fills a new Plugin from a template, asks before replacing edits and saves th
 });
 
 it("says when templates could not load and retries without blocking a blank Plugin", async () => {
-  vi.mocked(listTeamPluginTemplates).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce([shopTemplate]);
+  vi.mocked(listTeamPluginTemplates).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ templates: [shopTemplate] });
   withTools([shopContext]);
   await openCreateForm();
   const status = await screen.findByText(/模板暂时无法加载。/);
@@ -305,7 +320,7 @@ it("says when templates could not load and retries without blocking a blank Plug
 });
 
 it("offers templates only when creating on the page", async () => {
-  vi.mocked(listTeamPluginTemplates).mockResolvedValue([shopTemplate]);
+  vi.mocked(listTeamPluginTemplates).mockResolvedValue({ templates: [shopTemplate] });
   renderIntl(<TeamPluginsContent hosted={host()} />);
   await ready();
   expect(screen.queryByRole("combobox", { name: "从模板开始" })).toBeNull();

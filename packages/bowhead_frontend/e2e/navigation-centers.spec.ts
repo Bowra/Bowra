@@ -247,8 +247,10 @@ test("Tool source management returns to its catalog under Tools", async ({ page 
   await prepare(page, "owner");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/capabilities/?type=tools");
-  await page.getByRole("link", { name: "管理工具源", exact: true }).click();
-  await expect(page).toHaveURL(/team\/settings\/tools/);
+  // The header action; administrators may also get it beside the note about sources that are not on.
+  await page.getByRole("link", { name: "管理工具源", exact: true }).first().click();
+  // `next dev` compiles the Tool sources page on its first visit.
+  await expect(page).toHaveURL(/team\/settings\/tools/, { timeout: 30_000 });
   await expect(page.getByTestId("unified-nav-tools_catalog")).toHaveAttribute("aria-current", "page");
   await page.getByRole("link", { name: /返回工具/ }).click();
   await expect(page).toHaveURL(/capabilities\/?\?type=tools/);
@@ -296,29 +298,32 @@ test("existing Owner deep links keep their primary entry when the market is unav
   await expect(page).toHaveURL(/\/capabilities\/?$/);
 });
 
+// The overview has been one sectioned page since 2026-10-08: its team management cards carry
+// `capability_return=team`, and the management page returns to the overview ("返回概览").
 for (const [resource, label, selected] of [
-  ["tools", "工具源", "tools_catalog"],
-  ["plugins", "插件", "capabilities_catalog"],
-  ["workflows", "团队流程", "skills"],
-  ["subagents", "系统内置智能体", "agents"],
+  ["tools", "管理工具源", "tools_catalog"],
+  ["plugins", "管理团队插件", "capabilities_catalog"],
+  ["workflows", "打开团队流程", "skills"],
+  ["subagents", "打开智能体", "agents"],
 ]) {
-  test(`team overview returns from ${resource} management to the same view`, async ({ page }) => {
+  test(`team overview returns from ${resource} management to the overview`, async ({ page }) => {
     await prepare(page, "owner");
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto("/capabilities/?view=team");
-    const entry = page.getByTestId("capability-center").getByRole("link", { name: new RegExp(`打开${label}`) });
-    await expect(entry).toHaveAttribute("href", `/team/settings/${resource}/?capability_return=team`);
+    await page.goto("/capabilities/");
+    const entry = page.getByTestId("capability-center").locator(`a[href="/team/settings/${resource}/?capability_return=team"]`);
+    await expect(entry).toHaveAccessibleName(new RegExp(label));
     await entry.click();
-    await expect(page).toHaveURL(new RegExp(`team/settings/${resource}/?\\?capability_return=team`));
+    // `next dev` compiles a management page on its first visit (the Tool sources page took 7.5 s locally).
+    await expect(page).toHaveURL(new RegExp(`team/settings/${resource}/?\\?capability_return=team`), { timeout: 30_000 });
     await expect(page.getByTestId(`unified-nav-${selected}`)).toHaveAttribute("aria-current", "page");
-    await page.getByRole("link", { name: "← 返回团队管理", exact: true }).click();
-    await expect(page).toHaveURL(/capabilities\/?\?view=team$/);
-    await expect(page.getByTestId("unified-nav-capabilities")).toHaveAttribute("aria-current", "page");
+    const back = page.getByRole("link", { name: /返回概览/ });
+    await expect(back).toHaveAttribute("href", "/capabilities/");
+    await back.click();
+    await expect(page).toHaveURL(/\/capabilities\/?$/);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`team/settings/${resource}/?\\?capability_return=team`));
-    await expect(page.getByRole("link", { name: "← 返回团队管理", exact: true })).toHaveAttribute("href", "/capabilities/?view=team");
     await page.goForward();
-    await expect(page).toHaveURL(/capabilities\/?\?view=team$/);
+    await expect(page).toHaveURL(/\/capabilities\/?$/);
   });
 }
 

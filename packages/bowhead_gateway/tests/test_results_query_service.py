@@ -893,3 +893,74 @@ async def test_report_query_is_closure_first_and_projects_direct_roles(
     assert [item.key for item in relation_search.items] == [
         f"artifact:{data.id}",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_owner_query_lists_only_the_files_one_turn_saved(tmp_path: Path) -> None:
+    """Chat running state R2.3: the work-file line opens Results filtered to its Turn. The report and code are not a
+    Turn's files, other Turns' files stay out, and a file revised in that Turn shows its version from that Turn
+    (this fixture's layout stores the new version as its own file; the store applies the filter per version)."""
+    session_store, canvas_store, artifact_store, session, _, _ = await _stores(tmp_path)
+    page_v1 = await artifact_store.put_bytes(
+        content=b"<p>v1</p>",
+        filename="门店看板.html",
+        mime="text/html",
+        source="generated",
+        created_by=session.user_id,
+        session_id=session.id,
+        kind="deliverable",
+        created_by_turn="turn_earlier",
+    )
+    page_v2 = await artifact_store.put_bytes(
+        content=b"<p>v2</p>",
+        filename="门店看板.html",
+        mime="text/html",
+        source="generated",
+        created_by=session.user_id,
+        session_id=session.id,
+        kind="deliverable",
+        created_by_turn="turn_now",
+        version_of_target=page_v1.id,
+    )
+    work = await artifact_store.put_bytes(
+        content=b"a,b\n",
+        filename="门店明细.csv",
+        mime="text/csv",
+        source="sandbox",
+        created_by=session.user_id,
+        session_id=session.id,
+        kind="sandbox_output",
+        created_by_turn="turn_now",
+    )
+    kwargs = {
+        "session": session,
+        "team_id": "team_results",
+        "scale_nav": True,
+        "session_store": session_store,
+        "canvas_store": canvas_store,
+        "artifact_store": artifact_store,
+        "cursor_codec": _codec(),
+    }
+    filtered = await query_owner_results(
+        **kwargs,
+        request_body=ResultsQueryRequestV1(surface="explorer", filters=ResultsFiltersV1(turn_id="turn_now")),
+    )
+    assert {item.route.artifact_id for item in filtered.items} == {page_v2.id, work.id}
+    assert page_v1.id not in {item.route.artifact_id for item in filtered.items}
+    assert all(item.object_type == "artifact" for item in filtered.items)
+    assert filtered.matched_total == 2
+    everything = await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="explorer"))
+    assert {"report", "artifact"} <= {item.object_type for item in everything.items}
+    assert len(everything.items) > len(filtered.items)
+
+
+@pytest.mark.unit
+def test_a_request_without_a_turn_filter_keeps_its_cursor_binding() -> None:
+    from bowhead_core.results_read_model import results_query_filter_hash
+
+    filters = ResultsFiltersV1()
+    before = {"lens": "all", "primary": "all", "secondary": "all", "technical_only": False}
+    assert results_query_filter_hash(query="", filters=filters.model_dump(mode="json", exclude_none=True)) == results_query_filter_hash(
+        query="", filters=before
+    )

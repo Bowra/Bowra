@@ -23,6 +23,7 @@ from bowhead_core.skill_upload import NAME_PATTERN as _SKILL_NAME_RE
 from bowhead_core.subagent_authoring_catalog import (
     APPROVAL_EXECUTOR_UNAVAILABLE,
     COMPILER_DERIVED_SKILL_TOOLS,
+    TOOL_DISABLED_BY_TEAM,
     SubagentAuthoringCatalogSnapshot,
 )
 from bowhead_core.subagent_prompt_limits import (
@@ -163,7 +164,7 @@ def validate_common(
         # Minimum length. Previously only the maximum was checked, making `system_prompt` optional throughout (optional FE type → gateway
         # `CreateBody.system_prompt: str = ""` → no empty check here). Production actually created instruction-free
         # agents: 3 of 6 team agents on 116 had empty prompts, including `pharma-competitive-research`,
-        # dispatched by Lead for an entire turn (t_5d59b5d71fde, 2026-09-07). Its runtime
+        # dispatched by Lead for an entire turn (an observed task, 2026-09-07). Its runtime
         # `profile.system_prompt` was empty (no skills or authoring pseudo-tools ⇒ empty prelude),
         # leaving only ws_meta/memory/language blocks, without role, boundaries or output contract, while Lead dispatched it
         # based on its carefully written description.
@@ -341,6 +342,16 @@ def validate_tool_refs(
             # Accepted and ignored: Skill grants decide the Skill wrapper Tools.
             continue
         tool = tools.get(canonical_tool_name(tool_ref))
+        if tool is not None and tool.team_disabled:
+            # A Tool the team turned off stays where it was selected (the Turn drops it); it is never a new pick.
+            if canonical_tool_name(tool_ref) in existing:
+                continue
+            raise TeamSubagentValidationError(
+                TOOL_DISABLED_BY_TEAM,
+                f"tool turned off for the team: {tool_ref!r}",
+                field="tool_refs",
+                tool_ref=tool_ref,
+            )
         if tool is None or not tool.discoverable:
             raise TeamSubagentValidationError(
                 "subagent_tool_no_longer_available",
@@ -368,6 +379,7 @@ def validate_candidate(
     reserved_names: set[str],
     operation: Literal["draft", "create", "edit", "enable"],
     allow_empty_tools: bool = False,
+    existing_tool_refs: tuple[str, ...] | list[str] = (),
 ) -> None:
     validate_name(candidate.name, reserved_names=reserved_names)
     validate_common(
@@ -385,6 +397,7 @@ def validate_candidate(
         candidate.tool_refs,
         catalog=catalog,
         require_selectable=operation in {"create", "enable"},
+        existing_tool_refs=existing_tool_refs,
     )
     if operation == "create" and candidate.audience_mode != "private":
         raise TeamSubagentValidationError(

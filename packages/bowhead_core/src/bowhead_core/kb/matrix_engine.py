@@ -21,8 +21,10 @@ import hashlib
 import logging
 import math
 import os
+import random
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -32,9 +34,9 @@ from bowhead_core.kb.doc_type_store import ExtractField
 from bowhead_core.kb.eligibility import KbUseEligibility
 from bowhead_core.kb.extracted_record_store import wrap_extractor_result_to_variants
 from bowhead_core.kb.generations import use_guard_enabled
-from bowhead_core.kb.matrix_store import cell_is_stale, is_raw_string_sentinel, normalize_matrix_value
-from bowhead_core.kb.permission import ScopeContext
-from bowhead_core.kb.structured_extractor import backfill_chunk_ids
+from bowhead_core.kb.matrix_store import AUTO_RETRY_KEY_SUFFIX, cell_is_stale, is_raw_string_sentinel, normalize_matrix_value
+from bowhead_core.kb.permission import KbPermission, ScopeContext
+from bowhead_core.kb.source_location import SourceIndex, bind_field_sources
 from bowhead_core.kb.telemetry import emit_audit
 from bowhead_core.rate_card import credits_for_tokens
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
@@ -66,15 +68,73 @@ EST_REASONING_TOKENS_PER_COL = 1500
 # ETA basis: spike p50 28s/cell (FR-21).
 ETA_SECONDS_PER_CELL = 28
 
-BATCH_SCOPE_KINDS = ("all_pending", "column", "force_all", "force_column", "stale", "stale_column")
+BATCH_SCOPE_KINDS = ("all_pending", "failed", "column", "force_all", "force_column", "stale", "stale_column")
 SCOPE_KINDS = (*BATCH_SCOPE_KINDS, "single_cell")
 # Stale scopes (FR-12b rerun-expired row + FR-4 post-edit column confirmation): selection = derived stale predicate,
 # includes verified, excludes edited; empty is not stale (rerun existing results semantics).
 STALE_SCOPE_KINDS = ("stale", "stale_column")
+# Force scopes rerun every cell of their range; they keep verified cells unless the scope says keep_verified=false
+# (document matrix step 1 §3.1: "rerun all keeps edited and verified cells").
+FORCE_SCOPE_KINDS = ("force_all", "force_column")
+
+# Row subsets (step 1 §3.1): a trial or selection names at most this many rows of the matrix.
+MAX_SCOPE_FILE_IDS = 50
+# A trial runs the first rows that have pending cells in the chosen scope.
+TRIAL_FILE_COUNT = 3
+
+# One automatic retry (step 1 §3.3): jittered wait before the retry pass.
+AUTO_RETRY_DELAY_RANGE_S = (20.0, 60.0)
+# The wait re-reads the run this often, so a cancel during it converges promptly.
+AUTO_RETRY_POLL_S = 1.0
+# Error code left on a run whose retry pass was skipped because most model calls exhausted the provider chain.
+PROVIDER_OUTAGE_CODE = "provider_outage"
+# A cancelled run's error code when the creator made the matrix private while another member's run was going (S8).
+MATRIX_BECAME_PRIVATE_CODE = "matrix_became_private"
 
 # cross-verify (FR-39): kernel samples whole prompts (SELF_CONSISTENCY_N=2 reruns all fields);
 # cost/duration ×2 (tech-design-m3 §0.1/decision 10).
 CV_COST_MULTIPLIER = 2
+
+
+@dataclass(frozen=True)
+class TargetSelection:
+    """Cells a scope selects, and the candidates it kept because a person edited or verified them."""
+
+    targets: list[tuple[str, str]]
+    skipped_edited: int = 0
+    skipped_verified: int = 0
+
+
+def is_auto_retryable(fail_reason: str | None, fail_hint: str | None) -> bool:
+    """Transient, unbilled failures that get one automatic retry (step 1 §3.3).
+
+    ``llm_parse_failed`` is billed and stays a manual rerun; a file without chunks, a crash
+    diagnosis other than ``call_crashed``, credit, quota and source stops need the user.
+    """
+    if fail_reason == "timeout":
+        return True
+    if fail_reason == "llm_invoke_failed":
+        return fail_hint != "file_has_no_chunks"
+    if fail_reason == "system_interrupted":
+        return fail_hint == "call_crashed"
+    return False
+
+
+def _default_auto_retry_delay_s() -> float:
+    low, high = AUTO_RETRY_DELAY_RANGE_S
+    return random.uniform(low, high)  # noqa: S311 - jitter, not a secret.
+
+
+def _allocate_credits(total: int, shares: list[float]) -> list[int]:
+    """Round fractional credit shares to integers that add up to ``total`` (largest remainder)."""
+    if not shares:
+        return []
+    floors = [math.floor(s) for s in shares]
+    remainder = total - sum(floors)
+    order = sorted(range(len(shares)), key=lambda i: (shares[i] - floors[i], -i), reverse=True)
+    for i in order[: max(0, remainder)]:
+        floors[i] += 1
+    return floors
 
 
 def _env_int(name: str, default: int) -> int:
@@ -277,6 +337,7 @@ class KbMatrixEngine:
         runtime_resolver: Callable[[str], Awaitable[Any]] | None = None,
         artifact_store: Any = None,
         file_authorizer: Any = None,
+        auto_retry_delay_s: Callable[[], float] | None = None,
     ) -> None:
         # Single-process self-assert (decision 2): independent of chi_flags gate; chi retirement cannot silently disable it.
         web_concurrency = os.environ.get("WEB_CONCURRENCY", "1") or "1"
@@ -292,6 +353,8 @@ class KbMatrixEngine:
         self._runtime_resolver = runtime_resolver
         self._artifact_store = artifact_store
         self._file_authorizer = file_authorizer
+        # Seconds to wait before the automatic retry pass (jittered 20–60 s; tests inject 0).
+        self._auto_retry_delay_s = auto_retry_delay_s or _default_auto_retry_delay_s
         self.run_tasks: dict[str, asyncio.Task[None]] = {}
         self._inflight: set[str] = set()  # Second idempotency guard (store UPSERT is first)
         self._global_sem: asyncio.Semaphore | None = None
@@ -302,18 +365,48 @@ class KbMatrixEngine:
     # ─── Target expansion (FR-12b authority table + FR-9 server enforcement) ─
 
     @staticmethod
-    def expand_targets(
+    def scope_file_ids(matrix: MatrixDTO, scope: dict[str, Any]) -> list[str] | None:
+        """Rows a scope is limited to (trial or selection), in the order given; None = every row.
+
+        Raises ValueError for an empty list, more than ``MAX_SCOPE_FILE_IDS`` rows, or a row
+        that is not in the matrix (the route reports these with their own codes first).
+        """
+        raw = scope.get("file_ids")
+        if raw is None:
+            return None
+        if not isinstance(raw, (list, tuple)):
+            raise ValueError("scope.file_ids must be a list")
+        ids = list(dict.fromkeys(str(x) for x in raw))
+        if not ids:
+            raise ValueError("scope.file_ids must not be empty")
+        if len(ids) > MAX_SCOPE_FILE_IDS:
+            raise ValueError(f"scope.file_ids allows at most {MAX_SCOPE_FILE_IDS} rows")
+        rows = {str(f.get("file_id") or "") for f in matrix.files}
+        if any(file_id not in rows for file_id in ids):
+            raise ValueError("scope.file_ids names a row that is not in the matrix")
+        return ids
+
+    @staticmethod
+    def select_targets(
         matrix: MatrixDTO,
         cells: list[MatrixCellDTO],
         scope: dict[str, Any],
         *,
         file_versions: dict[str, int] | None = None,
-    ) -> tuple[list[tuple[str, str]], int]:
-        """返回 (targets, skipped_edited)。批量 scope 一律排除 edited（FR-9 优先级
-        高于一切）并计数；queued/running 在飞格不入目标（幂等 + cells_total 口径）。
-        stale 族（M3）：圈选 = ``cell_is_stale`` 单一权威谓词（与快照 `_cell_payload`
-        双消费，决策 2）——需要 ``file_versions``（stale 族缺省 → ValueError，
-        caller 必须显式喂，不允许静默半个谓词）。"""
+    ) -> TargetSelection:
+        """Cells a scope selects (FR-12b authority table + FR-9 server enforcement; step 1 §3.1).
+
+        - Batch scopes always exclude edited cells (FR-9 outranks everything) and count them.
+        - Force scopes also keep verified cells unless ``keep_verified`` is false. A failed
+          cell stays a target, so a force scope covers everything ``all_pending`` covers.
+        - ``failed`` targets failed cells only; empty and edited cells are excluded.
+        - ``file_ids`` limits batch scopes to those rows (trial or selection).
+        - Queued/running cells are in flight and never targets (idempotency + cells_total).
+        - Stale scopes (M3): selection = the single ``cell_is_stale`` predicate (shared with the
+          snapshot `_cell_payload`, decision 2). They need ``file_versions`` (missing → ValueError;
+          callers pass it explicitly, never half a predicate). They include verified cells.
+        - ``single_cell`` is an explicit per-cell action and targets the cell whatever its state.
+        """
         kind = str(scope.get("kind") or "")
         if kind not in SCOPE_KINDS:
             raise ValueError(f"scope.kind must be one of {SCOPE_KINDS}")
@@ -324,11 +417,13 @@ class KbMatrixEngine:
                 raise ValueError(f"unknown file_id: {file_id}")
             if column_id not in {str(c["column_id"]) for c in matrix.columns}:
                 raise ValueError(f"unknown column_id: {column_id}")
-            return [(file_id, column_id)], 0
+            return TargetSelection([(file_id, column_id)])
 
         stale_kind = kind in STALE_SCOPE_KINDS
         if stale_kind and file_versions is None:
             raise ValueError("stale scope requires file_versions")
+        limited = KbMatrixEngine.scope_file_ids(matrix, scope)
+        allowed_files = set(limited) if limited is not None else None
 
         cell_by_key = {(c.file_id, c.column_id): c for c in cells}
         col_pv_by_id = {str(c["column_id"]): int(c.get("prompt_version") or 1) for c in matrix.columns}
@@ -338,17 +433,23 @@ class KbMatrixEngine:
             if wanted not in col_ids:
                 raise ValueError(f"unknown column_id: {wanted}")
             col_ids = [wanted]
-        force = kind in ("force_all", "force_column")
+        force = kind in FORCE_SCOPE_KINDS
+        # Only an explicit false overwrites verified cells; omitted, null or malformed values keep them.
+        keep_verified = scope.get("keep_verified") is not False
+        failed_only = kind == "failed"
 
         targets: list[tuple[str, str]] = []
         skipped_edited = 0
+        skipped_verified = 0
         for f in matrix.files:
             file_id = str(f.get("file_id") or "")
+            if allowed_files is not None and file_id not in allowed_files:
+                continue
             for col_id in col_ids:
                 cell = cell_by_key.get((file_id, col_id))
                 if cell is None:
-                    if not stale_kind:
-                        targets.append((file_id, col_id))  # empty: include outside stale scopes
+                    if not stale_kind and not failed_only:
+                        targets.append((file_id, col_id))  # empty: include outside stale and failed scopes
                     continue
                 if cell.status in ("queued", "running"):
                     continue  # In flight
@@ -370,8 +471,23 @@ class KbMatrixEngine:
                     # (done+edited not candidate under all_pending; do not inflate dialog count)
                     skipped_edited += 1
                     continue
+                if force and keep_verified and cell.verified and cell.status != "failed":
+                    skipped_verified += 1
+                    continue
                 targets.append((file_id, col_id))
-        return targets, skipped_edited
+        return TargetSelection(targets, skipped_edited, skipped_verified)
+
+    @staticmethod
+    def expand_targets(
+        matrix: MatrixDTO,
+        cells: list[MatrixCellDTO],
+        scope: dict[str, Any],
+        *,
+        file_versions: dict[str, int] | None = None,
+    ) -> tuple[list[tuple[str, str]], int]:
+        """(targets, skipped_edited) view of ``select_targets``."""
+        selection = KbMatrixEngine.select_targets(matrix, cells, scope, file_versions=file_versions)
+        return selection.targets, selection.skipped_edited
 
     # ─── Estimates (§6.1, calibration = Spike A) ─────────────
 
@@ -406,6 +522,19 @@ class KbMatrixEngine:
         return calls
 
     def estimate_targets(self, matrix: MatrixDTO, targets: list[tuple[str, str]], *, router: Any | None = None) -> dict[str, Any]:
+        """Estimate of a target set: the total plus its breakdown (step 1 §3.2).
+
+        The total keeps the per-call formula that execution charges against. The breakdown
+        splits each call's credits by its token terms and rounds once, so ``reading_credits``
+        plus every column's ``credits`` equals ``credits_estimated``:
+
+        - ``reading_credits``: reading each document in calls without cross-check (shared by
+          their columns). When a file has only cross-check calls, its first reading is shared too.
+        - ``columns[]``: each column's prompt and reasoning terms. A cross-check call reads
+          the document again; that reading goes to its columns, which is why a cross-checked
+          column can be most of the cost.
+        - ``longest_file``: the longest target file and its share of the total.
+        """
         from bowhead_core.rate_card import ModelCreditRates, ModelTokenUsage, credits_for_model_usage
 
         active_router = router or self._router
@@ -416,6 +545,15 @@ class KbMatrixEngine:
         char_by_file = {str(f.get("file_id") or ""): int(f.get("char_count") or 0) for f in matrix.files}
         col_by_id = {str(c["column_id"]): c for c in matrix.columns}
         calls = self.build_calls(matrix, targets)
+
+        def is_cv(col_ids: list[str]) -> bool:
+            return bool(col_ids) and bool(col_by_id.get(col_ids[0], {}).get("cross_verify"))
+
+        files_with_plain_call = {file_id for file_id, col_ids in calls if not is_cv(col_ids)}
+        shared_cv_reading: set[str] = set()
+        reading_share = 0.0
+        column_share: dict[str, float] = {}
+        file_credits: dict[str, int] = {}
         credits_est = 0
         for file_id, col_ids in calls:
             chars = char_by_file.get(file_id, 0)
@@ -423,20 +561,47 @@ class KbMatrixEngine:
             # Prompt text term (M3 review S-P2-2 added): resend questions/hints/options constraints per chunk
             # —negligible at question≤2000/hint≤500, no longer negligible with options up to ~6.6KB/column;
             # omission systematically understates FR-14 hard gate for options-heavy columns. Same clause function as execution.
-            prompt_chars = sum(
-                len(str(col_by_id.get(c, {}).get("question") or ""))
-                + len(str(col_by_id.get(c, {}).get("extraction_hint") or ""))
-                + len(option_constraint_clause(col_by_id.get(c, {})))
-                for c in col_ids
-            )
             # Reasoning ×n_chunks: each chunk independently runs all fields (review P1: omission systematically underestimates large files)
-            est_tokens = chars + prompt_chars * n_chunks + EST_REASONING_TOKENS_PER_COL * len(col_ids) * n_chunks
-            if col_ids and bool(col_by_id.get(col_ids[0], {}).get("cross_verify")):
+            column_tokens = {
+                c: (
+                    len(str(col_by_id.get(c, {}).get("question") or ""))
+                    + len(str(col_by_id.get(c, {}).get("extraction_hint") or ""))
+                    + len(option_constraint_clause(col_by_id.get(c, {})))
+                    + EST_REASONING_TOKENS_PER_COL
+                )
+                * n_chunks
+                for c in col_ids
+            }
+            est_tokens = chars + sum(column_tokens.values())
+            shared_reading = chars
+            cv_reading = 0
+            if is_cv(col_ids):
                 est_tokens *= CV_COST_MULTIPLIER  # Double entire cv call (honest FR-39 estimate)
+                column_tokens = {c: t * CV_COST_MULTIPLIER for c, t in column_tokens.items()}
+                if file_id in files_with_plain_call or file_id in shared_cv_reading:
+                    shared_reading, cv_reading = 0, chars * CV_COST_MULTIPLIER
+                else:
+                    shared_cv_reading.add(file_id)
+                    shared_reading, cv_reading = chars, chars * (CV_COST_MULTIPLIER - 1)
             # Estimate and actual deduction must use same formula, or promised pre-run cost N drifts from actual charge
-            credits_est += credits_for_model_usage(
+            call_credits = credits_for_model_usage(
                 [ModelTokenUsage(est_tokens, 0, 0, ModelCreditRates(conservative_rate, conservative_rate, conservative_rate))]
             )
+            credits_est += call_credits
+            file_credits[file_id] = file_credits.get(file_id, 0) + call_credits
+            per_token = call_credits / max(1, est_tokens)
+            reading_share += shared_reading * per_token
+            for c, tokens in column_tokens.items():
+                column_share[c] = column_share.get(c, 0.0) + (tokens + cv_reading / len(col_ids)) * per_token
+
+        cells_by_col: dict[str, int] = {}
+        for _, col_id in targets:
+            cells_by_col[col_id] = cells_by_col.get(col_id, 0) + 1
+        col_order = [str(c["column_id"]) for c in matrix.columns if str(c["column_id"]) in cells_by_col]
+        rounded = _allocate_credits(credits_est, [reading_share, *(column_share.get(c, 0.0) for c in col_order)])
+        target_files = list(dict.fromkeys(file_id for file_id, _ in targets))
+        longest = max(target_files, key=lambda f: char_by_file.get(f, 0), default=None)
+
         concurrency = min(cell_concurrency(), global_concurrency())
         weighted_cells = sum(CV_COST_MULTIPLIER if bool(col_by_id.get(col_id, {}).get("cross_verify")) else 1 for _, col_id in targets)
         eta_s = math.ceil(ETA_SECONDS_PER_CELL * weighted_cells / max(1, concurrency))
@@ -445,6 +610,20 @@ class KbMatrixEngine:
             "calls": len(calls),
             "credits_estimated": credits_est,
             "eta_s": eta_s,
+            "files": len(target_files),
+            "reading_credits": rounded[0] if rounded else 0,
+            "columns": [
+                {
+                    "column_id": c,
+                    "cells": cells_by_col[c],
+                    "credits": rounded[i + 1],
+                    "cross_verify": bool(col_by_id.get(c, {}).get("cross_verify")),
+                }
+                for i, c in enumerate(col_order)
+            ],
+            "longest_file": (
+                {"file_id": longest, "chars": char_by_file.get(longest, 0), "credits": file_credits.get(longest, 0)} if longest is not None else None
+            ),
         }
 
     async def estimate_run(
@@ -455,17 +634,24 @@ class KbMatrixEngine:
         user_id: str,
     ) -> dict[str, Any]:
         """预估端点响应体（§6.1）：只读不落库。team 池更紧时不回 team 原值
-        （review P2：池余额今天只有 admin 可见）。"""
+        （review P2：池余额今天只有 admin 可见）。
+
+        Step 1 §3.2 adds the breakdown (``estimate_targets``), ``skipped_verified`` (verified
+        cells a force scope keeps) and ``trial_file_ids``: the first ``TRIAL_FILE_COUNT`` rows
+        with targets in this scope, which a trial sends back as ``file_ids``."""
         cells = await self._store.list_cells(matrix.matrix_id)
         file_versions = await self._file_versions(matrix) if str(scope.get("kind") or "") in STALE_SCOPE_KINDS else None
-        targets, skipped_edited = self.expand_targets(matrix, cells, scope, file_versions=file_versions)
+        selection = self.select_targets(matrix, cells, scope, file_versions=file_versions)
         _, _, router = await self._resolve_runtime(matrix.team_id)
-        est = self.estimate_targets(matrix, targets, router=router)
+        est = self.estimate_targets(matrix, selection.targets, router=router)
         effective, user_layer, team_tighter = await self._effective_balance(user_id, matrix.team_id)
         credits_est = int(est["credits_estimated"])
+        trial_file_ids = list(dict.fromkeys(file_id for file_id, _ in selection.targets))[:TRIAL_FILE_COUNT]
         return {
             **est,
-            "skipped_edited": skipped_edited,
+            "skipped_edited": selection.skipped_edited,
+            "skipped_verified": selection.skipped_verified,
+            "trial_file_ids": trial_file_ids if str(scope.get("kind") or "") != "single_cell" else [],
             "available_credits": user_layer,
             "team_pool_tighter": team_tighter,
             "warn": credits_est > 0.2 * effective,
@@ -496,7 +682,8 @@ class KbMatrixEngine:
 
             cells = await self._store.list_cells(matrix.matrix_id)
             file_versions = await self._file_versions(matrix)
-            targets, skipped_edited = self.expand_targets(matrix, cells, scope, file_versions=file_versions)
+            selection = self.select_targets(matrix, cells, scope, file_versions=file_versions)
+            targets, skipped_edited = selection.targets, selection.skipped_edited
             if not targets:
                 raise MatrixRunError("no_pending_cells", "没有待运行的格", skipped_edited=skipped_edited)
 
@@ -508,7 +695,9 @@ class KbMatrixEngine:
                 async def check_sources():
                     nonlocal denied
                     for file_id in pending_files:
-                        check = await self._source_check(file_id, initiated_by, matrix.team_id, matrix.workspace_id, index)
+                        check = await self._source_check(
+                            file_id, initiated_by, matrix.team_id, matrix.workspace_id, index, personal_owner=matrix.visibility == "private"
+                        )
                         if not check.allowed:
                             denied = True
                             return
@@ -538,11 +727,16 @@ class KbMatrixEngine:
                 raise MatrixQuotaExceeded("kb_quota_exceeded", "空间本月 LLM 配额已用完")
 
             column_versions = {str(c["column_id"]): int(c.get("prompt_version") or 1) for c in matrix.columns}
+            stored_scope = dict(scope)
+            if kind == "single_cell":
+                stored_scope.pop("file_ids", None)  # A single cell names its row in file_id.
+            elif stored_scope.get("file_ids") is not None:
+                stored_scope["file_ids"] = self.scope_file_ids(matrix, scope)  # Deduplicated, in the given order.
             run = await self._store.create_run_and_enqueue(
                 matrix_id=matrix.matrix_id,
                 workspace_id=matrix.workspace_id,
                 team_id=matrix.team_id,
-                scope=scope,
+                scope=stored_scope,
                 initiated_by=initiated_by,
                 targets=targets,
                 skipped_edited=skipped_edited,
@@ -564,8 +758,10 @@ class KbMatrixEngine:
                 "run_id": run.run_id,
                 "matrix_id": matrix.matrix_id,
                 "scope_kind": kind,
+                "trial": bool(stored_scope.get("file_ids")),
                 "cells_total": run.cells_total,
                 "skipped_edited": skipped_edited,
+                "skipped_verified": selection.skipped_verified,
                 "credits_estimated": credits_estimated,
             },
         )
@@ -733,10 +929,25 @@ class KbMatrixEngine:
         targets = [(c.file_id, c.column_id) for c in queued]
         calls = self.build_calls(matrix, targets)
         col_def_by_id = {str(c["column_id"]): c for c in matrix.columns}
-        state: dict[str, Any] = {"stop": None, "calls_done": 0}
+        # model_calls / chain_failures: calls that reached the model, and those whose provider chain was exhausted
+        # (the outage guard of the automatic retry, step 1 §3.3).
+        state: dict[str, Any] = {"stop": None, "calls_done": 0, "calls_total": len(calls), "model_calls": 0, "chain_failures": 0}
         run_sem = asyncio.Semaphore(cell_concurrency())
         global_sem = self._get_global_sem()
         progress_every = max(1, len(calls) // 5)  # Fixed %20 gives small matrices no progress events (review P2)
+        # Current row set and visibility, recomputed only when structure_seq moves (one get_matrix per call).
+        structure: dict[str, Any] = {"seq": None, "file_ids": frozenset(), "private": matrix.visibility == "private"}
+
+        async def current_file_ids() -> frozenset[str] | None:
+            """File ids now in the matrix, or None when it was deleted after the run started."""
+            now_matrix = await self._store.get_matrix(run.matrix_id)
+            if now_matrix is None:
+                return None
+            if structure["seq"] != now_matrix.structure_seq:
+                structure["seq"] = now_matrix.structure_seq
+                structure["file_ids"] = frozenset(str(f.get("file_id") or "") for f in now_matrix.files)
+                structure["private"] = now_matrix.visibility == "private"
+            return structure["file_ids"]
 
         async def run_one_call(file_id: str, col_ids: list[str]) -> None:
             # Acquire run_sem before global_sem: reversed order holds global permits while waiting for
@@ -747,6 +958,19 @@ class KbMatrixEngine:
                 current = await self._store.get_run(run_id)
                 if current is None or current.status != "running":
                     return  # Pre-dispatch cancelling/external-state check
+                file_ids_now = await current_file_ids()
+                if file_ids_now is None:
+                    # Matrix deleted mid-run without a cancel (the delete route cancels first): stop
+                    # dispatching and converge as cancelled; later calls see the status and return.
+                    await self._store.set_run_status(run_id, "cancelling", expected_from=("running",))
+                    return
+                if structure["private"] and run.initiated_by != matrix.created_by:
+                    # S8: the creator made the matrix private, so another member's run may not go on. It stops
+                    # like a deleted matrix's (no further calls or charges; landed cells stay) and says why.
+                    await self._store.set_run_status(run_id, "cancelling", error_code=MATRIX_BECAME_PRIVATE_CODE, expected_from=("running",))
+                    return
+                if file_id not in file_ids_now:
+                    return  # File removed mid-run; the removal already reverted its queued cells.
                 if not await self._quotas.check_quota(run.workspace_id):
                     state["stop"] = "quota_exceeded"
                     metrics.inc("kb_matrix.quota_hit")
@@ -756,7 +980,19 @@ class KbMatrixEngine:
                     return
                 self._inflight.update(inflight_keys)
                 try:
-                    await self._execute_call(run, matrix, file_id, col_ids, col_def_by_id, kb_store, extractor, router, health, state)
+                    await self._execute_call(
+                        run,
+                        matrix,
+                        file_id,
+                        col_ids,
+                        col_def_by_id,
+                        kb_store,
+                        extractor,
+                        router,
+                        health,
+                        state,
+                        personal_owner=bool(structure["private"]),
+                    )
                 except Exception:
                     # Unexpected exceptions reaching gather(return_exceptions=True) are swallowed: cells stay permanently
                     # queued/running while run still succeeds (impl review B-P1-2)—catch locally
@@ -779,12 +1015,16 @@ class KbMatrixEngine:
                     if state["calls_done"] % progress_every == 0:
                         emit_audit(
                             "kb.matrix_run_progress",
-                            {"run_id": run_id, "matrix_id": run.matrix_id, "calls_done": state["calls_done"], "calls_total": len(calls)},
+                            {"run_id": run_id, "matrix_id": run.matrix_id, "calls_done": state["calls_done"], "calls_total": state["calls_total"]},
                         )
                     # Call ≥15s, no throttle needed (§5.1)
                     await self._store.touch_run_heartbeat(run_id)
 
-        await asyncio.gather(*(run_one_call(f, cs) for f, cs in calls), return_exceptions=True)
+        async def dispatch(batch: list[tuple[str, list[str]]]) -> None:
+            await asyncio.gather(*(run_one_call(f, cs) for f, cs in batch), return_exceptions=True)
+
+        await dispatch(calls)
+        outage_code = await self._auto_retry_pass(run, matrix, state, dispatch)
 
         # ─── Convergence (§5.5) ───
         current = await self._store.get_run(run_id)
@@ -803,12 +1043,77 @@ class KbMatrixEngine:
             leaked = await self._store.fail_pending_cells_for_run(run_id, fail_reason="system_interrupted", fail_hint="call_leaked")
             if leaked:
                 await self._store.increment_run_counters(run_id, failed=leaked)
-            if not await self._store.set_run_status(run_id, "succeeded", expected_from=("running",)):
+            # A skipped retry pass leaves provider_outage on the succeeded run, so the banner can say why its failures remain.
+            if not await self._store.set_run_status(run_id, "succeeded", error_code=outage_code, expected_from=("running",)):
                 # Narrow window: set cancelling after gather
                 await self._converge_cancelled(run_id)
             else:
                 metrics.inc("kb_matrix.run_succeeded")
                 await self._finalize_run_billing(run_id)
+
+    async def _auto_retry_pass(
+        self,
+        run: MatrixRunDTO,
+        matrix: MatrixDTO,
+        state: dict[str, Any],
+        dispatch: Callable[[list[tuple[str, list[str]]]], Awaitable[None]],
+    ) -> str | None:
+        """One automatic retry of this run's transient failures (step 1 §3.3).
+
+        Runs only while the run is still running without a stop reason. The cells failed with
+        ``is_auto_retryable`` reasons are re-enqueued under the same run after a jittered wait
+        and dispatched once more; they were never charged, so a success charges once through
+        the normal path. When more than half of the calls that reached the model exhausted the
+        provider chain, the pass is skipped as a likely outage and ``PROVIDER_OUTAGE_CODE`` is
+        returned for the run's summary.
+        """
+        current = await self._store.get_run(run.run_id)
+        if current is None or current.status != "running" or state["stop"]:
+            return None
+        single_cell = str(run.scope.get("kind") or "") == "single_cell"
+        failed = await self._store.list_cells_for_run(run.run_id, statuses=("failed",))
+        keys = [
+            (c.file_id, c.column_id)
+            for c in failed
+            if is_auto_retryable(c.fail_reason, c.fail_hint)
+            and not str(c.idempotency_key or "").endswith(AUTO_RETRY_KEY_SUFFIX)
+            and (single_cell or not c.edited_by_user)
+        ]
+        if not keys:
+            return None
+        audit = {"run_id": run.run_id, "matrix_id": run.matrix_id, "cells": len(keys)}
+        if state["chain_failures"] * 2 > state["model_calls"]:
+            metrics.inc("kb_matrix.auto_retry_skipped")
+            emit_audit(
+                "kb.matrix_run_auto_retry",
+                {**audit, "action": "skipped_outage", "model_calls": state["model_calls"], "chain_failures": state["chain_failures"]},
+            )
+            return PROVIDER_OUTAGE_CODE
+        delay_s = max(0.0, float(self._auto_retry_delay_s()))
+        if not await self._wait_while_running(run.run_id, delay_s):
+            return None  # Cancelled or stopped during the wait; convergence takes over.
+        requeued = await self._store.requeue_failed_cells_for_retry(run.run_id, run.matrix_id, keys, include_edited=single_cell)
+        if not requeued:
+            return None
+        metrics.inc("kb_matrix.auto_retry")
+        emit_audit("kb.matrix_run_auto_retry", {**audit, "action": "retried", "cells": len(requeued), "delay_s": round(delay_s)})
+        retry_calls = self.build_calls(matrix, requeued)
+        state["calls_total"] += len(retry_calls)
+        await dispatch(retry_calls)
+        return None
+
+    async def _wait_while_running(self, run_id: str, delay_s: float) -> bool:
+        """Sleep ``delay_s`` in steps of at most ``AUTO_RETRY_POLL_S``; False as soon as the run leaves ``running``."""
+        remaining = delay_s
+        while True:
+            current = await self._store.get_run(run_id)
+            if current is None or current.status != "running":
+                return False
+            if remaining <= 0:
+                return True
+            step = min(AUTO_RETRY_POLL_S, remaining)
+            await asyncio.sleep(step)
+            remaining -= step
 
     async def _converge_cancelled(self, run_id: str) -> None:
         run = await self._store.get_run(run_id)
@@ -878,8 +1183,14 @@ class KbMatrixEngine:
         router: Any,
         health: ProviderHealth,
         state: dict[str, Any],
+        *,
+        personal_owner: bool = False,
     ) -> None:
-        """单调用管线（§5.3）。顺序不变量：cell-done 落态 commit 严格早于 deduct。"""
+        """单调用管线（§5.3）。顺序不变量：cell-done 落态 commit 严格早于 deduct。
+
+        ``personal_owner``: the matrix is private (S8), so the source check accepts personal files of the
+        run's initiator. Cells of personal files never read or write the Team-wide cache.
+        """
         matrix_id = run.matrix_id
         keys = [(file_id, c) for c in col_ids]
 
@@ -892,7 +1203,7 @@ class KbMatrixEngine:
 
         source_check = None
         if use_guard_enabled():
-            source_check = await self._source_check(file_id, run.initiated_by, run.team_id, run.workspace_id, kb_store)
+            source_check = await self._source_check(file_id, run.initiated_by, run.team_id, run.workspace_id, kb_store, personal_owner=personal_owner)
             if not source_check.allowed:
                 n = await self._store.fail_cells(matrix_id, keys, fail_reason="source_unavailable", fail_hint=source_check.reason)
                 await self._store.increment_run_counters(run.run_id, failed=n)
@@ -901,26 +1212,28 @@ class KbMatrixEngine:
             if file is None or file.active_generation_id != source_check.generation_id:
                 raise MatrixRunError("source_unavailable")
 
-        chunks3 = await kb_store.get_ordered_chunks_for_file(file)
-        if not chunks3:
+        chunks = await kb_store.get_ordered_source_chunks(file)
+        if not chunks:
             n = await self._store.fail_cells(matrix_id, keys, fail_reason="llm_invoke_failed", fail_hint="file_has_no_chunks")
             await self._store.increment_run_counters(run.run_id, failed=n)
             return
-        # Reduce projection: backfill_chunk_ids accepts only pairs (review P2)
-        chunks2 = [(cid, content) for cid, content, _ in chunks3]
-        text = "\n\n".join(content for _, content, _ in chunks3)
+        # Every cited quote is located in this file's own chunks, which also gives its page (S7).
+        sources = SourceIndex(chunks, file.mime_type)
+        text = "\n\n".join(c.content for c in chunks)
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-        # 2. Cache lookup (§5.6): key model = primary resolved by same router instance
+        # 2. Cache lookup (§5.6): key model = primary resolved by same router instance. The pool is Team-wide, so
+        # personal files (private matrices, S8) neither look it up nor add to it.
         primary = self._resolve_primary(router)
+        cacheable = file.scope != "personal"
         done_n = failed_n = cached_n = 0
         pending: list[tuple[dict[str, Any], str | None]] = []
         for col_id in col_ids:
             col = col_def_by_id[col_id]
-            lookup_key = build_cache_key(run.team_id, content_hash, col, primary[1]) if primary else None
+            lookup_key = build_cache_key(run.team_id, content_hash, col, primary[1]) if primary and cacheable else None
             hit = await self._store.find_cached_cell(run.team_id, lookup_key) if lookup_key else None
             if hit is not None:
-                variants = self._reground_cached_variants(hit.variants, chunks2)
+                variants = self._reground_cached_variants(hit.variants, sources)
                 landed = await self._finalize_ai_cell(
                     run,
                     matrix_id,
@@ -933,6 +1246,7 @@ class KbMatrixEngine:
                     cached=True,
                     kb_store=kb_store,
                     source_check=source_check,
+                    personal_owner=personal_owner,
                 )
                 if landed:
                     done_n += 1
@@ -969,6 +1283,7 @@ class KbMatrixEngine:
         fields = [_degraded_field(col) for col, _ in pending]
         n_chunks = max(1, math.ceil(len(text) / CHUNK_CHARS))
         pref = health.next_pref()
+        state["model_calls"] = state.get("model_calls", 0) + 1
         try:
             result = await asyncio.wait_for(
                 extractor.extract(text=text, fields=fields, cross_verify_enabled=cv, user_pref=pref, strict_invoke=True),
@@ -982,6 +1297,7 @@ class KbMatrixEngine:
             # strict_invoke throws = exhausted fallback chain; provider failure is temporary, does not stop system-wide execution (§5.4)
             logger.warning("kb_matrix.call_invoke_failed run=%s file=%s", run.run_id, file_id, exc_info=True)
             health.record_chain_failure()
+            state["chain_failures"] = state.get("chain_failures", 0) + 1
             n = await self._store.fail_cells(matrix_id, pending_keys, fail_reason="llm_invoke_failed")
             await self._store.increment_run_counters(run.run_id, done=done_n, failed=n, cached=cached_n)
             return
@@ -992,7 +1308,7 @@ class KbMatrixEngine:
 
         if cv:
             metrics.inc("kb_matrix.cross_verify_call")  # Observe double-cost share (§6)
-        backfill_chunk_ids(result.fields, chunks2)
+        bind_field_sources(result.fields, sources)
         variants_map = wrap_extractor_result_to_variants(result.fields, fields)
         file_version = int(getattr(file, "version", 1) or 1)
         for col, lookup_key in pending:
@@ -1007,7 +1323,12 @@ class KbMatrixEngine:
                         v["normalized"] = normalize_matrix_value(raw_value, col)
                         break
             if fname in variants_map:
-                store_key = build_cache_key(run.team_id, content_hash, col, result.effective_model) if result.effective_model else lookup_key
+                if not cacheable:
+                    store_key = None
+                elif result.effective_model:
+                    store_key = build_cache_key(run.team_id, content_hash, col, result.effective_model)
+                else:
+                    store_key = lookup_key
                 landed = await self._finalize_ai_cell(
                     run,
                     matrix_id,
@@ -1020,13 +1341,14 @@ class KbMatrixEngine:
                     cached=False,
                     kb_store=kb_store,
                     source_check=source_check,
+                    personal_owner=personal_owner,
                 )
                 if landed:
                     done_n += 1
             else:
-                # LLM omitted field (value=null is valid done; only missing key is parse failure)
-                await self._store.fail_cells(matrix_id, [(file_id, str(col["column_id"]))], fail_reason="llm_parse_failed")
-                failed_n += 1
+                # LLM omitted field (value=null is valid done; only missing key is parse failure).
+                # Count only cells actually failed: a cell whose file left the matrix mid-call is not counted.
+                failed_n += await self._store.fail_cells(matrix_id, [(file_id, str(col["column_id"]))], fail_reason="llm_parse_failed")
 
         # 4. Billing (§6.2): cell state committed → deduct (never reverse: crash would double-charge)
         tokens_in = int(result.usage_input_tokens or 0)
@@ -1114,6 +1436,7 @@ class KbMatrixEngine:
         cached: bool,
         kb_store: Any = None,
         source_check: Any = None,
+        personal_owner: bool = False,
     ) -> bool:
         """AI 值落格：哨兵 → needs_review；edited 格处理按 scope 分流（B-P1-3）：
         - 批量 run：FR-9 在 run 全时长成立——enqueue 后被编辑的格不覆盖（store 层
@@ -1131,6 +1454,7 @@ class KbMatrixEngine:
                 run.workspace_id,
                 kb_store,
                 expected_generation=source_check.generation_id if source_check else "",
+                personal_owner=personal_owner,
             )
             if not check.allowed:
                 n = await self._store.fail_cells(matrix_id, [(file_id, column_id)], fail_reason="source_unavailable", fail_hint=check.reason)
@@ -1179,24 +1503,52 @@ class KbMatrixEngine:
             logger.info("kb_matrix.finalize_guard_hit run=%s matrix=%s file=%s col=%s", run.run_id, matrix_id, file_id, column_id)
         return landed
 
-    async def _source_check(self, file_id: str, user_id: str, team_id: str, workspace_id: str, index: Any, *, expected_generation: str | None = None):
+    async def _source_check(
+        self,
+        file_id: str,
+        user_id: str,
+        team_id: str,
+        workspace_id: str,
+        index: Any,
+        *,
+        expected_generation: str | None = None,
+        personal_owner: bool = False,
+    ):
+        """The use-guard check of one source file for ``user_id`` (the run's initiator).
+
+        Personal files are refused, except the initiator's own in a private matrix (``personal_owner``, S8);
+        those then pass the same scope rule and file grants as any other file.
+        """
+
         async def authorize(file):
-            return bool(
-                self._file_authorizer and file.scope != "personal" and await self._file_authorizer(file, user_id, team_id, workspace_id, execute=True)
-            )
+            if file.scope == "personal" and not (personal_owner and KbPermission.owner_of(file) == user_id):
+                return False
+            return bool(self._file_authorizer and await self._file_authorizer(file, user_id, team_id, workspace_id, execute=True))
+
+        async def levels():
+            # A file in a named knowledge base needs the initiator's level in the matrix's Space.
+            resolve = getattr(self._file_authorizer, "knowledge_levels", None)
+            if not callable(resolve):
+                return None
+            try:
+                return await resolve(user_id, team_id, workspace_id)
+            except Exception:
+                return None
 
         scope = ScopeContext(user_id=user_id, team_id=team_id, workspace_id=workspace_id, role="user")
         return await KbUseEligibility(self._files_store, self._artifact_store, index).check(
-            file_id, scope, authorize, expected_generation=expected_generation
+            file_id, scope, authorize, expected_generation=expected_generation, resolve_levels=levels
         )
 
     def _reground_cached_variants(
         self,
         source_variants: list[dict[str, Any]],
-        chunks2: list[tuple[str, str]],
+        sources: SourceIndex,
     ) -> list[dict[str, Any]]:
         """缓存复制句柄卫生（§5.6 review P2）：不搬源 ws 的 chunk_id/page 句柄，
-        对 caller 自己文件的 chunks 重跑 backfill（同 content_hash ⇒ 内容相同必命中）。
+        对 caller 自己文件的 chunks 重新定位（同 content_hash ⇒ 内容相同必命中）。
+        Document matrix S7: the page and ``chunk_index`` are re-derived from the caller's chunks
+        the same way as ``chunk_id``; a variant whose quote is not found carries none of them.
         毒缓存收口路④（M3 review S-P1-1）：剔除人工来源 variant。**真双保险两条件**
         （impl-diff review S-P2-a）：`extracted_by` 以 user_edit 起头（user_edit /
         user_edit_superseded）**或** variant 级 `edited_by_user`——superseded 变体由
@@ -1209,12 +1561,11 @@ class KbMatrixEngine:
             if str(v.get("extracted_by") or "").startswith("user_edit") or v.get("edited_by_user"):
                 continue
             nv = dict(v)
-            nv["chunk_id"] = None
-            nv["page"] = None
-            excerpt = nv.get("source_excerpt")
-            if excerpt and isinstance(excerpt, str):
-                probe: dict[str, dict[str, Any]] = {"_": {"source_snippet": excerpt}}
-                backfill_chunk_ids(probe, chunks2)
-                nv["chunk_id"] = probe["_"].get("chunk_id")
+            nv.pop("chunk_index", None)
+            location = sources.locate(nv.get("source_excerpt"))
+            nv["chunk_id"] = location.chunk_id if location else None
+            nv["page"] = location.page if location else None
+            if location is not None:
+                nv["chunk_index"] = location.chunk_index
             out.append(nv)
         return out

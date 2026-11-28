@@ -33,9 +33,9 @@ Steht auf der Seite stattdessen „Ihr Konto ist eingerichtet“, wurde Ihr Kont
 1. Wählen Sie auf der Anmeldeseite „Passwort vergessen?“, geben Sie die E-Mail-Adresse ein, mit der Sie sich anmelden, und wählen Sie „Link zum Zurücksetzen senden“.
 2. Wenn „Prüfen Sie Ihr Postfach“ angezeigt wird, öffnen Sie den Link in der E-Mail. Zum Schutz der Konten zeigt die Seite denselben Hinweis an, unabhängig davon, ob die E-Mail-Adresse registriert ist.
 3. Geben Sie unter „Neues Passwort festlegen“ das neue Passwort zweimal ein und wählen Sie „Neues Passwort speichern“.
-4. Sie sehen „Passwort aktualisiert“. Ein Link, den Sie selbst angefordert haben, meldet Sie direkt an – wählen Sie dann die Schaltfläche „… öffnen“. Bei einem Link, den die Administration für Sie erstellt hat, wählen Sie „Zur Anmeldung“ und melden sich mit dem neuen Passwort an.
+4. Sie sehen „Passwort aktualisiert“. Nach dem Zurücksetzen über den Link aus der E-Mail wird Ihre E-Mail-Adresse automatisch bestätigt und Sie werden angemeldet. Wählen Sie „… öffnen“, um fortzufahren. Bei einem Link, den die Administration für Sie erstellt hat, wählen Sie „Zur Anmeldung“ und melden sich mit dem neuen Passwort an.
 
-Links zum Zurücksetzen funktionieren nur einmal und laufen ab. Wenn Sie „Dieser Link funktioniert nicht mehr“ sehen, wählen Sie „Neuen Link zum Zurücksetzen anfordern“.
+Links zum Zurücksetzen per E-Mail sind 24 Stunden gültig. Von der Administration erstellte Links können einmal verwendet werden und laufen ab. Wenn Sie „Dieser Link funktioniert nicht mehr“ sehen, wählen Sie „Neuen Link zum Zurücksetzen anfordern“.
 
 „Wir können gerade keine E-Mails senden“ bedeutet, dass Ihr Team den E-Mail-Versand nicht aktiviert hat. Wenden Sie sich an die Teamleitung oder die Administration – dort kann auf der Seite „Mitglieder“ ein Link zum Zurücksetzen des Passworts für Sie erstellt werden.
 

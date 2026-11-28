@@ -143,4 +143,5 @@ def test_feishu_report_turn_answer_drops_chat_chips() -> None:
     report = NeutralTurnState(turn_id="t_2")
     apply_event(report, _Ev("canvas.section_added", {"section": {"id": "sec_1", "kind": "narrative", "markdown": "x"}}))
     assert report.section_list(), "夹具必须真的形成报告轮"
-    assert answer_text_for_card(report, "完整报告见画布 [cite:3]。") == "完整报告见画布 。"
+    # Report Turns drop the chat's citation marks; the card keeps the pointer sentence the web answer no longer has.
+    assert answer_text_for_card(report, "华东下滑 8% [cite:3]。", answer_locale="zh-CN") == "华东下滑 8% 。\n\n完整报告见画布。"

@@ -5,16 +5,22 @@
  * conflict, plus Undo all. Undo only restores what Coach wrote; when the Owner also changed a field the row
  * shows the three values and changes nothing until the Owner chooses.
  */
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { draftChangeSection, draftFieldLabelKey, type AgentConfigSectionKey } from "@/lib/agent-draft-changes";
+import { draftChangeSection, draftFieldLabelKey, type AgentConfigLayout, type AgentConfigSectionKey } from "@/lib/agent-draft-changes";
 import { ApiError } from "@/lib/api-client";
 import { changeAgentCoachFields, type AgentDraftChange, type AgentWorkingCopyValue } from "@/lib/agents-api";
 import { CardStatus, useCardStatus } from "./agent-ci-shared";
+
+/**
+ * What 对比 shows for a row (FEATURE_AGENT_RELEASE_BAR): the page renders the before → after text; null when the
+ * row has no text to compare (a list field shows its added and removed items inline instead).
+ */
+export type CoachCompareView = (row: AgentDraftChange) => ReactNode | null;
 
 type CoachRow = AgentDraftChange & { coach: NonNullable<AgentDraftChange["coach"]> };
 
@@ -79,6 +85,9 @@ export function CoachChangesSection({
   editorDirty,
   onChanged,
   onOpenSection,
+  layout = "legacy",
+  aiProposalIds,
+  compare,
 }: {
   agentId: string;
   changes: readonly AgentDraftChange[];
@@ -87,17 +96,28 @@ export function CoachChangesSection({
   editorDirty: boolean;
   onChanged: () => Promise<void>;
   onOpenSection?: (section: AgentConfigSectionKey) => void;
+  /** Which Configure layout "edit" opens a section of. */
+  layout?: AgentConfigLayout;
+  /** FEATURE_AGENT_RELEASE_BAR: Coach proposals that AI 优化 made; their rows read AI 优化 · 改写了… */
+  aiProposalIds?: ReadonlySet<string>;
+  /** FEATURE_AGENT_RELEASE_BAR: a text row shows one line with 对比 instead of the whole new text. */
+  compare?: CoachCompareView;
 }) {
   const t = useTranslations("agents_marketplace");
+  const tv = useTranslations("agent_config_v2");
   const headingId = useId();
   const rows = coachChangeRows(changes);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useCardStatus();
   const [conflict, setConflict] = useState<CoachRow | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
+  const [comparing, setComparing] = useState<CoachRow | null>(null);
   if (!rows.length) return null;
+  const isAi = (row: CoachRow) => Boolean(aiProposalIds?.has(row.coach.proposal_id));
+  const allAi = rows.every(isAi);
 
-  const label = (row: CoachRow) => t(draftFieldLabelKey(row.path) as never);
+  // The redesigned page calls the instructions 工作说明, as its Configure field does.
+  const label = (row: CoachRow) => compare && row.path === "/definition/system_prompt" ? tv("field_instructions") : t(draftFieldLabelKey(row.path) as never);
   const applied = rows.filter((row) => row.coach.state === "applied");
   const conflicted = applied.filter((row) => row.coach.conflict);
   const undone = rows.filter((row) => row.coach.state === "undone");
@@ -156,7 +176,7 @@ export function CoachChangesSection({
   return (
     <section className="am-coach-changes" aria-labelledby={headingId}>
       <header>
-        <h3 id={headingId}>{t("coach_changes_title")}</h3>
+        <h3 id={headingId}>{compare && allAi ? tv("strip_ai_title") : t("coach_changes_title")}</h3>
         <span>{count}{conflicted.length ? `${t("version_list_separator")}${t("coach_changes_conflicted", { count: conflicted.length })}` : null}</span>
         {applied.length > 1 ? (
           <Button
@@ -202,14 +222,21 @@ export function CoachChangesSection({
             : row.coach.conflict
               ? null
               : { label: t("coach_change_reapply"), onClick: () => void run(`reapply:${row.path}`, "reapply", [row.path], t("coach_change_reapplied", { field: label(row) })) };
+          const compareView = compare ? compare(row) : null;
           return (
             <li key={row.path} data-state={row.coach.state}>
               <span className="am-coach-field">
+                {compare && isAi(row) ? <Badge tone="accent">{tv("strip_ai")}</Badge> : null}
                 {label(row)}
                 {isApplied && row.coach.conflict ? <Badge tone="warning">{t("coach_change_badge_conflict")}</Badge> : null}
                 {!isApplied ? <Badge tone="neutral">{t("coach_change_badge_undone")}</Badge> : null}
               </span>
-              <RowDiff row={row} />
+              {compareView ? (
+                <span className="am-coach-diff am-cfg2-strip-line">
+                  {tv(isAi(row) ? "strip_rewrote" : "strip_changed", { field: label(row) })}
+                  <Button variant="ghost" size="sm" aria-label={tv("compare_named", { field: label(row) })} onClick={() => setComparing(row)}>{tv("compare")}</Button>
+                </span>
+              ) : <RowDiff row={row} />}
               {action ? (
                 <Button
                   variant="ghost"
@@ -227,6 +254,12 @@ export function CoachChangesSection({
       </ul>
       {disabledReason ? <p className="am-ci-note">{disabledReason}</p> : null}
       <CardStatus status={status} />
+      {comparing && compare ? (
+        <Dialog title={tv("compare_title", { field: label(comparing) })} onClose={() => setComparing(null)} closeLabel={tv("close")} width={760}
+          footer={<Button variant="secondary" onClick={() => setComparing(null)}>{tv("close")}</Button>}>
+          {compare(comparing)}
+        </Dialog>
+      ) : null}
       {conflict ? (
         <Dialog
           title={t("coach_conflict_title", { field: label(conflict) })}
@@ -241,7 +274,7 @@ export function CoachChangesSection({
           ) : (
             <>
               {onOpenSection ? (
-                <Button variant="ghost" onClick={() => { const section = draftChangeSection(conflict.path); setConflict(null); onOpenSection(section); }}>
+                <Button variant="ghost" onClick={() => { const section = draftChangeSection(conflict.path, layout); setConflict(null); onOpenSection(section); }}>
                   {t("coach_conflict_edit")}
                 </Button>
               ) : null}

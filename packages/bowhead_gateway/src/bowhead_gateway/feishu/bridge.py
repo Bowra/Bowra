@@ -8,7 +8,6 @@ import logging
 import os
 import re
 from dataclasses import dataclass, replace
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 from uuid import uuid4
@@ -21,6 +20,7 @@ from bowhead_core.source_linkage_copy import (
 )
 
 from bowhead_core import Orchestrator, TurnRequest, get_event_registry
+from bowhead_gateway.datarc_context import DatarcTurnContext, recovered_datarc_source, resolve_datarc_turn_context
 from bowhead_gateway.feishu import renderer
 from bowhead_gateway.feishu.client import FeishuAPIError, FeishuClient
 from bowhead_gateway.im.blocks import Caveat, ReportLifecycleLine, SourceLinkageLine, SourcesBlock, format_source_lines
@@ -65,13 +65,14 @@ class FeishuInboundMessage:
 @dataclass(frozen=True)
 class FeishuBoundUser:
     user_id: str
-    team_id: str | None
+    team_id: str
     email: str | None
     display_name: str | None
     bowhead_workspace_id: str
     datarc_workspace_id: str
     workspace_role: str
     member_uid: str
+    datarc: DatarcTurnContext
 
 
 def parse_message_event(body: dict[str, Any], *, bot_open_id: str = "") -> FeishuInboundMessage | None:
@@ -316,14 +317,16 @@ class FeishuTurnBridge:
             return {"status": "buffered", "turn_id": _steer.active_turn_id}
         # _steer.kind == "proceed" → fall through to the fresh-turn flow below.
 
-        datarc_client, datarc_unavailable, vector_client = await self._resolve_team_runtime_clients(bound.team_id)
+        datarc = bound.datarc
         turn_req = TurnRequest(
             session_id=session_id,
             workspace_id=bound.bowhead_workspace_id,
             active_datarc_project=bound.datarc_workspace_id,
-            datarc_client=datarc_client,
-            datarc_unavailable=datarc_unavailable,
-            vector_client=vector_client,
+            datarc_binding=datarc.connection_binding,
+            datarc_source_evidence=recovered_datarc_source(datarc, bound.user_id, bound.team_id, bound.member_uid),
+            datarc_client=datarc.datarc_client,
+            datarc_unavailable=datarc.datarc_unavailable,
+            vector_client=datarc.vector_client,
             user_id=bound.user_id,
             member_uid=bound.member_uid,
             text=text,
@@ -339,8 +342,6 @@ class FeishuTurnBridge:
         except RuntimeError as exc:
             if str(exc) != "team_model_runtime_unavailable":
                 raise
-            # Gate only **with a team**; teamless dev/legacy bindings retain the old path
-            # (aligned with chat /send's 409 only when resolved_team_id is set).
             # credential-readiness batch 2 (tech-design §16 register): unconfigured team model ->
             # explicit channel message, no turn creation. Previously continued without team_router,
             # reaching RefusalAdapter in prod for a loud turn failure without channel attribution. Copy:
@@ -500,10 +501,9 @@ class FeishuTurnBridge:
             )
             return None, "needs_workspace"
         bowhead_workspace_id = str(selected["workspace_id"])
+        team_id = str(selected.get("team_id") or "")
         datarc_workspace_id = str(selected.get("datarc_workspace_id") or "")
-        if not datarc_workspace_id:
-            datarc_workspace_id = bowhead_workspace_id
-        if datarc_workspace_id.startswith("ws_"):
+        if not team_id or not datarc_workspace_id or datarc_workspace_id.startswith("ws_"):
             await self._reply_card(
                 inbound.message_id,
                 renderer.error_card(
@@ -515,10 +515,13 @@ class FeishuTurnBridge:
             return None, "denied"
         role = str(selected.get("role") or "member")
         try:
+            datarc = await resolve_datarc_turn_context(
+                self.app, team_id=team_id, workspace_id=bowhead_workspace_id, pinned_project=datarc_workspace_id
+            )
             member_uid = await self._resolve_member_uid(
                 identity=self._datarc_member_identity(user=user, email=email),
                 datarc_workspace_id=datarc_workspace_id,
-                team_id=getattr(user, "team_id", None),
+                datarc_client=datarc.datarc_client,
             )
         except Exception as exc:
             logger.warning(
@@ -548,13 +551,14 @@ class FeishuTurnBridge:
             return None, "denied"
         return FeishuBoundUser(
             user_id=user.id,
-            team_id=getattr(user, "team_id", None),
+            team_id=team_id,
             email=email or getattr(user, "email", None),
             display_name=getattr(user, "display_name", None),
             bowhead_workspace_id=bowhead_workspace_id,
             datarc_workspace_id=datarc_workspace_id,
             workspace_role=role,
             member_uid=member_uid,
+            datarc=datarc,
         ), "ok"
 
     async def _resolve_user_context(
@@ -755,20 +759,14 @@ class FeishuTurnBridge:
         *,
         identity: str,
         datarc_workspace_id: str,
-        team_id: str | None = None,
+        datarc_client: Any | None = None,
     ) -> str | None:
         resolver = getattr(self.app.state, "member_resolver", None)
-        datarc_client, unavailable, _vector = await self._resolve_team_runtime_clients(team_id)
-        if unavailable or datarc_client is None:
+        if datarc_client is None:
             return None
         if resolver is not None and identity:
             try:
-                try:
-                    return await resolver.resolve(identity, datarc_workspace_id, datarc=datarc_client)
-                except TypeError:
-                    # Test and adapter implementations that predate the explicit
-                    # client parameter may hold a team-scoped client themselves.
-                    return await resolver.resolve(identity, datarc_workspace_id)
+                return await resolver.resolve(identity, datarc_workspace_id, datarc=datarc_client)
             except MemberNotFoundError:
                 logger.warning(
                     "feishu.member_uid_not_found identity=%s ws=%s",
@@ -806,24 +804,6 @@ class FeishuTurnBridge:
             session_id=session_id,
             message_text=text or "",
         )
-
-    async def _resolve_team_runtime_clients(
-        self,
-        team_id: str | None,
-    ) -> tuple[Any | None, bool, Any | None]:
-        """Mirror Web chat's per-team Datarc resolution for Feishu turns.
-
-        A configured-but-broken team Datarc connection must fail closed via
-        datarc_unavailable=True; otherwise turn_runner would fall back to the process-global
-        Datarc client and break tenant isolation.
-        """
-        if not team_id:
-            return None, False, None
-        from bowhead_gateway._turn_runtime import _resolve_turn_datarc_runtime
-
-        request = SimpleNamespace(app=self.app)
-        datarc_client, datarc_unavailable, vector_client = await _resolve_turn_datarc_runtime(request, team_id)
-        return datarc_client, datarc_unavailable, vector_client
 
     async def _preflight_credits_and_entitlement(self, bound: FeishuBoundUser, *, locale: str) -> str | None:
         if not bound.team_id:
@@ -1016,6 +996,8 @@ class FeishuTurnBridge:
         """Answer from the persisted Turn when its live events never reached this mirror."""
         answer = str(getattr(turn, "final_answer", "") or "")
         if str(turn.status) == "completed" and answer.strip():
+            if await self._turn_changed_report(str(turn.id)):
+                answer = with_report_pointer(answer, answer_locale)
             await self._reply_card(
                 source_message_id,
                 renderer.answer_card(answer, locale=locale, answer_locale=answer_locale),
@@ -1033,6 +1015,23 @@ class FeishuTurnBridge:
         else:
             await self._reply_card(source_message_id, card, tenant_key=tenant_key)
         await self.store.mark_message_status(message_id=source_message_id, status="failed")
+
+    async def _turn_changed_report(self, turn_id: str) -> bool:
+        """Whether the Turn's stored final payload names report sections it added or revised; False when unknown."""
+        store = getattr(self.app.state, "turn_log_store", None)
+        if store is None:
+            return False
+        try:
+            rows = await store.list_events(turn_id, event_types=("lead.final.payload",))
+        except Exception:
+            logger.warning("feishu.report_pointer_lookup_failed turn=%s", turn_id, exc_info=True)
+            return False
+        for row in reversed(rows):
+            payload = getattr(row, "payload", None)
+            if isinstance(payload, dict):
+                changes = payload.get("report_changes")
+                return isinstance(changes, dict) and bool(changes.get("added") or changes.get("updated"))
+        return False
 
     async def _mirror_turn_events(
         self,
@@ -1158,7 +1157,7 @@ class FeishuTurnBridge:
                 pending_patch = True
             if event.event_type == "final_answer":
                 answer = state.final_answer or str(payload.get("text") or "")
-                answer = answer_text_for_card(neutral, answer)
+                answer = answer_text_for_card(neutral, answer, answer_locale=answer_locale)
                 _link = await self.store.get_turn_link(turn_id)
                 _chat_type = str((getattr(_link, "meta", None) or {}).get("chat_type") or "")
                 await refresh_kb_citation_labels(neutral, self.app, private_chat=_chat_type == "p2p")
@@ -1223,7 +1222,9 @@ class FeishuTurnBridge:
                     await self._patch_card(
                         answer_message_id,
                         renderer.answer_card(
-                            state.final_answer or "",
+                            # The same answer text as the first card: report Turns drop citation marks and keep
+                            # the pointer sentence.
+                            answer_text_for_card(neutral, state.final_answer or "", answer_locale=answer_locale),
                             locale=locale,
                             answer_locale=answer_locale,
                             artifacts=state.inline_artifacts,
@@ -1526,13 +1527,15 @@ class FeishuTurnBridge:
         rc = clarification_runtime_context(req, db_path=getattr(clarify, "db_path", None))
         if not rc:
             return None
+        team_id = rc.get("team_id") or ""
         source_evidence = rc.get("datarc_selection")
+        pinned_project = rc.get("active_datarc_project") or rc.get("datarc_workspace_id")
         recovered_context = None
         recovered_member = ""
         if source_evidence is not None:
             recovered_context, recovered_member = await resolve_datarc_recovery_context(
                 self.app,
-                team_id=rc.get("team_id") or "",
+                team_id=team_id,
                 user_id=req.user_id,
                 workspace_id=req.workspace_id,
                 session_id=req.session_id,
@@ -1541,46 +1544,68 @@ class FeishuTurnBridge:
                 if req.kind == "tool_context_select" and req.chosen_value != "__bowhead_clarification_skip__"
                 else None,
             )
-            datarc_client, datarc_unavailable, vector_client = (
-                recovered_context.datarc_client,
-                recovered_context.datarc_unavailable,
-                recovered_context.vector_client,
+        elif pinned_project:
+            # Legacy cards can resume only with a freshly verified identity in their original workspace.
+            user_store = self.app.state.user_store
+            user = await user_store.get_user(req.user_id)
+            if (
+                not isinstance(pinned_project, str)
+                or pinned_project.startswith("ws_")
+                or not team_id
+                or not user
+                or not user.email_verified
+                or not user.email
+                or await user_store.get_workspace_team_id(req.workspace_id) != team_id
+            ):
+                return "terminal_protocol_surface_unavailable"
+            recovered_context = await resolve_datarc_turn_context(
+                self.app, team_id=team_id, workspace_id=req.workspace_id, pinned_project=pinned_project
             )
-        else:
-            datarc_client, datarc_unavailable, vector_client = await self._resolve_team_runtime_clients(rc.get("team_id"))
+            if recovered_context.connection_binding is None:
+                return "terminal_protocol_surface_unavailable"
+            try:
+                recovered_member = await self.app.state.member_resolver.resolve(
+                    user.email, pinned_project, datarc=recovered_context.datarc_client, refresh=True
+                )
+            except MemberNotFoundError:
+                return "terminal_protocol_surface_unavailable"
+            except Exception as exc:
+                logger.warning("feishu.clarification_datarc_reauthorization_failed request_id=%s error_type=%s", request_id, type(exc).__name__)
+                return "clarification_resume_preflight_unavailable"
+        datarc = recovered_context or await resolve_datarc_turn_context(self.app, team_id=team_id, workspace_id=req.workspace_id)
         from bowhead_gateway.turn_service import build_resume_turn_request
 
-        if rc.get("team_id") and team_router is None:
+        if team_id and team_router is None:
             team_router = await self._resolve_team_router(
-                rc.get("team_id"),
+                team_id,
                 entrypoint="clarification",
             )
 
         turn_req = build_resume_turn_request(
             req,
             source_db_path=getattr(clarify, "db_path", None),
-            datarc_client=datarc_client,
-            datarc_unavailable=datarc_unavailable,
-            vector_client=vector_client,
+            datarc_binding=datarc.connection_binding,
+            datarc_client=datarc.datarc_client,
+            datarc_unavailable=datarc.datarc_unavailable,
+            vector_client=datarc.vector_client,
             team_router=team_router,
         )
-        if turn_req is not None and recovered_context is not None:
+        if turn_req is None:
+            return None
+        turn_req.member_uid = recovered_member
+        if recovered_context is not None:
             from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
 
-            from bowhead_gateway.datarc_context import recovered_datarc_source
-
-            turn_req.datarc_binding = recovered_context.connection_binding
-            turn_req.member_uid = recovered_member
             turn_req.active_datarc_project = recovered_context.active_datarc_project
             turn_req.active_datarc_workspace_name = recovered_context.active_datarc_workspace_name
             turn_req.accessible_datarc_workspaces = recovered_context.accessible_datarc_workspaces
             turn_req.datarc_source_evidence = recovered_datarc_source(
                 recovered_context,
                 req.user_id,
-                rc.get("team_id") or "",
+                team_id,
                 recovered_member,
             )
-            if req.kind == "tool_context_select":
+            if req.kind == "tool_context_select" and source_evidence is not None:
                 from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
 
                 outcome = await clarify.get_resolution_outcome(req.request_id)
@@ -1591,8 +1616,6 @@ class FeishuTurnBridge:
                 turn_req.datarc_helper_switch_resolution = DatarcHelperSwitchResolution.from_card(
                     req, source=turn_req.datarc_source_evidence, persistence=persistence
                 )
-        if turn_req is None:
-            return None
         # feedback-0713 F2: IM resume (clarification-card click) follows new-message policy: revive soft-deleted sessions,
         # rather than reject (deterministic IM thread binding; see handle_message comment).
         if turn_req.session_id:
@@ -1865,14 +1888,30 @@ class FeishuTurnBridge:
         return f"feishu:{inbound.tenant_key}:{inbound.chat_id}:{inbound.sender_open_id}"
 
 
-def answer_text_for_card(neutral: NeutralTurnState, answer: str) -> str:
+def answer_text_for_card(neutral: NeutralTurnState, answer: str, *, answer_locale: str | None = None) -> str:
     """报告轮：卡片的来源列表来自报告自己的 sources 章（另一套编号），对话摘要里的 [cite:N]
-    与之对不上 ⇒ 摘要去掉角标，出处以报告为准。对话轮原样（来源列表与角标同一套编号）。"""
+    与之对不上 ⇒ 摘要去掉角标，出处以报告为准。对话轮原样（来源列表与角标同一套编号）。
+
+    A report Turn's web answer no longer ends with the pointer sentence: the web shows a report card instead (chat
+    running state R2.2). Feishu has no report card, so its answer keeps the localized pointer.
+    """
     if not neutral.section_list():
         return answer
     from bowhead_core.citation_marks import CITE_MARKER_RE
 
-    return CITE_MARKER_RE.sub("", answer)
+    return with_report_pointer(CITE_MARKER_RE.sub("", answer), answer_locale)
+
+
+def with_report_pointer(answer: str, answer_locale: str | None) -> str:
+    """Append the localized "the full report is on the canvas" sentence once (IM channels have no report card)."""
+    from bowhead_core.report_chrome_text import chrome_text, supported_chrome_langs
+
+    if not answer.strip():
+        return answer
+    # Planning Mode answers and Turns from before the report card already end with the sentence, in any language.
+    if any(chrome_text("canvas_pointer", lang) in answer for lang in supported_chrome_langs()):
+        return answer
+    return answer.rstrip() + "\n\n" + chrome_text("canvas_pointer", str(answer_locale or "en-US"))
 
 
 def _neutral_trust_parts(

@@ -23,9 +23,11 @@ vi.mock("@/lib/api-client", () => {
   return { apiJson: vi.fn(), ApiError };
 });
 vi.mock("@/lib/use-theme-config", () => ({ refreshEffectiveTheme: vi.fn(async () => true) }));
+vi.mock("./running-view-style", () => ({ refreshRunningViewStyle: vi.fn(async () => undefined) }));
 
 import { ApiError, apiJson } from "@/lib/api-client";
 import { refreshEffectiveTheme } from "@/lib/use-theme-config";
+import { refreshRunningViewStyle } from "./running-view-style";
 import { PERSONAL_APPEARANCE_REFRESH_EVENT } from "@/lib/personal-appearance";
 import { WORKSPACE_SETTINGS_SAVED_EVENT } from "@/lib/workspace-settings-notifications";
 
@@ -128,10 +130,13 @@ describe("personal appearance saved results", () => {
     window.addEventListener(PERSONAL_APPEARANCE_REFRESH_EVENT, saved);
     try {
       apiMock.mockResolvedValueOnce(dto("ccd_v3", "applied"));
+      vi.mocked(refreshRunningViewStyle).mockClear();
       await performLiteAction(proposal, "apply");
       expect(saved).toHaveBeenCalledTimes(1);
       expect((saved.mock.calls[0][0] as CustomEvent).detail).toEqual({ teamId: "team_original" });
       expect(refreshEffectiveTheme).toHaveBeenLastCalledWith("team_original");
+      // The run view is a separate account setting in the same form (chat running state R3.6).
+      expect(refreshRunningViewStyle).toHaveBeenCalledTimes(1);
       apiMock.mockRejectedValueOnce(new Error("save failed"));
       await expect(performLiteAction(proposal, "undo")).rejects.toThrow("save failed");
       expect(saved).toHaveBeenCalledTimes(1);
@@ -154,11 +159,13 @@ describe("personal appearance saved results", () => {
       notes: {},
       ...over,
     });
+    vi.mocked(refreshRunningViewStyle).mockClear();
     try {
       dispatchToTurnStore("config.lite_propose", card("ccd_saved", { status: "applied" }));
       expect(getLiteProposal("ccd_saved")?.status).toBe("applied");
       expect(saved).toHaveBeenCalledTimes(1);
       expect(refreshEffectiveTheme).toHaveBeenLastCalledWith("team_original");
+      expect(refreshRunningViewStyle).toHaveBeenCalledTimes(1);
 
       dispatchToTurnStore("config.lite_propose", card("ccd_replayed", { status: "applied" }), "replay");
       dispatchToTurnStore("config.lite_propose", card("ccd_pending"));
@@ -166,6 +173,7 @@ describe("personal appearance saved results", () => {
       expect(getLiteProposal("ccd_unknown")?.status).toBeUndefined();
       expect(saved).toHaveBeenCalledTimes(1);
       expect(refreshEffectiveTheme).toHaveBeenCalledTimes(1);
+      expect(refreshRunningViewStyle).toHaveBeenCalledTimes(1);
       // The receipt stays authoritative: the payload hint never fills the server-state cache.
       expect(getLiteServerState("ccd_saved")).toBeNull();
     } finally {

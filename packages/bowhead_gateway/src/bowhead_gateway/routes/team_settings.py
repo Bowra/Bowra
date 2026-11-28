@@ -39,7 +39,7 @@ from bowhead_core.team_language_policy import (
     normalize_team_language_policy,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bowhead_core import agent_run_limits as run_limits
 from bowhead_core import execution_limits
@@ -686,3 +686,66 @@ async def put_execution_limits(
         ip=request.client.host if request.client else None,
     )
     return with_field_contract("team_execution_limits", _execution_limits_view(after))
+
+
+class FileRetentionReviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    days: Literal[0, 30, 90] | None = Field(description="Use 30 or 90 days, zero to disable, or null to inherit deployment retention.")
+    expected_version: int = Field(ge=0, description="Version returned by the last policy read.")
+
+    @field_validator("days", mode="before")
+    @classmethod
+    def require_integer_days(cls, value):
+        if value is not None and type(value) is not int:
+            raise ValueError("Use an integer day count or null to inherit")
+        return value
+
+
+class FileRetentionApplyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    review_id: str = Field(min_length=32, max_length=32, description="Exact inventory review for this Team administrator.")
+    include_existing: bool = Field(description="Apply this policy to eligible existing versions captured in the review.")
+
+
+@router.get("/file-retention")
+async def get_file_policy(request: Request, response: Response, user: User = Depends(_REQUIRE_TEAM_REFERENCE_RETENTION_ADMIN)):
+    from bowhead_core._db import open_pooled_read_ctx
+    from bowhead_core.file_retention import PolicyError, admin, policy
+
+    from bowhead_gateway.routes.file_library import require_library
+
+    require_library()
+    response.headers["Cache-Control"] = "private, no-store"
+    async with open_pooled_read_ctx(_user_store(request).db_path) as db:
+        await db.execute("BEGIN")
+        try:
+            await admin(db, user.team_id, user.id)
+        except PolicyError as exc:
+            raise HTTPException(exc.status, detail={"error": {"code": exc.code}}) from exc
+        return await policy(db, user.team_id)
+
+
+@router.post("/file-retention/review", dependencies=[Depends(require_not_readonly)])
+async def review_file_policy(body: FileRetentionReviewBody, request: Request, user: User = Depends(_REQUIRE_TEAM_REFERENCE_RETENTION_ADMIN)):
+    from bowhead_core.file_retention import PolicyError, review
+
+    from bowhead_gateway.routes.file_library import require_library
+
+    require_library()
+    try:
+        return await review(_user_store(request).db_path, request.app.state.kb_files_store, user.team_id, user.id, body.days, body.expected_version)
+    except PolicyError as exc:
+        raise HTTPException(exc.status, detail={"error": {"code": exc.code}}) from exc
+
+
+@router.put("/file-retention", dependencies=[Depends(require_not_readonly)])
+async def apply_file_policy(body: FileRetentionApplyBody, request: Request, user: User = Depends(_REQUIRE_TEAM_REFERENCE_RETENTION_ADMIN)):
+    from bowhead_core.file_retention import PolicyError, apply
+
+    from bowhead_gateway.routes.file_library import require_library
+
+    require_library()
+    try:
+        return await apply(_user_store(request).db_path, user.team_id, user.id, body.review_id, body.include_existing)
+    except PolicyError as exc:
+        raise HTTPException(exc.status, detail={"error": {"code": exc.code}}) from exc

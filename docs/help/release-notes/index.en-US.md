@@ -2,6 +2,7 @@
 
 Community source snapshots have independent history. Application versions do not imply that images or a hosted service have been published.
 
+- [v1.7.95](releases/v1.7.95.en-US.md) — Attach library files, follow live results and connect reviewed Notion and n8n tools.
 - [v1.7.76](releases/v1.7.76.en-US.md) — Explore break-even scenarios, reference several slides and get clearer model setup feedback.
 - [v1.7.75](releases/v1.7.75.en-US.md) — Edit supported PowerPoint content and keep revised uploads linked to their originals.
 - [v1.7.73](releases/v1.7.73.en-US.md) — Pin results to the sidebar and improve charts, reports and long conversations.

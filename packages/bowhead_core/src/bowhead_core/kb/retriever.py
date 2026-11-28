@@ -36,6 +36,8 @@ from bowhead_core.kb.synonyms import expand_synonyms_for_query
 from bowhead_core.kb.telemetry import emit_audit
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from bowhead_core.kb.embedder import Embedder
     from bowhead_core.kb.permission import ScopeContext
     from bowhead_core.kb.reranker import Reranker
@@ -343,12 +345,20 @@ class KbRetriever:
         authorize_file: FileAuthorizer | None = None,
         allowed_file_ids: tuple[str, ...] | None = None,
         enforce_source_access: bool = False,
+        permit_file: Callable[[Any], bool] | None = None,
     ) -> KbSearchResult:
-        """4-stage pipeline. Returns KbSearchResult."""
+        """4-stage pipeline. Returns KbSearchResult.
+
+        ``permit_file`` is an Agent's source ceiling on the file's current row (its selected
+        knowledge bases), applied with the access checks before reranking.
+        """
         t0 = time.time()
         if allowed_file_ids == ():
             return KbSearchResult(chunks=[], total_candidates=0, rerank_used=False, latency_ms=0)
-        source_filter = {"allowed_file_ids": allowed_file_ids} if allowed_file_ids is not None else {}
+        # A knowledge base selection pre-filters by chunk key instead of a file list that grows with
+        # the knowledge bases; ``allowed_file_ids`` then only post-filters below.
+        prefilter = allowed_file_ids is not None and getattr(scope_ctx, "knowledge_base_selection", None) is None
+        source_filter = {"allowed_file_ids": allowed_file_ids} if prefilter else {}
 
         # 0.40.3 Bug 5: short-circuit garbage input. Empty/whitespace/<2-char
         # queries produced degenerate embeddings → rerank API 400 rejected
@@ -418,6 +428,9 @@ class KbRetriever:
                         file = await self._files_store.get(file_id) if self._files_store else None
                         check = None
                         if enforce_source_access and (not file or authorize_file is None or not await authorize_file(file)):
+                            seen_checks[file_id] = (None, None)
+                            continue
+                        if permit_file is not None and (not file or not permit_file(file)):
                             seen_checks[file_id] = (None, None)
                             continue
                         if file and use_guard_enabled() and authorize_file is not None:

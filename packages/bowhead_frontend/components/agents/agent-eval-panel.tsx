@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useTranslations } from "next-intl";
+import { ChevronDown } from "lucide-react";
+
+import { Dialog } from "@/components/ui/dialog";
+import { MenuFloating, useMenu, useMenuItem } from "@/components/ui/menu";
 
 import {
   cancelAgentEvalRun,
@@ -140,6 +144,13 @@ function AgentEvalPanelContent({
   tools,
   privateAgent = false,
   liveVersion,
+  onTestSafetyOnly,
+  redesigned = false,
+  liveRevisionId,
+  hasDraft = true,
+  onUnsavedChange,
+  casesRef,
+  reloadRequest = 0,
 }: {
   agentId: string;
   agentName?: string;
@@ -159,8 +170,29 @@ function AgentEvalPanelContent({
   privateAgent?: boolean;
   /** The released version's number, so the page says "released v1" instead of "the released version". */
   liveVersion?: number;
+  /**
+   * Owner draft trial: a private Agent without the Owner's cases offers 试用草稿 on the release bar instead of the
+   * safety-only test, which moves into this suite's menu.
+   */
+  onTestSafetyOnly?: () => void;
+  /**
+   * FEATURE_AGENT_RELEASE_BAR 测试用例 (slices-2-5-tech-design §4): one 添加用例 menu, the suite ⋯ holding the runs and
+   * rail cards (在已发布的 vN 上测试 runs `target: "live"`), and a footer that saves itself.
+   */
+  redesigned?: boolean;
+  /** The released version's revision, which 在已发布的 vN 上测试 names while a candidate exists. */
+  liveRevisionId?: string;
+  /** A saved draft exists; without one the footer offers 在已发布的 vN 上测试 once the cases are saved. */
+  hasDraft?: boolean;
+  /** Unsaved case edits, for the release bar's 测试这次修改 and the page's leave guard. */
+  onUnsavedChange?: (count: number) => void;
+  /** Lets the release bar save the cases before testing (保存并测试). */
+  casesRef?: MutableRefObject<{ save: () => Promise<boolean> } | null>;
+  /** Bumped after suggested cases were accepted: reread the suites so the editor takes the new revision (S13). */
+  reloadRequest?: number;
 }) {
   const t = useTranslations("agents_marketplace");
+  const tc = useTranslations("agent_cases_v2");
   const format = useCiFormat();
   const { activeId: workspaceId } = useSpaceSelection();
   const [manager, setManager] = useState<AgentEvalManager | null>(null);
@@ -246,6 +278,14 @@ function AgentEvalPanelContent({
     () => manager?.runs.find((run) => run.status === "queued" || run.status === "running") ?? null,
     [manager?.runs],
   );
+  // A run on the released version shows its result only in a dialog; say when it finished and offer it.
+  const [liveRunDone, setLiveRunDone] = useState(false);
+  const liveRunActive = useRef(false);
+  useEffect(() => {
+    if (activeRun) setLiveRunDone(false);
+    else if (liveRunActive.current) setLiveRunDone(true);
+    liveRunActive.current = activeRun?.target_kind === "live";
+  }, [activeRun]);
 
   useEffect(() => {
     if (!activeRun) return;
@@ -269,6 +309,23 @@ function AgentEvalPanelContent({
     lastAddRequest.current = addCaseRequest;
     focusCaseEditorRef.current?.();
   }, [addCaseRequest, manager]);
+
+  // Redesigned 测试用例: the page hears about unsaved cases (release bar, leave guard) once the editor holds the suite.
+  const [suiteDialog, setSuiteDialog] = useState<"results" | "auto" | null>(null);
+  const savedSuiteCases = manager?.suites.find((suite) => suite.suite_kind === "owner_quality")?.revision?.cases;
+  const unsavedForPage = builderLoadedFor === agentId ? unsavedCaseChanges(cases, savedSuiteCases ?? []) : 0;
+  useEffect(() => { onUnsavedChange?.(unsavedForPage); }, [onUnsavedChange, unsavedForPage]);
+  useEffect(() => () => onUnsavedChange?.(0), [onUnsavedChange]);
+  // Accepting suggested cases saved a new revision: reread it so a later save keeps the accepted cases (S13).
+  const lastReloadRequest = useRef(reloadRequest);
+  useEffect(() => {
+    if (lastReloadRequest.current === reloadRequest) return;
+    lastReloadRequest.current = reloadRequest;
+    void load().then(() => {
+      setTaskToggled(new Set());
+      setBuilderLoadedFor(null);
+    });
+  }, [load, reloadRequest]);
 
   if (!available) return null;
 
@@ -507,31 +564,267 @@ function AgentEvalPanelContent({
 
   focusCaseEditorRef.current = focusCaseEditor;
 
+  // Redesigned 测试用例 (FEATURE_AGENT_RELEASE_BAR): the release bar saves the cases before 测试这次修改.
+  const saveCases = async (): Promise<boolean> => {
+    if (!manager || busy || submitting.current) return false;
+    submitting.current = true;
+    setBusy("save-suite");
+    try {
+      await persistSuite(false);
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError({ message: runErrorMessage(cause, "eval_save_failed"), cause });
+      return false;
+    } finally {
+      submitting.current = false;
+      setBusy(null);
+    }
+  };
+  if (casesRef) casesRef.current = redesigned ? { save: saveCases } : null;
+
+  /** 在已发布的 vN 上测试: the suite on the released version (`target: "live"`), saved first when it has edits (S11). */
+  const runOnLive = async () => {
+    if (!manager || !workspaceId || busy || submitting.current) return;
+    submitting.current = true;
+    setBusy("run-live");
+    let saved = false;
+    try {
+      const value = await persistSuite(false);
+      saved = true;
+      const suite = value.suites.find((item) => item.suite_kind === "owner_quality");
+      if (!suite?.revision) throw new Error("The saved evaluation suite has no revision");
+      await startSuite(suite, { kind: "live", revision_id: liveRevisionId ?? null });
+      setError(null);
+    } catch (cause) {
+      setError({ message: runErrorMessage(cause, saved ? "eval_saved_run_failed" : "eval_save_failed"), cause });
+      if (cause instanceof ApiError && cause.code === "agent_eval_subject_changed") void load();
+    } finally {
+      submitting.current = false;
+      setBusy(null);
+    }
+  };
+
+  /** 放弃修改: the editor goes back to the saved suite (or to one empty case before the first save). */
+  const discardCases = async () => {
+    if (!await confirm({
+      title: tc("discard_title"),
+      description: tc("discard_body", { count: unsavedChanges }),
+      confirmLabel: tc("discard_confirm"),
+      cancelLabel: tc("discard_keep"),
+      tone: "danger",
+    })) return;
+    setTaskToggled(new Set());
+    setNotice(null);
+    if (ownerSuite) {
+      setBuilderLoadedFor(null);
+    } else {
+      setSuiteName("");
+      setCases([editableCase(1)]);
+    }
+  };
+
   const statusTone = (state: string): BadgeTone => {
     const tone = evidenceTone(state);
     return tone === "positive" ? "positive" : tone === "progress" ? "accent" : tone === "warning" ? "warning" : "danger";
   };
 
+  /** One suite's last own run: its source, counts, answer quality and the causes of attempts without a verdict. */
+  const suiteEvidenceCard = (suite: AgentEvalSuite) => {
+    const summary = suite.evidence.run?.summary;
+    const lastRun = suite.evidence.run;
+    const lastRunAt = lastRun?.finished_at ?? lastRun?.started_at ?? lastRun?.created_at ?? null;
+    const runId = suite.evidence.run?.run_id;
+    const runStatus = suite.evidence.run?.status;
+    const inspection = runId ? inspectedRuns[runId] : null;
+    // Attempts without a verdict, by cause: a time limit or a Tool the evaluation can't run is not an environment fault.
+    const unfinished = inspection?.results?.filter((result) => result.status === "infra_failed") ?? [];
+    const timeLimited = unfinished.filter((result) => TIME_LIMIT_FAILURE_CODES.has(result.failure_code ?? "")).length;
+    const toolNotRun = unfinished.filter((result) => TOOL_NOT_RUN_FAILURE_CODES.has(result.failure_code ?? "")).length;
+    // Some answers depended on a Tool evaluation can't run yet (not only Tools the cases require).
+    const usedToolNotRun = unfinished.some((result) => result.failure_code === TOOL_NOT_RUN_CODE);
+    const infraFailures = unfinished.length - timeLimited - toolNotRun;
+    // Attempts without a verdict by cause (evaluation model, the Agent's model, a Tool, a cancellation, or a
+    // platform error with its reference), each with its cases and fix, as on Release.
+    const attemptCauses = new Map<string, { cases: string[]; tools: string[]; causes: (string | null)[]; references: string[]; roles: string[]; owner: string | null; workspace: string | null }>();
+    for (const result of inspection?.results ?? []) {
+      const stored = storedAttemptFailure(result.deterministic);
+      const reason = attemptFailureReason(result.status, result.failure_code, stored.cause);
+      if (!reason) continue;
+      const entry = attemptCauses.get(reason) ?? { cases: [], tools: [], causes: [], references: [], roles: [], owner: stored.owner, workspace: stored.workspace };
+      const saved = suite.revision?.cases.find((item) => item.case_key === result.case_key);
+      const question = (result.task ?? (saved ? caseTask(saved) : "")).trim();
+      const name = t("version_quoted", { name: question ? (question.length > 40 ? `${question.slice(0, 39)}…` : question) : result.case_key });
+      if (!entry.cases.includes(name)) entry.cases.push(name);
+      if (stored.tool && !entry.tools.includes(stored.tool)) entry.tools.push(stored.tool);
+      if (stored.reference && entry.references.length < 3 && !entry.references.includes(stored.reference)) entry.references.push(stored.reference);
+      if (stored.role) entry.roles.push(stored.role);
+      entry.causes.push(stored.cause);
+      attemptCauses.set(reason, entry);
+    }
+    const translate = (key: string, values?: Record<string, string>) => t(key as never, values as never);
+    const attemptLines = [...attemptCauses.entries()].map(([reason, entry]) => {
+      const detail = attemptReasonDetail(reason, {
+        cases: entry.cases.join(t("version_list_comma")),
+        tools: entry.tools,
+        toolNames: entry.tools.length ? quotedToolNames(entry.tools, t) : undefined,
+        causes: entry.causes,
+        references: entry.references,
+        role: modelRoleLabel(entry.roles[0], translate),
+        owner: entry.owner,
+        workspace: entry.workspace,
+      }, translate);
+      return [t(gateReasonKey(reason) as never), detail].filter(Boolean).join(t("version_list_separator"));
+    });
+    const failedCases = inspection?.results?.filter((result) => result.status === "failed").length ?? 0;
+    // Name the cases (by their question) and the Tools, so "split the case" or "change the point" has a target.
+    const caseNames = (codes: (code: string) => boolean) => [...new Set(unfinished
+      .filter((result) => codes(result.failure_code ?? ""))
+      .map((result) => {
+        const saved = suite.revision?.cases.find((item) => item.case_key === result.case_key);
+        const question = (result.task ?? (saved ? caseTask(saved) : "")).trim();
+        return t("version_quoted", { name: question ? (question.length > 40 ? `${question.slice(0, 39)}…` : question) : result.case_key });
+      }))].join(t("version_list_comma"));
+    const notRunTools = [...new Set(unfinished
+      .filter((result) => TOOL_NOT_RUN_FAILURE_CODES.has(result.failure_code ?? ""))
+      .flatMap((result) => {
+        const stored = result.deterministic as { required_tools_not_run?: unknown; tools_not_run?: unknown } | undefined;
+        const groups = stored?.required_tools_not_run ?? stored?.tools_not_run;
+        return Array.isArray(groups) ? groups.flatMap((group) => typeof group === "string" ? group.split("|") : []) : [];
+      }))];
+    const titleId = `agent-eval-suite-${suite.suite_id}`;
+    return (
+      <article key={suite.suite_id} className="am-ci-card" aria-labelledby={titleId}>
+        <CiCardHead
+          titleId={titleId}
+          title={suite.suite_kind === "platform_contract" ? t("eval_platform_suite_name") : suite.name}
+          body={suite.suite_kind === "platform_contract" ? t("eval_platform_suite_body") : t("eval_owner_suite_body")}
+          // A suite's state counts only "Run this suite" runs; "Not run on its own" says so (a passed
+          // "Test this change" before a release isn't counted here).
+          badge={<Badge tone={statusTone(suite.evidence.state)}>{suite.evidence.state === "valid" ? t("eval_execution_passed") : t(suite.evidence.state === "missing" ? "eval_state_missing_own" : `eval_state_${suite.evidence.state}` as never)}</Badge>}
+        />
+        {lastRun ? (
+          <p className="am-ci-note am-ci-run-source">
+            {/* PRD R20: say which evaluation these numbers come from; the release check is a different one. */}
+            {lastRunAt
+              ? t("eval_last_run_source", { target: t(lastRun.target_kind === "candidate" ? "eval_last_run_candidate" : "eval_last_run_live"), date: format.dateTime(lastRunAt) })
+              : t("eval_last_run_source_undated", { target: t(lastRun.target_kind === "candidate" ? "eval_last_run_candidate" : "eval_last_run_live") })}
+          </p>
+        ) : null}
+        {summary ? (
+          <p className="am-ci-meta">
+            <span>{t("eval_cases")} <b>{summary.case_count ?? 0}</b></span>
+            <span>{t("eval_execution_passed_count")} <b>{summary["pass@k_cases"] ?? 0}</b></span>
+            <span>{t("eval_flaky")} <b>{summary.flaky_cases ?? 0}</b></span>
+          </p>
+        ) : null}
+        <AnswerQuality quality={inspection?.quality ?? lastRun?.quality} />
+        {suite.suite_kind === "owner_quality" && suite.revision?.cases_on_old_defaults?.length ? (
+          <div className="am-ci-ist" data-tone="info">
+            <span className="am-ci-ist-text">{t("eval_old_defaults_notice", { count: suite.revision.cases_on_old_defaults.length })}</span>
+            <span className="am-ci-ist-actions">
+              <Button size="sm" variant="secondary" disabled={archived || busy !== null} loading={busy === `defaults:${suite.suite_id}`} onClick={() => void updateOldDefaults(suite)}>{t("eval_old_defaults_update")}</Button>
+            </span>
+          </div>
+        ) : null}
+        {inspection && runStatus !== "passed" ? <p className="am-ci-note" role="status">{attemptLines.length
+          ? attemptLines.join(" ")
+          : infraFailures > 0
+          ? t("eval_infrastructure_failure", { count: infraFailures })
+          : toolNotRun > 0
+          ? `${t(usedToolNotRun ? "eval_tool_not_run" : "eval_required_tool_not_run", { count: toolNotRun })} ${notRunTools.length
+            ? t("version_reason_detail_tool_not_run", {
+              tools: usedToolNotRun ? listedToolNames(notRunTools, t) : quotedToolNames(notRunTools, t),
+              cases: caseNames((code) => TOOL_NOT_RUN_FAILURE_CODES.has(code)),
+            })
+            : t("version_reason_detail_cases", { cases: caseNames((code) => TOOL_NOT_RUN_FAILURE_CODES.has(code)) })}`
+          : timeLimited > 0
+          ? `${t("eval_time_limit_failure", { count: timeLimited })} ${t("version_reason_detail_time_limit", { cases: caseNames((code) => TIME_LIMIT_FAILURE_CODES.has(code)) })}`
+          : failedCases > 0
+            ? t("eval_failed_cases", { count: failedCases })
+            : t("eval_incomplete_result")}</p> : null}
+        <div className="am-ci-acts">
+          {suite.suite_kind !== "owner_quality" ? <Button variant="secondary" disabled={archived || busy !== null || Boolean(activeRun) || !workspaceId || !suite.revision} loading={busy === `run:${suite.suite_id}`} onClick={() => void runSuite(suite)}>{t("eval_run_suite")}</Button> : null}
+          {runId && runStatus !== "queued" && runStatus !== "running" ? (
+            <Button variant="ghost" disabled={inspectingRunId !== null} loading={inspectingRunId === runId} onClick={() => inspection ? setInspectedRuns((current) => { const next = { ...current }; delete next[runId]; return next; }) : void inspectRun(runId)}>{t(inspection ? "eval_hide_results" : "eval_view_results")}</Button>
+          ) : null}
+        </div>
+        {inspection ? <AgentEvalRunResults key={inspection.run_id} agentId={agentId} run={inspection} /> : null}
+      </article>
+    );
+  };
+  const autoRegressionControls = manager ? <>
+    <label className="am-ci-ctl">
+      <input type="checkbox" checked={manager.trigger_policy?.enabled ?? false} disabled={archived || busy !== null} onChange={() => void changeRegression({ enabled: !(manager.trigger_policy?.enabled ?? false) })} />
+      <span>{t("eval_auto_regression")}</span>
+      <small>{t("eval_auto_regression_body")}</small>
+    </label>
+    {onAskCoach ? <Button size="sm" variant="ghost" disabled={archived || busy !== null} onClick={() => onAskCoach(t("eval_auto_baseline_prefill", { name: agentName || t("eval_review_this_agent") }))}>{t("eval_auto_baseline_action")}</Button> : null}
+    <fieldset className="am-ci-scopes">
+      <legend>{t("eval_auto_events")}</legend>
+      {(["definition", "dependency", "model"] as const).map((kind) => {
+        const key = `on_${kind}_change` as const;
+        return <label key={kind} className="am-ci-ctl" data-disabled={!manager.trigger_policy?.enabled || undefined}><input type="checkbox" checked={manager.trigger_policy?.[key] ?? false} disabled={archived || busy !== null || !manager.trigger_policy?.enabled} onChange={() => void changeRegression({ [key]: !(manager.trigger_policy?.[key] ?? false) })} /><span>{t(`eval_auto_${kind}` as never)}</span></label>;
+      })}
+    </fieldset>
+  </> : null;
   return (
-    <section className="am-ci am-ci-eval" aria-labelledby="agent-eval-title">
-      <div className="am-ci-vhead">
-        <div className="am-ci-vh"><h2 id="agent-eval-title">{t("eval_title")}</h2><p>{t("eval_body")}</p></div>
-        {manager ? <Badge tone="neutral">{manager.target.kind === "candidate"
-          ? t("eval_target_candidate")
-          : liveVersion ? t("eval_target_live_version", { version: liveVersion }) : t("eval_target_live")}</Badge> : null}
-      </div>
+    <section className="am-ci am-ci-eval" aria-labelledby="agent-eval-title" data-redesigned={redesigned || undefined}>
+      {redesigned ? (
+        // The 最近一次测试 card sits above this panel; the platform suite becomes one sentence (design §5).
+        <div className="am-ci-vh am-ev-intro"><h2 id="agent-eval-title" className="sr-only">{t("release_bar_tab_cases")}</h2><p>{tc("intro")}</p></div>
+      ) : (
+        <div className="am-ci-vhead">
+          <div className="am-ci-vh"><h2 id="agent-eval-title">{t("eval_title")}</h2><p>{t("eval_body")}</p></div>
+          {manager ? <Badge tone="neutral">{manager.target.kind === "candidate"
+            ? t("eval_target_candidate")
+            : liveVersion ? t("eval_target_live_version", { version: liveVersion }) : t("eval_target_live")}</Badge> : null}
+        </div>
+      )}
       <CardStatus status={error ? { tone: "error", message: error.message, cause: error.cause, onRetry: error.retry } : notice ? { tone: "success", message: notice } : null} />
       {!manager ? <LoadingSkeleton rows={3} label={t("loading")} /> : (
-        <div className="am-ci-split am-ev-layout" data-coach="true">
+        <div className={redesigned ? "am-ev-layout" : "am-ci-split am-ev-layout"} data-coach={redesigned ? undefined : "true"}>
           <div className="am-ci-col">
             {/* Agent Eval Points E1: one suite card, cases with their points, one primary action. */}
             <article className="am-ci-card am-ev-suite" aria-labelledby="agent-eval-builder-title">
               <div className="am-ev-suite-h">
                 <h3 id="agent-eval-builder-title">{t("eval_suite_header", { name: suiteName.trim() || t("eval_owner_suite_default_name"), count: cases.filter((item) => item.task.trim()).length })}</h3>
+                {redesigned && unsavedChanges > 0 ? <Badge size="sm" tone="warning">{tc("unsaved_chip", { count: unsavedChanges })}</Badge> : null}
                 <span className="am-ci-sp" />
+                {redesigned ? <>
+                  <AddCaseMenu label={tc("add_menu")} disabled={archived || busy !== null} items={[
+                    { id: "manual", label: tc("add_manual"), disabled: cases.length >= MAX_SUITE_CASES, onSelect: focusCaseEditor },
+                    { id: "conversations", label: tc("add_conversations"), disabled: cases.length >= MAX_SUITE_CASES, onSelect: () => setPickingConversations(true) },
+                    { id: "suggest", label: tc("add_suggest"), onSelect: () => setSuggestOpen(true) },
+                  ]} />
+                  <RowActionsMenu label={tc("menu_label")} actions={[
+                    { id: "run-live", label: tc("menu_run_live", { version: `v${liveVersion ?? ""}` }), disabled: archived || busy !== null || Boolean(activeRun) || !workspaceId || !cases.some((item) => item.task.trim()), onSelect: () => void runOnLive() },
+                    { id: "last-live", label: tc("menu_last_results"), onSelect: () => setSuiteDialog("results") },
+                    ...(manager.suites.some((suite) => suite.suite_kind === "platform_contract" && suite.revision) ? [{
+                      id: "platform", label: tc("menu_platform"), disabled: archived || busy !== null || Boolean(activeRun) || !workspaceId,
+                      onSelect: () => { const platform = manager.suites.find((suite) => suite.suite_kind === "platform_contract" && suite.revision); if (platform) void runSuite(platform); },
+                    }] : []),
+                    // 只跑基础安全检查 lives here while the release bar offers 试用草稿 instead (no Owner cases yet).
+                    ...(onTestSafetyOnly && !(ownerSuite?.revision?.case_count ?? 0) ? [{
+                      id: "safety-only", label: t("release_bar_action_test_safety_only"), disabled: archived || busy !== null || !workspaceId, onSelect: onTestSafetyOnly,
+                    }] : []),
+                    { id: "auto", label: tc("menu_auto"), onSelect: () => setSuiteDialog("auto") },
+                    ...(ownerSuite?.revision?.cases_on_old_defaults?.length ? [{
+                      id: "defaults", label: tc("menu_defaults"), disabled: archived || busy !== null, onSelect: () => void updateOldDefaults(ownerSuite),
+                    }] : []),
+                    { id: "rename", label: t("eval_suite_rename"), disabled: archived || busy !== null, onSelect: () => setRenaming((value) => !value) },
+                  ]} />
+                </> : <>
                 <Button size="sm" variant="secondary" disabled={archived || busy !== null || cases.length >= MAX_SUITE_CASES} onClick={() => setPickingConversations(true)}>{t("eval_from_conversations")}</Button>
                 <Button size="sm" variant="secondary" aria-expanded={suggestOpen} disabled={archived || busy !== null} onClick={() => setSuggestOpen((value) => !value)}>{t("eval_suggest")}</Button>
-                <RowActionsMenu label={t("eval_suite_menu")} actions={[{ id: "rename", label: t("eval_suite_rename"), disabled: archived || busy !== null, onSelect: () => setRenaming((value) => !value) }]} />
+                <RowActionsMenu label={t("eval_suite_menu")} actions={[
+                  { id: "rename", label: t("eval_suite_rename"), disabled: archived || busy !== null, onSelect: () => setRenaming((value) => !value) },
+                  // 只跑基础安全检查 lives here while the release bar offers 试用草稿 instead (no Owner cases yet).
+                  ...(onTestSafetyOnly && !(ownerSuite?.revision?.case_count ?? 0) ? [{
+                    id: "safety-only", label: t("release_bar_action_test_safety_only"), disabled: archived || busy !== null || !workspaceId, onSelect: onTestSafetyOnly,
+                  }] : []),
+                ]} />
+                </>}
               </div>
               <p className="am-ci-note">{t("eval_builder_body")}</p>
               {renaming || !ownerSuite ? (
@@ -604,6 +897,32 @@ function AgentEvalPanelContent({
                   );
                 })}
               </div>
+              {redesigned ? <>
+                {/* Redesigned footer: the suite saves itself (both secondary; the release bar holds the page's primary). */}
+                {activeRun ? (
+                  <div className="am-ci-ist am-ev-running" data-tone="info">
+                    <span className="am-ci-ist-text" role="status">{tc(activeRun.target_kind === "live" ? "footer_running_live" : "footer_running", { version: `v${liveVersion ?? ""}` })}</span>
+                    <span className="am-ci-ist-actions"><Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void cancel(activeRun)}>{tc("footer_stop")}</Button></span>
+                  </div>
+                ) : liveRunDone ? (
+                  <div className="am-ci-ist am-ev-running" data-tone="info">
+                    <span className="am-ci-ist-text" role="status">{tc("footer_live_done", { version: `v${liveVersion ?? ""}` })}</span>
+                    <span className="am-ci-ist-actions"><Button size="sm" variant="ghost" onClick={() => { setLiveRunDone(false); setSuiteDialog("results"); }}>{tc("footer_live_view")}</Button></span>
+                  </div>
+                ) : null}
+                <div className="am-ci-acts am-ev-save" data-dirty={unsavedChanges > 0 || undefined}>
+                  {unsavedChanges > 0 ? <span className="am-ev-save-dot" aria-hidden /> : null}
+                  <span className="am-ci-note" role="status">{unsavedChanges > 0 ? tc("footer_unsaved", { count: unsavedChanges }) : savedThisVisit ? t("eval_save_saved") : null}</span>
+                  <span className="am-ci-sp" />
+                  {unsavedChanges > 0 ? <>
+                    <Button variant="secondary" disabled={archived || busy !== null} onClick={() => void discardCases()}>{tc("footer_discard")}</Button>
+                    <Button variant="secondary" disabled={archived || busy !== null} loading={busy === "save-suite"} onClick={() => void saveSuite()}>{tc("footer_save")}</Button>
+                  </> : !hasDraft && ownerSuite?.revision ? (
+                    // With no draft there is nothing for 测试这次修改 to compare; the saved cases can still run on vN.
+                    <Button variant="secondary" disabled={archived || busy !== null || Boolean(activeRun) || !workspaceId} loading={busy === "run-live"} onClick={() => void runOnLive()}>{tc("menu_run_live", { version: `v${liveVersion ?? ""}` })}</Button>
+                  ) : null}
+                </div>
+              </> : <>
               {/* Sticky save bar (Item 5): it says what's unsaved, so collapsing a case never hides that the suite isn't saved. */}
               <div className="am-ci-acts am-ev-save" data-dirty={unsavedChanges > 0 || undefined}>
                 {unsavedChanges > 0 ? <span className="am-ev-save-dot" aria-hidden /> : null}
@@ -613,133 +932,13 @@ function AgentEvalPanelContent({
                 <Button variant="secondary" disabled={archived || busy !== null} loading={busy === "save-suite"} onClick={() => void saveSuite()}>{t("eval_save_suite")}</Button>
                 <Button variant="primary" disabled={archived || busy !== null || Boolean(activeRun) || !workspaceId || !cases.some((item) => item.task.trim())} loading={busy === "save-and-run"} onClick={() => void saveSuite(true)}>{t(unsavedChanges > 0 || !ownerSuite || suiteName.trim() !== ownerSuite.name ? "eval_save_and_run" : "eval_run_suite")}</Button>
               </div>
+              </>}
             </article>
           </div>
 
-          <div className="am-ci-col am-ci-aside">
-            {manager.suites.map((suite) => {
-              const summary = suite.evidence.run?.summary;
-              const lastRun = suite.evidence.run;
-              const lastRunAt = lastRun?.finished_at ?? lastRun?.started_at ?? lastRun?.created_at ?? null;
-              const runId = suite.evidence.run?.run_id;
-              const runStatus = suite.evidence.run?.status;
-              const inspection = runId ? inspectedRuns[runId] : null;
-              // Attempts without a verdict, by cause: a time limit or a Tool the evaluation can't run is not an environment fault.
-              const unfinished = inspection?.results?.filter((result) => result.status === "infra_failed") ?? [];
-              const timeLimited = unfinished.filter((result) => TIME_LIMIT_FAILURE_CODES.has(result.failure_code ?? "")).length;
-              const toolNotRun = unfinished.filter((result) => TOOL_NOT_RUN_FAILURE_CODES.has(result.failure_code ?? "")).length;
-              // Some answers depended on a Tool evaluation can't run yet (not only Tools the cases require).
-              const usedToolNotRun = unfinished.some((result) => result.failure_code === TOOL_NOT_RUN_CODE);
-              const infraFailures = unfinished.length - timeLimited - toolNotRun;
-              // Attempts without a verdict by cause (evaluation model, the Agent's model, a Tool, a cancellation, or a
-              // platform error with its reference), each with its cases and fix, as on Release.
-              const attemptCauses = new Map<string, { cases: string[]; tools: string[]; causes: (string | null)[]; references: string[]; roles: string[]; owner: string | null; workspace: string | null }>();
-              for (const result of inspection?.results ?? []) {
-                const stored = storedAttemptFailure(result.deterministic);
-                const reason = attemptFailureReason(result.status, result.failure_code, stored.cause);
-                if (!reason) continue;
-                const entry = attemptCauses.get(reason) ?? { cases: [], tools: [], causes: [], references: [], roles: [], owner: stored.owner, workspace: stored.workspace };
-                const saved = suite.revision?.cases.find((item) => item.case_key === result.case_key);
-                const question = (result.task ?? (saved ? caseTask(saved) : "")).trim();
-                const name = t("version_quoted", { name: question ? (question.length > 40 ? `${question.slice(0, 39)}…` : question) : result.case_key });
-                if (!entry.cases.includes(name)) entry.cases.push(name);
-                if (stored.tool && !entry.tools.includes(stored.tool)) entry.tools.push(stored.tool);
-                if (stored.reference && entry.references.length < 3 && !entry.references.includes(stored.reference)) entry.references.push(stored.reference);
-                if (stored.role) entry.roles.push(stored.role);
-                entry.causes.push(stored.cause);
-                attemptCauses.set(reason, entry);
-              }
-              const translate = (key: string, values?: Record<string, string>) => t(key as never, values as never);
-              const attemptLines = [...attemptCauses.entries()].map(([reason, entry]) => {
-                const detail = attemptReasonDetail(reason, {
-                  cases: entry.cases.join(t("version_list_comma")),
-                  tools: entry.tools,
-                  toolNames: entry.tools.length ? quotedToolNames(entry.tools, t) : undefined,
-                  causes: entry.causes,
-                  references: entry.references,
-                  role: modelRoleLabel(entry.roles[0], translate),
-                  owner: entry.owner,
-                  workspace: entry.workspace,
-                }, translate);
-                return [t(gateReasonKey(reason) as never), detail].filter(Boolean).join(t("version_list_separator"));
-              });
-              const failedCases = inspection?.results?.filter((result) => result.status === "failed").length ?? 0;
-              // Name the cases (by their question) and the Tools, so "split the case" or "change the point" has a target.
-              const caseNames = (codes: (code: string) => boolean) => [...new Set(unfinished
-                .filter((result) => codes(result.failure_code ?? ""))
-                .map((result) => {
-                  const saved = suite.revision?.cases.find((item) => item.case_key === result.case_key);
-                  const question = (result.task ?? (saved ? caseTask(saved) : "")).trim();
-                  return t("version_quoted", { name: question ? (question.length > 40 ? `${question.slice(0, 39)}…` : question) : result.case_key });
-                }))].join(t("version_list_comma"));
-              const notRunTools = [...new Set(unfinished
-                .filter((result) => TOOL_NOT_RUN_FAILURE_CODES.has(result.failure_code ?? ""))
-                .flatMap((result) => {
-                  const stored = result.deterministic as { required_tools_not_run?: unknown; tools_not_run?: unknown } | undefined;
-                  const groups = stored?.required_tools_not_run ?? stored?.tools_not_run;
-                  return Array.isArray(groups) ? groups.flatMap((group) => typeof group === "string" ? group.split("|") : []) : [];
-                }))];
-              const titleId = `agent-eval-suite-${suite.suite_id}`;
-              return (
-                <article key={suite.suite_id} className="am-ci-card" aria-labelledby={titleId}>
-                  <CiCardHead
-                    titleId={titleId}
-                    title={suite.suite_kind === "platform_contract" ? t("eval_platform_suite_name") : suite.name}
-                    body={suite.suite_kind === "platform_contract" ? t("eval_platform_suite_body") : t("eval_owner_suite_body")}
-                    // A suite's state counts only "Run this suite" runs; "Not run on its own" says so (a passed
-                    // "Test this change" before a release isn't counted here).
-                    badge={<Badge tone={statusTone(suite.evidence.state)}>{suite.evidence.state === "valid" ? t("eval_execution_passed") : t(suite.evidence.state === "missing" ? "eval_state_missing_own" : `eval_state_${suite.evidence.state}` as never)}</Badge>}
-                  />
-                  {lastRun ? (
-                    <p className="am-ci-note am-ci-run-source">
-                      {/* PRD R20: say which evaluation these numbers come from; the release check is a different one. */}
-                      {lastRunAt
-                        ? t("eval_last_run_source", { target: t(lastRun.target_kind === "candidate" ? "eval_last_run_candidate" : "eval_last_run_live"), date: format.dateTime(lastRunAt) })
-                        : t("eval_last_run_source_undated", { target: t(lastRun.target_kind === "candidate" ? "eval_last_run_candidate" : "eval_last_run_live") })}
-                    </p>
-                  ) : null}
-                  {summary ? (
-                    <p className="am-ci-meta">
-                      <span>{t("eval_cases")} <b>{summary.case_count ?? 0}</b></span>
-                      <span>{t("eval_execution_passed_count")} <b>{summary["pass@k_cases"] ?? 0}</b></span>
-                      <span>{t("eval_flaky")} <b>{summary.flaky_cases ?? 0}</b></span>
-                    </p>
-                  ) : null}
-                  <AnswerQuality quality={inspection?.quality ?? lastRun?.quality} />
-                  {suite.suite_kind === "owner_quality" && suite.revision?.cases_on_old_defaults?.length ? (
-                    <div className="am-ci-ist" data-tone="info">
-                      <span className="am-ci-ist-text">{t("eval_old_defaults_notice", { count: suite.revision.cases_on_old_defaults.length })}</span>
-                      <span className="am-ci-ist-actions">
-                        <Button size="sm" variant="secondary" disabled={archived || busy !== null} loading={busy === `defaults:${suite.suite_id}`} onClick={() => void updateOldDefaults(suite)}>{t("eval_old_defaults_update")}</Button>
-                      </span>
-                    </div>
-                  ) : null}
-                  {inspection && runStatus !== "passed" ? <p className="am-ci-note" role="status">{attemptLines.length
-                    ? attemptLines.join(" ")
-                    : infraFailures > 0
-                    ? t("eval_infrastructure_failure", { count: infraFailures })
-                    : toolNotRun > 0
-                    ? `${t(usedToolNotRun ? "eval_tool_not_run" : "eval_required_tool_not_run", { count: toolNotRun })} ${notRunTools.length
-                      ? t("version_reason_detail_tool_not_run", {
-                        tools: usedToolNotRun ? listedToolNames(notRunTools, t) : quotedToolNames(notRunTools, t),
-                        cases: caseNames((code) => TOOL_NOT_RUN_FAILURE_CODES.has(code)),
-                      })
-                      : t("version_reason_detail_cases", { cases: caseNames((code) => TOOL_NOT_RUN_FAILURE_CODES.has(code)) })}`
-                    : timeLimited > 0
-                    ? `${t("eval_time_limit_failure", { count: timeLimited })} ${t("version_reason_detail_time_limit", { cases: caseNames((code) => TIME_LIMIT_FAILURE_CODES.has(code)) })}`
-                    : failedCases > 0
-                      ? t("eval_failed_cases", { count: failedCases })
-                      : t("eval_incomplete_result")}</p> : null}
-                  <div className="am-ci-acts">
-                    {suite.suite_kind !== "owner_quality" ? <Button variant="secondary" disabled={archived || busy !== null || Boolean(activeRun) || !workspaceId || !suite.revision} loading={busy === `run:${suite.suite_id}`} onClick={() => void runSuite(suite)}>{t("eval_run_suite")}</Button> : null}
-                    {runId && runStatus !== "queued" && runStatus !== "running" ? (
-                      <Button variant="ghost" disabled={inspectingRunId !== null} loading={inspectingRunId === runId} onClick={() => inspection ? setInspectedRuns((current) => { const next = { ...current }; delete next[runId]; return next; }) : void inspectRun(runId)}>{t(inspection ? "eval_hide_results" : "eval_view_results")}</Button>
-                    ) : null}
-                  </div>
-                  {inspection ? <AgentEvalRunResults key={inspection.run_id} agentId={agentId} run={inspection} /> : null}
-                </article>
-              );
-            })}
+          {/* The rail's cards move into the suite ⋯ (dialogs below) on the redesigned page. */}
+          {!redesigned ? <div className="am-ci-col am-ci-aside">
+            {manager.suites.map((suite) => suiteEvidenceCard(suite))}
             {activeRun ? (
               <div className="am-ci-ist" data-tone="info">
                 <span className="am-ci-ist-text" role="status">{t("eval_running")}</span>
@@ -782,23 +981,25 @@ function AgentEvalPanelContent({
             })()}
             <details className="am-ci-card">
               <summary>{t("eval_auto_regression")}</summary>
-              <label className="am-ci-ctl">
-                <input type="checkbox" checked={manager.trigger_policy?.enabled ?? false} disabled={archived || busy !== null} onChange={() => void changeRegression({ enabled: !(manager.trigger_policy?.enabled ?? false) })} />
-                <span>{t("eval_auto_regression")}</span>
-                <small>{t("eval_auto_regression_body")}</small>
-              </label>
-              {onAskCoach ? <Button size="sm" variant="ghost" disabled={archived || busy !== null} onClick={() => onAskCoach(t("eval_auto_baseline_prefill", { name: agentName || t("eval_review_this_agent") }))}>{t("eval_auto_baseline_action")}</Button> : null}
-              <fieldset className="am-ci-scopes">
-                <legend>{t("eval_auto_events")}</legend>
-                {(["definition", "dependency", "model"] as const).map((kind) => {
-                  const key = `on_${kind}_change` as const;
-                  return <label key={kind} className="am-ci-ctl" data-disabled={!manager.trigger_policy?.enabled || undefined}><input type="checkbox" checked={manager.trigger_policy?.[key] ?? false} disabled={archived || busy !== null || !manager.trigger_policy?.enabled} onChange={() => void changeRegression({ [key]: !(manager.trigger_policy?.[key] ?? false) })} /><span>{t(`eval_auto_${kind}` as never)}</span></label>;
-                })}
-              </fieldset>
+              {autoRegressionControls}
             </details>
-          </div>
+          </div> : null}
         </div>
       )}
+      {redesigned && manager && suiteDialog === "results" ? (
+        <Dialog title={tc("menu_last_results")} onClose={() => setSuiteDialog(null)} closeLabel={tc("close")} width={720}
+          footer={<Button variant="secondary" onClick={() => setSuiteDialog(null)}>{tc("close")}</Button>}>
+          <div className="am-ev-dialog-cards">
+            {[...manager.suites].sort((a, b) => (a.suite_kind === "owner_quality" ? -1 : b.suite_kind === "owner_quality" ? 1 : 0)).map((suite) => suiteEvidenceCard(suite))}
+          </div>
+        </Dialog>
+      ) : null}
+      {redesigned && manager && suiteDialog === "auto" ? (
+        <Dialog title={t("eval_auto_regression")} onClose={() => setSuiteDialog(null)} closeLabel={tc("close")}
+          footer={<Button variant="secondary" onClick={() => setSuiteDialog(null)}>{tc("close")}</Button>}>
+          <div className="am-ev-dialog-auto">{autoRegressionControls}</div>
+        </Dialog>
+      ) : null}
       {confirmDialog}
       {pickingConversations ? (
         <AgentEvalConversationPicker
@@ -809,6 +1010,38 @@ function AgentEvalPanelContent({
         />
       ) : null}
     </section>
+  );
+}
+
+interface AddCaseItem { id: string; label: string; onSelect: () => void; disabled?: boolean }
+
+function AddCaseMenuItem({ item }: { item: AddCaseItem }) {
+  const props = useMenuItem({ label: item.label, onSelect: item.onSelect, disabled: item.disabled });
+  return <button type="button" className="ui-row-menu-item" {...props}><span>{item.label}</span></button>;
+}
+
+/** 添加用例 (redesigned 测试用例): one menu for 手写一条 / 从对话起草 / 自动建议用例. */
+function AddCaseMenu({ label, items, disabled }: { label: string; items: AddCaseItem[]; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const menu = useMenu({ open: open && !disabled, onOpenChange: (next) => setOpen(next && !disabled), placement: "bottom-end", offset: 4, sheetTitle: label });
+  return (
+    <>
+      <button
+        type="button"
+        ref={menu.refs.setReference}
+        className="settings-button settings-button--secondary settings-button--sm am-ev-add-menu"
+        disabled={disabled}
+        {...menu.getReferenceProps()}
+      >
+        {label}
+        <ChevronDown size={14} aria-hidden />
+      </button>
+      <MenuFloating menu={menu}>
+        <div ref={menu.refs.setFloating} {...menu.getFloatingProps({ className: "ui-row-menu", "aria-label": label })}>
+          {items.map((item) => <AddCaseMenuItem key={item.id} item={item} />)}
+        </div>
+      </MenuFloating>
+    </>
   );
 }
 

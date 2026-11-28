@@ -20,7 +20,7 @@ import {
 import { configureTavily, createDatarcTool, listBuiltinTools, refreshDatarcScope, type TeamBuiltinTool } from "@/lib/team-builtin-tools-api";
 import { applyToolSourceRefresh, previewToolSourceRefresh } from "@/lib/team-tool-source-refresh-api";
 
-import { ToolsManager } from "./tools-manager";
+import { ToolsManager, landingTab } from "./tools-manager";
 
 vi.mock("@/lib/team-tool-sources-api", () => ({
   authorizeSource: vi.fn(),
@@ -109,6 +109,10 @@ const IMPACT: ResourceChangeImpact = {
   reason_codes: [],
 };
 
+function openServicesTab() {
+  fireEvent.click(screen.getByRole("tab", { name: /内置服务/ }));
+}
+
 describe("ToolsManager interaction boundaries", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/team/settings/tools/");
@@ -163,7 +167,7 @@ describe("ToolsManager interaction boundaries", () => {
     const dialog = screen.getByRole("dialog", { name: /添加 MCP 工具/ });
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     // jsdom lacks inert; floating-ui falls back to aria-hidden + data-floating-ui-inert.
-    await waitFor(() => expect(trigger.closest("header")?.hasAttribute("data-floating-ui-inert")).toBe(true));
+    await waitFor(() => expect(trigger.closest("[data-floating-ui-inert]")).not.toBeNull());
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /添加 MCP 工具/ })).toBeNull());
@@ -173,10 +177,11 @@ describe("ToolsManager interaction boundaries", () => {
   it("selects a built-in third-party tool before showing its configuration", async () => {
     await renderLoadedTools();
 
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
-    expect(await screen.findByRole("dialog", { name: "选择内置第三方工具" })).toBeTruthy();
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
+    expect(await screen.findByRole("dialog", { name: "选择内置服务" })).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索工具…" }), { target: { value: "missing" } });
-    expect(screen.getByText("没有匹配的内置第三方工具。")).toBeTruthy();
+    expect(screen.getByText("没有匹配的内置服务。")).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索工具…" }), { target: { value: "tav" } });
 
     fireEvent.click(screen.getByRole("button", { name: /Tavily/ }));
@@ -187,7 +192,8 @@ describe("ToolsManager interaction boundaries", () => {
   it("offers Datarc with name, endpoint, and connection key fields", async () => {
     await renderLoadedTools();
 
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
     fireEvent.click(screen.getByRole("button", { name: /北极九章/ }));
 
     expect(await screen.findByRole("dialog", { name: "接入北极九章" })).toBeTruthy();
@@ -209,7 +215,8 @@ describe("ToolsManager interaction boundaries", () => {
     const first = await screen.findByText("Power BI - 财务");
     expect(screen.getByText("Power BI - 销售")).toBeTruthy();
     expect(first.closest(".legacy-tools-pbi-row")?.querySelector("span[aria-hidden='true']")?.getAttribute("style")).toContain("rgb(242, 200, 17)");
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
     expect(screen.getByRole("button", { name: /Power BI/ })).toBeTruthy();
   });
 
@@ -217,7 +224,8 @@ describe("ToolsManager interaction boundaries", () => {
     await renderLoadedTools();
     vi.mocked(configureTavily).mockRejectedValueOnce(Object.assign(new Error("tavily_api_key_invalid"), { status: 422 }));
 
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
     fireEvent.click(screen.getByRole("button", { name: /Tavily/ }));
     const dialog = await screen.findByRole("dialog", { name: "接入 Tavily" });
     fireEvent.change(screen.getByLabelText("Tavily API Key"), { target: { value: "tvly-wrong" } });
@@ -235,7 +243,8 @@ describe("ToolsManager interaction boundaries", () => {
       .mockRejectedValueOnce(Object.assign(new Error("datarc_endpoint_rejected"), { status: 422 }))
       .mockRejectedValueOnce(Object.assign(new Error("some_new_backend_code"), { status: 500 }));
 
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
     fireEvent.click(screen.getByRole("button", { name: /北极九章/ }));
     const dialog = await screen.findByRole("dialog", { name: "接入北极九章" });
     fireEvent.change(screen.getByLabelText("配置名称"), { target: { value: "财务" } });
@@ -261,7 +270,8 @@ describe("ToolsManager interaction boundaries", () => {
       .mockRejectedValueOnce(Object.assign(new Error("操作失败，请稍后重试。"), { status: 422, code: "datarc_connection_key_invalid" }))
       .mockRejectedValueOnce(Object.assign(new Error("操作失败，请稍后重试。"), { status: 422, code: "datarc_endpoint_unsupported" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置第三方工具" }));
+    openServicesTab();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 添加内置服务" }));
     fireEvent.click(screen.getByRole("button", { name: /北极九章/ }));
     const dialog = await screen.findByRole("dialog", { name: "接入北极九章" });
     fireEvent.change(screen.getByLabelText("配置名称"), { target: { value: "财务" } });
@@ -328,6 +338,7 @@ describe("ToolsManager interaction boundaries", () => {
     renderIntl(<ToolsManager />);
     await screen.findByText("北极九章 - 财务");
 
+    openServicesTab();
     await chooseRowAction("北极九章 - 财务 的更多操作", "编辑");
 
     expect(await screen.findByText("范围已验证")).toBeTruthy();
@@ -497,41 +508,6 @@ describe("ToolsManager interaction boundaries", () => {
   });
 
   // ─── Built-in capabilities (capability-surface-audit step 2) ────────────────────
-  it("陈列系统内置能力，并跟着搜索框一起过滤", async () => {
-    await renderLoadedTools();
-
-    // Unfiltered: heading + total count.
-    expect(screen.getByTestId("builtin-capabilities")).toBeTruthy();
-    expect(screen.getByText(new RegExp(`${PRODUCT_NAME} 自带的 \\d+ 项能力`))).toBeTruthy();
-    expect(screen.getByText("搜索知识库")).toBeTruthy();
-    expect(screen.getByText("查询数据")).toBeTruthy();
-
-    // Filtered: matches only, count becomes Matching N of M.
-    // 116 dogfood screenshot, 2026-09-09: only 4 cards remained but subtitle still said “自带的 33 项能力”, appearing miscounted.
-    fireEvent.change(screen.getByRole("searchbox", { name: "按源名 / 工具名过滤…" }), {
-      target: { value: "知识库" },
-    });
-    expect(screen.getByText(/匹配 \d+ 项，共 \d+ 项内置能力/)).toBeTruthy();
-    expect(screen.queryByText(new RegExp(`${PRODUCT_NAME} 自带的 \\d+ 项能力`))).toBeNull();
-    expect(screen.getByText("搜索知识库")).toBeTruthy();
-    expect(screen.queryByText("查询数据")).toBeNull();
-  });
-
-  it("lists the capabilities every Agent has as always on, without a switch", async () => {
-    await renderLoadedTools();
-
-    const system = screen.getByTestId("system-capabilities");
-    expect(within(system).getByText("系统能力")).toBeTruthy();
-    expect(within(system).getByText("查找会话结果")).toBeTruthy();
-    expect(within(system).getByText(/始终开启/)).toBeTruthy();
-    expect(within(system).queryByRole("switch")).toBeNull();
-
-    // The same search box filters it, and a search that matches nothing else still shows it.
-    fireEvent.change(screen.getByRole("searchbox", { name: "按源名 / 工具名过滤…" }), { target: { value: "查找会话" } });
-    expect(within(screen.getByTestId("system-capabilities")).getByText("查找会话结果")).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox", { name: "按源名 / 工具名过滤…" }), { target: { value: "知识库" } });
-    expect(screen.queryByTestId("system-capabilities")).toBeNull();
-  });
 });
 
 describe("ToolsManager 卡片「⋯」（外观段第四批）", () => {
@@ -579,8 +555,10 @@ describe("ToolsManager add buttons", () => {
     const builtin = catalogText("zh-CN", "settings.tools.new_builtin");
     const sourceButton = screen.getByRole("button", { name: (name) => name.endsWith(source) });
     expectRefreshedGlyph(sourceButton, "＋", "start", source);
+    fireEvent.click(screen.getByRole("tab", { name: /内置服务/ }));
     expectRefreshedGlyph(screen.getByRole("button", { name: (name) => name.endsWith(builtin) }), "＋", "start", builtin);
 
+    fireEvent.click(screen.getByRole("tab", { name: /外部工具源/ }));
     fireEvent.click(sourceButton);
     expect(await screen.findByRole("dialog", { name: catalogText("zh-CN", "settings.tools.new_source_dialog_label") })).toBeTruthy();
   });
@@ -854,5 +832,48 @@ describe("ToolsManager Choose Tools", () => {
     const notice = await screen.findByText(/源「Remote MCP」的工具列表已更新/);
     expect(notice).not.toHaveTextContent("新增工具尚未导入。");
     expect(within(notice).queryByRole("button", { name: "选择工具" })).toBeNull();
+  });
+});
+
+describe("ToolsManager task tabs", () => {
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/team/settings/tools/");
+    vi.mocked(listSources).mockResolvedValue([{ ...SOURCE }]);
+    vi.mocked(listBuiltinTools).mockResolvedValue([
+      { id: "tavily", provider: "tavily", name: "Tavily", display_name: "Tavily", status: "enabled" } as TeamBuiltinTool,
+    ]);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("opens on the external sources and keeps the built-in services one tab away", async () => {
+    renderIntl(<ToolsManager />);
+    expect(await screen.findByText("CRM")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("管理工具源");
+    expect(screen.getByRole("tab", { name: /外部工具源/ }).getAttribute("aria-selected")).toBe("true");
+    // Both panels stay mounted (the service sections read their own state); only the selected one is visible.
+    expect(screen.getByText("Tavily")).not.toBeVisible();
+
+    openServicesTab();
+    expect(screen.getByText("Tavily")).toBeVisible();
+    expect(screen.getByRole("switch", { name: /Tavily/ })).toBeTruthy();
+    expect(screen.getByText("CRM")).not.toBeVisible();
+  });
+
+  it("points administrators to the Tools page for the built-in Tool switches", async () => {
+    renderIntl(<ToolsManager />);
+    await screen.findByText("CRM");
+    expect(screen.getByRole("link", { name: "「工具」页" }).getAttribute("href")).toBe("/capabilities/?type=tools");
+  });
+
+  it("opens the services tab for a Google sign-in return and a built-in connection's repair link", () => {
+    expect(landingTab("?google=connected")).toBe("services");
+    expect(landingTab("?from_agent=osa_1&dependency=teammcp.ibt_finance.datarc_query")).toBe("services");
+    expect(landingTab("?from_agent=osa_1&dependency=teammcp.pbi_sales.pbi_execute_dax")).toBe("services");
+    expect(landingTab("?from_agent=osa_1&dependency=uploadFile")).toBe("sources");
+    expect(landingTab("?oauth=success&source=ots_1")).toBe("sources");
+    expect(landingTab("")).toBe("sources");
   });
 });

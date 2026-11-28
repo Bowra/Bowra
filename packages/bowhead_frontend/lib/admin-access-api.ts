@@ -10,6 +10,7 @@ export interface AccessGroup {
   description: string;
   status: string;
   member_count: number;
+  directory_managed?: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;

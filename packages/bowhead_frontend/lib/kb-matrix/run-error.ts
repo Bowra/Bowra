@@ -23,6 +23,7 @@ export type KbMatrixRunErrorKey =
   | "err_run_feature_unavailable"
   | "err_run_invalid_request"
   | "err_run_network"
+  | "err_run_files_limit"
   | "fail_source_unavailable"
   | "err_run_generic";
 
@@ -36,6 +37,10 @@ export const KB_MATRIX_RUN_ERROR_KEY: Readonly<Record<string, KbMatrixRunErrorKe
   source_unavailable: "fail_source_unavailable",
   run_not_cancellable: "err_not_cancellable",
   invalid_matrix_run_scope: "err_run_invalid_scope",
+  // Step 1 (S3): trial or selection rows.
+  matrix_run_files_limit: "err_run_files_limit",
+  matrix_run_files_not_in_matrix: "err_run_target_changed",
+  matrix_run_files_empty: "err_run_invalid_request",
   matrix_service_unavailable: "err_run_service_unavailable",
   matrix_not_found: "err_run_target_changed",
   matrix_column_not_found: "err_run_target_changed",

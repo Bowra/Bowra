@@ -7,7 +7,15 @@ export type ResultsFiltersDTO = {
   primary: "all" | "deliverables" | "evidence";
   secondary: "all" | "data" | "code" | "input";
   technical_only: boolean;
+  /** Chat running state R2.3: only the files one Turn saved. Absent = every Turn. */
+  turn_id?: string | null;
 };
+
+/** The request form of the filters: an unset Turn filter is left out, as older servers expect. */
+function requestFilters(filters: ResultsFiltersDTO): ResultsFiltersDTO {
+  const { turn_id: turnId, ...rest } = filters;
+  return turnId ? { ...rest, turn_id: turnId } : rest;
+}
 export type ResultCapabilityDTO =
   | "read_report"
   | "edit_report"
@@ -26,7 +34,9 @@ export type ResultCapabilityDTO =
   | "open_outputs"
   | "view_run_details"
   | "feedback_unsupported"
-  | "edit_presentation";
+  | "edit_presentation"
+  /** A Word file the owner may edit in place (docx inline edit design §7.1; the editor comes in batch 2). */
+  | "edit_document";
 
 export type ResultArtifactMetadataDTO = {
   mime: string;
@@ -146,7 +156,7 @@ const CAPABILITIES = new Set<ResultCapabilityDTO>([
   "share_report", "view_history", "clear_report", "delete_report",
   "download", "reference_in_chat", "manage_in_files", "view_raw",
   "view_details", "copy_code", "open_outputs", "view_run_details",
-  "feedback_unsupported", "edit_presentation",
+  "feedback_unsupported", "edit_presentation", "edit_document",
 ]);
 const OBJECT_TYPES = new Set(["report", "artifact", "code"]);
 const VIEWER_PROFILES = new Set(["report", "html", "image", "video", "table", "text", "document", "unsupported", "code"]);
@@ -423,12 +433,12 @@ export async function queryResults({
         dto_version: 1,
         surface: request.surface,
         query: request.query ?? "",
-        filters: request.filters ?? {
+        filters: requestFilters(request.filters ?? {
           lens: "all",
           primary: "all",
           secondary: "all",
           technical_only: false,
-        },
+        }),
         page_size: request.page_size ?? null,
         cursor: request.cursor ?? null,
         snapshot_token: request.snapshot_token ?? null,

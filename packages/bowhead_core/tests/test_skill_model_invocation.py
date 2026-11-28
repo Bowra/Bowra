@@ -153,8 +153,8 @@ async def test_confirmed_parameter_rejection_gets_new_physical_id_same_context(m
 
 @pytest.mark.parametrize("family", ["openai", "anthropic"])
 @pytest.mark.parametrize("mode", ["invoke", "stream"])
-@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("PRIVATE"), httpx2.ConnectError("PRIVATE"), httpx2.ReadError("PRIVATE")])
-async def test_transport_failure_is_retried_with_new_physical_id_same_context(model_case, family, mode, failure):
+@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("PRIVATE"), httpx2.ConnectError("PRIVATE"), httpx2.ReadError("PRIVATE"), 503])
+async def test_model_failure_is_retried_with_new_physical_id_same_context(model_case, family, mode, failure):
     case = model_case
     adapter = adapter_for(family)
     sent = []
@@ -162,6 +162,8 @@ async def test_transport_failure_is_retried_with_new_physical_id_same_context(mo
     def respond(http_request):
         sent.append(json.loads(http_request.content))
         if len(sent) == 1:
+            if failure == 503:
+                return httpx2.Response(503)
             raise failure
         return success(family, mode)
 

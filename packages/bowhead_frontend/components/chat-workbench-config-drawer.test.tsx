@@ -19,6 +19,9 @@ const canvasState = {
   // crashing `selectStreamingSectionIdKey` on `.size`; **fix the shape, never add selector defenses**
   // that also hide genuine missing-store-field bugs.
   streamingSectionIds: new Set<string>(),
+  // Real `CanvasState` fields the live report card reads (chat running state R2.1).
+  bufferedLeadSectionIds: new Set<string>(),
+  turnPatched: null,
 };
 let desktop = true;
 const resultsCapabilities = {
@@ -150,6 +153,9 @@ beforeEach(() => {
   resultsCapabilities.workspace = true;
   // Local jsdom localStorage is a broken stub (getItem not a function); ChatWorkbench preference reads need it.
   const store = new Map<string, string>();
+  // These tests read the report pane: the reader left Results open in these conversations (chat running state R2.7,
+  // where a report no longer opens Results by itself).
+  store.set("bowhead.results_open.v1", JSON.stringify(Object.fromEntries(["s_1", "s_2", "s_stop"].map((id) => [id, { state: "open", at: 1 }]))));
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: {

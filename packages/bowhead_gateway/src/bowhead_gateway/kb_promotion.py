@@ -65,11 +65,13 @@ async def promote_artifact_to_kb(
     trigger: PromotionTrigger,
     worker: Any | None = None,
     action: Any | None = None,
+    knowledge_base_id: str | None = None,
 ) -> str:
     """Admit membership over existing bytes and process it once.
 
     Only a server-bound original user action can create a membership. Replays
     compare the source and destination and never revive a retired action.
+    ``knowledge_base_id`` is the checked target knowledge base (None: the scope's default).
     """
     kind = getattr(artifact, "kind", None) or "tool_data"
     # Guard here rather than in callers, automatically constraining every new call site.
@@ -91,6 +93,7 @@ async def promote_artifact_to_kb(
     file_id, created, _ = await files_store.create_admitted(
         action=action,
         source_fingerprint=fingerprint,
+        knowledge_base_id=knowledge_base_id,
         artifact_id=artifact.id,
         filename=artifact.filename,
         mime_type=artifact.mime,

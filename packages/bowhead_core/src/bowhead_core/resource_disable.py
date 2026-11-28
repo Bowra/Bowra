@@ -325,7 +325,7 @@ def system_plugin_provenance(refs: list[str], tools: list[str], grants: list[dic
 # Owner's grant, so its runs send or write without asking each time; Lead keeps its own in-turn
 # confirmation (``email_send_confirmation``).
 _OPENED_TO_TEAM_AGENTS = frozenset(
-    {"remove_chart", "tool_list_workspaces", "send_email", "google_doc_write", "google_sheet_write", "google_slides_write"}
+    {"remove_chart", "tool_list_workspaces", "send_email", "google_doc_write", "google_sheet_write", "google_slides_write", "wecom_notify"}
 )
 
 

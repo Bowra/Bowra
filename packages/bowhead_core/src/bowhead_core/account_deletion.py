@@ -132,6 +132,22 @@ async def retire_account_conn(
         await db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
     split = domain_layout_active(store.db_path)
     if split:
+        await db.execute(
+            "UPDATE scim_groups SET version=version+1,updated_at=? WHERE id IN ("
+            "SELECT m.group_id FROM scim_members m JOIN scim_users u ON u.id=m.user_id WHERE u.user_id=?)",
+            (result.requested_at, user_id),
+        )
+        await db.execute("DELETE FROM scim_members WHERE user_id IN (SELECT id FROM scim_users WHERE user_id=?)", (user_id,))
+        manager_path = '$."urn:ietf:params:scim:schemas:extension:enterprise:2.0:User".manager'
+        await db.execute(
+            "UPDATE scim_users SET attributes=json_remove(attributes,?),version=version+1,updated_at=? "
+            "WHERE json_extract(attributes,?) IN (SELECT id FROM scim_users WHERE user_id=?)",
+            (manager_path, result.requested_at, manager_path + ".value", user_id),
+        )
+        await db.execute("DELETE FROM scim_users WHERE user_id=?", (user_id,))
+        await db.execute("DELETE FROM wecom_bindings WHERE user_id=?", (user_id,))
+        await db.execute("DELETE FROM wecom_jobs WHERE user_id=?", (user_id,))
+        await db.execute("DELETE FROM teams_activity_dedup WHERE delivery_user_id=?", (user_id,))
         from bowhead_core.terminal_auth_epochs import bump_terminal_auth_epoch
         from bowhead_core.terminal_protocol import AuthFenceScopeKind
 

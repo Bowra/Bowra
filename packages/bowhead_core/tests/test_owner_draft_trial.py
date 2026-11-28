@@ -802,3 +802,157 @@ async def test_a_trial_session_keeps_its_origin(ctx) -> None:
             response={},
             session_origin="agent_eval",
         )
+
+
+# ── Slice 2: request rules, readers and the trial context ────────────────────────
+
+
+def test_trial_refusal_codes_follow_explicit_causes_only() -> None:
+    from bowhead_core.agent_owner_trial import OwnerTrialRefusal, trial_refusal_code
+    from bowhead_core.chat_reference_preparation import ReferenceStartPreparationError
+    from bowhead_core.published_diagnostics import AGENT_TRIAL_SEND_REFUSAL_CODES
+
+    assert trial_refusal_code(OwnerTrialRefusal("agent_trial_extra_references")) == "agent_trial_extra_references"
+    mapped = {
+        code: trial_refusal_code(AgentExecutionBindingError(code))
+        for code in ("agent_trial_owner_required", "agent_candidate_stale", "agent_not_runnable", "agent_trial_turn_conflict")
+    }
+    assert mapped == {
+        "agent_trial_owner_required": "agent_trial_owner_required",
+        "agent_candidate_stale": "agent_trial_candidate_changed",
+        "agent_not_runnable": "agent_trial_agent_unavailable",
+        "agent_trial_turn_conflict": "agent_trial_session_mismatch",
+    }
+    assert set(mapped.values()) <= AGENT_TRIAL_SEND_REFUSAL_CODES
+    try:
+        try:
+            raise AgentExecutionBindingError("agent_trial_owner_required")
+        except AgentExecutionBindingError as inner:
+            raise ValueError("wrapped") from inner
+    except ValueError as exc:
+        assert trial_refusal_code(exc) == "agent_trial_owner_required"
+    # A failure reduced to the generic preparation code stays generic.
+    try:
+        try:
+            raise AgentExecutionBindingError("agent_not_runnable")
+        except AgentExecutionBindingError:
+            raise ReferenceStartPreparationError("reference_start_preparation_unavailable") from None
+    except ReferenceStartPreparationError as exc:
+        assert trial_refusal_code(exc) is None
+
+
+def test_a_trial_message_names_only_its_agent_and_continues_only_its_own_session() -> None:
+    from bowhead_core.agent_owner_trial import (
+        OwnerTrialRefusal,
+        TrialSessionFacts,
+        require_trial_document,
+        require_trial_session,
+        trial_reference,
+    )
+
+    document = _document(_trial_resource())
+    assert trial_reference(document) == _trial_resource()
+    assert require_trial_document(document) == _trial_resource()
+    live = AgentResourceRef(kind="agent", source_kind="team", id=AGENT, version=LIVE_REVISION, assignment_id="asa_1", release_id=RELEASE)
+    assert trial_reference(_document(live)) is None
+    extra = InputDocument.model_validate(
+        {
+            "schema_version": 1,
+            "nodes": [
+                *document.model_dump(mode="python", exclude_none=True)["nodes"][:1],
+                {
+                    "type": "reference",
+                    "node_id": "00000000-0000-4000-8000-000000000002",
+                    "resource": {"kind": "skill", "source_kind": "builtin", "id": "builtin:method", "version": "sha256:" + "a" * 64},
+                    "label": "Method",
+                    "parameters": {},
+                },
+                {"type": "text", "text": " compare"},
+            ],
+        }
+    )
+    with pytest.raises(OwnerTrialRefusal, match="agent_trial_extra_references"):
+        require_trial_document(extra)
+    require_trial_session(None, user_id="u_owner", agent_id=AGENT)
+    require_trial_session(TrialSessionFacts("agent_trial", "u_owner", frozenset({AGENT})), user_id="u_owner", agent_id=AGENT)
+    for facts in (
+        TrialSessionFacts("normal", "u_owner", frozenset()),
+        TrialSessionFacts("agent_trial", "u_other", frozenset({AGENT})),
+        TrialSessionFacts("agent_trial", "u_owner", frozenset({"osa_other"})),
+    ):
+        with pytest.raises(OwnerTrialRefusal, match="agent_trial_session_mismatch"):
+            require_trial_session(facts, user_id="u_owner", agent_id=AGENT)
+
+
+async def test_a_trial_turn_hides_feedback_escalation_and_plan_proposals(ctx) -> None:
+    from bowhead_core.agents.lead_orchestrator import _maybe_propose_plan
+    from bowhead_core.chat_reference_plan import proposal_requirements
+    from bowhead_core.feedback_escalate_tool import _handler
+    from bowhead_core.turn_runner import _owner_trial_prefetch
+
+    await _record(ctx)
+    store = SimpleNamespace(session_store=SimpleNamespace(db_path=str(ctx.execution)))
+    trial = await _owner_trial_prefetch(store, SimpleNamespace(turn_id=OWNER_TURN))
+    assert trial is not None and trial.candidate_id == CANDIDATE
+    assert await _owner_trial_prefetch(store, SimpleNamespace(turn_id=MEMBER_TURN)) is None
+    refused = await _handler({"request": "x", "rubric": "y", "user_asked_to_submit": True}, SimpleNamespace(owner_trial=trial))
+    assert refused["error"] == "agent_trial_feedback_unavailable"
+    sctx = SimpleNamespace(planning_mode="planning", turn_id=OWNER_TURN)
+    assert await _maybe_propose_plan(sctx, "plan it", SimpleNamespace(parent_ctx=SimpleNamespace(owner_trial=trial))) is None
+    runtime = SimpleNamespace(bindings=SimpleNamespace(db_path=str(ctx.core)), turn_id=OWNER_TURN)
+    with pytest.raises(ValueError, match=AGENT_TRIAL_BLOCKED_FEATURE_CODES["plan_mode"]):
+        await proposal_requirements(runtime, [], None)
+
+
+async def test_attribution_names_the_frozen_draft_live_and_stored(ctx) -> None:
+    from bowhead_core.subagent import _agent_attribution_payload
+
+    trial = await _record(ctx)
+    binding = await _admit(ctx)
+    expected = {"candidate_id": CANDIDATE, "candidate_kind": "draft", "frozen_at": trial.frozen_at}
+    assert _agent_attribution_payload(binding)["trial"] == expected
+    assert "agent_release_id" not in _agent_attribution_payload(binding)
+    detail = await ctx.store.read_turn_binding_detail(team_id=ctx.team_id, turn_id=OWNER_TURN)
+    assert [item.get("trial") for item in detail["executions"]] == [expected]
+    member = await _in_tx(
+        ctx,
+        lambda db: ctx.store.admit_team_execution_in_connection(
+            db,
+            team_id=ctx.team_id,
+            user_id=ctx.member,
+            turn_id=MEMBER_TURN,
+            profile_name=PROFILE,
+            agent_id=AGENT,
+            dispatch_source="explicit",
+            dispatch_key="reference:primary",
+        ),
+    )
+    assert "trial" not in _agent_attribution_payload(member)
+    member_detail = await ctx.store.read_turn_binding_detail(team_id=ctx.team_id, turn_id=MEMBER_TURN)
+    assert all("trial" not in item for item in member_detail["executions"])
+
+
+async def test_the_draft_under_test_notice_needs_a_running_test_and_a_newer_saved_draft(tmp_path) -> None:
+    from bowhead_core.agent_owner_trial import candidate_under_test
+
+    path = tmp_path / "core.db"
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript(
+            """
+            CREATE TABLE team_subagent_release_candidate(id TEXT, team_id TEXT, subagent_id TEXT, submitted_at TEXT);
+            CREATE TABLE team_subagent_working_copy(team_id TEXT, subagent_id TEXT, updated_at TEXT);
+            CREATE TABLE agent_eval_run(team_id TEXT, agent_id TEXT, candidate_id TEXT, status TEXT);
+            INSERT INTO team_subagent_release_candidate VALUES ('arc_1','team','agent','2026-11-25T10:00:00+00:00');
+            INSERT INTO team_subagent_working_copy VALUES ('team','agent','2026-11-25T09:00:00+00:00');
+            INSERT INTO agent_eval_run VALUES ('team','agent','arc_1','running');
+            """
+        )
+    check = {"team_id": "team", "agent_id": "agent", "candidate_id": "arc_1"}
+    # The draft was not saved after the candidate was frozen.
+    assert await candidate_under_test(path, **check) is False
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("UPDATE team_subagent_working_copy SET updated_at='2026-11-25T11:00:00+00:00'")
+    assert await candidate_under_test(path, **check) is True
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("UPDATE agent_eval_run SET status='passed'")
+    assert await candidate_under_test(path, **check) is False

@@ -41,6 +41,7 @@ export type ResultCapability =
   | "view_run_details"
   | "feedback_unsupported"
   | "edit_presentation"
+  | "edit_document"
   /** Pin to the sidebar (result pins): readable files outside a shared-report view, and the report; reading is enough. */
   | "pin_result";
 
@@ -125,7 +126,7 @@ function artifactSourceLabel(
   labels: ResultModelLabels,
 ): string {
   // A hand edit has no origin of its own (it maps to "other"); without this it read as AI generated.
-  if (item.source === "presentation_edit") return labels.sourceEdited;
+  if (item.source === "presentation_edit" || item.source === "document_edit") return labels.sourceEdited;
   switch (item.origin) {
     case "upload": return labels.sourceUpload;
     case "export": return labels.sourceExport;

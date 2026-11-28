@@ -96,6 +96,23 @@ describe("buildCellFromWire", () => {
     // Missing key → undefined (side panel omits cv row).
     expect(buildCellFromWire(WIRE_DONE as never).selfConsistencyAgree).toBeUndefined();
   });
+
+  it("maps the latest change (step 1 S4) and drops kinds this client does not know", () => {
+    const at = "2026-11-27T09:10:00+00:00";
+    const cell = buildCellFromWire({ ...WIRE_DONE, last_event: { kind: "verified", actor_name: "Mei", at } } as never);
+    expect(cell.lastEvent).toEqual({ kind: "verified", actorName: "Mei", at });
+    expect(buildCellFromWire({ ...WIRE_DONE, last_event: { kind: "ai_value", actor_name: null, at } } as never).lastEvent?.actorName).toBeNull();
+    expect(buildCellFromWire({ ...WIRE_DONE, last_event: { kind: "renamed", actor_name: "Mei", at } } as never).lastEvent).toBeUndefined();
+    // Older backends and unreadable rows send none.
+    expect(buildCellFromWire(WIRE_DONE as never).lastEvent).toBeUndefined();
+  });
+
+  it("maps the quoted chunk's position (step 1 S7); cells written before it have none", () => {
+    const cell = buildCellFromWire({ ...WIRE_DONE, variants: [{ ...WIRE_DONE.variants[0], page: null, chunk_index: 3 }] } as never);
+    expect(cell.page).toBeUndefined();
+    expect(cell.chunkIndex).toBe(3);
+    expect(buildCellFromWire(WIRE_DONE as never).chunkIndex).toBeUndefined();
+  });
 });
 
 // ── M3 runs[] mapping + typed errors (§4.5/§4.8) ────────────────
@@ -180,6 +197,33 @@ describe("snapshot runs[] mapping (M3)", () => {
     stubFetch({ seq: 9, cells: {}, run: WIRE_RUN });
     const res2 = await fetchMatrixDelta("mx_1", 5);
     if (res2.kind === "delta") expect(res2.delta.runs).toHaveLength(1);
+  });
+
+  it("sends the held digest with since_seq and maps both answers (step 1 S6)", async () => {
+    stubFetch({ ...WIRE_FULL, kind: "full", projection_digest: "d1" });
+    expect((await fetchMatrixSnapshot("mx_1")).projectionDigest).toBe("d1");
+    stubFetch({ kind: "delta", seq: 9, structure_seq: 1, projection_digest: "d1", cells: { "f1:c1": WIRE_DONE }, runs: [WIRE_RUN], run: WIRE_RUN });
+    const res = await fetchMatrixDelta("mx_1", 5, "d1");
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain("/snapshot?since_seq=5&digest=d1");
+    expect(res.kind).toBe("delta");
+    if (res.kind === "delta") {
+      expect(res.delta.projectionDigest).toBe("d1");
+      expect(res.delta.cells["f1:c1"].value).toBe("286000");
+    }
+    // Without a digest (idle polls) the request asks for nothing but a full answer.
+    stubFetch({ ...WIRE_FULL, kind: "full", projection_digest: "d2" });
+    const full = await fetchMatrixDelta("mx_1", 5);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toMatch(/\/snapshot\?since_seq=5$/);
+    expect(full.kind === "full" && full.snapshot.projectionDigest).toBe("d2");
+  });
+
+  it("asks the server to record an opening only when told to (step 1 S9)", async () => {
+    stubFetch(WIRE_FULL);
+    await fetchMatrixSnapshot("mx_1", { opened: true });
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toMatch(/\/matrices\/mx_1\/snapshot\?opened=true$/);
+    stubFetch(WIRE_FULL);
+    await fetchMatrixSnapshot("mx_1");
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toMatch(/\/matrices\/mx_1\/snapshot$/);
   });
 
   it("non-2xx throws MatrixApiError carrying status (FE-P2-11 死轮询根因修复)", async () => {

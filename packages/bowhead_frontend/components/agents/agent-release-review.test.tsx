@@ -282,14 +282,14 @@ describe("AgentReleaseReview", () => {
     expect(await screen.findByText("审批前需要完成评测")).toBeTruthy();
     // Only the Agent's owner can run an eval, so telling the reviewer "an evaluation
     // is required" without saying whose move it is leaves them with nothing to do.
-    expect(screen.getByText(/评测只能由该智能体的负责人运行/)).toBeTruthy();
+    expect(screen.getByText(/评测只能由该智能体的所有者运行/)).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "批准并发布" }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 
   it.each([
-    { code: "agent_eval_required", text: /只有该智能体的负责人能运行评测/ },
+    { code: "agent_eval_required", text: /只有该智能体的所有者能运行评测/ },
     { code: "agent_eval_critical_failure", text: /出现了致命失败/ },
     { code: "agent_eval_platform_suite_missing", text: /套件会自动装好/ },
     { code: "qualified_reviewer_unavailable", text: /这个团队目前没有可审批的人/ },
@@ -324,9 +324,9 @@ describe("AgentReleaseReview", () => {
     renderIntl(<AgentReleaseReview agentId="osa_1" candidateId="arc_1" />);
 
     // With no Owner cases the reviewer is told so instead of "evidence is ready".
-    expect(await screen.findByText("Owner 没有提供用例")).toBeTruthy();
+    expect(await screen.findByText("所有者没有提供用例")).toBeTruthy();
     expect(screen.queryByText("发布证据已就绪")).toBeNull();
-    expect(screen.queryByText(/评测只能由该智能体的负责人运行/)).toBeNull();
+    expect(screen.queryByText(/评测只能由该智能体的所有者运行/)).toBeNull();
     expect(
       (screen.getByRole("button", { name: "批准并发布" }) as HTMLButtonElement).disabled,
     ).toBe(false);

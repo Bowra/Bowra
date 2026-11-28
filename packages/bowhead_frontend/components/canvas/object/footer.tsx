@@ -12,6 +12,8 @@ export interface CanvasFooterPrimary {
   /** Read by screen readers through aria-describedby; also shown on the left when no message is given. */
   disabledReason?: ReactNode;
   busy?: boolean;
+  /** "secondary" where another control is the screen's one primary action (an Agent editor beside a trial chat). */
+  variant?: "primary" | "secondary";
 }
 
 export interface CanvasFooterSecondary {
@@ -64,7 +66,7 @@ export function CanvasObjectFooter({
           {primary ? (
             // A blocked primary stays focusable (aria-disabled) so its reason remains readable; activation is ignored.
             <Button
-              variant="primary"
+              variant={primary.variant ?? "primary"}
               onClick={() => { if (!primary.disabled && !primary.busy) primary.onClick(); }}
               disabled={primary.busy}
               aria-disabled={primary.disabled && !primary.busy ? true : undefined}

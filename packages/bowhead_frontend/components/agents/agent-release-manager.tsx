@@ -38,6 +38,7 @@ import {
   getAgentAuthoringCatalog,
   getAgentWorkingCopy,
   listAgentReleases,
+  getAgentVersionWorkbench,
   publishAgentWorkingCopy,
   restoreAgent,
   runAgentSafetyCheck,
@@ -80,11 +81,25 @@ import { AGENT_PENDING_ANCHOR, AgentVersionWorkbenchPanel } from "./agent-versio
 import { AgentReleaseBar } from "./agent-release-bar";
 import { releaseBarState } from "./release-bar-state";
 import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
+import { useAgentDraftTrialCapability } from "@/lib/use-agent-draft-trial-capability";
+import { DRAFT_FIELD_ORDER, type DraftFieldKey } from "@/lib/agent-trial";
+import { reportTrialEditorDirtyFields } from "@/lib/agent-trial-editor-state";
+import type { ReleaseBarTrialHost } from "./agent-version-validation";
+import { useAgentTrialLayout } from "./agent-trial-layout";
 import { toast } from "@/lib/use-toast";
 import { type PickerPlugin, ResourcePluginPicker, ResourceSummary, ResourceToolPicker, pluginMatches, pluginToolOwners, pluginsFromCatalog, visiblePlugins } from "@/components/ui/resource-picker";
 import { randomUuid } from "@/lib/random-id";
 import { releaseNoteText } from "@/lib/agent-release-notes";
 import { type HttpFailureReasonOptions, withHttpFailureReason } from "@/lib/user-facing-error";
+import { HelpPopover } from "@/components/ui/help-popover";
+import { draftFieldChip, pendingFieldProposals, pendingSuggestedCaseCount, type AgentConfigLayout } from "@/lib/agent-draft-changes";
+import { AGENT_PENDING_CASES_ANCHOR } from "@/lib/agent-case-proposal-path";
+import { newestOpenAiOptimizeProposal } from "@/lib/agent-optimize";
+import { readRuntimeExtensions } from "@/lib/agent-runtime-extensions";
+import { coachProposalIds, useAiOptimizedProposalIds } from "@/lib/use-ai-optimized-proposals";
+import type { AgentVersionWorkbench } from "@/lib/agents-api";
+import { ConfigRow, FieldChip, MoreRow, RemoveButton, ShareConsequences, useKnowledgeSummary } from "./agent-config-v2";
+import { useInstructionsOptimize } from "./agent-instructions-optimize";
 
 type AudienceMode = AgentAudienceSnapshot["effective_mode"];
 function HostedStage({ value: _value, ...props }: HTMLAttributes<HTMLDivElement> & { value: string }) {
@@ -92,14 +107,18 @@ function HostedStage({ value: _value, ...props }: HTMLAttributes<HTMLDivElement>
 }
 
 export type AgentManagerTask = "config" | "evaluate" | "release";
-export type AgentConfigSection = "does" | "uses" | "who";
+/** `more` (更多设置) exists only in the redesigned Configure (FEATURE_AGENT_RELEASE_BAR, design §4). */
+export type AgentConfigSection = "does" | "uses" | "who" | "more";
 
 const AGENT_MANAGER_TASKS = new Set<AgentManagerTask>(["config", "evaluate", "release"]);
 const AGENT_CONFIG_SECTIONS = new Set<AgentConfigSection>(["does", "uses", "who"]);
+const V2_CONFIG_SECTIONS = new Set<AgentConfigSection>(["does", "uses", "who", "more"]);
 // Former Configure sub-pages, by the section that now holds them.
 const LEGACY_CONFIG_VIEW_SECTIONS: Record<string, AgentConfigSection> = {
   prompt: "does", capabilities: "does", resources: "uses", access: "who", market: "who",
 };
+// The redesigned Configure keeps the listing, copy policy and pending proposals under 更多设置.
+const V2_CONFIG_VIEW_SECTIONS: Record<string, AgentConfigSection> = { ...LEGACY_CONFIG_VIEW_SECTIONS, market: "more" };
 export const AGENT_HISTORY_ANCHOR = "agent-release-history";
 
 export interface AgentManagerLocation {
@@ -110,8 +129,11 @@ export interface AgentManagerLocation {
   legacy: boolean;
 }
 
-/** Where a workbench URL points, including links written before the four tabs existed. */
-export function agentManagerLocation(search: string): AgentManagerLocation {
+/**
+ * Where a workbench URL points, including links written before the four tabs existed. `layout` "v2" is the
+ * redesigned Configure, which adds `config_section=more`.
+ */
+export function agentManagerLocation(search: string, layout: AgentConfigLayout = "legacy"): AgentManagerLocation {
   const params = new URLSearchParams(search);
   const raw = params.get("section");
   const configView = params.get("config_view");
@@ -124,15 +146,17 @@ export function agentManagerLocation(search: string): AgentManagerLocation {
   if (raw === "automation") return { task: "config", section: null, anchor: null, legacy: true };
   const task = raw && AGENT_MANAGER_TASKS.has(raw as AgentManagerTask) ? raw as AgentManagerTask : "config";
   const requested = params.get("config_section");
+  const sections = layout === "v2" ? V2_CONFIG_SECTIONS : AGENT_CONFIG_SECTIONS;
+  const views = layout === "v2" ? V2_CONFIG_VIEW_SECTIONS : LEGACY_CONFIG_VIEW_SECTIONS;
   const section = task !== "config" ? null
-    : requested && AGENT_CONFIG_SECTIONS.has(requested as AgentConfigSection) ? requested as AgentConfigSection
-      : configView ? LEGACY_CONFIG_VIEW_SECTIONS[configView] ?? null : null;
+    : requested && sections.has(requested as AgentConfigSection) ? requested as AgentConfigSection
+      : configView ? views[configView] ?? null : null;
   return { task, section, anchor: null, legacy };
 }
 
-function currentManagerLocation(): AgentManagerLocation {
+function currentManagerLocation(layout: AgentConfigLayout = "legacy"): AgentManagerLocation {
   if (typeof window === "undefined") return { task: "config", section: null, anchor: null, legacy: false };
-  const location = agentManagerLocation(window.location.search);
+  const location = agentManagerLocation(window.location.search, layout);
   return location.task === "config" && window.location.hash === `#${AGENT_PENDING_ANCHOR}`
     ? { ...location, anchor: AGENT_PENDING_ANCHOR } : location;
 }
@@ -350,6 +374,50 @@ function fingerprint(value: EditorDraft): string {
   });
 }
 
+/** Each Configure field by the name the Owner sees, for the trial's save rule (only 工作说明 saves silently). */
+const DRAFT_FIELD_GROUPS: Record<keyof EditorDraft, DraftFieldKey> = {
+  systemPrompt: "instructions",
+  displayName: "name",
+  description: "description",
+  sourceLocale: "listing",
+  listingExtras: "listing",
+  primaryCapabilityRef: "resources",
+  pluginIds: "resources",
+  builtinPluginIds: "resources",
+  toolConnectionIds: "resources",
+  toolRefs: "resources",
+  skillNames: "resources",
+  skillGrants: "resources",
+  extensionFields: "resources",
+  knowledgeAccess: "resources",
+  audienceMode: "audience",
+  userIds: "audience",
+  groupIds: "audience",
+  model: "advanced",
+  maxIterations: "advanced",
+  capabilityProtocolBlock: "advanced",
+  outputSchema: "advanced",
+};
+
+/** The unsaved field groups between two `fingerprint`s of the editor draft. */
+export function editorDraftDirtyFields(savedFingerprint: string, currentFingerprint: string): DraftFieldKey[] {
+  if (savedFingerprint === currentFingerprint) return [];
+  let saved: Record<string, unknown>;
+  let current: Record<string, unknown>;
+  try {
+    saved = JSON.parse(savedFingerprint) as Record<string, unknown>;
+    current = JSON.parse(currentFingerprint) as Record<string, unknown>;
+  } catch {
+    return ["advanced"];
+  }
+  const groups = new Set<DraftFieldKey>();
+  for (const key of new Set([...Object.keys(saved), ...Object.keys(current)])) {
+    if (JSON.stringify(saved[key]) === JSON.stringify(current[key])) continue;
+    groups.add(DRAFT_FIELD_GROUPS[key as keyof EditorDraft] ?? "advanced");
+  }
+  return DRAFT_FIELD_ORDER.filter((field) => groups.has(field));
+}
+
 function errorText(error: unknown, fallback: string, options?: HttpFailureReasonOptions): string {
   return withHttpFailureReason(fallback, error, options);
 }
@@ -385,7 +453,15 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   // FEATURE_AGENT_RELEASE_BAR: one release bar above the tabs replaces the release cards and summaries; the
   // Canvas-hosted editor shows it as a band at its top, and keeps its own save bar.
   const releaseBarOn = useAgentReleaseBarCapability();
+  // The same switch reorders Configure into five sections (design §4, slices-2-5-tech-design §3).
+  const layout: AgentConfigLayout = releaseBarOn ? "v2" : "legacy";
+  const configV2 = layout === "v2";
   const [releaseBarSlot, setReleaseBarSlot] = useState<HTMLDivElement | null>(null);
+  // FEATURE_AGENT_DRAFT_TRIAL_V1 extends the release bar: 试用草稿 and 测试用例 › 试用记录.
+  const trialOn = useAgentDraftTrialCapability() && releaseBarOn;
+  const trialLayout = useAgentTrialLayout();
+  const [trialListSlot, setTrialListSlot] = useState<HTMLDivElement | null>(null);
+  const [safetyTestRequest, setSafetyTestRequest] = useState(0);
   const mounted = useRef(true);
   const loadRequest = useRef(0);
   const navigationIntent = useRef(0);
@@ -393,6 +469,8 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; loadRequest.current += 1; navigationIntent.current += 1; }; }, []);
   const toolT = useTranslations("settings.subagents");
   const t = useTranslations("agents_marketplace");
+  const v2t = useTranslations("agent_config_v2");
+  const v2c = useTranslations("agent_cases_v2");
   const navT = useTranslations("sidebar.centers");
   const pickerT = useTranslations("resource_picker");
   const { confirm, dialog: navigationDialog } = useConfirmDialog();
@@ -442,9 +520,22 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   const [suitesRefreshKey, setSuitesRefreshKey] = useState(0);
   const [addCaseRequest, setAddCaseRequest] = useState(0);
   const [evaluateTestState, setEvaluateTestState] = useState<TestChangeState | null>(null);
-  const [activeTask, setActiveTask] = useState<AgentManagerTask>(() => hostedMode ? "config" : currentManagerLocation().task);
-  // "Who can use it" starts folded; a link to a section opens it.
-  const [closedSections, setClosedSections] = useState<ReadonlySet<AgentConfigSection>>(() => new Set(["who"]));
+  const [activeTask, setActiveTask] = useState<AgentManagerTask>(() => hostedMode ? "config" : currentManagerLocation(layout).task);
+  // "Who can use it" starts folded; a link to a section opens it. The redesigned Configure opens 谁能用 by default.
+  const [closedSections, setClosedSections] = useState<ReadonlySet<AgentConfigSection>>(() => new Set(configV2 ? [] : ["who"]));
+  // Redesigned Configure (FEATURE_AGENT_RELEASE_BAR): the last workbench read (field chips, AI 优化, the cases chip),
+  // a counter that makes the workbench reread itself, and which 更多设置 rows and drawers are open.
+  const [workbenchFacts, setWorkbenchFacts] = useState<AgentVersionWorkbench | null>(null);
+  const [workbenchRefresh, setWorkbenchRefresh] = useState(0);
+  const [proposalsSlot, setProposalsSlot] = useState<HTMLDivElement | null>(null);
+  const [moreOpen, setMoreOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [drawer, setDrawer] = useState<"knowledge" | "methods" | "connections" | null>(null);
+  const pendingAnchorRequested = useRef(false);
+  // Redesigned 测试用例: unsaved case edits (release bar, leave guard), the suite editor's save, and a counter that
+  // makes it reread the suite after suggested cases were accepted.
+  const [casesDirty, setCasesDirty] = useState(0);
+  const casesRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+  const [evalReloadRequest, setEvalReloadRequest] = useState(0);
   // "Advanced" under What it does (Item 4): the Owner's own toggle wins; until then it follows the Agent.
   const [advancedOpen, setAdvancedOpen] = useState<boolean | null>(null);
   const [addResourcesOpen, setAddResourcesOpen] = useState(false);
@@ -564,7 +655,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   useEffect(() => {
     if (hostedMode || versionAvailability === "checking") return;
     const syncNavigation = (fromHistory: boolean) => {
-      const requested = currentManagerLocation();
+      const requested = currentManagerLocation(layout);
       const unavailable = requested.task === "evaluate" && evalAvailability === "disabled";
       // An evaluation link falls back to Release, the closest view that is always there.
       const task = !unavailable ? requested.task : requested.task === "evaluate" ? "release" : "config";
@@ -577,6 +668,12 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       if (fromHistory || !locationApplied.current) {
         locationApplied.current = true;
         if (task === "config" && requested.section) openSection(requested.section);
+        // Redesigned: pending proposals wait under 更多设置 › 待处理的建议; open that row before scrolling to it.
+        if (configV2 && requested.anchor === AGENT_PENDING_ANCHOR) {
+          pendingAnchorRequested.current = true;
+          setMoreOpen((current) => new Set(current).add("proposals"));
+          openSection("more");
+        }
         if (requested.anchor) revealAnchor(requested.anchor);
       }
     };
@@ -584,7 +681,19 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     syncNavigation(false);
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [evalAvailability, versionAvailability, hostedMode, openSection, revealAnchor]);
+  }, [evalAvailability, versionAvailability, hostedMode, openSection, revealAnchor, configV2, layout]);
+
+  // A Coach case receipt links to the pending list (`#agent-pending-changes`). Redesigned, suggested cases wait on
+  // 测试用例 instead: when only cases are pending there, the link lands on them.
+  useEffect(() => {
+    if (!configV2 || hostedMode || !workbenchFacts || !pendingAnchorRequested.current) return;
+    pendingAnchorRequested.current = false;
+    const fields = pendingFieldProposals(workbenchFacts.change_proposals ?? []).length + (workbenchFacts.member_feedback?.length ?? 0);
+    if (fields || !pendingSuggestedCaseCount(workbenchFacts.change_proposals ?? []) || evalAvailability !== "enabled") return;
+    window.history.replaceState(null, "", managerTaskUrl("evaluate", null, AGENT_PENDING_CASES_ANCHOR));
+    setActiveTask("evaluate");
+    revealAnchor(AGENT_PENDING_CASES_ANCHOR);
+  }, [configV2, evalAvailability, hostedMode, revealAnchor, workbenchFacts]);
 
   useEffect(() => {
     if (activeTask === "evaluate" && evalAvailability === "enabled") setEvalPanelVisited(true);
@@ -657,12 +766,24 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       || existingGrant.skill_ref.id !== catalogGrant.skill_ref.id
     ));
   }) ?? [];
-  const missingTools = draft?.toolRefs.filter((ref) => !toolsByRef.has(ref)) ?? [];
+  // A Tool the team turned off is kept as selected (the run leaves it out); it is neither listed nor unavailable.
+  const teamDisabledTools = new Set(catalog?.team_disabled_tools ?? []);
+  const missingTools = draft?.toolRefs.filter((ref) => !toolsByRef.has(ref) && !teamDisabledTools.has(ref)) ?? [];
   const audienceBlockedSkills = draft?.skillNames.filter((name) => {
     const skill = skillsByName.get(name);
     return skill ? !skill.allowed_audiences.includes(draft.audienceMode) : false;
   }) ?? [];
   const dirty = draft !== null && fingerprint(draft) !== savedFingerprint;
+  const draftDirtyFields = useMemo(
+    () => (dirty ? editorDraftDirtyFields(savedFingerprint, inputFingerprint) : []),
+    [dirty, inputFingerprint, savedFingerprint],
+  );
+  // The Canvas editor tells a trial chat what is unsaved, for the hint above its composer.
+  useEffect(() => {
+    if (!hostedMode) return undefined;
+    reportTrialEditorDirtyFields(agentId, draftDirtyFields);
+    return () => reportTrialEditorDirtyFields(agentId, []);
+  }, [agentId, draftDirtyFields, hostedMode]);
   const needsSave = dirty || !detail?.working_copy;
   const hasCapability = Boolean(
     draft?.primaryCapabilityRef
@@ -768,8 +889,10 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     .filter((plugin) => !selectedPluginIds.has(plugin.id) && pluginMatches(plugin, resourceQuery, locale));
   const libraryEmpty = Boolean(normalizedResourceQuery) && !libraryPlugins.length && !availableToolConnections.length && !availableTools.length && !availableSkills.length;
 
+  // The leave guard also covers unsaved test cases on the redesigned page (S13).
+  const unsavedCasesGuard = configV2 && casesDirty > 0;
   useEffect(() => {
-    if (hostedMode || !dirty && !releaseNote.trim()) return;
+    if (hostedMode || !dirty && !releaseNote.trim() && !unsavedCasesGuard) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -786,11 +909,13 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener(BEFORE_APP_NAVIGATION_EVENT, guard);
     };
-  }, [dirty, releaseNote, confirm, navT, hostedMode]);
+  }, [dirty, releaseNote, confirm, navT, hostedMode, unsavedCasesGuard]);
 
   const tObject = useTranslations("canvas_object");
-  const hostedState = useRef({ dirty, busy, inputFingerprint, hosted, confirm, navT, detail, tObject, name: draft?.displayName ?? "" });
-  hostedState.current = { dirty, busy, inputFingerprint, hosted, confirm, navT, detail, tObject, name: draft?.displayName ?? "" };
+  const hostedState = useRef({ dirty, busy, inputFingerprint, hosted, confirm, navT, detail, tObject, name: draft?.displayName ?? "", dirtyFields: draftDirtyFields });
+  hostedState.current = { dirty, busy, inputFingerprint, hosted, confirm, navT, detail, tObject, name: draft?.displayName ?? "", dirtyFields: draftDirtyFields };
+  // Set below, once the reasons Configure can't be saved are known; the trial chat names it before sending.
+  const hostedSaveBlocked = useRef<string | null>(null);
   useEffect(() => {
     if (!hostedMode) return;
     const hasUnsaved = () => Boolean(hostedState.current.busy
@@ -813,7 +938,9 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       return { target: { kind: "agent", id: value.agent_id, version: value.aggregate_row_version, live_release_id: value.live.release_id,
         working_copy: copy ? { id: copy.id, version: copy.row_version, base_release_id: [null, "", "None"].includes(copy.base_release_id) ? null : copy.base_release_id } : null },
         dirty: state.dirty, pending_write: state.busy !== null };
-    }, save: () => hostedActions.current.save(), discard: () => hostedActions.current.discard() };
+    }, save: () => hostedActions.current.save(), discard: () => hostedActions.current.discard(),
+    // A trial chat saves per the trial rule before each message: only 工作说明 without asking.
+    dirtyFields: () => hostedState.current.dirtyFields, saveBlockedProblem: () => hostedSaveBlocked.current };
     if (hosted?.controllerRef) hosted.controllerRef.current = port;
     const unregister = registerSubagentDraftNavigationGuard({ hasUnsaved,
       confirmLeave: async () => { if (!hasUnsaved()) return true; hostedState.current.hosted?.onActivate(); return allowLeave(); },
@@ -981,13 +1108,15 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         setAskPublish(true);
       }
       await load(inputFingerprint);
+      // The release bar and cards read the workbench, which says whether the saved draft was tested.
+      setWorkbenchRefresh((value) => value + 1);
       if (mounted.current) latestInput.current.hosted?.onSaved(draft.displayName);
       return true;
     } catch (cause) {
       if (!mounted.current) return false;
       const releaseErrorKey = agentReleaseErrorKey(cause instanceof ApiError ? cause.code : undefined);
       const blockedText = cause instanceof ApiError ? agentReleaseBlockedText(cause, (key, values) => t(key as never, values as never)) : null;
-      setError(cause instanceof ApiError && cause.code === "approval_executor_unavailable"
+      setError(cause instanceof ApiError && (cause.code === "approval_executor_unavailable" || cause.code === "tool_disabled_by_team")
         ? toolT(toolSelectionLockedReasonKey(cause.code))
         : blockedText ?? (releaseErrorKey ? t(releaseErrorKey as never) : errorText(cause, t("release_save_failed"))));
       return false;
@@ -997,7 +1126,8 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   };
   const discardHosted = async (): Promise<boolean> => {
     if (!detail || !catalog || !draft) return false;
-    if (!await confirm(canvasCloseGuardOptions(tObject, draft.displayName))) return false;
+    // Nothing is closed here: the copy says the unsaved edits go and the saved draft stays.
+    if (!await confirm({ ...canvasCloseGuardOptions(tObject, draft.displayName), description: t("release_bar_discard_body", { name: draft.displayName }) })) return false;
     setDraft(editorDraft(detail, catalog, teamPlugins));
     return true;
   };
@@ -1045,10 +1175,18 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     }
     setBusy("publish");
     try {
+      // Once the Agent has an evaluation Policy, freezing a candidate must name it or the server refuses (409).
+      let policy = workbenchFacts?.current_eval_policy_revision_id ?? null;
+      try {
+        policy = (await getAgentVersionWorkbench(agentId)).current_eval_policy_revision_id ?? null;
+      } catch {
+        /* Keep the last workbench read; the server names a conflict if it moved on. */
+      }
       const result = await publishAgentWorkingCopy(
         agentId,
         {
           working_copy_id: working.id,
+          expected_eval_policy_revision_id: policy,
           // Safety check increments working-copy row_version (116: 1→2); report
           // subject.working_copy_row_version is correct publish version; detail's precheck value always yields 409.
           working_copy_row_version: report.subject?.working_copy_row_version ?? working.row_version,
@@ -1213,6 +1351,58 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     }
   };
 
+  // What each section still needs before the draft can be saved; the redesigned layout holds the output contract
+  // under 它做什么 › 高级 (S10).
+  const missingDependency = Boolean(missingTools.length || missingSkills.length || missingToolConnections.length);
+  const sectionProblems: Record<AgentConfigSection, string | null> = {
+    does: displayNameInvalid ? t("release_display_name_required") : missingPrimaryCapability ? t("release_primary_unavailable")
+      : configV2 && outputSchemaInvalid ? t("release_output_schema_invalid") : null,
+    uses: !hasCapability ? t("release_capability_required")
+      : missingDependency ? t("release_dependency_stale")
+        : audienceBlockedSkills.length ? t("release_personal_skill_private_only") : null,
+    who: customAudienceInvalid ? t("release_custom_required") : !configV2 && outputSchemaInvalid ? t("release_output_schema_invalid") : null,
+    more: null,
+  };
+  const saveBlockedNow = !hasCapability || missingPrimaryCapability || customAudienceInvalid || optionalAudienceInvalid || displayNameInvalid || outputSchemaInvalid
+    || missingDependency || audienceBlockedSkills.length > 0;
+  const firstProblemSection = (["does", "uses", "who"] as const).find((section) => sectionProblems[section]) ?? null;
+  const saveBlockedInfo = saveBlockedNow
+    ? { problem: firstProblemSection ? sectionProblems[firstProblemSection]! : t("release_bar_meta_unsaved_blocked"), section: firstProblemSection ?? "uses" as const }
+    : null;
+  hostedSaveBlocked.current = saveBlockedInfo?.problem ?? null;
+
+  // Redesigned Configure: field chips and the AI 优化 strip label read the same AI 优化 proposal ids.
+  const aiProposalIds = useAiOptimizedProposalIds(agentId, coachProposalIds(workbenchFacts?.draft_changes), workbenchFacts?.change_proposals ?? [], configV2);
+  const knowledgeSummary = useKnowledgeSummary(agentId, draft?.knowledgeAccess, configV2);
+  const selectedPluginNames = pickedPlugins.length
+    ? pickedPlugins.map((plugin) => plugin.name)
+    : teamPlugins.filter((plugin) => draft?.pluginIds.includes(plugin.id)).map((plugin) => plugin.name);
+  const optimize = useInstructionsOptimize({
+    agentId,
+    agentName: draft?.displayName || detail?.aggregate.name || "",
+    enabled: configV2 && Boolean(detail && draft) && detail?.aggregate.lifecycle_state !== "archived" && Boolean(detail?.actions.edit)
+      && !hosted?.readOnly && versionAvailability === "enabled",
+    text: draft?.systemPrompt ?? "",
+    dirtyFields: draftDirtyFields,
+    hasDraft: Boolean(detail?.working_copy),
+    save,
+    saveBlocked: saveBlockedInfo,
+    onOpenSection: openSection,
+    live: `v${detail?.live.release_sequence ?? 0}`,
+    // Facts come from the page's own state, never from the text (§3.2).
+    facts: async () => ({
+      tools: evalPointTools.map((tool) => tool.name),
+      plugins: selectedPluginNames,
+      skills: selectedSkills.map((skill) => authoringSkillTitle(skill, locale)),
+      knowledge: knowledgeSummary.available ? knowledgeSummary.names : [],
+    }),
+    pending: configV2 ? newestOpenAiOptimizeProposal(workbenchFacts?.change_proposals) : null,
+    onChanged: async (afterApply) => {
+      await load(afterApply ? latestInput.current.fingerprint : undefined);
+      setWorkbenchRefresh((value) => value + 1);
+    },
+  });
+
   if (loading && !detail) {
     return <div className="am-page am-release-page" aria-busy="true"><div className="am-detail-loading" /></div>;
   }
@@ -1224,9 +1414,12 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
   const selectedAudienceUsers = new Set(draft.userIds);
   const selectedAudienceGroups = new Set(draft.groupIds);
   const releaseLabel = t(releaseBarOn ? "release_bar_tab_versions" : "version_task_validation");
-  const taskItems: Array<{ id: AgentManagerTask; label: string; count?: number; marker?: boolean }> = [
+  // Redesigned 测试用例 carries its waiting suggestions as a chip ("N 条建议", Q5).
+  const suggestedCaseCount = configV2 ? pendingSuggestedCaseCount(workbenchFacts?.change_proposals ?? []) : 0;
+  const liveRelease = releases.find((release) => release.release_id === detail.live.release_id) ?? null;
+  const taskItems: Array<{ id: AgentManagerTask; label: string; count?: number; marker?: boolean; chip?: string }> = [
     { id: "config", label: t("version_task_config"), count: pendingCount },
-    ...(evalAvailability === "enabled" ? [{ id: "evaluate" as const, label: t(releaseBarOn ? "release_bar_tab_cases" : "version_task_eval") }] : []),
+    ...(evalAvailability === "enabled" ? [{ id: "evaluate" as const, label: t(releaseBarOn ? "release_bar_tab_cases" : "version_task_eval"), chip: suggestedCaseCount ? v2c("tab_chip", { count: suggestedCaseCount }) : undefined }] : []),
     { id: "release", label: releaseLabel, marker: activeTask !== "release" && releaseResultUnseen(releaseResult, releaseSeen) },
   ];
   const goToTask = (task: AgentManagerTask, section: AgentConfigSection | null = null, anchor: string | null = null) => {
@@ -1243,14 +1436,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     else next.add(section);
     return next;
   });
-  const dependencyBlocked = Boolean(missingTools.length || missingSkills.length || missingToolConnections.length);
-  const sectionProblem: Record<AgentConfigSection, string | null> = {
-    does: displayNameInvalid ? t("release_display_name_required") : missingPrimaryCapability ? t("release_primary_unavailable") : null,
-    uses: !hasCapability ? t("release_capability_required")
-      : dependencyBlocked ? t("release_dependency_stale")
-        : audienceBlockedSkills.length ? t("release_personal_skill_private_only") : null,
-    who: customAudienceInvalid ? t("release_custom_required") : outputSchemaInvalid ? t("release_output_schema_invalid") : null,
-  };
+  const sectionProblem = sectionProblems;
   // Name only the kinds that are present ("2 Plugins · 4 Tools"), in the interface language, with the rule the
   // creation draft and receipt use (agentResourceCounts): a Plugin counts once, not as the Tools it brings, and the
   // Python Skill that picking Run code adds on its own is not a picked Skill.
@@ -1272,6 +1458,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     ].filter(Boolean).join(t("version_list_separator")),
     uses: resourceCountLine,
     who: t(`release_audience_${draft.audienceMode}` as never),
+    more: v2t("more_summary"),
   };
   const configSection = (section: AgentConfigSection, title: string, body: ReactNode, action?: ReactNode) => {
     const open = !closedSections.has(section);
@@ -1309,12 +1496,13 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         : t("version_ask_coach_prefill", { name }));
     }
     : null;
-  const saveBlocked = !hasCapability || missingPrimaryCapability || customAudienceInvalid || optionalAudienceInvalid || displayNameInvalid || outputSchemaInvalid
-    || Boolean(missingTools.length || missingSkills.length || missingToolConnections.length || audienceBlockedSkills.length);
+  const saveBlocked = saveBlockedNow;
   const discardDraftEdits = () => {
     void (async () => {
-      if (!await confirm(canvasCloseGuardOptions(tObject, draft.displayName))) return;
+      if (!await confirm({ ...canvasCloseGuardOptions(tObject, draft.displayName), description: t("release_bar_discard_body", { name: draft.displayName }) })) return;
       if (detail && catalog) setDraft(editorDraft(detail, catalog, teamPlugins));
+      // 放弃修改 leaves with the dirty state; keep focus on the bar's new status instead of the page body.
+      window.setTimeout(() => releaseBarSlot?.querySelector<HTMLElement>(".am-rb-status")?.focus(), 0);
     })();
   };
   const copyAgentLink = () => {
@@ -1324,6 +1512,15 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       () => toast({ kind: "error", text: url }),
     );
   };
+  // Owner draft trial: the start flow saves per the rule (only 工作说明 without asking) and freezes the draft.
+  const trialHost: ReleaseBarTrialHost | null = trialOn && !archived && !hosted?.readOnly && detail.actions.edit ? {
+    dirtyFields: draftDirtyFields,
+    savedDraftEqualsRelease: !detail.working_copy,
+    saveDraft: save,
+    onOpenSection: (section) => goToTask("config", section),
+    listSlot: trialListSlot,
+    safetyTestRequest,
+  } : null;
   const releaseBarHost = releaseBarOn && !archived ? {
     slot: releaseBarSlot,
     shared: draft.audienceMode !== "private",
@@ -1335,10 +1532,267 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     onDiscard: discardDraftEdits,
     onCopyLink: copyAgentLink,
     variant: hostedMode ? "canvas" as const : "page" as const,
+    trial: trialHost,
+    // "Can't save yet" names what is missing and links to the section that fixes it (§3.1 "Saving").
+    saveBlockedLink: saveBlockedInfo ? {
+      problem: saveBlockedInfo.problem,
+      label: v2t("bar_blocked_link", { section: v2t(`section_${saveBlockedInfo.section}` as never) }),
+      onSelect: () => goToTask("config", saveBlockedInfo.section),
+    } : null,
+    // 测试这次修改 asks first while the suite editor has unsaved cases (保存并测试 saves them).
+    cases: casesDirty > 0 ? { dirtyCount: casesDirty, save: () => casesRef.current?.save() ?? Promise.resolve(false) } : null,
   } : null;
   const archivedBar = releaseBarOn && archived ? releaseBarState({
     workbench: null, kind: null, test: null, hasOwnerCases: true, blockedByRegression: false, dirty: false, archived: true, shared: false,
   }) : null;
+  const modelField = catalog.model_policy.locked || catalog.model_policy.allowed_roles.length <= 1 ? (
+    <div className="am-release-policy-field"><span>{t("release_model_role")}</span><strong>{draft.model === "analyst" ? t("release_model_analyst") : draft.model}</strong><small>{t("release_model_policy_locked")}</small></div>
+  ) : (
+    <label><span>{t("release_model_role")}</span><select name="agent-model-role" autoComplete="off" disabled={archived} value={draft.model} onChange={(event) => update({ model: event.target.value })}>{catalog.model_policy.allowed_roles.map((role) => <option key={role} value={role}>{role === "analyst" ? t("release_model_analyst") : role}</option>)}</select></label>
+  );
+  const primaryCapabilityFields = <>
+    {sharedAgent ? <p className="am-config-advanced-note" role="note">{t("release_advanced_reviewer_note")}</p> : null}
+    <header><div><h3>{t("release_primary_title")}</h3><p>{t(sharedAgent ? "release_primary_body" : "release_primary_body_private")}</p></div></header>
+    {missingPrimaryCapability ? <div className="am-release-stale-list"><strong>{t("release_primary_unavailable")}</strong><label><input type="radio" name="agent-primary-capability" checked disabled /><span translate="no">{draft.primaryCapabilityRef}</span><small>{t("release_primary_clear_to_save")}</small></label></div> : null}
+    <fieldset className="am-release-primary-grid">
+      <legend className="sr-only">{t("release_primary_title")}</legend>
+      <label data-selected={draft.primaryCapabilityRef === null}>
+        <input type="radio" name="agent-primary-capability" checked={draft.primaryCapabilityRef === null} disabled={archived} onChange={() => update({ primaryCapabilityRef: null })} />
+        <span><strong>{t("release_primary_none")}</strong><small>{t("release_primary_none_body")}</small><em>{t("release_primary_optional")}</em></span>
+      </label>
+      {selectablePrimaryCapabilities.map((capability) => {
+        const copy = localizedCapabilityText(capability, locale);
+        const selected = draft.primaryCapabilityRef === capability.exact_ref;
+        return (
+          <label key={capability.exact_ref} data-selected={selected} data-disabled={!capability.selectable}>
+            <input type="radio" name="agent-primary-capability" checked={selected} disabled={archived || !capability.selectable} onChange={() => update({ primaryCapabilityRef: capability.exact_ref })} />
+            <span><strong>{copy.name}</strong><small>{copy.description}</small><em>{capability.selectable ? t("release_primary_verified") : t(`release_primary_${capability.verification_state}` as never)}</em></span>
+          </label>
+        );
+      })}
+    </fieldset>
+    {!catalog.primary_capabilities.some((capability) => capability.selectable) ? (
+      <div className="am-config-empty"><strong>{t("version_config_capability_empty")}</strong><p>{t("release_primary_catalog_pending")}</p><button type="button" className="am-config-inline-link" onClick={() => openSection("uses")}>{t("version_config_capability_configure_resources")}</button></div>
+    ) : null}
+    {unavailablePrimaryCapabilities.length ? (
+      <details className="am-config-unavailable">
+        <summary>{t("version_config_capability_unavailable", { count: unavailablePrimaryCapabilities.length })}</summary>
+        <p>{t("version_config_capability_unavailable_body")}</p>
+        <div className="am-release-primary-grid">
+          {unavailablePrimaryCapabilities.map((capability) => { const copy = localizedCapabilityText(capability, locale); return <label key={capability.exact_ref} data-disabled="true"><input type="radio" name="unavailable-agent-primary-capability" disabled /><span><strong>{copy.name}</strong><small>{copy.description}</small><em>{t(`release_primary_${capability.verification_state}` as never)}</em></span></label>; })}
+        </div>
+      </details>
+    ) : null}
+  </>;
+  const forkManagerSection = forkSettings ? (
+    <section className="am-release-history am-fork-manager">
+      <header>
+        <span>{t("fork_manager_eyebrow")}</span>
+        <h2>{t("fork_manager_title")}</h2>
+        <p>{t("fork_manager_body")}</p>
+      </header>
+      <div className="am-fork-manager-explanation">
+        <strong>{t("fork_manager_explanation_title")}</strong>
+        <ul>
+          <li>{t("fork_manager_explanation_copy")}</li>
+          <li>{t("fork_manager_explanation_gaps")}</li>
+          <li>{t("fork_manager_explanation_independent")}</li>
+        </ul>
+      </div>
+      <div className="am-fork-manager-grid">
+        <div className="am-fork-policy-card">
+          <label>
+            <span>{t("fork_policy_label")}</span>
+            <select value={forkSettings.policy.policy} disabled={archived || busy !== null} onChange={(event) => void changeForkPolicy(event.target.value as AgentForkSettings["policy"]["policy"])}>
+              <option value="not_allowed">{t("fork_policy_not_allowed")}</option>
+              <option value="recipients">{t("fork_policy_recipients")}</option>
+              <option value="team_members">{t("fork_policy_team_members")}</option>
+            </select>
+          </label>
+          <p>{t(`fork_policy_${forkSettings.policy.policy}_body` as never)}</p>
+          <small>{t("fork_policy_future_only")}</small>
+        </div>
+        {forkSettings.lineage ? (
+          <div className="am-fork-lineage-card">
+            <span>{t("fork_lineage_label")}</span>
+            <h3>{forkSettings.lineage.source_agent_id ? <a href={appPath(`/agents/detail/?id=${encodeURIComponent(forkSettings.lineage.source_agent_id)}`)}>{forkSettings.lineage.source_display_name}</a> : forkSettings.lineage.source_display_name}</h3>
+            <p>{forkSettings.lineage.source_accessible ? t("fork_lineage_connected") : t("fork_lineage_tombstone")}</p>
+            <dl>
+              <div><dt>{t("fork_source_version")}</dt><dd>{forkSettings.lineage.source_revision_ref.slice(-8)}</dd></div>
+              <div><dt>{t("fork_upstream_status")}</dt><dd>{t(forkSettings.lineage.upstream.update_available ? "fork_update_available" : "fork_up_to_date")}</dd></div>
+              <div><dt>{t("fork_auto_update")}</dt><dd>{t("fork_never_auto_updates")}</dd></div>
+            </dl>
+            {forkSettings.lineage.upstream.comparison ? <p className="am-fork-comparison">{t("fork_change_summary", { tools: Number(forkSettings.lineage.upstream.comparison.upstream_changes.tools_added ?? 0) + Number(forkSettings.lineage.upstream.comparison.upstream_changes.tools_removed ?? 0), skills: Number(forkSettings.lineage.upstream.comparison.upstream_changes.skills_added ?? 0) + Number(forkSettings.lineage.upstream.comparison.upstream_changes.skills_removed ?? 0) })}{forkSettings.lineage.upstream.comparison.local_changed_since_fork ? ` · ${t("fork_local_changed")}` : ""}</p> : null}
+            {forkSettings.lineage.dependency_gaps.length ? <small>{t("fork_manager_gaps", { count: forkSettings.lineage.dependency_gaps.length })}</small> : null}
+          </div>
+        ) : (
+          <div className="am-fork-lineage-card">
+            <span>{t("fork_lineage_label")}</span>
+            <h3>{t("fork_original_agent")}</h3>
+            <p>{t("fork_original_agent_body")}</p>
+          </div>
+        )}
+      </div>
+    </section>
+  ) : null;
+
+  // Redesigned Configure (FEATURE_AGENT_RELEASE_BAR, design §4): Coach's changes, then 它做什么 → 它能用什么 → 谁能用
+  // → 更多设置. Every control of today's layout is kept: catalogs and panels open on demand instead of inline.
+  const chipFor = (path: string) => draftFieldChip(workbenchFacts?.draft_changes, path, aiProposalIds);
+  const toggleMore = (row: string) => setMoreOpen((current) => {
+    const next = new Set(current);
+    if (next.has(row)) next.delete(row); else next.add(row);
+    return next;
+  });
+  const advancedParts: Array<[string, string | null]> = [
+    [t("release_capability_protocol_block"), draft.capabilityProtocolBlock ? v2t("advanced_value_on") : null],
+    [v2t("advanced_primary"), selectedPrimaryCapability ? localizedCapabilityText(selectedPrimaryCapability, locale).name : missingPrimaryCapability ? t("release_advanced_needs_attention") : null],
+    [v2t("advanced_output"), draft.outputSchema.trim() ? v2t("advanced_value_set") : null],
+  ];
+  const advancedSummary = advancedParts.every(([, value]) => !value)
+    ? v2t("advanced_none")
+    : advancedParts.map(([name, value]) => value ? v2t("advanced_value", { name, value }) : v2t("advanced_unset", { name })).join(v2t("separator"));
+  const writeToolNames = [...new Set([...draft.toolRefs, ...pluginToolOwner.keys()])]
+    .filter((ref) => ["external_write", "destructive"].includes(toolsByRef.get(ref)?.risk ?? ""))
+    .map((ref) => { const tool = toolsByRef.get(ref); return tool ? localizedToolText(tool).name : toolLabel(ref).name; });
+  const optionalMethods = readRuntimeExtensions(draft.extensionFields.runtime_extensions);
+  const optionalMethodsLine = optionalMethods === "unsupported" ? v2t("methods_unsupported")
+    : optionalMethods && optionalMethods.skill_read.enabled && optionalMethods.skill_read.resource_allowlist.length
+      ? v2t("methods_count", { count: optionalMethods.skill_read.resource_allowlist.length })
+      : v2t("methods_none");
+  const legacyPickedTeamPlugins = pickerPlugins.length ? [] : teamPlugins.filter((plugin) => draft.pluginIds.includes(plugin.id));
+  const configureV2 = <>
+    {/* Coach 的修改, first and only when non-empty: the workbench portals its strip here (S9). */}
+    {!hostedMode ? <div ref={setCoachSlot} className="am-cfg2-coach-slot" /> : null}
+    {configSection("does", v2t("section_does"), <>
+      <section className="am-release-section">
+        <div className="am-release-form-grid">
+          <label><span className="am-cfg2-label">{t("release_display_name")}<FieldChip chip={chipFor("/listing/display_name")} /></span><input aria-label={t("release_display_name")} name="agent-display-name" autoComplete="off" maxLength={40} disabled={archived} value={draft.displayName} onChange={(event) => update({ displayName: event.target.value })} />{displayNameInvalid ? <small className="am-release-inline-error">{t("release_display_name_required")}</small> : null}</label>
+          <label className="am-release-field-wide"><span className="am-cfg2-label">{t("release_description")}<FieldChip chip={chipFor("/listing/description")} /></span><small className="am-cfg2-helper">{v2t(sharedAgent ? "description_helper_shared" : "description_helper")}</small><textarea aria-label={t("release_description")} name="agent-description" autoComplete="off" maxLength={200} rows={3} disabled={archived} value={draft.description} onChange={(event) => update({ description: event.target.value })} /><small>{draft.description.length}/200</small></label>
+        </div>
+      </section>
+      <section className="am-release-section am-config-prompt-section">
+        {feedbackPrefill && !archived ? (
+          <div className="am-release-field-wide">
+            <FeedbackPrefillPanel
+              handoff={feedbackPrefill}
+              baseline={draft.systemPrompt}
+              stale={feedbackPrefillStale}
+              realigning={realigning}
+              onRealign={() => void realignFeedbackPrefill()}
+              onApply={(edited) => { update({ systemPrompt: edited }); setFeedbackPrefillApplied(true); setFeedbackPrefill(null); clearFeedbackPrefill(); }}
+              onDiscard={() => { setFeedbackPrefill(null); clearFeedbackPrefill(); }}
+            />
+          </div>
+        ) : null}
+        <div className="am-release-field-wide am-cfg2-prompt">
+          <div className="am-cfg2-label-row">
+            <label className="am-cfg2-label" htmlFor={`${agentId}-system-prompt`}>{v2t("field_instructions")}<FieldChip chip={chipFor("/definition/system_prompt")} /></label>
+            {optimize.button}
+          </div>
+          <textarea id={`${agentId}-system-prompt`} aria-label={v2t("field_instructions")} name="agent-system-prompt" autoComplete="off" className="am-release-prompt" maxLength={MAX_PROMPT_CHARS_TEAM} rows={14} disabled={archived} readOnly={optimize.waiting} aria-busy={optimize.waiting || undefined} value={draft.systemPrompt} onChange={(event) => update({ systemPrompt: event.target.value })} />
+          <PromptBudgetHint text={draft.systemPrompt} t={t} />
+          {optimize.panel}
+        </div>
+        <div className="am-release-form-grid am-release-compact-fields">{modelField}</div>
+      </section>
+      <details className="am-release-section am-config-advanced" open={advancedOpen ?? false} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+        <summary>
+          <span>{v2t("advanced_title")}</span>
+          <span className="am-config-advanced-summary">{advancedSummary}</span>
+          {missingPrimaryCapability || outputSchemaInvalid ? <Badge size="sm" tone="warning">{t("release_advanced_needs_attention")}</Badge> : null}
+        </summary>
+        <div className="am-config-advanced-body">
+          <label className="am-release-field-wide am-release-toggle-field"><input name="agent-capability-protocol-block" type="checkbox" disabled={archived} checked={draft.capabilityProtocolBlock} onChange={(event) => update({ capabilityProtocolBlock: event.target.checked })} /><span><strong>{t("release_capability_protocol_block")}</strong><small>{t("release_capability_protocol_block_help")}</small></span></label>
+          {primaryCapabilityFields}
+          <div className="am-cfg2-output">
+            <h3>{t("release_output_contract_title")}</h3>
+            <p>{t("release_output_contract_body")}</p>
+            <label><span>{t("release_output_contract_json")}</span><textarea name="agent-output-contract" autoComplete="off" spellCheck={false} className="am-release-prompt" rows={8} disabled={archived} value={draft.outputSchema} onChange={(event) => update({ outputSchema: event.target.value })} placeholder={'{\n  "type": "object"\n}'} />{outputSchemaInvalid ? <small className="am-release-inline-error">{t("release_output_schema_invalid")}</small> : null}</label>
+          </div>
+        </div>
+      </details>
+    </>)}
+    {configSection("uses", v2t("section_uses"), <section className="am-release-section am-cfg2-uses">
+      <div className="am-cfg2-uses-actions">
+        {!archived ? <Button variant="secondary" size="sm" onClick={() => setAddResourcesOpen(true)}>{v2t("uses_add")}</Button> : null}
+        {/* Decision 21: the Tool / Skill / Plugin explanations sit in one popover. */}
+        <span className="am-cfg2-help">{v2t("uses_help")}<HelpPopover label={v2t("uses_help")} title={pickerT("guide_title")}><ul><li>{pickerT("concept_tool")}</li><li>{pickerT("concept_skill")}</li><li>{pickerT("concept_plugin")}</li></ul></HelpPopover></span>
+      </div>
+      {!hasCapability ? <p className="am-release-inline-error">{t("release_capability_required")}</p> : null}
+      {missingDependency ? <p className="am-release-inline-error">{t("release_dependency_stale")}</p> : null}
+      {audienceBlockedSkills.length ? <p className="am-release-inline-error">{t("release_personal_skill_private_only")}</p> : null}
+      <ul className="am-cfg2-rows" aria-label={v2t("uses_selected")}>
+        {pickedPlugins.map((plugin) => <ConfigRow key={`plugin:${plugin.id}`} kind={v2t("kind_plugin")} title={plugin.name} meta={v2t(plugin.guidance ? "plugin_meta_guidance" : "plugin_meta", { count: plugin.tools.length })} action={!archived ? <RemoveButton name={plugin.name} onRemove={() => togglePlugin(plugin)} /> : null} />)}
+        {legacyPickedTeamPlugins.map((plugin) => <ConfigRow key={`team-plugin:${plugin.id}`} kind={v2t("kind_plugin")} title={plugin.name} meta={plugin.description} action={!archived ? <RemoveButton name={plugin.name} onRemove={() => update({ pluginIds: draft.pluginIds.filter((id) => id !== plugin.id) })} /> : null} />)}
+        {selectedToolConnections.map((connection) => <ConfigRow key={`connection:${connection.id}`} kind={v2t("kind_connection")} title={connection.name} meta={toolConnectionSummary(connection)} action={!archived ? <RemoveButton name={connection.name} onRemove={() => toggleToolConnection(connection)} /> : null} />)}
+        {selectedTools.map((tool) => <ConfigRow key={`tool:${tool.stable_ref}`} kind={v2t("kind_tool")} title={localizedToolText(tool).name} meta={`${t(`release_risk_${tool.risk}` as never)}${!tool.selectable ? ` · ${toolT(toolSelectionLockedReasonKey(tool.locked_reason ?? ""))}` : ""}`} action={!archived ? <RemoveButton name={localizedToolText(tool).name} onRemove={() => toggle("toolRefs", tool.stable_ref)} /> : null} />)}
+        {selectedSkills.map((skill) => {
+          const requiredByNames = selectedSkills.filter((candidate) => (candidate.required_skills ?? []).includes(skill.name)).map((candidate) => authoringSkillTitle(candidate));
+          const name = authoringSkillTitle(skill, locale);
+          return <ConfigRow key={`skill:${skill.name}`} kind={v2t("kind_skill")} title={name} meta={authoringSkillDescription(skill, locale) || t("release_skill_fallback")} action={!archived ? <RemoveButton name={name} disabled={requiredByNames.length > 0} reason={requiredByNames.length ? t("release_required_by_skills", { skills: listFormatter.format(requiredByNames) }) : undefined} onRemove={() => toggleSkill(skill.name)} /> : null}>
+            {skill.script_runtime === "disabled" ? <small role="note" data-testid="skill-scripts-disabled">{t("release_skill_scripts_disabled")}</small> : null}
+          </ConfigRow>;
+        })}
+        {missingTools.map((ref) => <ConfigRow key={`missing-tool:${ref}`} tone="warning" kind={v2t("kind_tool")} title={ref} meta={t("release_remove_to_publish")} action={!archived ? <RemoveButton name={ref} onRemove={() => toggle("toolRefs", ref)} /> : null} />)}
+        {missingToolConnections.map((id) => <ConfigRow key={`missing-connection:${id}`} tone="warning" kind={v2t("kind_connection")} title={id} meta={t("release_remove_to_publish")} action={!archived ? <RemoveButton name={id} onRemove={() => update({ toolConnectionIds: draft.toolConnectionIds.filter((value) => value !== id) })} /> : null} />)}
+        {missingSkills.map((name) => <ConfigRow key={`missing-skill:${name}`} tone="warning" kind={v2t("kind_skill")} title={name} meta={t("release_remove_to_publish")} action={!archived ? <RemoveButton name={name} onRemove={() => toggleSkill(name)} /> : null} />)}
+        {knowledgeSummary.available ? <ConfigRow kind={v2t("kind_knowledge")} title={t("knowledge_sources_title")} meta={knowledgeSummary.line} action={<Button size="sm" variant="ghost" aria-label={v2t("edit_named", { name: t("knowledge_sources_title") })} onClick={() => setDrawer("knowledge")}>{v2t("edit")}</Button>} /> : null}
+        <ConfigRow kind={v2t("kind_methods")} title={v2t("methods_title")} meta={optionalMethodsLine} action={<Button size="sm" variant="ghost" aria-label={v2t("configure_named", { name: v2t("methods_title") })} onClick={() => setDrawer("methods")}>{v2t("configure")}</Button>} />
+      </ul>
+      {!hasResources && !pickedPlugins.length && !legacyPickedTeamPlugins.length ? <p className="am-ci-note">{v2t("uses_empty")}</p> : null}
+      <ul className="am-cfg2-summary">
+        <li>{writeToolNames.length ? v2t("summary_writes", { names: listFormatter.format(writeToolNames) }) : v2t("summary_writes_none")}</li>
+        {!hostedMode ? <li>{v2t("summary_personal")}<Button size="sm" variant="ghost" onClick={() => setDrawer("connections")}>{v2t("manage_connections")}</Button></li> : null}
+        <li>{v2t("summary_scope")}</li>
+      </ul>
+    </section>)}
+    {configSection("who", v2t("section_who"), <section className="am-release-section">
+      <fieldset className="am-release-segments"><legend className="sr-only">{t("release_audience_title")}</legend>{(["private", "custom", "teamwide"] as const).map((mode) => <label data-selected={draft.audienceMode === mode} key={mode}><input type="radio" name="agent-audience-mode" value={mode} checked={draft.audienceMode === mode} disabled={archived} onChange={() => update({ audienceMode: mode })} /><span>{t(`release_audience_${mode}` as never)}</span></label>)}</fieldset>
+      {draft.audienceMode !== "private" ? <p className="am-release-audience-explanation">{t(`release_audience_${draft.audienceMode}_body` as never)}</p> : null}
+      {draft.audienceMode === "custom" ? <div className="am-release-directory"><label><span>{t("release_find_people")}</span><input name="agent-audience-search" autoComplete="off" type="search" disabled={archived} value={directoryQuery} onChange={(event) => setDirectoryQuery(event.target.value)} placeholder={t("release_find_people_placeholder")} /></label>{customAudienceInvalid ? <p className="am-release-inline-error">{t("release_custom_required")}</p> : null}<div>{groups.map((group) => <label key={`group:${group.id}`}><input name="agent-audience-group" type="checkbox" checked={selectedAudienceGroups.has(group.id)} disabled={archived} onChange={() => toggle("groupIds", group.id)} /><span><strong>{group.name}</strong><small>{t("release_group_members", { count: group.member_count })}</small></span></label>)}{users.map((user) => <label key={`user:${user.id}`}><input name="agent-audience-user" type="checkbox" checked={selectedAudienceUsers.has(user.id)} disabled={archived} onChange={() => toggle("userIds", user.id)} /><span><strong>{user.display_name}</strong><small>{user.email_masked}</small></span></label>)}{[...draft.groupIds.filter((id) => !groups.some((group) => group.id === id)), ...draft.userIds.filter((id) => !users.some((user) => user.id === id))].map((id) => <label key={`unresolved:${id}`}><input name="agent-audience-principal" type="checkbox" checked disabled={archived} onChange={() => draft.groupIds.includes(id) ? toggle("groupIds", id) : toggle("userIds", id)} /><span><strong>{id}</strong><small>{t("release_selected_principal")}</small></span></label>)}</div></div> : null}
+      <ShareConsequences mode={draft.audienceMode} copyLink={{ label: t("release_bar_action_copy_link"), onCopy: copyAgentLink }} />
+      {draft.audienceMode !== "private" ? <PersonalToolAudienceNotice agentId={agentId} /> : null}
+    </section>)}
+    {!hostedMode ? configSection("more", v2t("section_more"), <ul className="am-cfg2-more-list">
+      <MoreRow id="agent-more-market" title={v2t("more_market")} value={detail.working_copy ? null : v2t("more_market_save_first")} open={moreOpen.has("market")} onToggle={() => toggleMore("market")}>
+        <div className="am-config-market-stack">
+          <p role="note">{t("version_config_market_not_listing")}</p>
+          {detail.working_copy ? <AgentLocalizationPanel agentId={agentId} archived={archived} parentDirty={dirty} refreshToken={`${detail.working_copy.id}:${detail.working_copy.row_version}`} onLocalizationChanged={() => setSafety(null)} /> : <div className="am-config-empty"><strong>{t("version_config_market_save_first")}</strong><p>{t("version_config_market_save_first_body")}</p></div>}
+          {detail.working_copy ? <AgentTaxonomyPanel agentId={agentId} archived={archived} parentDirty={dirty} refreshToken={`${detail.working_copy.id}:${detail.working_copy.row_version}`} onTaxonomyChanged={() => { setSafety(null); void load(); }} /> : null}
+        </div>
+      </MoreRow>
+      {forkSettings ? <MoreRow id="agent-more-fork" title={v2t("more_fork")} value={t(`fork_policy_${forkSettings.policy.policy}` as never)} open={moreOpen.has("fork")} onToggle={() => toggleMore("fork")}>{forkManagerSection}</MoreRow> : null}
+      <MoreRow id="agent-more-proposals" title={v2t("more_pending")} value={pendingCount ? v2t("more_pending_count", { count: pendingCount }) : v2t("more_pending_none")} open={moreOpen.has("proposals")} onToggle={() => toggleMore("proposals")}>
+        {/* Field proposals and members' thumbs-downs, portaled here by the workbench. */}
+        <div ref={setProposalsSlot} className="am-cfg2-proposals-slot" />
+        {!pendingCount ? <p className="am-ci-note">{v2t("more_pending_empty")}</p> : null}
+      </MoreRow>
+    </ul>) : null}
+    {drawer === "knowledge" ? (
+      <Dialog variant="drawer" title={t("knowledge_sources_title")} onClose={() => setDrawer(null)} closeLabel={v2t("done")}>
+        <AgentKnowledgeSourcesPanel key={`knowledge:${agentId}`} agentId={agentId} value={draft.knowledgeAccess} disabled={!detail.actions.edit || busy !== null || archived} onChange={(knowledgeAccess) => update({ knowledgeAccess })} />
+      </Dialog>
+    ) : null}
+    {drawer === "methods" ? (
+      <Dialog variant="drawer" title={v2t("methods_title")} onClose={() => setDrawer(null)} closeLabel={v2t("done")}>
+        <section className="am-release-section"><AgentOptionalSkillsPanel key={agentId} agentId={agentId} value={draft.extensionFields.runtime_extensions} audience={draft.audienceMode} disabled={!detail.actions.edit || busy !== null} onChange={(runtime_extensions) => {
+          const baseline = detail.working_copy ?? detail.live;
+          update({
+            extensionFields: runtime_extensions === null && !Object.hasOwn(baseline.definition, "runtime_extensions")
+              ? {}
+              : { runtime_extensions },
+          });
+        }} /></section>
+      </Dialog>
+    ) : null}
+    {drawer === "connections" && !hostedMode ? (
+      <Dialog variant="drawer" title={v2t("summary_personal")} onClose={() => setDrawer(null)} closeLabel={v2t("done")}>
+        <PersonalMcpAgentBindings agentId={agentId} />
+      </Dialog>
+    ) : null}
+    {optimize.dialogs}
+  </>;
   const workbenchPanel = (
     <AgentVersionWorkbenchPanel
         // The workbench probes its availability once on mount (an archived Agent answers 404), so
@@ -1357,7 +1811,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         onResultWaiting={setReleaseResult}
         onChanged={load}
         onError={handleVersionError}
-        onOpenConfig={() => goToTask("config")}
+        onOpenConfig={(section) => { goToTask("config"); if (section) window.setTimeout(() => openSection(section), 0); }}
         onOpenEvaluate={evalAvailability === "enabled" ? () => goToTask("evaluate") : undefined}
         onOpenHistory={hostedMode ? undefined : () => goToTask("release", null, AGENT_HISTORY_ANCHOR)}
         onOpenRelease={hostedMode ? undefined : () => goToTask("release")}
@@ -1370,6 +1824,13 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         onAddCases={activeTask === "evaluate" && !archived ? () => setAddCaseRequest((value) => value + 1) : undefined}
         onTestState={activeTask === "evaluate" ? setEvaluateTestState : undefined}
         releaseBar={releaseBarHost}
+        layout={layout}
+        onWorkbench={configV2 ? setWorkbenchFacts : undefined}
+        refreshKey={workbenchRefresh}
+        proposalsSlot={proposalsSlot}
+        casesDirtyCount={casesDirty}
+        onCasesAccepted={() => setEvalReloadRequest((value) => value + 1)}
+        lastReleaseTest={liveRelease?.release_test ? { sequence: liveRelease.release_sequence } : null}
     />
   );
 
@@ -1456,7 +1917,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
       <Tabs value={activeTask} onValueChange={(task) => goToTask(task)} idBase="agent-manager">
       {!hostedMode ? <div className="am-task-bar">
         <TabList appearance="underline" className="am-release-task-nav" aria-label={t("version_task_navigation")}>
-          {taskItems.map((item) => <Tab key={item.id} value={item.id}>{item.label}{item.count ? <span className="am-task-count" aria-label={t("version_task_pending_count", { count: item.count })}>{item.count}</span> : null}{item.marker ? <span className="am-task-marker" role="img" aria-label={t("version_task_result_waiting")} /> : null}</Tab>)}
+          {taskItems.map((item) => <Tab key={item.id} value={item.id}>{item.label}{item.count ? <span className="am-task-count" aria-label={t("version_task_pending_count", { count: item.count })}>{item.count}</span> : null}{item.chip ? <span className="am-task-chip">{item.chip}</span> : null}{item.marker ? <span className="am-task-marker" role="img" aria-label={t("version_task_result_waiting")} /> : null}</Tab>)}
         </TabList>
         {askCoach ? <Button variant="secondary" size="sm" onClick={() => askCoach()}><Bot size={14} aria-hidden />{t("version_ask_coach_action")}</Button> : null}
       </div> : null}
@@ -1472,6 +1933,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
         </header> : null}
         <div className="am-release-layout">
           <div id="agent-config-view" className="am-release-editor" aria-disabled={archived} tabIndex={-1}>
+            {configV2 ? configureV2 : <>
             {configSection("does", t("version_config_section_does"), <>
               <section className="am-release-section am-config-prompt-section">
                 <header><div><h2>{t("release_instructions_title")}</h2><p>{t("release_instructions_body")}</p></div></header>
@@ -1491,11 +1953,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
                 <label className="am-release-field-wide"><span>{t("release_system_prompt")}</span><textarea aria-label={t("release_system_prompt")} name="agent-system-prompt" autoComplete="off" className="am-release-prompt" maxLength={MAX_PROMPT_CHARS_TEAM} rows={14} disabled={archived} value={draft.systemPrompt} onChange={(event) => update({ systemPrompt: event.target.value })} /><PromptBudgetHint text={draft.systemPrompt} t={t} /></label>
                 <div className="am-release-form-grid am-release-compact-fields">
                   <label className="am-release-field-wide am-release-toggle-field"><input name="agent-capability-protocol-block" type="checkbox" disabled={archived} checked={draft.capabilityProtocolBlock} onChange={(event) => update({ capabilityProtocolBlock: event.target.checked })} /><span><strong>{t("release_capability_protocol_block")}</strong><small>{t("release_capability_protocol_block_help")}</small></span></label>
-                  {catalog.model_policy.locked || catalog.model_policy.allowed_roles.length <= 1 ? (
-                    <div className="am-release-policy-field"><span>{t("release_model_role")}</span><strong>{draft.model === "analyst" ? t("release_model_analyst") : draft.model}</strong><small>{t("release_model_policy_locked")}</small></div>
-                  ) : (
-                    <label><span>{t("release_model_role")}</span><select name="agent-model-role" autoComplete="off" disabled={archived} value={draft.model} onChange={(event) => update({ model: event.target.value })}>{catalog.model_policy.allowed_roles.map((role) => <option key={role} value={role}>{role === "analyst" ? t("release_model_analyst") : role}</option>)}</select></label>
-                  )}
+                  {modelField}
                 </div>
               </section>
               <section className="am-release-section">
@@ -1521,38 +1979,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
                   {missingPrimaryCapability ? <Badge size="sm" tone="warning">{t("release_advanced_needs_attention")}</Badge> : null}
                 </summary>
                 <div className="am-config-advanced-body">
-                {sharedAgent ? <p className="am-config-advanced-note" role="note">{t("release_advanced_reviewer_note")}</p> : null}
-                <header><div><h3>{t("release_primary_title")}</h3><p>{t(sharedAgent ? "release_primary_body" : "release_primary_body_private")}</p></div></header>
-                {missingPrimaryCapability ? <div className="am-release-stale-list"><strong>{t("release_primary_unavailable")}</strong><label><input type="radio" name="agent-primary-capability" checked disabled /><span translate="no">{draft.primaryCapabilityRef}</span><small>{t("release_primary_clear_to_save")}</small></label></div> : null}
-                <fieldset className="am-release-primary-grid">
-                  <legend className="sr-only">{t("release_primary_title")}</legend>
-                  <label data-selected={draft.primaryCapabilityRef === null}>
-                    <input type="radio" name="agent-primary-capability" checked={draft.primaryCapabilityRef === null} disabled={archived} onChange={() => update({ primaryCapabilityRef: null })} />
-                    <span><strong>{t("release_primary_none")}</strong><small>{t("release_primary_none_body")}</small><em>{t("release_primary_optional")}</em></span>
-                  </label>
-                  {selectablePrimaryCapabilities.map((capability) => {
-                    const copy = localizedCapabilityText(capability, locale);
-                    const selected = draft.primaryCapabilityRef === capability.exact_ref;
-                    return (
-                      <label key={capability.exact_ref} data-selected={selected} data-disabled={!capability.selectable}>
-                        <input type="radio" name="agent-primary-capability" checked={selected} disabled={archived || !capability.selectable} onChange={() => update({ primaryCapabilityRef: capability.exact_ref })} />
-                        <span><strong>{copy.name}</strong><small>{copy.description}</small><em>{capability.selectable ? t("release_primary_verified") : t(`release_primary_${capability.verification_state}` as never)}</em></span>
-                      </label>
-                    );
-                  })}
-                </fieldset>
-                {!catalog.primary_capabilities.some((capability) => capability.selectable) ? (
-                  <div className="am-config-empty"><strong>{t("version_config_capability_empty")}</strong><p>{t("release_primary_catalog_pending")}</p><button type="button" className="am-config-inline-link" onClick={() => openSection("uses")}>{t("version_config_capability_configure_resources")}</button></div>
-                ) : null}
-                {unavailablePrimaryCapabilities.length ? (
-                  <details className="am-config-unavailable">
-                    <summary>{t("version_config_capability_unavailable", { count: unavailablePrimaryCapabilities.length })}</summary>
-                    <p>{t("version_config_capability_unavailable_body")}</p>
-                    <div className="am-release-primary-grid">
-                      {unavailablePrimaryCapabilities.map((capability) => { const copy = localizedCapabilityText(capability, locale); return <label key={capability.exact_ref} data-disabled="true"><input type="radio" name="unavailable-agent-primary-capability" disabled /><span><strong>{copy.name}</strong><small>{copy.description}</small><em>{t(`release_primary_${capability.verification_state}` as never)}</em></span></label>; })}
-                    </div>
-                  </details>
-                ) : null}
+                {primaryCapabilityFields}
                 </div>
               </details>
             
@@ -1619,64 +2046,22 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
               <p role="note">{t("version_config_market_not_listing")}</p>
               {detail.working_copy ? <AgentLocalizationPanel agentId={agentId} archived={archived} parentDirty={dirty} refreshToken={`${detail.working_copy.id}:${detail.working_copy.row_version}`} onLocalizationChanged={() => setSafety(null)} /> : <div className="am-config-empty"><strong>{t("version_config_market_save_first")}</strong><p>{t("version_config_market_save_first_body")}</p></div>}
               {detail.working_copy ? <AgentTaxonomyPanel agentId={agentId} archived={archived} parentDirty={dirty} refreshToken={`${detail.working_copy.id}:${detail.working_copy.row_version}`} onTaxonomyChanged={() => { setSafety(null); void load(); }} /> : null}
-              {forkSettings ? (
-                <section className="am-release-history am-fork-manager">
-                  <header>
-                    <span>{t("fork_manager_eyebrow")}</span>
-                    <h2>{t("fork_manager_title")}</h2>
-                    <p>{t("fork_manager_body")}</p>
-                  </header>
-                  <div className="am-fork-manager-explanation">
-                    <strong>{t("fork_manager_explanation_title")}</strong>
-                    <ul>
-                      <li>{t("fork_manager_explanation_copy")}</li>
-                      <li>{t("fork_manager_explanation_gaps")}</li>
-                      <li>{t("fork_manager_explanation_independent")}</li>
-                    </ul>
-                  </div>
-                  <div className="am-fork-manager-grid">
-                    <div className="am-fork-policy-card">
-                      <label>
-                        <span>{t("fork_policy_label")}</span>
-                        <select value={forkSettings.policy.policy} disabled={archived || busy !== null} onChange={(event) => void changeForkPolicy(event.target.value as AgentForkSettings["policy"]["policy"])}>
-                          <option value="not_allowed">{t("fork_policy_not_allowed")}</option>
-                          <option value="recipients">{t("fork_policy_recipients")}</option>
-                          <option value="team_members">{t("fork_policy_team_members")}</option>
-                        </select>
-                      </label>
-                      <p>{t(`fork_policy_${forkSettings.policy.policy}_body` as never)}</p>
-                      <small>{t("fork_policy_future_only")}</small>
-                    </div>
-                    {forkSettings.lineage ? (
-                      <div className="am-fork-lineage-card">
-                        <span>{t("fork_lineage_label")}</span>
-                        <h3>{forkSettings.lineage.source_agent_id ? <a href={appPath(`/agents/detail/?id=${encodeURIComponent(forkSettings.lineage.source_agent_id)}`)}>{forkSettings.lineage.source_display_name}</a> : forkSettings.lineage.source_display_name}</h3>
-                        <p>{forkSettings.lineage.source_accessible ? t("fork_lineage_connected") : t("fork_lineage_tombstone")}</p>
-                        <dl>
-                          <div><dt>{t("fork_source_version")}</dt><dd>{forkSettings.lineage.source_revision_ref.slice(-8)}</dd></div>
-                          <div><dt>{t("fork_upstream_status")}</dt><dd>{t(forkSettings.lineage.upstream.update_available ? "fork_update_available" : "fork_up_to_date")}</dd></div>
-                          <div><dt>{t("fork_auto_update")}</dt><dd>{t("fork_never_auto_updates")}</dd></div>
-                        </dl>
-                        {forkSettings.lineage.upstream.comparison ? <p className="am-fork-comparison">{t("fork_change_summary", { tools: Number(forkSettings.lineage.upstream.comparison.upstream_changes.tools_added ?? 0) + Number(forkSettings.lineage.upstream.comparison.upstream_changes.tools_removed ?? 0), skills: Number(forkSettings.lineage.upstream.comparison.upstream_changes.skills_added ?? 0) + Number(forkSettings.lineage.upstream.comparison.upstream_changes.skills_removed ?? 0) })}{forkSettings.lineage.upstream.comparison.local_changed_since_fork ? ` · ${t("fork_local_changed")}` : ""}</p> : null}
-                        {forkSettings.lineage.dependency_gaps.length ? <small>{t("fork_manager_gaps", { count: forkSettings.lineage.dependency_gaps.length })}</small> : null}
-                      </div>
-                    ) : (
-                      <div className="am-fork-lineage-card">
-                        <span>{t("fork_lineage_label")}</span>
-                        <h3>{t("fork_original_agent")}</h3>
-                        <p>{t("fork_original_agent_body")}</p>
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
+              {forkManagerSection}
             </div> : null}
             </>)}
+            </>}
             {addResourcesOpen ? (
               <Dialog variant="drawer" title={t("version_config_resources_add")} onClose={() => setAddResourcesOpen(false)} closeLabel={t("cancel")}>
                 <div className="am-config-resource-library">
                   <div className="am-release-subsection-heading"><h3>{t("version_config_resources_add")}</h3><p>{t("version_config_resources_add_body")}</p></div>
                   <label className="am-config-resource-search"><span>{t("version_config_search_all")}</span><input type="search" name="agent-resource-search" autoComplete="off" value={resourceQuery} onChange={(event) => { setResourceQuery(event.target.value); setResourceVisibleCount(8); }} placeholder={t("version_config_search_all_placeholder")} /></label>
+                  {/* Redesigned: Team Plugins of a server without the Plugin catalog are picked here too (Configure lists only the selection). */}
+                  {configV2 && !pickerPlugins.length && teamPlugins.length ? <div className="am-release-picker-grid">
+                    {teamPlugins.map((plugin) => <label key={plugin.id} data-selected={draft.pluginIds.includes(plugin.id)}>
+                      <input type="checkbox" checked={draft.pluginIds.includes(plugin.id)} disabled={archived || (plugin.status !== "active" && !draft.pluginIds.includes(plugin.id))} onChange={() => update({ pluginIds: draft.pluginIds.includes(plugin.id) ? draft.pluginIds.filter((id) => id !== plugin.id) : [...draft.pluginIds, plugin.id] })} />
+                      <span><strong>{plugin.name}</strong><small>{plugin.description}</small><em>{t("version_config_capability_resources", { count: plugin.tool_refs.length + plugin.skill_grants.length })}</em></span>
+                    </label>)}
+                  </div> : null}
                   {libraryEmpty ? <div className="am-config-empty" role="status"><strong>{pickerT("no_match_title", { query: resourceQuery.trim() })}</strong><p>{pickerT("no_match_body")}</p></div> : <>
                   {libraryPlugins.length ? <>
                     <div className="am-config-library-heading"><span>{t("version_config_available_plugins", { count: libraryPlugins.length })}</span><CapabilityLink href="/capabilities/?type=plugins">{navT("capabilities_catalog")}</CapabilityLink></div>
@@ -1721,6 +2106,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
               saving={busy === "save"}
               failed={Boolean(error) && dirty}
               guard={false}
+              saveVariant={trialLayout ? "secondary" : "primary"}
               saveDisabled={Boolean(hosted?.readOnly) || archived || !needsSave || !hasCapability || missingPrimaryCapability || customAudienceInvalid || optionalAudienceInvalid || displayNameInvalid || outputSchemaInvalid || Boolean(missingTools.length || missingSkills.length || missingToolConnections.length || audienceBlockedSkills.length)}
               onSave={() => void save()}
               onDiscard={() => {
@@ -1797,7 +2183,15 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
             tools={evalPointTools}
             privateAgent={draft.audienceMode === "private"}
             liveVersion={detail.live.release_sequence}
+            onTestSafetyOnly={trialHost && draft.audienceMode === "private" ? () => setSafetyTestRequest((value) => value + 1) : undefined}
+            redesigned={configV2}
+            liveRevisionId={detail.live.revision_id}
+            hasDraft={Boolean(detail.working_copy)}
+            onUnsavedChange={configV2 ? setCasesDirty : undefined}
+            casesRef={configV2 ? casesRef : undefined}
+            reloadRequest={evalReloadRequest}
           />
+          {trialHost ? <div ref={setTrialListSlot} className="am-trial-list-slot" /> : null}
         </div>
       ) : null}
 

@@ -201,3 +201,27 @@ async def test_unpin_session_idempotent(tmp_path: Path) -> None:
     await s.unpin_session(user_id="u1", session_id="s1")  # never pinned
     sessions = await s.list_sessions(user_id="u1", workspace_id="w")
     assert sessions[0].pinned_at is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_only_sets_initial_title_on_creation(tmp_path: Path) -> None:
+    import asyncio
+
+    from bowhead_core.session_store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions.db")
+    await store.initialize()
+    scope = {"workspace_id": "ws_a", "user_id": "u1"}
+    await store.ensure_session(session_id="old", **scope)
+    assert (await store.ensure_session(session_id="old", initial_title="New default", **scope)).title is None
+
+    first, duplicate = await asyncio.gather(
+        store.ensure_session(session_id="new", initial_title="WeCom Conversation", **scope),
+        store.ensure_session(session_id="new", initial_title="企业微信会话", **scope),
+    )
+    assert first.title == duplicate.title
+    assert first.title in {"WeCom Conversation", "企业微信会话"}
+
+    await store.rename_session(user_id="u1", session_id="new", title="My conversation")
+    current = await store.ensure_session(session_id="new", initial_title="Conversation WeCom", **scope)
+    assert current.title == "My conversation"

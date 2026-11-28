@@ -1013,6 +1013,13 @@ class ToolExecutionContext:
     knowledge_source_generations: dict[str, Any] = field(default_factory=dict)
     knowledge_pending_citations: list[tuple[Any, str, str]] = field(default_factory=list)
     knowledge_readable_file_ids: tuple[str, ...] | None = None
+    # Prepared per knowledge Tool call for a selected-knowledge-base ceiling (knowledge_source_runtime):
+    # the usable selected knowledge bases, kb_search's chunk pre-filter, the caller's levels, and why
+    # nothing is readable. They narrow a read and never grant one.
+    knowledge_base_filter: tuple[str, ...] | None = None
+    knowledge_base_selection: Any = None
+    knowledge_prepared_levels: Any = None
+    knowledge_ceiling_hint: str | None = None
     knowledge_source_uses: dict[str, Any] = field(default_factory=dict)
     knowledge_source_ancestors: tuple[dict[str, Any], ...] = ()
     knowledge_navigation_uses: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -1069,6 +1076,9 @@ class ToolExecutionContext:
     # Capability Center disabling (tech design §8.3): team/user disable settings read once at turn start.
     # None = no disable state injected; no run-time removal.
     resource_disable_state: Any | None = None
+    # The Owner draft trial this Turn runs (agent_owner_trial_turn), read once at turn start; None otherwise.
+    # Features that would use the released Agent are not offered in a trial (trial-tech-design §4.5).
+    owner_trial: Any | None = field(default=None, repr=False)
     # Team run-limit snapshot; None only outside an admitted turn.
     agent_run_limits: Any | None = None
     agent_runtime_budget: Any | None = None
@@ -1952,7 +1962,7 @@ class ToolRegistry:
         Sprint omicron Phase C2: filter on visible_to_llm field — hidden tools
         (deprecated aliases) excluded even if in whitelist.
         """
-        from bowhead_core.kb.management_tools import available
+        from bowhead_core.kb.management_tools import available, management_schema
 
         names = whitelist or list(self._specs)
         from bowhead_core.tool_delivery_review import terminal_review_schema
@@ -1961,7 +1971,9 @@ class ToolRegistry:
         for name in names:
             if name in self._specs and self._specs[name].visible_to_llm and available(name):
                 spec = self._specs[name]
-                schemas.append(terminal_review_schema(spec.schema, spec.terminal_payload_field) if spec.terminal_payload_field else spec.schema)
+                # Knowledge management Tools also name a knowledge base while knowledge bases are on.
+                schema = management_schema(name, spec.schema) if spec.team_tool_binding is None else spec.schema
+                schemas.append(terminal_review_schema(schema, spec.terminal_payload_field) if spec.terminal_payload_field else schema)
         return schemas
 
     async def admit(
@@ -3881,7 +3893,7 @@ def build_default_registry() -> ToolRegistry:
     # ─── kb_search (V7 KB sprint Day 16) ─────────────────────
     async def _kb_search(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         """Retrieve evidence or report an unavailable service without claiming an empty library."""
-        from bowhead_core.knowledge_source_runtime import require_prepared_read
+        from bowhead_core.knowledge_source_runtime import knowledge_levels_of, require_prepared_read
 
         require_prepared_read(ctx)
         if ctx.kb_retriever is None:
@@ -3911,6 +3923,10 @@ def build_default_registry() -> ToolRegistry:
             team_id=ctx.team_id,
             role=_role,  # type: ignore[arg-type]
             extra_personal_workspaces=extra_personal_workspaces,
+            # Levels drive the named-knowledge-base pre-filter and the post-filter's read rule.
+            knowledge_levels=ctx.knowledge_prepared_levels or await knowledge_levels_of(ctx),
+            # An Agent's selected knowledge bases: the chunk-key pre-filter (None otherwise).
+            knowledge_base_selection=ctx.knowledge_base_selection,
         )
         scope_filter = await _kb_search_scope_filter_for_grants(ctx)
         if scope_filter == []:
@@ -3927,7 +3943,8 @@ def build_default_registry() -> ToolRegistry:
                 "total_candidates": 0,
                 "rerank_used": False,
                 "latency_ms": 0,
-                "hint": "No knowledge sources are permitted by this Agent's selection and your current access. Review the source selection or provide an authorized task attachment.",
+                "hint": ctx.knowledge_ceiling_hint
+                or "No knowledge sources are permitted by this Agent's selection and your current access. Review the source selection or provide an authorized task attachment.",
             }
         from bowhead_core.kb.generations import use_guard_enabled
         from bowhead_core.kb.retrieval_policy import DEFAULT_TOP_K, MAX_TOP_K
@@ -3943,6 +3960,9 @@ def build_default_registry() -> ToolRegistry:
         guard_args = {"authorize_file": authorize} if use_guard_enabled() or ctx.knowledge_scope is not None else {}
         if ctx.knowledge_scope is not None:
             guard_args.update(allowed_file_ids=ctx.knowledge_readable_file_ids, enforce_source_access=True)
+            if ctx.knowledge_scope.knowledge_base_ids is not None:
+                # The file's current knowledge base decides, whatever its chunk key says.
+                guard_args.update(permit_file=ctx.knowledge_scope.permits)
         result = await ctx.kb_retriever.invoke(
             query=str(args.get("query", "")),
             scope_ctx=scope_ctx,
@@ -4044,6 +4064,19 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # Record Tools read extraction records and rows only from files the caller can read now.
+    # Any record the caller cannot read gets this one answer, whatever the reason.
+    _record_not_found = {"record": None, "note": "Record not found or deleted"}
+
+    def _record_access_unavailable(exc: Exception) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error_kind": "service_unavailable",
+            "reason_code": str(exc),
+            "hint": "Your current access to the files behind these records could not be checked, so no records were read. "
+            "This does not establish that records are absent. Retry; if this persists, ask a Team administrator to check knowledge access.",
+        }
+
     # ─── kb_list_tables (kb-knowledge-tables sprint v1.0) ─────────
     async def _kb_list_tables(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         """列当前 workspace 的全部文档表 (KbDocType).
@@ -4053,7 +4086,8 @@ def build_default_registry() -> ToolRegistry:
         when tables are empty / not matching — per Anthropic agent tools guidance,
         actionable hints in tool output > prompt rules.
         """
-        from bowhead_core.knowledge_source_runtime import require_prepared_read
+        from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+        from bowhead_core.knowledge_source_runtime import record_file_ceiling, require_prepared_read
 
         require_prepared_read(ctx)
         del args  # workspace_id comes from ctx; reject LLM-supplied ws (prevent cross-ws leaks).
@@ -4070,9 +4104,30 @@ def build_default_registry() -> ToolRegistry:
         # skip apparently empty tables (also fixes latent LIVE Sprint-25 defect + main graduated-table path). Keep key
         # record_count (BC), and also expose kind to distinguish types.
         from bowhead_core.kb.doc_type_store import derive_doc_type_kind as _dt_kind
+        from bowhead_core.kb.doc_type_store import is_frozen_snapshot
 
         source_counts = {}
-        if ctx.knowledge_scope is not None:
+        if ctx.knowledge_scope is None:
+            # Counts cover only readable files. A frozen snapshot keeps its own count: its rows are
+            # matrix copies taken from Space and Team files and stay after a source file is deleted.
+            ceiling: tuple[str, ...] | None = None
+            for table in items:
+                if is_frozen_snapshot(table) or _dt_kind(table) in ("seed", "template"):
+                    continue
+                records = ctx.kb_extracted_rows_store if table.cardinality == "many" else ctx.kb_extracted_record_store
+                if records is None:
+                    source_counts[table.doc_type_id] = 0
+                    continue
+                if ceiling is None:
+                    try:
+                        ceiling = await record_file_ceiling(ctx)
+                    except KnowledgeAccessError as exc:
+                        return {"items": [], **_record_access_unavailable(exc)}
+                source_counts[table.doc_type_id] = await records.count_for_doc_type(
+                    workspace_id=ctx.workspace_id, doc_type_id=table.doc_type_id, allowed_file_ids=ceiling
+                )
+        else:
+            ceiling = await record_file_ceiling(ctx)
             eligible_tables = []
             for table in items:
                 if getattr(table, "graduated_mode", None) is not None:
@@ -4083,7 +4138,7 @@ def build_default_registry() -> ToolRegistry:
                 count = await records.count_for_doc_type(
                     workspace_id=ctx.workspace_id,
                     doc_type_id=table.doc_type_id,
-                    allowed_file_ids=ctx.knowledge_readable_file_ids,
+                    allowed_file_ids=ceiling,
                 )
                 if count:
                     source_counts[table.doc_type_id] = count
@@ -4162,7 +4217,8 @@ def build_default_registry() -> ToolRegistry:
         - `mode` field: 'rows' | 'aggregate'
         - `aggregate_result` (only when aggregate kwarg passed)
         """
-        from bowhead_core.knowledge_source_runtime import require_prepared_read
+        from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+        from bowhead_core.knowledge_source_runtime import record_file_ceiling, require_prepared_read
 
         require_prepared_read(ctx)
         rec_store = ctx.kb_extracted_record_store
@@ -4175,7 +4231,6 @@ def build_default_registry() -> ToolRegistry:
         if not doc_type_id:
             return {"records": [], "error": "doc_type_id required"}
 
-        source_args = {"allowed_file_ids": ctx.knowledge_readable_file_ids} if ctx.knowledge_scope is not None else {}
         doc_type = None
         # Resolve cardinality (Sprint 25 dispatch)
         cardinality = "one"  # default
@@ -4194,6 +4249,17 @@ def build_default_registry() -> ToolRegistry:
                     "error": "knowledge_source_lineage_unavailable",
                     "hint": "This table has no supported original-file lineage. Use kb_search for the selected source documents.",
                 }
+
+        from bowhead_core.kb.doc_type_store import is_frozen_snapshot
+
+        # Only readable files contribute records, rows and aggregates. An ordinary read of a frozen
+        # snapshot keeps reading the whole snapshot (see kb_list_tables).
+        source_args: dict[str, Any] = {}
+        if ctx.knowledge_scope is not None or doc_type is None or not is_frozen_snapshot(doc_type):
+            try:
+                source_args["allowed_file_ids"] = await record_file_ceiling(ctx)
+            except KnowledgeAccessError as exc:
+                return {"records": [], **_record_access_unavailable(exc)}
 
         # Sprint 25: cardinality=many → use kb_extracted_rows
         if cardinality == "many" and rows_store is not None:
@@ -4517,7 +4583,8 @@ def build_default_registry() -> ToolRegistry:
     # ─── kb_get_record (kb-knowledge-tables sprint v1.0) ─────────
     async def _kb_get_record(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         """单条 record 详情 (含 fields_json + citation snippets + verify_status)."""
-        from bowhead_core.knowledge_source_runtime import require_prepared_read
+        from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+        from bowhead_core.knowledge_source_runtime import readable_source, require_prepared_read
 
         require_prepared_read(ctx)
         store = ctx.kb_extracted_record_store
@@ -4532,12 +4599,16 @@ def build_default_registry() -> ToolRegistry:
         record = await store.get(record_id)
         if record is None or record.workspace_id != ctx.workspace_id:
             # Do not disclose whether record exists (defense-in-depth); consistently return not-found.
-            return {"record": None, "note": "记录不存在或已删"}
-        if ctx.knowledge_scope is not None:
-            from bowhead_core.knowledge_source_runtime import readable_source
-
-            if not await readable_source(ctx, record.file_id):
-                return {"record": None, "note": "Record unavailable"}
+            return dict(_record_not_found)
+        try:
+            # Checks the Agent's sources when it has a scope, and the caller's file access always.
+            readable = await readable_source(ctx, record.file_id, enforce=True)
+        except KnowledgeAccessError as exc:
+            if exc.code != "knowledge_source_authorization_unavailable":
+                raise
+            return {"record": None, **_record_access_unavailable(exc)}
+        if not readable:
+            return dict(_record_not_found)
         return {"record": record.to_dict()}
 
     reg.register(

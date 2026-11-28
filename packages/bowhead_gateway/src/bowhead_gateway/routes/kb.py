@@ -37,11 +37,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
-from bowhead_core.access_control import resource_grants_enforce_enabled
+from bowhead_core.access_control import normalize_workspace_role, resource_grants_enforce_enabled
 from bowhead_core.artifact_reconcile import probe_blob
 from bowhead_core.artifact_store import _open_db
 from bowhead_core.kb.errors import ScopeChangeMigrationError
 from bowhead_core.kb.health import KbHealthObservation, SourceRecord, check_storage_health, health_observation_enabled, inspect_file_health
+from bowhead_core.kb.knowledge_base_access import KNOWLEDGE_EDIT, KNOWLEDGE_MANAGE, KNOWLEDGE_OWNER, KNOWLEDGE_USE
+from bowhead_core.kb.knowledge_base_store import DEFAULT_AUDIENCE, KnowledgeBaseRow, default_knowledge_base_id
 from bowhead_core.kb.parse_recovery import PARSE_ERROR_SERVICE_UNAVAILABLE
 from bowhead_core.kb.permission import KbPermission, ScopeContext, drop_chunks_of_deleted_files, resolve_extra_personal_workspaces
 from bowhead_core.kb.schemas import (
@@ -79,6 +81,7 @@ from bowhead_gateway.access_context import (
     has_workspace_access_source,
 )
 from bowhead_gateway.artifact_attribution import ATTRIBUTION_EVENT, decide_for_kb_scope, track_attribution
+from bowhead_gateway.kb_authorization import knowledge_levels_for
 from bowhead_gateway.routes.auth import _current_user
 from bowhead_gateway.routes.kb_extract_service import trigger_row_extraction
 from bowhead_gateway.skill_import_landing import finish_bundle_import, inventory_bundle_for_kb
@@ -185,6 +188,13 @@ async def _make_scope_context_checked(
         workspace_id=access_ctx.workspace_id,
         team_id=access_ctx.team_id,
         role=role,
+        space_viewer=normalize_workspace_role(access_ctx.workspace_role) == "viewer",
+        knowledge_levels=await knowledge_levels_for(
+            access_ctx,
+            files_store=getattr(request.app.state, "kb_files_store", None),
+            user_store=getattr(request.app.state, "user_store", None),
+            access_store=getattr(request.app.state, "access_control_store", None),
+        ),
     )
 
 
@@ -680,6 +690,81 @@ async def _kb_scope_check(
     return file
 
 
+_KNOWLEDGE_BASE_LEVEL_NAMES = {KNOWLEDGE_USE: "use", KNOWLEDGE_EDIT: "edit", KNOWLEDGE_MANAGE: "manage", KNOWLEDGE_OWNER: "owner"}
+
+
+def _knowledge_base_not_found() -> HTTPException:
+    """The single response for "no such knowledge base" and "a knowledge base you cannot use"."""
+    return _kb_error(404, "knowledge_base_not_found")
+
+
+async def _knowledge_base_check(
+    knowledge_base_id: str, ctx: ScopeContext, files_store: Any, *, level: int = KNOWLEDGE_USE
+) -> tuple[KnowledgeBaseRow, int]:
+    """Return a knowledge base and the caller's level when the caller may act on it with ``level``.
+
+    Unknown, another Team's, deleted, a Space knowledge base outside the current Space and one
+    the caller has no level on all raise the same 404 ``knowledge_base_not_found``, so the answer
+    never reveals whether the ID exists. 403 ``knowledge_base_level_required`` only when the
+    caller can use the knowledge base but ``level`` needs more (``KNOWLEDGE_OWNER`` = the owner
+    or an automatic manager). A home's default is answered before its row exists.
+    """
+    levels = ctx.knowledge_levels
+    if levels is None:
+        raise _kb_error(
+            503,
+            "knowledge_base_access_unavailable",
+            hint="Knowledge base access could not be checked. Retry; if it keeps failing, ask an administrator to check the knowledge service.",
+        )
+    held = int(levels.get(knowledge_base_id, 0))
+    if held <= 0:
+        raise _knowledge_base_not_found()
+    row = await files_store.get_knowledge_base(knowledge_base_id)
+    if row is None:
+        home_of = getattr(levels, "home_of", None)
+        home = home_of(knowledge_base_id) if callable(home_of) else None
+        if home is None or knowledge_base_id != default_knowledge_base_id(ctx.team_id, *home):
+            raise _knowledge_base_not_found()
+        audience, audience_level = DEFAULT_AUDIENCE[home[0]]
+        row = KnowledgeBaseRow(
+            id=knowledge_base_id,
+            team_id=ctx.team_id,
+            home=home[0],
+            home_id=home[1],
+            is_default=True,
+            name=None,
+            description=None,
+            audience=audience,
+            audience_level=audience_level,
+            owner_user_id=home[1] if home[0] == "personal" else None,
+            revision=1,
+            created_at="",
+            updated_at="",
+            deleted_at=None,
+        )
+    if (
+        row.deleted_at
+        or row.team_id != ctx.team_id
+        or (row.home == "space" and row.home_id != ctx.workspace_id)
+        or (row.home == "personal" and row.home_id != ctx.user_id)
+    ):
+        raise _knowledge_base_not_found()
+    if held < level:
+        required = _KNOWLEDGE_BASE_LEVEL_NAMES.get(level, "manage")
+        raise _kb_error(
+            403,
+            "knowledge_base_level_required",
+            required_level=required,
+            level=_KNOWLEDGE_BASE_LEVEL_NAMES.get(min(held, KNOWLEDGE_MANAGE), "use"),
+            hint=(
+                "Only the knowledge base's owner or an automatic manager can do this."
+                if required == "owner"
+                else f"You need {required} access to this knowledge base. Ask its owner or a manager to give it to you."
+            ),
+        )
+    return row, held
+
+
 def _enrich_dto(dto: KbFileDTO, ctx: ScopeContext) -> KbFileDTO:
     """Set can_delete / can_change_scope flags on DTO based on caller permission."""
     from bowhead_core.kb.generations import use_guard_enabled
@@ -856,6 +941,9 @@ async def upload_file(
     # kb-knowledge-tables v1.0: optional doc_type_id binds file to a workspace doc_type
     # → worker runs StructuredExtractor and saves a KbExtractedRecord with extracted fields.
     doc_type_id: str | None = Form(None),
+    # Knowledge bases (behind FEATURE_KNOWLEDGE_BASES): the target knowledge base of the scope's
+    # home; omitted means its default, as today. Ignored while the switch is off.
+    knowledge_base_id: str | None = Form(None),
     user: User = Depends(_current_user),
     _feat: None = Depends(require_feature_licensed("kb")),  # §5.1 entitlement (additive to scope authz, INV-2)
 ) -> KbFileDTO:
@@ -865,7 +953,7 @@ async def upload_file(
     P1-O12: server-side mime 检测 (python-magic) + filename ext fallback (P1-S1).
     """
     _require_ingestion_admission()
-    ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id)
+    ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id, knowledge_base_id=knowledge_base_id)
 
     # [V3 P0-V3-1 fix] cross-workspace doc_type_id leak defense:
     # If supplied, doc_type_id must belong to caller's space, preventing foreign doc_type scope bypass.
@@ -906,15 +994,69 @@ async def upload_file(
         use_llm=use_llm,
         doc_type_id=doc_type_id,
         route="kb_single_upload",
+        knowledge_base_id=knowledge_base_id,
     )
 
 
-async def authorize_kb_scope_write(request: Request, user: User, *, scope: str, scope_id: str) -> Any:
-    """Scope-context, write-permission and resource-grant checks shared by every KB file entry."""
+def knowledge_base_target(knowledge_base_id: str | None) -> str | None:
+    """The requested target knowledge base while knowledge bases are on; None (today's default) otherwise."""
+    from bowhead_core.kb.knowledge_base_store import knowledge_bases_enabled
+
+    return knowledge_base_id if knowledge_base_id and knowledge_bases_enabled() else None
+
+
+async def require_knowledge_base_target(
+    request: Request, ctx: ScopeContext, *, scope: str, scope_id: str, knowledge_base_id: str | None
+) -> str | None:
+    """Check an upload or add target: the caller must be able to edit it, and it must be the scope's home.
+
+    Ignored (None) while knowledge bases are off, as the field was before. A target the caller
+    cannot see answers 404 ``knowledge_base_not_found``; one it can only use answers 403.
+    """
+    from bowhead_core.kb.knowledge_base_store import home_for_scope
+
+    target = knowledge_base_target(knowledge_base_id)
+    if target is None:
+        return None
+    row, _ = await _knowledge_base_check(target, ctx, _get_files_store(request), level=KNOWLEDGE_EDIT)
+    try:
+        home = home_for_scope(scope, scope_id)
+    except ValueError:
+        home = None
+    if home != (row.home, row.home_id):
+        raise _kb_error(
+            422,
+            "knowledge_base_scope_mismatch",
+            hint="The chosen knowledge base lives in another place than the chosen scope. Choose the knowledge base again and retry.",
+        )
+    return row.id
+
+
+def knowledge_write_error(exc: Exception) -> HTTPException:
+    """The HTTP answer for a refused knowledge membership write."""
+    code = getattr(exc, "code", "knowledge_operation_denied")
+    if code == "knowledge_base_unavailable":
+        return _knowledge_base_not_found()
+    if code == "knowledge_source_in_trash":
+        return _kb_error(
+            409,
+            code,
+            hint="The original file is in Files › Trash. Restore it first, then add it to knowledge again.",
+        )
+    return _kb_error(409, code, hint="Check the file's current knowledge membership and destination; use a new explicit action after removal.")
+
+
+async def authorize_kb_scope_write(request: Request, user: User, *, scope: str, scope_id: str, knowledge_base_id: str | None = None) -> Any:
+    """Scope-context, write-permission and resource-grant checks shared by every KB file entry.
+
+    ``knowledge_base_id`` (knowledge bases on) is the target knowledge base: the caller needs edit
+    on it, see :func:`require_knowledge_base_target`.
+    """
     ctx = await _make_scope_context_checked(user, request)
     if scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4: prevent scope_id=""+ws="" empty-to-empty writes.
-    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role):
+    target = await require_knowledge_base_target(request, ctx, scope=scope, scope_id=scope_id, knowledge_base_id=knowledge_base_id)
+    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role, knowledge_base_id=target):
         raise _kb_error(403, "kb_scope_access_denied")
     await _require_kb_scope_grant(
         request,
@@ -940,11 +1082,13 @@ async def ingest_kb_file_bytes(
     use_llm: bool = False,
     doc_type_id: str | None = None,
     route: str,
+    knowledge_base_id: str | None = None,
 ) -> KbFileDTO:
     """Store one already-authorized file and enqueue parsing — the single KB ingestion path.
 
     Used by the multipart upload and by imports that fetch bytes elsewhere (Google Drive);
-    callers must have run :func:`authorize_kb_scope_write` for the same scope.
+    callers must have run :func:`authorize_kb_scope_write` for the same scope and target
+    knowledge base. The membership writer re-checks a named target in its own transaction.
     """
     if len(raw) > _SINGLE_MAX_SIZE:
         raise _kb_error(413, "kb_file_too_large")
@@ -996,23 +1140,27 @@ async def ingest_kb_file_bytes(
 
     # ── create kb_files row ──
     files_store = _get_files_store(request)
-    from bowhead_core.kb.ingestion import KnowledgeAction
+    from bowhead_core.kb.ingestion import KnowledgeAction, KnowledgeWriteError
 
-    file_id, _, _ = await files_store.create_admitted(
-        action=KnowledgeAction(f"upload:{artifact.id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
-        source_fingerprint=artifact.id,
-        artifact_id=artifact_id,
-        filename=filename or "unnamed",
-        mime_type=detected_mime,
-        size_bytes=len(raw),
-        scope=scope,
-        scope_id=scope_id,
-        workspace_id=workspace_id,
-        team_id=ctx.team_id,
-        uploaded_by=user.id,
-        use_llm_marker=use_llm,
-        doc_type_id=doc_type_id,
-    )
+    try:
+        file_id, _, _ = await files_store.create_admitted(
+            action=KnowledgeAction(f"upload:{artifact.id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+            source_fingerprint=artifact.id,
+            knowledge_base_id=knowledge_base_target(knowledge_base_id),
+            artifact_id=artifact_id,
+            filename=filename or "unnamed",
+            mime_type=detected_mime,
+            size_bytes=len(raw),
+            scope=scope,
+            scope_id=scope_id,
+            workspace_id=workspace_id,
+            team_id=ctx.team_id,
+            uploaded_by=user.id,
+            use_llm_marker=use_llm,
+            doc_type_id=doc_type_id,
+        )
+    except KnowledgeWriteError as exc:
+        raise knowledge_write_error(exc) from None
     emit_audit(
         "kb.uploaded",
         {
@@ -1132,8 +1280,11 @@ async def _process_zip_bundle(
     scope_id: str,
     use_llm: bool,
     attribution_route: str = "kb_bundle_upload",
+    knowledge_base_id: str | None = None,
 ) -> KbBundleUploadResponse:
     """Core bundle ingest — caller responsible for ACL + raw byte source.
+
+    ``knowledge_base_id`` is the checked target knowledge base (None: the scope's default).
 
     `attribution_route`：归属打点用的路由名。`/admin/import` 传 `kb_admin_import`，
     以免管理员服务端导入混进用户 bundle 上传的分布里。
@@ -1289,7 +1440,7 @@ async def _process_zip_bundle(
                 await db.commit()
             from bowhead_core.kb.ingestion import KnowledgeAction
 
-            ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id)
+            ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id, knowledge_base_id=knowledge_base_id)
             file_id, _, _ = await files_store.create_admitted(
                 action=KnowledgeAction(
                     f"bundle:{bundle_artifact.id}:{artifact.id}",
@@ -1299,6 +1450,7 @@ async def _process_zip_bundle(
                     ctx.workspace_id,
                 ),
                 source_fingerprint=artifact.id,
+                knowledge_base_id=knowledge_base_target(knowledge_base_id),
                 artifact_id=artifact.id,
                 filename=display_name,
                 mime_type=detected_mime,
@@ -1379,6 +1531,8 @@ async def upload_bundle(
     scope: KbScopeIn = Form(...),
     scope_id: str = Form(...),
     use_llm: bool = Form(False),
+    # The target knowledge base (FEATURE_KNOWLEDGE_BASES); every file of the bundle joins it.
+    knowledge_base_id: str | None = Form(None),
     user: User = Depends(_current_user),
     _feat: None = Depends(require_feature_licensed("kb")),  # §5.1 entitlement
 ) -> KbBundleUploadResponse:
@@ -1386,7 +1540,8 @@ async def upload_bundle(
     ctx = await _make_scope_context_checked(user, request)
     if scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4: prevent scope_id=""+ws="" empty-to-empty writes.
-    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role):
+    target = await require_knowledge_base_target(request, ctx, scope=scope, scope_id=scope_id, knowledge_base_id=knowledge_base_id)
+    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role, knowledge_base_id=target):
         raise _kb_error(403, "kb_scope_access_denied")
     await _require_kb_scope_grant(
         request,
@@ -1418,6 +1573,7 @@ async def upload_bundle(
         scope=scope,
         scope_id=scope_id,
         use_llm=use_llm,
+        knowledge_base_id=target,
     )
 
 
@@ -1615,22 +1771,19 @@ async def list_files(
     files_store = _get_files_store(request)
     safe_limit = max(1, min(int(limit), 1000))
     safe_offset = max(0, int(offset))
-    statuses = [s.strip() for s in status.split(",") if s.strip()] if status else None
-    mime_prefixes = [m.strip() for m in mime.split(",") if m.strip()] if mime else None
     sort_column, sort_direction = _list_order(order_by, order_dir)
     if cursor is not None and safe_offset:
         raise _kb_error(400, "invalid_kb_pagination")
     cursor_key = _decode_list_cursor(cursor, sort_column, sort_direction) if cursor is not None else None
-    filters: dict[str, Any] = {
-        "statuses": statuses,
-        "mime_prefixes": mime_prefixes,
-        "doc_type_id": doc_type_id,
-        "uploaded_after": uploaded_after,
-        "uploaded_before": uploaded_before,
-        "q": q,
-        "order_by": sort_column,
-        "order_dir": sort_direction,
-    }
+    filters = _file_list_filters(
+        status=status,
+        mime=mime,
+        doc_type_id=doc_type_id,
+        uploaded_after=uploaded_after,
+        uploaded_before=uploaded_before,
+        q=q,
+        sort=(sort_column, sort_direction),
+    )
 
     if scope == "all":
         space_id = (
@@ -1672,6 +1825,58 @@ async def list_files(
         listed_scopes = [scope]
         rows = await files_store.list_for_scope_filtered(scope, scope_id, **filters)
 
+    return await _file_list_page(
+        request,
+        ctx,
+        rows,
+        listed_scopes=listed_scopes,
+        file_ids=file_ids,
+        since=since,
+        cursor_key=cursor_key,
+        offset=safe_offset,
+        limit=safe_limit,
+        sort=(sort_column, sort_direction),
+    )
+
+
+def _file_list_filters(
+    *,
+    status: str | None,
+    mime: str | None,
+    doc_type_id: str | None,
+    uploaded_after: str | None,
+    uploaded_before: str | None,
+    q: str | None,
+    sort: tuple[str, str],
+) -> dict[str, Any]:
+    """The SQL-side filters and order of the file table (``KbFilesStore.list_for_scope_filtered``)."""
+    return {
+        "statuses": [s.strip() for s in status.split(",") if s.strip()] if status else None,
+        "mime_prefixes": [m.strip() for m in mime.split(",") if m.strip()] if mime else None,
+        "doc_type_id": doc_type_id,
+        "uploaded_after": uploaded_after,
+        "uploaded_before": uploaded_before,
+        "q": q,
+        "order_by": sort[0],
+        "order_dir": sort[1],
+    }
+
+
+async def _file_list_page(
+    request: Request,
+    ctx: ScopeContext,
+    rows: list[KbFileDTO],
+    *,
+    listed_scopes: list[str],
+    file_ids: list[str] | None,
+    since: str | None,
+    cursor_key: tuple[Any, str] | None,
+    offset: int,
+    limit: int,
+    sort: tuple[str, str],
+) -> KbFileListResponse:
+    """Read filter, grant filter, paging and enrichment shared by the file table and one knowledge base's files."""
+    sort_column, sort_direction = sort
     if file_ids is not None:
         requested_ids = set(file_ids)
         rows = [row for row in rows if row.file_id in requested_ids]
@@ -1687,8 +1892,8 @@ async def list_files(
         else:
             start = next((i for i, r in enumerate(rows) if _list_sort_key(r, sort_column) < cursor_key), total)
     else:
-        start = safe_offset
-    page = rows[start : start + safe_limit]
+        start = offset
+    page = rows[start : start + limit]
     has_more = start + len(page) < total
     next_cursor = _encode_list_cursor(page[-1], sort_column, sort_direction) if has_more and page else None
 
@@ -1988,6 +2193,8 @@ class PromoteArtifactRequest(BaseModel):
     scope: KbScopeIn = "personal"
     knowledge_intent: Literal["add_to_knowledge"]
     action_id: str = Field(min_length=1, max_length=128)
+    # The target knowledge base of the scope's home (FEATURE_KNOWLEDGE_BASES); ignored while off.
+    knowledge_base_id: str | None = Field(default=None, max_length=64)
 
 
 @router.post(
@@ -2052,7 +2259,8 @@ async def _promote_with_action(request: Request, *, body: PromoteArtifactRequest
     else:
         scope_id = ctx.team_id
 
-    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role):
+    target = await require_knowledge_base_target(request, ctx, scope=scope, scope_id=scope_id, knowledge_base_id=body.knowledge_base_id)
+    if not KbPermission.can_write_to_scope(scope, scope_id, ctx, ctx.role, knowledge_base_id=target):
         raise _kb_error(403, "kb_scope_access_denied")
     await _require_kb_scope_grant(request, ctx, scope=scope, scope_id=scope_id, permission="write")
 
@@ -2065,6 +2273,7 @@ async def _promote_with_action(request: Request, *, body: PromoteArtifactRequest
             files_store=files_store,
             scope=scope,
             scope_id=scope_id,
+            knowledge_base_id=target,
             # Sixth and final manual-copy consolidation: consumer is the **kb_files row** (promotion creates no artifact),
             # so use scope_workspace_id (original empty string = frozen team/no-space semantics),
             # **never** artifact_workspace_id; feeding sentinel to kb_files changes scope filtering.
@@ -2076,9 +2285,7 @@ async def _promote_with_action(request: Request, *, body: PromoteArtifactRequest
             worker=await _get_effective_worker(request, user),
         )
     except KnowledgeWriteError as exc:
-        raise _kb_error(
-            409, exc.code, hint="Check the file's current knowledge membership and destination; use a new explicit action after removal."
-        ) from exc
+        raise knowledge_write_error(exc) from exc
     except PromotionSkipped as e:
         # Unsupported by rules (unparseable MIME etc.), not a failure: 422 for readable frontend messaging.
         raise _kb_error(422, "kb_promotion_not_supported") from e
@@ -2132,16 +2339,26 @@ async def _change_file_scope_core(
     ctx: Any,
     request: Request,
     user: User,
+    *,
+    target_knowledge_base_id: str | None = None,
+    file: KbFileDTO | None = None,
 ) -> KbFileDTO:
     """Per-file scope change (perms + SQL update + chromadb migration + audit).
 
     Shared by the single PATCH endpoint and bulk_scope. Raises HTTPException on
     failure so bulk can capture it per item. kb-management REQ-1.4a.
+
+    ``target_knowledge_base_id`` is a checked target knowledge base in the new scope's home (a
+    move between knowledge bases across homes); None moves to the new scope's default, as
+    today's scope change does. A move carries no admin-override reason (``file`` is the row the
+    move already checked).
     """
     files_store = _get_files_store(request)
-    file = await _kb_scope_check(file_id, ctx, files_store, request)
+    moving = file is not None
+    if file is None:
+        file = await _kb_scope_check(file_id, ctx, files_store, request)
 
-    if not KbPermission.can_change_scope(file, ctx, body.new_scope, body.new_scope_id):
+    if not KbPermission.can_change_scope(file, ctx, body.new_scope, body.new_scope_id, target_knowledge_base_id=target_knowledge_base_id):
         raise _kb_error(403, "kb_file_access_denied")
     await _require_kb_scope_grant(
         request,
@@ -2166,7 +2383,7 @@ async def _change_file_scope_core(
 
     # P1-N4: admin override requires reason ≥10 characters.
     is_admin_override = ctx.user_id != KbPermission.owner_of(file)
-    if is_admin_override and (not body.reason or len(body.reason) < 10):
+    if is_admin_override and not moving and (not body.reason or len(body.reason) < 10):
         raise _kb_error(400, "kb_scope_change_reason_required")
 
     # Compute new routing keys.
@@ -2174,18 +2391,25 @@ async def _change_file_scope_core(
     old_scope_id = file.scope_id
     old_workspace_id = file.workspace_id
     old_team_id = file.team_id
+    old_knowledge_base_id = file.knowledge_base_id
 
     new_workspace_id = body.new_scope_id if body.new_scope in ("space", "workspace") else (old_workspace_id if body.new_scope == "personal" else "")
     new_team_id = body.new_scope_id if body.new_scope == "team" else old_team_id
 
     # SQL update
-    await files_store.update_scope(
-        file_id,
-        body.new_scope,
-        body.new_scope_id,
-        workspace_id=new_workspace_id,
-        team_id=new_team_id,
-    )
+    from bowhead_core.kb.ingestion import KnowledgeWriteError
+
+    try:
+        await files_store.update_scope(
+            file_id,
+            body.new_scope,
+            body.new_scope_id,
+            workspace_id=new_workspace_id,
+            team_id=new_team_id,
+            knowledge_base_id=target_knowledge_base_id,
+        )
+    except KnowledgeWriteError as exc:
+        raise knowledge_write_error(exc) from None
 
     # chromadb cross-coll migration (P0-O2 + P0-P2)
     kb_store = await _get_effective_kb_store(request, user)
@@ -2200,6 +2424,7 @@ async def _change_file_scope_core(
             new_scope_id=body.new_scope_id,
             new_workspace_id=new_workspace_id,
             new_team_id=new_team_id,
+            new_knowledge_base_id=target_knowledge_base_id,
         )
     except Exception as exc:
         # SQL changed first; any chunk-migration failure (reading old collection, updating metadata in place, vector-store outage)
@@ -2214,6 +2439,7 @@ async def _change_file_scope_core(
                 old_scope_id,
                 workspace_id=old_workspace_id,
                 team_id=old_team_id,
+                knowledge_base_id=old_knowledge_base_id,
             )
         except Exception:
             logger.exception("scope change SQL rollback failed for file_id=%s", file_id)
@@ -2240,6 +2466,7 @@ async def _change_file_scope_core(
             "original_uploader": file.uploaded_by,
             "is_admin_override": is_admin_override,
             "reason": body.reason,
+            **({"old_knowledge_base_id": old_knowledge_base_id, "new_knowledge_base_id": target_knowledge_base_id} if moving else {}),
         },
     )
 
@@ -2650,7 +2877,7 @@ async def verify_file_source(file_id: str, request: Request, response: Response,
     files = _get_files_store(request)
     await _kb_scope_check(file_id, ctx, files, request)
     retriever = await _get_effective_retriever(request, user)
-    authorizer = kb_file_authorizer(request.app.state.user_store, getattr(request.app.state, "access_control_store", None))
+    authorizer = kb_file_authorizer(request.app.state.user_store, getattr(request.app.state, "access_control_store", None), files_store=files)
 
     async def authorize(file: KbFileDTO) -> bool:
         return await authorizer(file, ctx.user_id, ctx.team_id, ctx.workspace_id)
@@ -2819,20 +3046,26 @@ async def search(
         operation=SpaceOperation.READ_HISTORY,
     )
     _require_workspace_context(ctx)  # Batch 1/c4: search collection routing needs space context.
-    scope_filter = await _allowed_kb_search_scope_filter(request, ctx, body.scope_filter)
+    selected = await _knowledge_base_search(request, ctx, body.knowledge_base_id)
+    scope_filter = await _allowed_kb_search_scope_filter(request, ctx, [selected.scope] if selected is not None else body.scope_filter)
     search_ctx = dataclasses.replace(
         ctx,
         extra_personal_workspaces=await resolve_extra_personal_workspaces(
             getattr(request.app.state, "kb_files_store", None),
             ctx.user_id,
         ),
+        knowledge_base_search=selected,
     )
     retriever = await _get_effective_retriever(request, user)
     from bowhead_core.kb.generations import use_guard_enabled
 
     from bowhead_gateway.kb_authorization import kb_file_authorizer
 
-    authorizer = kb_file_authorizer(getattr(request.app.state, "user_store", None), getattr(request.app.state, "access_control_store", None))
+    authorizer = kb_file_authorizer(
+        getattr(request.app.state, "user_store", None),
+        getattr(request.app.state, "access_control_store", None),
+        files_store=getattr(request.app.state, "kb_files_store", None),
+    )
 
     async def authorize(file: KbFileDTO) -> bool:
         return await authorizer(file, ctx.user_id, ctx.team_id, ctx.workspace_id)
@@ -2846,7 +3079,41 @@ async def search(
         **guard_args,
     )
     result = _apply_page_search_relevance_floor(result)
+    if selected is not None:
+        result = await _keep_knowledge_base_chunks(request, result, selected.knowledge_base_id)
     return await _filter_kb_search_result_by_file_grants(request, ctx, result)
+
+
+async def _knowledge_base_search(request: Request, ctx: ScopeContext, knowledge_base_id: str | None) -> Any:
+    """The deep-search restriction to one knowledge base the caller can use; None searches as before."""
+    from bowhead_core.kb.knowledge_base_access import KnowledgeBaseSearch
+
+    target = knowledge_base_target(knowledge_base_id)
+    if target is None:
+        return None
+    row, _ = await _knowledge_base_check(target, ctx, _get_files_store(request))
+    levels = ctx.knowledge_levels
+    named_in_home = levels.named_in(row.home, row.home_id) if hasattr(levels, "named_in") else ()
+    # A home's name is its canonical file scope (personal, space, team).
+    return KnowledgeBaseSearch(
+        knowledge_base_id=row.id,
+        scope=row.home,
+        only=None if row.is_default else row.id,
+        excluded=tuple(named_in_home) if row.is_default else (),
+    )
+
+
+async def _keep_knowledge_base_chunks(request: Request, result: KbSearchResult, knowledge_base_id: str) -> KbSearchResult:
+    """SQL post-filter of one knowledge base's deep search: keep chunks whose file is in it now."""
+    from bowhead_core.kb.knowledge_base_store import knowledge_base_key
+
+    files_store = _get_files_store(request)
+    ids = list(dict.fromkeys(chunk.file_id for chunk in result.chunks if chunk.file_id))
+    files: dict[str, KbFileDTO] = {}
+    for offset in range(0, len(ids), 256):
+        files.update({file.file_id: file for file in await files_store.get_many(ids[offset : offset + 256])})
+    kept = [chunk for chunk in result.chunks if chunk.file_id in files and knowledge_base_key(files[chunk.file_id]) == knowledge_base_id]
+    return result if len(kept) == len(result.chunks) else result.model_copy(update={"chunks": kept})
 
 
 # ─── GET /files/{file_id}/chunks (P1-12-2 frontend drawer) ──
@@ -2902,7 +3169,9 @@ async def list_file_chunks(
 
         from bowhead_gateway.kb_authorization import kb_file_authorizer
 
-        authorizer = kb_file_authorizer(request.app.state.user_store, getattr(request.app.state, "access_control_store", None))
+        authorizer = kb_file_authorizer(
+            request.app.state.user_store, getattr(request.app.state, "access_control_store", None), files_store=files_store
+        )
 
         async def authorize(current):
             return await authorizer(current, ctx.user_id, ctx.team_id, ctx.workspace_id)
@@ -3062,6 +3331,9 @@ async def resume_rebuild_batch(job_id: str, request: Request, user: User = Depen
 
 
 # The additive navigation API uses this original router and its authorization helpers.
+from bowhead_gateway.routes.kb_knowledge_bases import router as knowledge_bases_router  # noqa: E402
 from bowhead_gateway.routes.kb_navigation import router as navigation_router  # noqa: E402
 
 router.include_router(navigation_router)
+# Knowledge bases (phase 1 slice 3): every route answers 404 while FEATURE_KNOWLEDGE_BASES is off.
+router.include_router(knowledge_bases_router)

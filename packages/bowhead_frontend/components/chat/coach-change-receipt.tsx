@@ -9,11 +9,15 @@ import { useTranslations } from "next-intl";
 
 import { CircleCheck, Info } from "@/components/icons";
 import {
+  coachChangeEffects,
+  coachChangeGroups,
   coachOperationOpens,
   coachCaseEffects,
   coachOperationsVersion,
   readCoachOperation,
   subscribeCoachOperations,
+  uncoveredChangeOpens,
+  type CoachChangeGroup,
   type CoachOperationOpen,
   type CoachOperationReceipt,
   type CoachCaseEffect,
@@ -21,6 +25,12 @@ import {
 import { requestCoachOperationOpen } from "@/lib/coach-operation-requests";
 import { CoachReceiptScopeContext } from "@/lib/coach-receipt-scope";
 import { agentCaseProposalPath } from "@/lib/agent-case-proposal-path";
+import { draftFieldLabelKey } from "@/lib/agent-draft-changes";
+import { ApiError } from "@/lib/api-client";
+import { appPath } from "@/lib/base-path";
+import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
+import { CoachOpenAgentEditorsContext } from "@/lib/use-coach-resource-editors";
 import { caseProposalState } from "@/components/canvas/coach-operation-view";
 import { useAppRouter } from "@/lib/use-app-router";
 
@@ -43,11 +53,92 @@ export function coachChangeReceiptSummary(receipt: CoachOperationReceipt): { wri
 export function CoachChangeReceipts({ turnId, sessionId, current = false }: { turnId: string | null | undefined; sessionId: string | null | undefined; current?: boolean }) {
   useSyncExternalStore(subscribeCoachOperations, coachOperationsVersion, coachOperationsVersion);
   const scope = useContext(CoachReceiptScopeContext);
+  // FEATURE_AGENT_RELEASE_BAR: Agent draft writes come from the run record (slices 2-5 tech design §6).
+  const fromRecord = useAgentReleaseBarCapability();
   if (!turnId || !sessionId) return null;
-  const changes = coachOperationOpens(turnId).filter((pointer) => pointer.reference.kind === "agent_change" && pointer.sessionId === sessionId);
+  const opens = coachOperationOpens(turnId).filter((pointer) => pointer.reference.kind === "agent_change" && pointer.sessionId === sessionId);
+  const recorded = fromRecord && scope?.sessionId === sessionId ? coachChangeEffects(turnId) : [];
+  // An "open" event for a write the run record also carries is the same receipt; older Turns keep their row.
+  const changes = fromRecord ? uncoveredChangeOpens(opens, recorded) : opens;
   const cases = scope?.sessionId === sessionId ? coachCaseEffects(turnId) : [];
-  return <>{changes.map((pointer) => <CoachChangeReceiptRow key={pointer.requestId} pointer={pointer} />)}
+  return <>{scope && coachChangeGroups(recorded).map((group) => <CoachChangeEffectRow key={JSON.stringify([scope, group.agentId])} group={group} turnId={turnId} scope={scope} />)}
+    {changes.map((pointer) => <CoachChangeReceiptRow key={pointer.requestId} pointer={pointer} />)}
     {scope && cases.map((effect) => <CoachCaseReceiptRow key={JSON.stringify([scope, effect.reference])} effect={effect} scope={scope} current={current} />)}</>;
+}
+
+/** What one Agent's row says: its name before the change, whether Coach wrote the draft and the changed fields. */
+export function coachChangeGroupSummary(receipts: readonly CoachOperationReceipt[]): { written: boolean; name: string | null; paths: string[] } {
+  const paths: string[] = [];
+  let name: string | null = null;
+  let written = false;
+  for (const receipt of receipts) {
+    const summary = coachChangeReceiptSummary(receipt);
+    written ||= summary.written;
+    name ??= summary.name;
+    const changed = receipt.domain_result.changed_paths;
+    for (const path of Array.isArray(changed) ? changed : []) if (typeof path === "string" && !paths.includes(path)) paths.push(path);
+  }
+  return { written, name, paths };
+}
+
+/**
+ * One row per Agent Coach wrote in the Turn, read through the scoped reader. The read always answers "not
+ * released", so the row does not say it; the release bar states the truth. A 404 (not the Owner, or archived)
+ * leaves only the first words. While the Agent's editor is open in the Canvas the row only says so.
+ */
+function CoachChangeEffectRow({ group, turnId, scope }: {
+  group: CoachChangeGroup; turnId: string; scope: NonNullable<React.ContextType<typeof CoachReceiptScopeContext>>;
+}) {
+  const t = useTranslations("coach_receipt");
+  const tAgents = useTranslations("agents_marketplace");
+  const tConfig = useTranslations("agent_config_v2");
+  const router = useAppRouter();
+  const openEditors = useContext(CoachOpenAgentEditorsContext);
+  const [receipts, setReceipts] = useState<CoachOperationReceipt[] | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const referencesKey = JSON.stringify(group.references);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.allSettled(group.references.map((reference) => readCoachOperation(reference, scope.workspaceId, scope.sessionId, controller.signal, scope.teamId)))
+      .then((results) => {
+        if (controller.signal.aborted) return;
+        const read = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        setReceipts(read);
+        setUnavailable(!read.length && results.some((result) => result.status === "rejected"
+          && result.reason instanceof ApiError && result.reason.status === 404));
+      });
+    return () => controller.abort();
+  }, [referencesKey, scope.workspaceId, scope.sessionId, scope.teamId]);
+  const summary = receipts?.length ? coachChangeGroupSummary(receipts) : null;
+  const open = openEditors.has(group.agentId);
+  // The row is the redesign's: 工作说明 is named as on the Configure page.
+  const labels = summary ? [...new Set(summary.paths.map((path) => path === "/definition/system_prompt" ? tConfig("field_instructions") : tAgents(draftFieldLabelKey(path) as never)))] : [];
+  const parts = summary ? [
+    t(summary.written ? "written" : "proposed"),
+    summary.name,
+    labels.length ? t("fields", { fields: labels.join(t("field_separator")), count: summary.paths.length }) : null,
+    open ? t("already_open") : null,
+  ].filter(Boolean) : [t("pending")];
+  const managePath = `/agents/manage/?${new URLSearchParams({ agent_id: group.agentId })}`;
+  const latest = group.references[group.references.length - 1];
+  return (
+    <div className="coach-change-receipt" role="group" aria-label={t("group_label")} data-state={summary?.written ? "written" : "other"} data-source="record">
+      <span className="coach-change-receipt-head">
+        {summary?.written ? <CircleCheck size={14} aria-hidden /> : <Info size={14} aria-hidden />}
+        <strong>{parts.join(" · ")}</strong>
+      </span>
+      {!open && !unavailable ? (
+        <span className="coach-change-receipt-actions">
+          <button type="button" onClick={() => requestCoachOperationOpen({ turnId, reference: latest })}>{t("open_in_canvas")}</button>
+          <a href={appPath(managePath)} onClick={(event) => {
+            if (!shouldHandleAppLinkClick(event)) return;
+            event.preventDefault();
+            router.push(managePath);
+          }}>{t("go_manage")}</a>
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 function CoachCaseReceiptRow({ effect, scope, current }: {

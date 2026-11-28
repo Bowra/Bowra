@@ -20,19 +20,13 @@ import { newestCodeLine } from "@/lib/code-languages";
 import { extractWritingContent } from "@/lib/extract-writing-content";
 import type { PeerTerminal } from "@/lib/turn-store";
 
-import { deriveTerminalStatus, formatPeerDuration } from "./agent-grouping";
+import { deriveTerminalStatus } from "./agent-grouping";
 import type { StepStatus } from "./block-primitives";
-import { LEAD_BRAND_NAME, agentDisplayName, agentKeyFor, type AgentKey } from "./agent-meta";
+import { LEAD_BRAND_NAME, agentDisplayName } from "./agent-meta";
 import { isRecoverableStepFailure } from "./self-healing";
 import { getCurrentLocale } from "@/lib/locale";
 import { TOOL_CATALOG_KEYS, getToolMeta, writingDisplayKey } from "./tool-catalog";
 import type { StepView } from "./types";
-import { isInternalCloseoutStep } from "./step-view";
-
-/** Total band rows (2 historical + 1 current), the three in always three rows. */
-export const BAND_ROWS = 3;
-/** History row count = BAND_ROWS - 1 (current occupies its own row). */
-export const HISTORY_ROWS = BAND_ROWS - 1;
 
 /**
  * Main-surface forbidden tokens (PRD A5). A match **discards the whole string**, without partial redaction; a truncated
@@ -184,25 +178,9 @@ export type BandPhase = "preparing" | "gap" | "running";
 export type BandDensity = "rows" | "single";
 
 export interface BandRow {
-  /** stepId / `peer:<peerId>`: animation keys must stay stable or every reorder replays entry animation. */
+  /** stepId: animation keys must stay stable or every reorder replays entry animation. */
   key: string;
-  /**
-   * ★ Distinguish skeletons from real steps. Checking only an empty `label` renders a completed step
-   * whose forbidden tokens were filtered out as a loading skeleton, making completed work appear active.
-   *
-   * `peer` = a peer's **terminal state**. Inclusion is **deliberately asymmetric** for fail / done
-   * (see rules in `buildBandModel`):
-   *   · `fail`: **always include**. Failure is new information, and backend hardcodes its spawn row
-   *     as `is_transient`, falsely rendering `已重试`; remove that row and replace it with this one.
-   *   · `done`: include only peers with **zero child steps** (direct LLM results / plan-path peers).
-   *     Peers with child steps already show success through their own green steps; an extra row adds noise
-   *     and renders **before** their actual work.
-   * ⚠ The former rule omitted all peer rows when child steps existed; it was overturned
-   *   after repeated independent reviews showed hard-failed peers had no red band row under that rule.
-   */
-  kind: "step" | "skeleton" | "peer";
-  /** Human-readable heading; empty if unrecognized (rendering supplies fallback copy). Always empty on `peer` rows:
-   *  rendering combines `peerName` + `peerOutcome` through i18n (this module produces no wrapper copy). */
+  /** Human-readable heading; empty if unrecognized (rendering supplies fallback copy). */
   label: string;
   /** Filtered right-side metadata (summary or duration). Empty for warning steps; rendering shows their original outcome. */
   meta: string;
@@ -213,40 +191,18 @@ export interface BandRow {
   tone: "done" | "warn" | "fail" | "active";
   /** Original step outcome, separate from warning severity and retry eligibility. */
   stepState?: StepView["state"];
-  /** Ownership display name for `kind:"peer"`. */
-  peerName?: string;
-  /**
-   * Terminal state for `kind:"peer"`, from **existing** `deriveTerminalStatus` (see `bandTerminalStatus`).
-   * Only `fail` / `done` on the band; `bail` is unreachable during its lifecycle.
-   *
-   * Separate from visual `tone`: peer and step outcomes retain their own
-   * facts without predicting recovery from a warning classification.
-   */
-  peerOutcome?: "fail" | "done";
 }
 
 export interface BandCurrent {
-  agent: AgentKey;
-  /** Ownership display name (`agentDisplayName`, honoring Team-configured custom names). */
-  agentName: string;
   /**
-   * Original backend `agent_name`, **only for `AgentBadge`**. Its contract takes agent_name,
-   * not AgentKey: passing a key makes every custom agent generic, collapsing them to one badge.
-   */
-  agentBadgeName: string;
-  /**
-   * Current-row owner ID (peer ID or `"lead"`). **Rendering uses it as the throttle reset key**:
-   * prose must switch immediately on ownership change, preventing a new agent's name with the previous one's words,
-   * the misattribution `proseTailOf`'s `allowFallback:false` prevents;
-   * model filtering blocked it but rendering's throttle reintroduced it (caught by independent review).
+   * Current owner ID (peer ID or `"lead"`). **Rendering uses it as the throttle reset key** and puts the prose under
+   * that agent's group: prose must switch immediately on ownership change, preventing one agent's group from
+   * showing another's words (`proseTailOf`'s `allowFallback:false` blocks it in the model; rendering's throttle
+   * would reintroduce it).
    */
   owner: string;
   /** Human-readable current action. Rendering uses a generic fallback when empty. */
   what: string;
-  /** Filtered supplementary information (label / duration), joined into the footnote. */
-  detail: string[];
-  /** Previous owner's display name on agent change; null for consecutive work by the same agent. */
-  handoffFrom: string | null;
   /**
    * Display name while waiting for this peer to return (its spawn row remains active, with no terminal state).
    * Rendering uses `正在等 X 返回`, more truthful than `正在想下一步` (Lead is waiting, not thinking),
@@ -257,28 +213,20 @@ export interface BandCurrent {
    * Waiting for a peer whose **name has not arrived yet** (no entry in `peerNames`).
    *
    * ★ Observed on 116 dogfood: a frame rendered **`正在等 Bowhead 返回`**, Lead waiting for itself.
-   *   Root cause: `displayNameOf` falls back to `AGENT_META.lead.zh` when the name is absent; correct
-   *   for `agentName` (Lead owns the spawn step), but **false** for the awaited peer.
-   *   Rendering instead uses unnamed copy, never substituting Lead's name.
+   *   Root cause: `displayNameOf` falls back to Lead's brand name when the name is absent; **false** for the awaited
+   *   peer. Rendering instead uses unnamed copy, never substituting Lead's name.
    */
   waitingOnPeerUnknown: boolean;
   /**
-   * Current owning peer's **prose tail** (windowed + filtered), empty if absent.
-   *
-   * ★ With the running ledger disabled, peer prose has no other surface. User decision: keep prose visible
-   * to show some content; it is the band's only character-by-character changing content, and in long-turn gaps
-   * it alone indicates whether execution is stuck.
+   * Current owning agent's **prose tail** (windowed + filtered), empty if absent. In long-turn gaps it alone shows
+   * whether execution is stuck.
    */
   prose: string;
   /** Turn visibility FR5: `prose` is the newest line of code being written (rendered as code), not agent prose. */
   proseIsCode?: boolean;
   /**
-   * Current step's tool **category** (`tool-catalog`'s `cat`), for coarse phase copy in the disclosure strip.
-   *
-   * ★ Two levels are necessary: design strip `正在分析 · 第 7 步 · 3 分 25 秒`, current row
-   * `正在按门店汇总客流量并排名`. The first version rendered `what` in both, duplicating one sentence
-   * (obvious in spike screenshots); unit tests miss repetition because both surfaces have content.
-   * Unrecognized tools yield null, with generic phase copy from rendering.
+   * Current step's tool **category** (`tool-catalog`'s `cat`), for the heartbeat's coarse phase word, so the
+   * heartbeat and the group's current line never say the same sentence. Unrecognized tools yield null.
    */
   toolCat: string | null;
 }
@@ -286,28 +234,12 @@ export interface BandCurrent {
 export interface BandModel {
   phase: BandPhase;
   density: BandDensity;
-  /** Step ordinal (= number of steps seen); 0 if none.
-   *  ⚠ Count only **tool steps**, excluding peer terminal rows; `第 N 步` refers to tool-step granularity. */
-  stepOrdinal: number;
   /**
-   * Number of terminal-failed peers this turn (including those **with** child steps).
-   *
-   * ★ Only 2 history rows: a peer failing at t=20s scrolls out seconds later, leaving no main-surface trace
-   * for the remaining 2.5 minutes of a 3-minute turn, the forgetting-a-failure-because-it-scrolls-out behavior
-   * explicitly prohibited in inventory §2.1. **History is transient; this count persists**.
-   *
-   * ⚠ Count **all** terminal-failed peers. The band does not distinguish bail (`bandTerminalStatus`:
-   * unreachable during the band's lifecycle), so there is no bail exclusion here either.
-   * An earlier comment claimed otherwise after bail removal; independent review caught that stale false claim.
+   * Number of terminal-failed peers this turn (including those **with** child steps). The heartbeat keeps this count
+   * as a chip, and the screen-reader status announces it.
    */
   peerFailCount: number;
-  /** Always HISTORY_ROWS entries for `density === "rows"` (pad with skeletons); empty for `single`. */
-  history: BandRow[];
   current: BandCurrent | null;
-}
-
-function skeletonRow(i: number): BandRow {
-  return { key: `__skeleton_${i}`, kind: "skeleton", label: "", meta: "", tone: "done" };
 }
 
 function metaOf(s: StepView): string {
@@ -335,7 +267,8 @@ function toneOf(s: StepView): BandRow["tone"] {
   return s.state === "done" ? "done" : "active";
 }
 
-function rowOf(s: StepView): BandRow {
+/** One step as a row: what it did, its result or duration, and its tone. Shared with the run groups. */
+export function rowOf(s: StepView): BandRow {
   const tone = toneOf(s);
   // Turn visibility FR1: a history row names what the step did, as the trace row does
   // ("运行代码 · 生成单文件交互式 HTML 看板", "读取附件 · sales.csv"); the row truncates with an ellipsis.
@@ -343,7 +276,6 @@ function rowOf(s: StepView): BandRow {
   const detail = stripInternal(s.label);
   return {
     key: s.stepId,
-    kind: "step",
     label: name && detail && detail !== name ? `${name} · ${detail}` : name,
     meta: tone === "warn" ? "" : metaOf(s),
     tone,
@@ -358,17 +290,6 @@ export interface PeerIdentity {
   peerDisplayNames?: Record<string, string>;
 }
 
-/**
- * Who owns this step.
- *
- * ⚠ **Do not rely only on `StepView.subagentName`**; live SSE dispatch never fills it.
- * The authoritative path is `peerNames[subagentId]`, **the same** source as
- * `agent-grouping.ts` and other trace surfaces. Other fields route all production peer steps to Lead
- * (wrong badge color, Bowhead ownership footnote, no `接手自 X`).
- *
- * ⚠ **Do not** call `agentKeyFor` with an empty name either: it returns `generic` (`专家`),
- * making Lead's steps appear as an expert. Explicitly classify all non-peer steps as lead.
- */
 /** Current step's tool category; null outside the static catalog (including teammcp.*). */
 function toolCatOf(s: StepView): string | null {
   const tool = s.toolName ?? "";
@@ -406,19 +327,14 @@ function agentNameOf(s: StepView, peerNames: Record<string, string>): string | n
 }
 
 /**
- * Handoff identity = **peer ID**, not `AgentKey`.
+ * Owner identity = **peer ID**, not the agent kind: two peers of the same profile (`compute` × 2 is common on 116)
+ * are different owners, and prose must not pass between them. All non-peer steps use `"lead"`.
  *
- * ⚠ Comparing `AgentKey` misses handoffs between two peers using the same profile (`compute` × 2 is common on 116):
- * both sides are `"compute"`, so no announcement occurs. Peer ID actually determines ownership change.
- * All non-peer steps use `"lead"` (Lead's own steps have no subagentId).
+ * ⚠ **Do not rely only on `StepView.subagentName`**; live SSE dispatch never fills it. The authoritative path is
+ * `peerNames[subagentId]`, **the same** source as `agent-grouping.ts` and other trace surfaces.
  */
 function ownerIdOf(s: StepView, peerNames: Record<string, string>): string {
   return rowPeerIdOf(s, peerNames) ?? "lead";
-}
-
-function agentKeyOf(s: StepView, peerNames: Record<string, string>): AgentKey {
-  const name = agentNameOf(s, peerNames);
-  return name ? agentKeyFor(name) : "lead";
 }
 
 function displayNameOf(
@@ -441,74 +357,6 @@ export interface BuildBandInput extends PeerIdentity {
   peerTerminalById?: Record<string, PeerTerminal>;
   /** turn-store `peerProse` (peerId → accumulated prose); its only surface after the running ledger is disabled. */
   peerProse?: Record<string, string>;
-  /**
-   * Peers with **real child steps** (exclude Lead's spawn rows, which are Lead tool calls).
-   * Derive from `steps` by default, but callers should supply the **unthrottled** set.
-   *
-   * ⚠ `steps` is a **prefix** after minimum-dwell throttling, while `step_done`
-   * **updates state in place**, leaving later steps queued. Deriving from the prefix first renders
-   * `主分析 未完成`, then 450ms later, released steps change it back to `派子 agent · 已重试`,
-   * retracting an already disclosed terminal fact.
-   */
-  peerIdsWithSteps?: ReadonlySet<string>;
-  /**
-   * Peers with Lead spawn rows; also supply the **unthrottled** set.
-   *
-   * ⚠ Must share its source with `peerIdsWithSteps` (mixing throttled/unthrottled data causes real bugs):
-   * if a zero-child-step peer's `done` arrives before spawn is released, a frame renders
-   * an independent key=`peer:<id>` row located by `terminal.evtSeq`; after 450ms spawn is released,
-   * the same fact becomes a rewritten key=`<stepId>` row at an earlier position. Changed React keys replay
-   * entry animation and shift the row, the jitter `peerRowFrom`'s key comment prohibits.
-   */
-  peerIdsWithSpawnRow?: ReadonlySet<string>;
-}
-
-/** Timeline item: a step or a peer terminal row. */
-type TimelineItem =
-  | { kind: "step"; step: StepView }
-  | { kind: "peer"; row: BandRow };
-
-/**
- * Merge peer terminal rows into the step stream in event order.
- *
- * ★ Ordering uses `evtSeq` (bus's per-turn monotonic event sequence, stamped by `events.py`).
- * Merge rather than sort: walk steps once, emitting peer terminal rows with smaller evtSeq first.
- *
- * ⚠ **Do not always append**: a peer failing at step 3 would remain in the last historical slot,
- * crowding out dozens of subsequent steps. History should show what just happened; two such peers
- * occupy both rows and freeze them for the entire turn.
- *
- * Fallback: peer terminals without `evtSeq` go last (bypass-bus events lack sequence);
- * steps without `evtSeq` are not boundaries, so peer terminals follow them.
- *
- * ⚠ **Accepted known cost, caught by independent review**: merge occurs **after** minimum-dwell throttling,
- * so peer rows ignore `MIN_DWELL_MS`. With three zero-child-step peers reaching terminal state in one frame,
- * the 2-row window cannot fit all; one row **never appears for even a frame**. Accepted because facts remain
- * (persistent `peerFailCount` chip counts them; expansion shows full terminals); only that row's visibility is lost.
- * Fixing this requires throttling the merged timeline, changing the step rhythm already accepted on 116.
- */
-function mergeTimeline(
-  steps: StepView[],
-  peers: { evtSeq?: number; row: BandRow }[],
-): TimelineItem[] {
-  // undefined goes last: Number.POSITIVE_INFINITY naturally sorts it to the bottom.
-  const pending = [...peers].sort(
-    (a, b) => (a.evtSeq ?? Number.POSITIVE_INFINITY) - (b.evtSeq ?? Number.POSITIVE_INFINITY),
-  );
-  const out: TimelineItem[] = [];
-  let pi = 0;
-  for (const step of steps) {
-    const seq = step.evtSeq;
-    if (seq !== undefined) {
-      while (pi < pending.length && (pending[pi].evtSeq ?? Number.POSITIVE_INFINITY) < seq) {
-        out.push({ kind: "peer", row: pending[pi].row });
-        pi += 1;
-      }
-    }
-    out.push({ kind: "step", step });
-  }
-  for (; pi < pending.length; pi += 1) out.push({ kind: "peer", row: pending[pi].row });
-  return out;
 }
 
 /**
@@ -755,70 +603,14 @@ function bandTerminalStatus(terminal: PeerTerminal): StepStatus {
 }
 
 /**
- * Build a row from peer terminal facts. Caller supplies `key`:
- * independent terminal rows use `peer:<id>`; **rewritten spawn rows** retain their `stepId`,
- * avoiding replay of entry animation from a changed React key when the terminal arrives.
- */
-function peerRowFrom(
-  peerId: string,
-  terminal: PeerTerminal,
-  peerNames: Record<string, string>,
-  peerDisplayNames: Record<string, string>,
-  key: string,
-): BandRow | null {
-  const status = bandTerminalStatus(terminal);
-  if (status !== "fail" && status !== "done") return null;
-  const name = peerNames[peerId] ?? "";
-  return {
-    key,
-    kind: "peer",
-    label: "",
-    meta: formatPeerDuration(terminal.durationMs) ?? "",
-    tone: status,
-    // ⚠ **Leave names empty** if unavailable; rendering uses the two unnamed i18n entries.
-    //   Previously fell back to `AGENT_META.generic.zh` (`专家`), yielding
-    //   `专家 didn't finish` in en-US: hardcoded Chinese in English UI, caught by independent review.
-    //   A real path: `peer_dispatch_failed` before `agent_spawned` leaves
-    //   neither peerNames nor peerDisplayNames containing this peer yet.
-    peerName: name
-      ? agentDisplayName(name, peerDisplayNames[peerId] ?? null)
-      : (peerDisplayNames[peerId] ?? ""),
-    peerOutcome: status,
-  };
-}
-
-/**
- * Build independent terminal rows for peers whose rows are not carried elsewhere.
+ * The heartbeat line's facts from the step stream: phase, the current step (or the helper Lead waits on), the owning
+ * agent's prose or newest code line, and how many helpers failed. The card body is `run-groups.ts`.
  *
- * Caller computes exclusions (`rowsCarriedElsewhere`): peers with real child steps,
- * or successful peers carried by rewritten spawn rows. **Failed peers never belong to this set**;
- * see `BandRow.kind`'s asymmetric fail/done rules.
- */
-function peerTerminalRows(
-  peerTerminalById: Record<string, PeerTerminal>,
-  rowsCarriedElsewhere: ReadonlySet<string>,
-  peerNames: Record<string, string>,
-  peerDisplayNames: Record<string, string>,
-): { evtSeq?: number; row: BandRow }[] {
-  const out: { evtSeq?: number; row: BandRow }[] = [];
-  for (const [peerId, terminal] of Object.entries(peerTerminalById)) {
-    if (rowsCarriedElsewhere.has(peerId)) continue;
-    const row = peerRowFrom(peerId, terminal, peerNames, peerDisplayNames, `peer:${peerId}`);
-    if (row) out.push({ evtSeq: terminal.evtSeq, row });
-  }
-  return out;
-}
-
-/**
- * Compute the band's three rows from the step stream.
- *
- * Five invariants, all locked down by tests:
- *   ① `history.length` always equals `HISTORY_ROWS` (density `rows`); pad with skeletons
- *      to maintain constant height;
- *   ② Empty steps mean phase = preparing, not no band; occupy space even during the opening three seconds;
- *   ③ No active step means preparing (opening) or gap copy, **never** reporting completed work as `正在…`;
- *   ④ Current step is the **last** active one (newest rather than oldest under concurrency);
- *   ⑤ **Concurrency never loses a step**: history contains the last two non-current steps in occurrence order.
+ * Invariants, all locked down by tests:
+ *   ① Empty steps mean phase = preparing, not no band; the band occupies space from the opening;
+ *   ② No active step means preparing (opening) or gap copy, **never** reporting completed work as `正在…`;
+ *   ③ Current step is the **last** active one (newest rather than oldest under concurrency);
+ *   ④ A dispatch row is never current, nor a failed helper's dispatch or its leftover active steps.
  */
 export function buildBandModel({
   steps,
@@ -827,53 +619,18 @@ export function buildBandModel({
   peerDisplayNames = {},
   peerTerminalById = {},
   peerProse = {},
-  peerIdsWithSteps,
-  peerIdsWithSpawnRow,
 }: BuildBandInput): BandModel {
-  // ── Each peer appears once on the band, **where its terminal actually occurred** ─────────
-  //
-  // Peer terminal outcomes own their timeline position and severity. Failed
-  // peers replace their spawn row to avoid duplicate outcomes; successful peers
-  // with child steps need no extra row. Zero-child successful peers retain the
-  // rewritten spawn position. Use unthrottled child membership so queued steps
-  // cannot retract a terminal outcome as the visible prefix advances.
-  const childStepPeerIds =
-    peerIdsWithSteps
-    ?? new Set(
-      steps.filter((st) => !st.peerProseKey)
-        .map((st) => st.subagentId).filter((v): v is string => Boolean(v)),
-    );
   const failPeerIds = new Set(
     Object.entries(peerTerminalById)
       .filter(([, t]) => bandTerminalStatus(t) === "fail")
       .map(([id]) => id),
   );
-  /** This peer's success is carried by its rewritten spawn row (zero child steps + spawn row present). */
-  const spawnRowPeerIds =
-    peerIdsWithSpawnRow
-    ?? new Set(steps.map((st) => st.peerProseKey).filter((v): v is string => Boolean(v)));
-  const doneViaSpawnRow = new Set(
-    [...spawnRowPeerIds].filter((id) => !childStepPeerIds.has(id) && !failPeerIds.has(id)
-      && peerTerminalById[id] !== undefined),
-  );
-
-  // Independent terminal rows are **omitted** for successful peers with child steps (already represented by green steps),
-  // or success carried by rewritten spawn. Failures always receive rows.
-  const ownedPeerIds = new Set(
-    [...childStepPeerIds, ...doneViaSpawnRow].filter((id) => !failPeerIds.has(id)),
-  );
-  const peerRows = peerTerminalRows(
-    peerTerminalById, ownedPeerIds, peerNames, peerDisplayNames,
-  );
-  // Count peers **with** child steps too: although they lack a historical row, the fact that an agent did not finish
-  // must remain persistently visible in the disclosure strip.
-  const peerFailCount = Object.values(peerTerminalById).filter(
-    (t) => bandTerminalStatus(t) === "fail",
-  ).length;
+  // Count peers **with** child steps too: the fact that an agent did not finish stays visible on the heartbeat.
+  const peerFailCount = failPeerIds.size;
   // ⚠ A pure-chat turn has **no execution facts this turn**, rather than merely zero steps:
-  //   collapsing a zero-step turn with peer terminals to one row discards that row.
+  //   a zero-step turn with a helper result still shows that helper's group.
   const density: BandDensity =
-    answerStreaming && steps.length === 0 && peerRows.length === 0 ? "single" : "rows";
+    answerStreaming && steps.length === 0 && Object.keys(peerTerminalById).length === 0 ? "single" : "rows";
 
   // Current step = **last** active one (newest under concurrent peers).
   // ★★ Remove failed peers' spawn rows **before selecting the current step** (eighth independent review).
@@ -883,8 +640,6 @@ export function buildBandModel({
   //    Filtering only historical candidates (`others`) previously rendered history as `主分析 未完成`
   //    while current simultaneously showed `正在派子 agent` + spinner: two faces for one fact, one untruthful,
   //    precisely the shape this rule removes.
-  // ⚠ `stepOrdinal` still counts unfiltered `steps`: that step **really occurred**;
-  //    `第 N 步` counts executed tool steps, not surviving on-screen rows.
   const visibleSteps = steps.filter((st) => {
     // Failed peer spawn rows duplicate the red terminal fact and would misreport it.
     if (st.peerProseKey && failPeerIds.has(st.peerProseKey)) return false;
@@ -934,42 +689,6 @@ export function buildBandModel({
   //    beside `正在…` + spinner + running seconds, misreporting for the entire gap. Use gap copy.
   const cur = activeIdx >= 0 ? visibleSteps[activeIdx] : null;
 
-  // History = last HISTORY_ROWS steps **excluding current**, in occurrence order.
-  // ⚠ Former `steps.slice(0, activeIdx)` made concurrent completed steps after active
-  //    **disappear entirely** (neither historical nor current). Users saw the step count increase
-  //    while a row vanished, contributing to the impression that execution was stuck.
-  const others = activeIdx >= 0
-    ? [...visibleSteps.slice(0, activeIdx), ...visibleSteps.slice(activeIdx + 1)]
-    : visibleSteps;
-  // Merge steps and zero-child-step peer terminals into one timeline, then take the last HISTORY_ROWS items.
-  // ⚠ Merge **before** tail slicing: slicing steps then adding peers always puts peers last,
-  //   equivalent to the rejected always-append policy.
-  // Spawn handling (same source as the rule above):
-  //   · Failed peer → entire row already removed by `visibleSteps` (both current and historical;
-  //     otherwise current reports `正在派子 agent` for an already failed peer).
-  //   · Done peer with zero child steps → rewrite as peer row in place (retain position without an extra row).
-  //   · Otherwise → ordinary step row as usual.
-  const rowForStep = (st: StepView): BandRow => {
-    const spawnFor = st.peerProseKey ?? "";
-    if (spawnFor && doneViaSpawnRow.has(spawnFor)) {
-      const terminal = peerTerminalById[spawnFor];
-      const row = terminal
-        ? peerRowFrom(spawnFor, terminal, peerNames, peerDisplayNames, st.stepId)
-        : null;
-      // Without terminal duration, retain this step's own meta rather than replacing existing information with blank.
-      if (row) return row.meta ? row : { ...row, meta: metaOf(st) };
-    }
-    return rowOf(st);
-  };
-  const tail = mergeTimeline(others.filter((step) => step.state === "active" || !isInternalCloseoutStep(step)), peerRows)
-    .slice(-HISTORY_ROWS)
-    .map((it) => (it.kind === "step" ? rowForStep(it.step) : it.row));
-  const history: BandRow[] = [];
-  if (density === "rows") {
-    for (let i = 0; i < HISTORY_ROWS - tail.length; i += 1) history.push(skeletonRow(i));
-    history.push(...tail);
-  }
-
   if (!cur) {
     // Both cases enter here: ① no steps yet (opening → `preparing`); ② previous finished, next not started,
     // or waiting on a helper (`gap`). Both name no finished work (③), but only the opening is "getting ready":
@@ -999,14 +718,9 @@ export function buildBandModel({
     return {
       phase: trulyOpening ? "preparing" : "gap",
       density,
-      stepOrdinal: steps.length,
       peerFailCount,
-      history,
       current: last
         ? {
-          agent: agentKeyOf(waitingSpawn ?? last, peerNames),
-          agentName: displayNameOf(waitingSpawn ?? last, peerNames, peerDisplayNames),
-          agentBadgeName: agentNameOf(waitingSpawn ?? last, peerNames) ?? "lead",
           owner: ownerIdOf(waitingSpawn ?? last, peerNames),
           // ⚠ **Do not** use `displayNameOf` fallback when the name is missing; it supplies Lead's name,
           //   rendering `正在等 Bowhead 返回`, Lead waiting for itself (one observed frame on 116).
@@ -1014,7 +728,7 @@ export function buildBandModel({
             ? displayNameOf(waitingSpawn, peerNames, peerDisplayNames)
             : null,
           waitingOnPeerUnknown: waitingSpawn !== null && !agentNameOf(waitingSpawn, peerNames),
-          what: "", detail: [], handoffFrom: null, toolCat: null,
+          what: "", toolCat: null,
           // ★ Gaps need prose most: everything else in this state is static.
           // Steps imply an owner, **no fallback** (otherwise Lead's steps gain another peer's prose).
           prose: proseTailOf(
@@ -1027,58 +741,28 @@ export function buildBandModel({
         //     or prose from a peer that never executed steps gets attached (ninth review).
         : !trulyOpening
           ? {
-            agent: "lead", agentName: LEAD_BRAND_NAME, agentBadgeName: "lead",
             owner: "lead", waitingOnPeer: null, waitingOnPeerUnknown: false,
-            what: "", detail: [], handoffFrom: null, toolCat: null, prose: "",
+            what: "", toolCat: null, prose: "",
           }
         : ((): BandCurrent => {
           // No steps = no owner, precisely the fallback branch.
           const fb = proseTailOf(null, peerProse, { allowFallback: true });
-          // ⚠ Assign this row to the prose owner. Always assigning Lead renders
-          //   Bowhead with another peer's words, the same misattribution just blocked in the model
-          //   (caught independently; particularly apparent with concurrent prose-only peers).
-          const name = fb.peerId ? peerNames[fb.peerId] : undefined;
-          if (!name || !fb.peerId) {
-            return {
-              agent: "lead", agentName: LEAD_BRAND_NAME, agentBadgeName: "lead",
-              owner: "lead",
-              waitingOnPeer: null,
-              waitingOnPeerUnknown: false,
-              what: "", detail: [], handoffFrom: null, toolCat: null, prose: fb.text,
-            };
-          }
+          // ⚠ Assign the prose to its owner. Always assigning Lead renders Bowhead's group with another
+          //   peer's words, the same misattribution just blocked in the model (caught independently;
+          //   particularly apparent with concurrent prose-only peers). An owner without a name stays Lead.
+          const owner = fb.peerId && peerNames[fb.peerId] ? fb.peerId : "lead";
           return {
-            agent: agentKeyFor(name),
-            agentName: agentDisplayName(name, peerDisplayNames[fb.peerId] ?? null),
-            agentBadgeName: name,
-            owner: fb.peerId,
+            owner,
             waitingOnPeer: null,
             waitingOnPeerUnknown: false,
-            what: "", detail: [], handoffFrom: null, toolCat: null, prose: fb.text,
+            what: "", toolCat: null, prose: fb.text,
           };
         })(),
     };
   }
 
-  // Handoff = current owner differs from the **immediately preceding step**.
-  // ⚠ A previous step **still running** is not a handoff (final review): with concurrent peers,
-  //   `接手自 X` is **false** while X still works; it has not handed over.
-  //   Handoff means previous owner finished and ownership changed, requiring prev to leave active.
-  const prevIdx = activeIdx > 0 ? activeIdx - 1 : -1;
-  const prev = prevIdx >= 0 ? visibleSteps[prevIdx] : null;
-  const handoff =
-    prev && prev.state !== "active"
-    && ownerIdOf(prev, peerNames) !== ownerIdOf(cur, peerNames);
-  // ⚠ Do not announce when both **display names match** (observed on 116 dogfood): one plan turn spawned three `compute`
-  //   peers all named `主分析`, producing the footnote
-  //   `主分析 · 2025年 天津 营业额 按种类大类 明细 · 接手自 主分析`,
-  //   with identical names for current agent and handoff source: uninformative to users
-  //   and apparently buggy. Different peer IDs are **internal facts**; matching display names mean **no user-visible owner change**.
-  const prevName = prev ? displayNameOf(prev, peerNames, peerDisplayNames) : "";
-  const curName = displayNameOf(cur, peerNames, peerDisplayNames);
-  const announceHandoff = handoff && prevName !== curName;
-  // Turn visibility FR5: while an agent writes code, the act names its purpose ("写代码 · 生成看板") and the foot
-  // shows the newest line of that code in place of prose; the band keeps its fixed height.
+  // Turn visibility FR5: while an agent writes code, the action names its purpose ("写代码 · 生成看板") and the
+  // newest line of that code shows under its group's current line in place of prose.
   const writingCode = cur.stepType === "lead_thinking_writing" && Boolean(cur.codeLanguage);
   const intent = writingCode ? stripInternal(cur.label) : "";
   const codeLine = writingCode
@@ -1088,23 +772,15 @@ export function buildBandModel({
   return {
     phase: "running",
     density,
-    stepOrdinal: steps.length,
     peerFailCount,
-    history,
     current: {
-      agent: agentKeyOf(cur, peerNames),
-      agentName: curName,
-      agentBadgeName: agentNameOf(cur, peerNames) ?? "lead",
       // ⚠ Use the **non-active** name: rendering wraps current copy in `band_doing` (`正在{what}`),
       //   while catalog `activeName` already contains `正在` (e.g. `正在整理结果`); passing true renders
-      //   `正在正在整理结果`. Previously backend headings almost always prevented catalog fallback;
-      //   filtering jargon above now reaches it. History has no wrapper and still uses active names (see :291).
+      //   `正在正在整理结果`.
       what: intent ? `${humanLabel(cur, false)} · ${intent}` : humanLabel(cur, false),
-      detail: (writingCode ? [stripInternal(cur.durationText)] : [stripInternal(cur.label), stripInternal(cur.durationText)]).filter(Boolean),
       owner: ownerIdOf(cur, peerNames),
       waitingOnPeer: null,
       waitingOnPeerUnknown: false,
-      handoffFrom: announceHandoff ? prevName : null,
       toolCat: toolCatOf(cur),
       prose: writingCode
         ? codeLine

@@ -288,7 +288,7 @@ describe("real React reference editor and catalog", () => {
     render(ui(defaults()));
     await type("/");
     const option = await screen.findByRole("option");
-    expect(option.textContent).toContain("请选择已配置此技能（含插件提供）的智能体，或本次任务允许选择的只读方法；也可请智能体负责人添加。");
+    expect(option.textContent).toContain("请选择已配置此技能（含插件提供）的智能体，或本次任务允许选择的只读方法；也可请智能体的所有者添加。");
     expect(option.textContent).not.toContain("请 Lead 安排");
   });
   it("reads the catalog on native input and exposes disabled reasons without a selection or send", async () => {

@@ -93,6 +93,12 @@ describe("testChangeState (Test this change, §4)", () => {
     expect(stateOf(BASE)).toBe("not_tested");
   });
 
+  it("a saved draft with no field that differs from the release has nothing to test", () => {
+    // e.g. an old Agent's draft that only gained empty defaults when saved (116 pass 1, F17)
+    expect(stateOf({ ...BASE, candidate_identity: null, draft_changes: [], primary_action: action("prepare_candidate") })).toBe("nothing");
+    expect(stateOf({ ...BASE, candidate_identity: null, primary_action: action("prepare_candidate") })).toBe("not_tested");
+  });
+
   it("testing covers the request in flight and the running comparison, Coach's included", () => {
     expect(stateOf({ ...BASE, candidate_identity: null, primary_action: action("prepare_candidate") }, { preparing: true })).toBe("testing");
     expect(stateOf({ ...BASE, primary_action: action("view_comparison"), active_execution_summary: running } as AgentVersionWorkbench)).toBe("testing");

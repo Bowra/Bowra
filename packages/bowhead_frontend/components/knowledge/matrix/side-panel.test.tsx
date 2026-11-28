@@ -78,3 +78,40 @@ describe("SidePanel · 选项编辑", () => {
     expect(boxes.map((b) => b.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
   });
 });
+
+describe("SidePanel · 单格重跑写明花费", () => {
+  function renderRerun(cell: MatrixCellVM, rerunCredits: number | null) {
+    const onRerunCell = vi.fn();
+    render(
+      <NextIntlClientProvider locale="zh-CN" messages={messagesZh}>
+        <SidePanel
+          row={ROW}
+          col={{ columnId: "c1", name: "金额", type: "currency" }}
+          cell={cell}
+          canEdit
+          saving={false}
+          onClose={vi.fn()}
+          onSaveValue={vi.fn()}
+          onMarkVerified={vi.fn()}
+          onRerunCell={onRerunCell}
+          rerunCredits={rerunCredits}
+        />
+      </NextIntlClientProvider>,
+    );
+    return onRerunCell;
+  }
+
+  it("已完成的格子：重跑此格 · 约 N 点额度", () => {
+    const onRerunCell = renderRerun({ ...CELL, verified: true }, 7);
+    fireEvent.click(screen.getByRole("button", { name: "重跑此格 · 约 7 点额度" }));
+    expect(onRerunCell).toHaveBeenCalledTimes(1);
+  });
+
+  it("失败的格子：重试此格 · 约 N 点额度；价格未知时只写动作", () => {
+    renderRerun({ ...CELL, status: "failed", failReason: "timeout" }, 3);
+    expect(screen.getByRole("button", { name: "重试此格 · 约 3 点额度" })).toBeTruthy();
+    cleanup();
+    renderRerun({ ...CELL, status: "failed", failReason: "timeout" }, null);
+    expect(screen.getByRole("button", { name: messagesZh.kbMatrix.retry_cell })).toBeTruthy();
+  });
+});

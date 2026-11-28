@@ -13,6 +13,8 @@ import { forwardRef, memo, useEffect, useId, useImperativeHandle, useMemo, useRe
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslations } from "next-intl";
 
+import { RowActionsMenu } from "@/components/ui/row-actions-menu";
+
 import type { MatrixCellVM, MatrixColumnVM, MatrixRowVM, MatrixSnapshot } from "@/lib/kb-matrix/types";
 import { cellChoiceList } from "@/lib/kb-matrix/types";
 
@@ -160,13 +162,18 @@ function ColumnHeader({
   const colMenuLabel = (name: string) => t("colmenu_label", { name });
   const [showQuestion, setShowQuestion] = useState(false);
   const questionId = useId();
+  // The full name wraps over two lines; the question shows on hover, on focus and on tap (S2: names were cut to "是…").
   return (
-    <div className={"mx-colh" + (col.type === "question" ? " q" : "")} title={col.question || col.name}>
+    <div
+      className={"mx-colh" + (col.type === "question" ? " q" : "")}
+      onMouseEnter={() => setShowQuestion(true)}
+      onMouseLeave={() => setShowQuestion(false)}
+    >
       <span className="tico">{TYPE_GLYPH[col.type] ?? "Aa"}</span>
       <button type="button" className="cname mx-question-trigger" aria-expanded={showQuestion} aria-describedby={showQuestion ? questionId : undefined}
         onClick={() => setShowQuestion(true)} onFocus={() => setShowQuestion(true)}
         onBlur={() => setShowQuestion(false)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setShowQuestion(false); } }}>
-        {col.name}
+        <span className="mx-colname">{col.name}</span>
       </button>
       {showQuestion && <div id={questionId} role="tooltip" className="mx-question-text">{col.question || col.name}</div>}
       <span className="mx-colh-badge">
@@ -195,18 +202,70 @@ function ColumnHeader({
   );
 }
 
-function FileCell({ row, missingLabel }: { row: MatrixRowVM; missingLabel: string }) {
+/** Row selection and the row menu (S2), present only where rows can be removed (desktop editors of a real matrix). */
+export interface MatrixRowControls {
+  selected: ReadonlySet<string>;
+  onToggle: (fileId: string, selected: boolean) => void;
+  /** The rows the grid shows (all rows, or the filtered and sorted ones). */
+  onToggleAll: (fileIds: string[], selected: boolean) => void;
+  onRemove: (row: MatrixRowVM) => void;
+}
+
+function FileCell({ row, missingLabel, controls }: { row: MatrixRowVM; missingLabel: string; controls?: MatrixRowControls }) {
+  const t = useTranslations("kbMatrix");
+  const name = row.missing ? missingLabel : row.fileName;
   return (
-    <div className="mx-filecell">
+    <div className={"mx-filecell" + (controls?.selected.has(row.fileId) ? " is-selected" : "")}>
+      {controls && (
+        <input
+          type="checkbox"
+          className="mx-rowcheck"
+          aria-label={t("row_select", { name })}
+          checked={controls.selected.has(row.fileId)}
+          onChange={(e) => controls.onToggle(row.fileId, e.target.checked)}
+          onClick={(e) => e.stopPropagation()}
+          // The grid moves cell focus on arrows and opens the focused cell on Enter; keys stay with the checkbox.
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      )}
       <span className="fico" style={{ background: row.missing ? "#6B6463" : "#B43A2A" }}>
         {row.missing ? "?" : (row.fileName.split(".").pop() || "DOC").slice(0, 4).toUpperCase()}
       </span>
       <span className="fmeta">
-        <span className={"fname" + (row.missing ? " missing" : "")} title={row.missing ? missingLabel : row.fileName}>
-          {row.missing ? missingLabel : row.fileName}
+        <span className={"fname" + (row.missing ? " missing" : "")} title={name}>
+          {name}
         </span>
       </span>
+      {controls && (
+        <RowActionsMenu
+          className="mx-rowmore"
+          label={t("row_actions", { name })}
+          actions={[{ id: "remove", label: t("row_remove"), danger: true, onSelect: () => controls.onRemove(row) }]}
+        />
+      )}
     </div>
+  );
+}
+
+function SelectAllRows({ rows, controls }: { rows: MatrixRowVM[]; controls: MatrixRowControls }) {
+  const t = useTranslations("kbMatrix");
+  const ref = useRef<HTMLInputElement | null>(null);
+  const count = rows.filter((r) => controls.selected.has(r.fileId)).length;
+  const all = rows.length > 0 && count === rows.length;
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = count > 0 && !all;
+  }, [count, all]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="mx-rowcheck"
+      aria-label={t("rows_select_all")}
+      checked={all}
+      disabled={rows.length === 0}
+      onChange={(e) => controls.onToggleAll(rows.map((r) => r.fileId), e.target.checked)}
+      onKeyDown={(e) => e.stopPropagation()}
+    />
   );
 }
 
@@ -333,8 +392,10 @@ export interface MatrixGridProps {
   onRunCell?: (fileId: string, columnId: string) => void;
   /** M2: column-header menu caret (absent in readOnly view). */
   onColMenu?: (col: MatrixColumnVM, e: React.MouseEvent) => void;
-  /** wave-2 View failures: mute nonfailed cells (CSS `.failfilter`; parent filters rows). */
+  /** wave-2 View failures (S4: the failed status filter): CSS hook `.failfilter`, inert; the parent filters rows. */
   failFilter?: boolean;
+  /** S2: row checkboxes and the row menu (absent in read-only and template views). */
+  rowControls?: MatrixRowControls;
 }
 
 /** M3 §4.4: View failures positioning can scroll rows outside virtual window into view. */
@@ -343,7 +404,7 @@ export interface MatrixGridHandle {
 }
 
 export const MatrixGrid = forwardRef<MatrixGridHandle, MatrixGridProps>(function MatrixGrid(
-  { snapshot, focus, onCell, onCiteHover, onRunCell, onColMenu, failFilter }: MatrixGridProps,
+  { snapshot, focus, onCell, onCiteHover, onRunCell, onColMenu, failFilter, rowControls }: MatrixGridProps,
   ref,
 ) {
   const t = useTranslations("kbMatrix");
@@ -400,6 +461,7 @@ export const MatrixGrid = forwardRef<MatrixGridHandle, MatrixGridProps>(function
     >
       <div className="mx-headrow" style={{ gridTemplateColumns: template }} role="row">
         <div className="mx-colh freeze">
+          {rowControls && <SelectAllRows rows={snapshot.rows} controls={rowControls} />}
           <span className="cname" style={{ fontWeight: 600 }}>{t("col_file")}</span>
         </div>
         {snapshot.columns.map((c) => (
@@ -417,7 +479,7 @@ export const MatrixGrid = forwardRef<MatrixGridHandle, MatrixGridProps>(function
               style={{ gridTemplateColumns: template, transform: `translateY(${vi.start}px)`, height: vi.size }}
             >
               <div className="gcell freeze">
-                <FileCell row={row} missingLabel={t("file_missing")} />
+                <FileCell row={row} missingLabel={t("file_missing")} controls={rowControls} />
               </div>
               {snapshot.columns.map((c) => (
                 <DataCell

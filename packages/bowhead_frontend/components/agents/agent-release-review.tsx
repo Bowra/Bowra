@@ -24,6 +24,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ResourceDiff } from "@/components/ui/resource-diff";
 import { releaseNoteText } from "@/lib/agent-release-notes";
 import { PluginUpdateNotice } from "./plugin-update-notice";
+import { AgentReleaseReviewV2 } from "./agent-release-review-v2";
+import { useAgentReleaseBarCapability } from "@/lib/use-agent-release-bar-capability";
 
 const DIFF_KEYS = [
   "instructions_changed",
@@ -52,7 +54,10 @@ function isVersionEvaluation(value: AgentReleaseCandidateDetail["evaluation"]): 
 
 export function AgentReleaseReview({ agentId, candidateId }: { agentId: string; candidateId: string }) {
   const t = useTranslations("agents_marketplace");
+  const tList = useTranslations("agent_list_v2");
   const locale = useLocale();
+  // FEATURE_AGENT_RELEASE_BAR: the reviewer page of slices 2-5 tech design §5 (decision SD3).
+  const reviewV2 = useAgentReleaseBarCapability();
   const [detail, setDetail] = useState<AgentReleaseCandidateDetail | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState("needs_changes");
@@ -105,7 +110,7 @@ export function AgentReleaseReview({ agentId, candidateId }: { agentId: string; 
   };
 
   if (!detail) {
-    return <div className="am-page am-release-page"><AgentBreadcrumb documentLink href="/agents/manage/governance/" label={t("back_to_manage")} />{error && !rejectOpen ? <div className="am-notice" role="alert"><span>{error}</span></div> : <div className="am-detail-loading" aria-busy="true" />}</div>;
+    return <div className="am-page am-release-page"><AgentBreadcrumb documentLink href="/agents/manage/governance/" label={reviewV2 ? tList("view_team") : t("back_to_manage")} />{error && !rejectOpen ? <div className="am-notice" role="alert"><span>{error}</span></div> : <div className="am-detail-loading" aria-busy="true" />}</div>;
   }
 
   const candidate = detail.candidate;
@@ -128,6 +133,36 @@ export function AgentReleaseReview({ agentId, candidateId }: { agentId: string; 
     : candidate.behavior.primary_capability_name;
   const versionEvaluation = isVersionEvaluation(detail.evaluation) ? detail.evaluation : null;
   const legacyEvaluation = detail.evaluation && !isVersionEvaluation(detail.evaluation) ? detail.evaluation : null;
+
+  const rejectDialog = rejectOpen && !effectiveCompletion && detail.actions.reject ? <ConfirmDialog
+    title={t("release_reject_title")}
+    description={t("release_reject_body")}
+    confirmLabel={busy === "reject" ? t("release_rejecting") : t("release_reject_confirm")}
+    cancelLabel={t("release_reject_cancel")}
+    busy={busy !== null}
+    onCancel={() => setRejectOpen(false)}
+    onConfirm={() => void act("reject")}
+  >
+    <label className="am-review-rejection"><span>{t("release_rejection_reason")}</span><select name="release-rejection-reason" autoComplete="off" value={reason} disabled={busy !== null} onChange={(event) => setReason(event.target.value)}><option value="needs_changes">{t("release_reject_needs_changes")}</option><option value="risk_not_justified">{t("release_reject_risk")}</option><option value="audience_too_broad">{t("release_reject_audience")}</option><option value="insufficient_evidence">{t("release_reject_evidence")}</option></select></label>
+    {error ? <p role="alert">{error}</p> : null}
+  </ConfirmDialog> : null;
+
+  if (reviewV2) {
+    return <>
+      <AgentReleaseReviewV2
+        agentId={agentId}
+        detail={detail}
+        busy={busy}
+        error={error && !rejectOpen ? error : null}
+        completed={completed}
+        onApprove={() => void act("approve")}
+        onReject={() => { setReason("needs_changes"); setError(null); setRejectOpen(true); }}
+        onWithdraw={() => void act("withdraw")}
+        onDismissError={() => setError(null)}
+      />
+      {rejectDialog}
+    </>;
+  }
 
   const readiness = versionEvaluation?.readiness ?? "unknown";
   const readinessKey = ["ready", "ready_with_risks", "blocked", "unknown"].includes(readiness) ? readiness : "unknown";
@@ -220,18 +255,7 @@ export function AgentReleaseReview({ agentId, candidateId }: { agentId: string; 
           </section>
         </aside>
       </div>
-      {rejectOpen && !effectiveCompletion && detail.actions.reject ? <ConfirmDialog
-        title={t("release_reject_title")}
-        description={t("release_reject_body")}
-        confirmLabel={busy === "reject" ? t("release_rejecting") : t("release_reject_confirm")}
-        cancelLabel={t("release_reject_cancel")}
-        busy={busy !== null}
-        onCancel={() => setRejectOpen(false)}
-        onConfirm={() => void act("reject")}
-      >
-        <label className="am-review-rejection"><span>{t("release_rejection_reason")}</span><select name="release-rejection-reason" autoComplete="off" value={reason} disabled={busy !== null} onChange={(event) => setReason(event.target.value)}><option value="needs_changes">{t("release_reject_needs_changes")}</option><option value="risk_not_justified">{t("release_reject_risk")}</option><option value="audience_too_broad">{t("release_reject_audience")}</option><option value="insufficient_evidence">{t("release_reject_evidence")}</option></select></label>
-        {error ? <p role="alert">{error}</p> : null}
-      </ConfirmDialog> : null}
+      {rejectDialog}
     </div>
   );
 }

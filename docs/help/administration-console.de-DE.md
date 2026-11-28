@@ -9,3 +9,9 @@
 - **Auditprotokoll.** Wenn in Business verfügbar, filtern Sie Teamereignisse nach Aktion. Unter **Zugriff und Freigabe** finden Sie hinzugefügte, aktualisierte und entzogene Ressourcenberechtigungen. Öffnen Sie einen Eintrag, um den Ereigniscode und die erfassten Berechtigungsdetails zu sehen.
 
 Die Teamrolle regelt Verwaltungsaktionen. Der Zugriff auf Bereiche und Inhalte wird gesondert geprüft.
+
+## Wissensdatenbank-Freigaben prüfen
+
+Wissensdatenbanken werden schrittweise eingeführt. Wenn sie aktiviert sind, zeigt **Zugriffskontrolle** Teaminhabern und Team-Admins zusätzlich den schreibgeschützten Abschnitt **Wissensdatenbank-Freigaben**. Er listet jede Ressourcenfreigabe auf einen Wissensbereich oder eine Wissensdatei: Empfänger und Ziel mit Namen, was sie heute einschränkt (eine Erlauben-Freigabe macht ihr Ziel zur Positivliste, eine Verweigern-Freigabe sperrt ihren Empfänger), ob die Installation Freigaben erzwingt oder nur protokolliert, und als Vorschlag, welche Berechtigung auf welchen Wissensdatenbanken für denselben Zugriff nötig wäre. Dateien, die Sie nicht öffnen können, Dateien in „Mein Wissen“ anderer Personen und Wissensdatenbanken nur für Mitglieder eines Bereichs werden nicht benannt.
+
+Diese Freigaben gelten nach den Regeln der Wissensdatenbanken weiter: Sie können Zugriff nur sperren, nie gewähren. Der Abschnitt ändert nichts. Freigaben ändern oder entziehen Sie oben unter **Ressourcenfreigaben**.

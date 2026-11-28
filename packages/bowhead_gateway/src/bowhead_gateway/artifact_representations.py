@@ -8,14 +8,17 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Hashable
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 import httpx2
 from bowhead_core.artifact_store import mime_to_family
+from bowhead_core.artifact_views import read_view, write_view
 from bowhead_core.documents.authoring_executor import AuthoringExecutor
-from bowhead_core.documents.authoring_protocol import MAX_FILE
+from bowhead_core.documents.authoring_formats import PPTX_PROFILE, WORD_PROFILE
+from bowhead_core.documents.authoring_protocol import MAX_FILE, MAX_VIEW_PDF
 from bowhead_core.documents.package_io import OFFICE_MIMES, office_upload_mime
 from bowhead_core.results_read_model import artifact_supports_raw, derive_artifact_viewer_profile
 from fastapi import HTTPException, Response
@@ -27,7 +30,7 @@ if TYPE_CHECKING:
     from bowhead_core.documents.executor import DocumentExecutor
 
 Representation = Literal["preview", "raw", "details"]
-RepresentationRequest = Literal[Representation, "pptx-pdf"]
+RepresentationRequest = Literal[Representation, "pptx-pdf", "docx-pdf"]
 RAW_LIMIT = 512 * 1024
 PREVIEW_LIMIT = 100 * 1024 * 1024  # Same maximum as file upload, not the Raw budget.
 log = logging.getLogger(__name__)
@@ -166,22 +169,102 @@ async def _presentation_source_version(store: ArtifactStore, art: Artifact) -> s
     return head.identity or head.etag
 
 
+@dataclass(frozen=True)
+class _PageView:
+    """One kind of page render for Results: PPTX slides or Word pages (docx inline edit design §5)."""
+
+    kind: str
+    suffix: str
+    profile: str
+    #: What a kept render was made by: the worker profile and preview contract the gateway requires,
+    #: and a generation to bump when kept renders should be redone (a font or converter fix). The
+    #: executor's address is added per request. Known without asking the executor, so a kept render
+    #: is served without a network call.
+    renderer: str
+    log_event: str
+    render: Callable[[AuthoringExecutor, bytes], Awaitable[bytes]]
+
+
+async def _render_slides(renderer: AuthoringExecutor, source: bytes) -> bytes:
+    from bowhead_core.pptx_result_view import render_source
+
+    # LibreOffice refuses a chart cache that lists more points than it declares; PowerPoint opens it.
+    return await renderer.view_presentation(await render_source(source))
+
+
+async def _render_pages(renderer: AuthoringExecutor, source: bytes) -> bytes:
+    return await renderer.view_document(source)
+
+
+_PPTX_VIEW = _PageView(
+    kind="pptx-pdf",
+    suffix=".pptx",
+    profile=PPTX_PROFILE,
+    renderer="ordinary-pptx-worker-v1|pptx-results-preview-v1|1",
+    log_event="artifact.presentation_view_failed",
+    render=_render_slides,
+)
+_DOCX_VIEW = _PageView(
+    kind="docx-pdf",
+    suffix=".docx",
+    profile=WORD_PROFILE,
+    renderer=f"{WORD_PROFILE}|docx-results-preview-v1|1",
+    log_event="artifact.document_view_failed",
+    render=_render_pages,
+)
+
+
 async def build_presentation_view(
     store: ArtifactStore,
     art: Artifact,
     executor: Callable[[], DocumentExecutor] | None,
     previews: PresentationPreviewCoordinator | None,
 ) -> Response:
-    if office_upload_mime(art.filename, art.mime) != OFFICE_MIMES[".pptx"]:
+    return await _build_page_view(store, art, executor, previews, _PPTX_VIEW)
+
+
+async def build_document_view(
+    store: ArtifactStore,
+    art: Artifact,
+    executor: Callable[[], DocumentExecutor] | None,
+    previews: PresentationPreviewCoordinator | None,
+) -> Response:
+    """A Word document's pages, rendered once per version like slides (docx inline edit design §5.1)."""
+    from bowhead_core.docx_inline_edit_flag import docx_inline_edit_enabled
+
+    if not docx_inline_edit_enabled():
+        raise representation_error("unavailable")
+    return await _build_page_view(store, art, executor, previews, _DOCX_VIEW)
+
+
+async def _build_page_view(
+    store: ArtifactStore,
+    art: Artifact,
+    executor: Callable[[], DocumentExecutor] | None,
+    previews: PresentationPreviewCoordinator | None,
+    view: _PageView,
+) -> Response:
+    if office_upload_mime(art.filename, art.mime) != OFFICE_MIMES[view.suffix]:
         raise representation_error("unsupported")
     if art.size > MAX_FILE:
         raise representation_error("too_large")
     if executor is None or previews is None:
         raise representation_error("unavailable")
+    version = await _presentation_source_version(store, art)
+    document = executor()
+    # A version renders once: its kept render is served while the stored object and the renderer
+    # (contract, generation and executor) are the same (docx inline edit design §5.2). Work done by
+    # another executor is not shared, kept or in flight.
+    view_renderer = f"{view.renderer}|{document.url}"
+    kept = (
+        await read_view(store.backend, art.id, view.kind, source=str(version), renderer=view_renderer, limit=MAX_VIEW_PDF)
+        if version is not None
+        else None
+    )
+    if kept is not None:
+        return _pdf_response(kept)
     try:
-        document = executor()
-        renderer = AuthoringExecutor(root=document.root, url=document.url, token=document.token)
-        version = await _presentation_source_version(store, art)
+        renderer = AuthoringExecutor(root=document.root, url=document.url, token=document.token, profile=view.profile)
         # Unknown backend identities remain readable, but cannot identify shared work.
         key = (
             id(store),
@@ -192,30 +275,40 @@ async def build_presentation_view(
             str(document.root),
             document.url,
             renderer.profile,
+            view.kind,
         )
 
         async def convert() -> bytes:
             if await _presentation_source_version(store, art) != version:
                 raise representation_error("unavailable")
+            # A job that started after another one kept this render serves it instead of rendering again.
+            if version is not None:
+                kept = await read_view(store.backend, art.id, view.kind, source=str(version), renderer=view_renderer, limit=MAX_VIEW_PDF)
+                if kept is not None:
+                    return kept
             source = await _read_prefix(store, art, art.size + 1)
             if len(source) != art.size:
                 raise representation_error("corrupt")
-            from bowhead_core.pptx_result_view import render_source
-
-            # LibreOffice refuses a chart cache that lists more points than it declares; PowerPoint opens it.
-            return await renderer.view_presentation(await render_source(source))
+            rendered = await view.render(renderer, source)
+            if version is not None:
+                await write_view(store.backend, art.id, view.kind, source=str(version), renderer=view_renderer, pdf=rendered)
+            return rendered
 
         pdf = await previews.render(key, convert)
         if await _presentation_source_version(store, art) != version:
             raise representation_error("unavailable")
     except (httpx2.HTTPError, ValueError, OSError) as exc:
         code = getattr(exc, "code", type(exc).__name__)
-        log.warning("artifact.presentation_view_failed artifact_id=%s error_code=%s", art.id, code)
-        if code in {"document_slide_limit", "file_office_package_limit", "document_preview_limit"}:
+        log.warning("%s artifact_id=%s error_code=%s", view.log_event, art.id, code)
+        if code in {"document_slide_limit", "document_page_limit", "file_office_package_limit", "document_preview_limit"}:
             raise representation_error("too_large") from exc
         if code in {"file_office_invalid_package", "file_office_duplicate_part", "document_pdf_invalid", "document_pdf_page_mismatch"}:
             raise representation_error("corrupt") from exc
         raise representation_error("unavailable") from exc
+    return _pdf_response(pdf)
+
+
+def _pdf_response(pdf: bytes) -> Response:
     return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 

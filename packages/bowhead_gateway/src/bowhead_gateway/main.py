@@ -1218,7 +1218,18 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
                         _ttl_days = int(os.getenv("BOWHEAD_RUN_DATA_TTL_DAYS", "30"))
                     except ValueError:
                         _ttl_days = 30
-                    if _ttl_days > 0:
+                    from bowhead_core.file_retention import collect as collect_file_library
+                    from bowhead_core.file_retention import legacy_ttl_allowed
+
+                    from bowhead_core import file_library as file_library_rules
+
+                    if file_library_rules.enabled():
+                        try:
+                            moved = await collect_file_library(artifact_store, _kb_store)
+                            log.info("artifact_gc.runtime_to_trash", **moved)
+                        except Exception as exc:
+                            log.warning("artifact_gc.runtime_deferred", error=str(exc))
+                    elif _ttl_days > 0 and await legacy_ttl_allowed(artifact_store):
                         try:
                             _cands = await artifact_store.stale_run_data_ids(days=_ttl_days)
                             _protected: set[str] = set()
@@ -1240,7 +1251,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
                         await prune_file_versions(app)
                     except Exception as _e:  # noqa: BLE001 - pruning failures must not break GC.
                         log.warning("artifact_gc.file_version_prune_failed", error=str(_e))
-                    stats = await artifact_store.hard_delete_old_soft_deleted(days=30)
+                    stats = await artifact_store.hard_delete_old_soft_deleted(days=file_library_rules.TRASH_DAYS)
                     log.info("artifact_gc.done", **stats)
                     # Result pins of purged files and deleted reports (result pins tech design §4.5).
                     try:
@@ -1521,6 +1532,10 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Google Workspace delivery (Lead-only, same shape as send_email): always registered, unadvertised without enabled team connection/present user.
     register_google_delivery_tools(tool_registry, store_provider=lambda: getattr(app.state, "user_store", None))
+
+    edition_tools = getattr(getattr(app.state, "gateway_extensions", None), "tool_registrar", None)
+    if edition_tools is not None:
+        edition_tools(app, tool_registry)
 
     # G5 invariant (docs/skills-tools-ssot.md §5-G5): tool names ∩ skill names = ∅.
     # One root cause of the ω incident: python_sandbox's dual identity induced direct same-name LLM tool calls.
@@ -2473,7 +2488,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.access_control_store = access_control_store
     from bowhead_gateway.kb_authorization import kb_file_authorizer
 
-    _kb_authorizer = kb_file_authorizer(user_store, access_control_store, _kb_matrix_store)
+    _kb_authorizer = kb_file_authorizer(user_store, access_control_store, _kb_matrix_store, files_store=_kb_files_store)
     from bowhead_gateway.knowledge_management import KnowledgeManagementAccess
 
     orchestrator.knowledge_management_access = KnowledgeManagementAccess(app)
@@ -3412,6 +3427,10 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         log.info("notification_sweeper.enabled")
 
+    from bowhead_gateway.teams.delivery import run_delivery
+
+    teams_delivery_task = asyncio.create_task(run_delivery(app), name="teams_personal_delivery")
+
     # Send recorded notification emails (one worker per gateway).
     _notification_delivery_task: asyncio.Task | None = None
     if notification_service.delivery_enabled:
@@ -3697,6 +3716,9 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
             _notification_sweeper_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await _notification_sweeper_task
+        teams_delivery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await teams_delivery_task
         if _notification_delivery_task is not None:
             _notification_delivery_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
@@ -3720,7 +3742,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         _kb_maintenance_task.cancel()
         with suppress(asyncio.CancelledError):
             await _kb_maintenance_task
-        for task in list(getattr(app.state, "kb_rebuild_tasks", {}).values()):
+        for task in [*getattr(app.state, "kb_rebuild_tasks", {}).values(), *getattr(app.state, "kb_chunk_key_backfill_tasks", {}).values()]:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
@@ -3990,6 +4012,9 @@ def create_app() -> FastAPI:
     from bowhead_gateway.routes import team_tool_sources as team_tool_sources_routes
 
     app.include_router(team_tool_sources_routes.router, prefix="/api/v1/team-tool-sources", tags=["cca"])
+    from bowhead_gateway.routes import team_n8n_workflows as team_n8n_workflows_routes
+
+    app.include_router(team_n8n_workflows_routes.router, prefix="/api/v1/team-tool-sources", tags=["cca"])
     from bowhead_gateway.routes import team_builtin_tools as team_builtin_tools_routes
 
     app.include_router(team_builtin_tools_routes.router, prefix="/api/v1/team-builtin-tools", tags=["team-tools"])
@@ -4245,6 +4270,9 @@ def create_app() -> FastAPI:
     app.include_router(turns_routes.router, prefix="/api/v1/turns", tags=["turns"])
     app.include_router(memory_candidates_routes.router, prefix="/api/v1/memory/candidates", tags=["memory"])
     app.include_router(datarc_routes.router, prefix="/api/v1/datarc", tags=["datarc"])
+    from bowhead_gateway.routes import file_library
+
+    app.include_router(file_library.router, tags=["files"])
     app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
     # Sprint file-upload-presign Phase 1.4a: chat-attachment presign + confirm
     # (KB single + bundle presign live in routes/kb.py, Phase 1.4b).

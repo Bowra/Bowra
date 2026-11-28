@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 
-import { quoteLines, snippetWindow } from "./kb-snippet";
+import { quoteLines, readableChunkText, snippetWindow } from "./kb-snippet";
 
 const TABLE = "| 2025-09-15 | 浦东张杨路店 | 酒饮 | 13828 | 830 |\n".repeat(20) + "| 2025-09-17 | 滨江龙湖天街店 | 进口水果 | 236,480 | 4121 |\n";
 
@@ -59,3 +59,18 @@ describe("quoteLines", () => {
     expect(quoteLines("付款周期为 45 天", "付款周期")).toEqual([{ before: "", match: "付款周期", after: "为 45 天" }]);
   });
 });
+
+describe("readableChunkText", () => {
+  it("drops HTML paragraph tags and keeps the words", () => {
+    expect(readableChunkText("<p>灭菌注射用水: 1ml/支。</p>\n<p>【贮藏】于 25°C以下避光保存</p>")).toBe("灭菌注射用水: 1ml/支。\n\n【贮藏】于 25°C以下避光保存");
+  });
+
+  it("removes Markdown code fences that wrap a whole page", () => {
+    expect(readableChunkText("## Page 2\n\n```markdown\n# 识别FSH和LH易缺乏人群\n高育龄\n```")).toBe("## Page 2\n\n# 识别FSH和LH易缺乏人群\n高育龄");
+  });
+
+  it("decodes common entities and leaves comparisons alone", () => {
+    expect(readableChunkText("A &amp; B，x < 5 且 y > 3")).toBe("A & B，x < 5 且 y > 3");
+  });
+});
+

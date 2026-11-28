@@ -290,6 +290,132 @@ async def prepare_reference_team_start_admission(
         raise ReferenceStartPreparationError("reference_start_preparation_unavailable") from None
 
 
+async def prepare_reference_trial_start_admission(
+    db_path: str | Path,
+    *,
+    input_document: InputDocument,
+    scope: ReferenceRequestScope,
+    sources: SkillReadSourceResolver | None = None,
+    has_attachments: bool = False,
+) -> ReferenceStartAdmission:
+    """Prepare an Owner draft trial: the Owner's own Agent, bound to a frozen release candidate.
+
+    The reference catalog is not consulted: the entry comes from the Agent's own page
+    (trial-tech-design §4.2). The candidate is checked as admission checks it, with its own
+    revision, Safety report and behavior descriptor; no assignment, audience or live release is
+    read. A trial message carries only the trial Agent. Admission repeats every check in the Turn
+    transaction. Failures with a trial meaning keep their public code (``OwnerTrialRefusal`` or the
+    admission code); anything else is the generic preparation failure.
+    """
+    from bowhead_core.agent_execution_binding import (
+        _OWNER_TRIAL_CANDIDATE_STATES,
+        AgentExecutionBindingError,
+        ExactAgentBindingExpectation,
+        OwnerTrialTurn,
+        _agent_owner_user_id,
+        _behavior_descriptor_from_snapshot,
+        _candidate_team_snapshot,
+        _dispatchable_team_agent,
+        _validate_team_snapshot,
+    )
+    from bowhead_core.agent_owner_trial import OwnerTrialRefusal, require_trial_document
+    from bowhead_core.chat_reference_scope import require_reference_request_scope
+    from bowhead_core.sqlite_readable_schema import readable_table_exists
+
+    try:
+        document = InputDocument.model_validate(input_document.model_dump(mode="python", warnings="error"))
+        scope = ReferenceRequestScope.model_validate(scope.model_dump(mode="python", warnings="error"))
+        if type(has_attachments) is not bool:
+            raise ReferenceStartPreparationError("reference_start_unsupported")
+        document.validate_task(has_attachments=has_attachments)
+        resource = require_trial_document(document)
+        if sources is not None and (
+            not isinstance(sources, SkillReadSourceResolver)
+            or Path(domain_database_path(sources.db_path, "core")) != Path(domain_database_path(db_path, "core"))
+        ):
+            raise ReferenceStartPreparationError("reference_skill_preparation_required")
+        async with open_shared_ctx(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA query_only=ON")
+            await db.execute("BEGIN")
+            try:
+                if not await readable_table_exists(db, "agent_owner_trial_turn"):
+                    raise OwnerTrialRefusal("agent_trial_unavailable")
+                epoch = await require_reference_request_scope(db, scope)
+                aggregate = await _dispatchable_team_agent(db, team_id=scope.team_id, agent_id=resource.id)
+                if _agent_owner_user_id(aggregate) != scope.user_id:
+                    raise OwnerTrialRefusal("agent_trial_owner_required")
+                async with db.execute(
+                    """
+                    SELECT candidate.revision_id,candidate.capability_fingerprint,candidate.state,revision.created_at AS frozen_at
+                    FROM team_subagent_release_candidate candidate
+                    JOIN team_subagent_revision revision
+                      ON revision.team_id=candidate.team_id
+                     AND revision.subagent_id=candidate.subagent_id
+                     AND revision.id=candidate.revision_id
+                    WHERE candidate.team_id=? AND candidate.subagent_id=? AND candidate.id=?
+                    """,
+                    (scope.team_id, resource.id, resource.trial_candidate_id),
+                ) as cursor:
+                    candidate = await cursor.fetchone()
+                if candidate is None:
+                    raise OwnerTrialRefusal("agent_trial_candidate_unavailable")
+                if str(candidate["revision_id"]) != resource.version:
+                    raise OwnerTrialRefusal("agent_trial_candidate_changed")
+                if str(candidate["state"]) not in _OWNER_TRIAL_CANDIDATE_STATES:
+                    raise OwnerTrialRefusal("agent_trial_candidate_not_prepared")
+                trial = OwnerTrialTurn(
+                    turn_id="",
+                    session_id="",
+                    team_id=scope.team_id,
+                    agent_id=resource.id,
+                    owner_user_id=scope.user_id,
+                    candidate_id=str(resource.trial_candidate_id),
+                    revision_ref=resource.version,
+                    capability_fingerprint=str(candidate["capability_fingerprint"]),
+                    candidate_kind="draft" if str(candidate["state"]) == "prepared" else "submitted",
+                    frozen_at=str(candidate["frozen_at"]),
+                    created_at="",
+                )
+                snapshot = await _candidate_team_snapshot(db, trial=trial)
+                _validate_team_snapshot(snapshot)
+                descriptor = _behavior_descriptor_from_snapshot(snapshot)
+                if descriptor is None or descriptor.verification_state == "blocked":
+                    raise OwnerTrialRefusal("agent_trial_candidate_unavailable")
+                if sources is not None:
+                    # The draft's baseline Skills, checked as an ordinary start checks a release's.
+                    grants = exact_reference_skill_grants(decode_reference_json(str(snapshot["definition_json"]), max_bytes=1024 * 1024))
+                    require_supported_skill_grants(grants)
+                    for grant in grants:
+                        skill = SkillResourceRef(kind="skill", source_kind=grant.kind, id=grant.id, version=grant.revision)
+                        proof = await sources.describe_in_connection(db, skill, scope=scope)
+                        if proof.name != grant.name:
+                            raise ReferenceStartPreparationError("reference_skill_baseline_required")
+            finally:
+                await db.rollback()
+        return ReferenceStartAdmission(
+            input_document=document,
+            policy_epoch=epoch,
+            profile_name=str(aggregate["name"]),
+            expected=ExactAgentBindingExpectation(
+                agent_id=resource.id,
+                assignment_id=None,
+                revision_ref=resource.version,
+                release_id=None,
+                behavior_fingerprint=descriptor.behavior_fingerprint,
+            ),
+            skill_sources=sources,
+            has_attachments=has_attachments,
+        ).snapshot()
+    except (OwnerTrialRefusal, ReferenceStartPreparationError):
+        raise
+    except AgentExecutionBindingError as exc:
+        # Keep the admission code: agent_not_runnable / agent_trial_candidate_unavailable map to trial codes.
+        raise exc from None
+    except Exception:
+        raise ReferenceStartPreparationError("reference_start_preparation_unavailable") from None
+
+
 async def prepare_reference_system_start_admission(
     db_path: str | Path,
     *,

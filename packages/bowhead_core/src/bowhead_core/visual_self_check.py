@@ -139,6 +139,8 @@ class VisualRun:
     captures: dict[tuple[str, str], Any] = field(default_factory=dict)
     # Renders whose images reached a model, oldest first (`settle_renders`); one file version each.
     seen: list[PendingRender] = field(default_factory=list)
+    # Per file identity: the content digests of its saved versions rendered in this run, for the version fact.
+    rendered_versions: dict[str, set[str]] = field(default_factory=dict)
 
     def keep_pdf(self, artifact_id: str, pdf: bytes | None) -> None:
         if pdf is None or len(pdf) > _MAX_KEPT_PDF_BYTES:
@@ -238,6 +240,7 @@ def _summary(kind: str, view: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {"status": view["status"], "kind": kind}
     for key in (
         "reason",
+        "message",
         "pages",
         "shown",
         "not_shown",
@@ -372,11 +375,15 @@ def _check_presentation_fix(
     return baseline
 
 
-async def _render_page(run: VisualRun, kind: str, data: bytes, pages: list[int] | None, detail: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
+async def _render_page(
+    run: VisualRun, kind: str, data: bytes, pages: list[int] | None, detail: str, *, element: str | None = None, region: list[int] | None = None
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Slice B: an HTML or SVG file through the product preview's transform in the sandbox Chromium (§6).
 
     Content captured earlier in the run is not captured again. An SVG's content snapshot is its
-    ``<text>`` elements, read from the file by the worker.
+    ``<text>`` elements, read from the file by the worker. The capture's measured layout, when the sandbox
+    image provides one, cuts the screens and names them (visual-geometry tech design §5-§6); ``element`` or
+    ``region`` shows one part of an HTML page instead (§5b).
     """
     from bowhead_core import html_snapshot
     from bowhead_core.visual_view import html_content_snapshot
@@ -391,11 +398,17 @@ async def _render_page(run: VisualRun, kind: str, data: bytes, pages: list[int] 
         run.keep_capture(key, snapshot)
     else:
         _LOG.info("visual_view.capture_reused kind=%s", kind)
-    view = await _worker(
-        {"op": "screens_view", "kind": kind, "pages": pages, "detail": detail, "text_present": bool(snapshot.text.strip())},
-        snapshot.png,
-        {"svg": data} if kind == "svg" else None,
-    )
+    # ``kind`` names the worker itself in ``run_worker_json`` and is overwritten there, so the capture's kind has its own key.
+    control: dict[str, Any] = {
+        "op": "screens_view",
+        "capture_kind": kind,
+        "pages": pages,
+        "detail": detail,
+        "text_present": bool(snapshot.text.strip()),
+    }
+    if kind == "html":
+        control.update(layout=snapshot.layout, element=element, region=region)
+    view = await _worker(control, snapshot.png, {"svg": data} if kind == "svg" else None)
     if not isinstance(view, dict):
         return {"status": "not_completed", "reason": "render_failed"}, None
     content = html_content_snapshot(snapshot.text) if kind == "html" else view.pop("snapshot", None)
@@ -456,6 +469,12 @@ async def attach_visual_view(
     images = view.get("images") or []
     if view["status"] == "shown":
         digest = render_inputs.get("sha256")
+        if digest:
+            versions = run.rendered_versions.setdefault(identity, set())
+            versions.add(digest)
+            if len(versions) > 1:
+                # The one signal that grows with an edit-render-view loop (visual-geometry tech design §7).
+                view["version_note"] = f"This is version {len(versions)} of {artifact.filename} rendered in this run."
         run.pending.append(PendingRender(call_id=call_id, file=artifact.filename, view=view, version=(identity, digest) if digest else None))
     kept = None
     if ignored:
@@ -549,9 +568,17 @@ def _earlier_shown(images: list[dict[str, Any]]) -> str:
     if pages:
         noun = str(pages[0].get("label") or "page").split(" ", 1)[0].lower()
         numbers = [image["page"] for image in pages]
-        width, height = pages[0].get("px") or (0, 0)
-        size = f"{width}x{height} px" if width and height else "full size"
-        parts.append(f"{noun}s {page_ranges(numbers)}, each at {size}" if len(numbers) > 1 else f"{noun} {numbers[0]}, at {size}")
+        sizes = [tuple(image.get("px") or (0, 0)) for image in pages]
+        width, height = sizes[0]
+        if not width or not height:
+            size = "at full size"
+        elif len(sizes) == 1:
+            size = f"at {width}x{height} px"
+        elif len(set(sizes)) == 1:
+            size = f"each at {width}x{height} px"
+        else:  # HTML screens end at blank bands, so their heights differ
+            size = f"{width} px wide and {', '.join(str(item[1]) for item in sizes)} px tall"
+        parts.append(f"{noun}s {page_ranges(numbers)}, {size}" if len(numbers) > 1 else f"{noun} {numbers[0]}, {size}")
     parts.extend(f"{image.get('label')} in 1 sheet, each {SHEET_TILE_WIDTH} px wide" for image in images if image.get("pages"))
     return ", then ".join(parts)
 
@@ -563,16 +590,28 @@ def render_message(renders: list[PendingRender], earlier: list[EarlierView] | No
     """
     lines = ["Rendered view of files saved by your recent Tool calls."]
     images: list[ImageRef] = []
+    measured: set[Any] = set()
     for render in renders:
         view = render.view
         first = len(images) + 1
         images.extend(ImageRef(base64=image["base64"], mime=image["mime"]) for image in view.get("images") or [])
         numbers = f"image {first}" if len(images) == first else f"images {first}-{len(images)}"
         lines.append(f"- {render.file} (Tool call {render.call_id}): {view.get('shown')} ({numbers}).")
+        crop = bool(view.get("crop"))
+        if view.get("version_note"):
+            lines.append(f"  {view['version_note']}")
+        lines.extend(f"  {note}" for note in view.get("screen_notes") or [])
+        if view.get("screen_map"):
+            lines.append(f"  {view['screen_map']}")
+        findings_key = render.version or (render.file, render.call_id)
+        if view.get("layout_findings") and findings_key not in measured:
+            measured.add(findings_key)
+            lines.append(f"  Measured layout of {render.file}: {view['layout_findings']}")
         if view.get("not_shown"):
-            lines.append(f"  Not shown: {view['not_shown']}; {VIEW_FILE_TOOL} with pages can show them.")
+            how = "region" if crop else "pages"
+            lines.append(f"  Not shown: {view['not_shown']}; {VIEW_FILE_TOOL} with {how} can show them.")
         page_px = view.get("page_px") or [0, 0]
-        if page_px[0] and page_px[0] < 800:
+        if page_px[0] and page_px[0] < 800 and not crop:
             lines.append(
                 "  Text smaller than about 10 px at this size cannot be judged; do not report it as unreadable. "
                 f"{VIEW_FILE_TOOL} with detail full shows a page at 1280 px."
@@ -787,7 +826,9 @@ _VIEW_FILE_DESCRIPTION = (
     "file or an attached input such as a template. The rendered view comes with your next request; this result says what "
     "was rendered. detail sheet (default) shows up to 12 pages per sheet at 400 px each; detail full shows up to 4 pages at "
     "1280 px, for checking body text and numbers. An HTML page is shown as screens of its preview, 1280 px wide and up to "
-    "800 px tall, each cut where the page is blank; grey fills a screen below its cut. Saved files are "
+    "800 px tall; a screen ends where a block of the page ends or between elements, and the render names the part of the "
+    "page each screen shows and its elements' refs. For an HTML page, element (a ref such as e4 or b3) or region "
+    "([x1, y1, x2, y2] in page pixels) shows that element or part alone at full resolution, with its page position. Saved files are "
     "rendered automatically after each save; use this for pages that were not shown, fine detail, or files you did not save."
 )
 _MAX_REQUESTED_PAGES = 24
@@ -806,6 +847,8 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
     artifact_id = arguments.get("artifact_id")
     detail = arguments.get("detail") or "sheet"
     pages = arguments.get("pages")
+    element = arguments.get("element")
+    region = arguments.get("region")
     if not isinstance(artifact_id, str) or not artifact_id:
         return _refusal("invalid_arguments", "artifact_id must be the ID of a file from a Tool result or the Turn's attachments.")
     if detail not in {"sheet", "full"}:
@@ -814,6 +857,12 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
         not isinstance(pages, list) or not pages or len(pages) > _MAX_REQUESTED_PAGES or any(type(page) is not int or page < 1 for page in pages)
     ):
         return _refusal("invalid_arguments", f"pages must list 1 to {_MAX_REQUESTED_PAGES} page numbers, starting at 1.")
+    if element is not None and (not isinstance(element, str) or not element.strip()):
+        return _refusal("invalid_arguments", "element must be a ref from the render's screen lines, such as e4 or b3.")
+    if region is not None and (not isinstance(region, list) or len(region) != 4 or any(type(value) is not int for value in region)):
+        return _refusal("invalid_arguments", "region must be [x1, y1, x2, y2]: four whole page pixels.")
+    if sum(value is not None for value in (pages, element, region)) > 1:
+        return _refusal("invalid_arguments", "Give one of pages, element or region.")
     from bowhead_core.artifact_presentation import PresentationStorageUnavailable, PresentationUnavailable, available_artifact
 
     try:
@@ -825,12 +874,14 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
     kind = deliverable_kind(artifact.mime, artifact.filename)
     if kind is None:
         return _refusal("file_kind_not_viewable", f"{VIEW_FILE_TOOL} shows PPTX, PNG, JPEG, WebP, PDF, HTML and SVG files.")
+    if (element is not None or region is not None) and kind != "html":
+        return _refusal("invalid_arguments", "element and region apply to HTML files; use pages for this file.")
     started = time.perf_counter()
     zero_based = sorted({page - 1 for page in pages}) if pages else None
     digest = None
     try:
         with anyio.fail_after(RENDER_WAIT_SECONDS):
-            view, digest = await _render_on_request(run, ctx, artifact, kind, zero_based, detail, call_id)
+            view, digest = await _render_on_request(run, ctx, artifact, kind, zero_based, detail, call_id, element=element, region=region)
     except TimeoutError:
         view = {"status": "not_completed", "reason": "time_limit"}
     except Exception as exc:
@@ -853,7 +904,16 @@ async def view_file(arguments: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 
 async def _render_on_request(
-    run: VisualRun, ctx: Any, artifact: Any, kind: str, pages: list[int] | None, detail: str, call_id: str
+    run: VisualRun,
+    ctx: Any,
+    artifact: Any,
+    kind: str,
+    pages: list[int] | None,
+    detail: str,
+    call_id: str,
+    *,
+    element: str | None = None,
+    region: list[int] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """(view, content digest of the file viewed)."""
     data = await _read(ctx, artifact)
@@ -880,7 +940,7 @@ async def _render_on_request(
         view = await _worker({**control, "op": "pdf_view", "snapshot": saved_now}, data)
         snapshot = view.pop("snapshot", None) if isinstance(view, dict) else None
     elif kind in {"html", "svg"}:
-        view, snapshot = await _render_page(run, kind, data, pages, detail)
+        view, snapshot = await _render_page(run, kind, data, pages, detail, element=element, region=region)
         if view.get("status") != "shown":
             return view, digest
     else:
@@ -916,6 +976,17 @@ def view_file_spec() -> Any:
                         "description": "Slide or page numbers, starting at 1. Omit for all pages.",
                     },
                     "detail": {"type": "string", "enum": ["sheet", "full"], "description": "sheet (default) or full (1280 px per page, at most 4)."},
+                    "element": {
+                        "type": "string",
+                        "description": "HTML only: a ref from the render's screen lines, such as e4 (an element) or b3 (a block). Shows it alone at full resolution.",
+                    },
+                    "region": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "description": "HTML only: [x1, y1, x2, y2] in page pixels, as the render states positions. Shows that part of the page at full resolution.",
+                    },
                 },
             },
         ),

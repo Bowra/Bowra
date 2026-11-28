@@ -54,6 +54,7 @@ const MENU_LABELS = [
   "canvas.hdr_delete_report",
   "kbMatrix.runmenu_all",
   "kbMatrix.runmenu_stale",
+  "kbMatrix.runmenu_failed",
   "kbMatrix.runmenu_force",
   "kbMatrix.colmenu_run",
   "kbMatrix.colmenu_force",

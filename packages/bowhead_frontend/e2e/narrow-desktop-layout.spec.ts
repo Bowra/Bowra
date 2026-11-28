@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { enableResultsWorkspace, mockAuthedApp } from "./_app-mocks";
+import { rememberResultsOpen } from "./_results-open";
 import zh from "../edition/shared-messages/zh-CN.json";
 import de from "../edition/shared-messages/de-DE.json";
 
@@ -31,6 +32,7 @@ async function prepare(page: Page, width: number, split: Split) {
   await page.addInitScript((ratio) => window.localStorage.setItem("bowhead.split_ratio", ratio), SPLIT_RATIO[split]);
   await mockAuthedApp(page);
   await enableResultsWorkspace(page);
+  await rememberResultsOpen(page, [SESSION]);
   await page.route(`**/api/v1/canvas/${CANVAS}/status`, (route) =>
     route.fulfill(json({ status: "active", effectiveStatus: "active", quarantinedCount: 0 })),
   );
@@ -45,6 +47,9 @@ async function hydrate(page: Page) {
       sections,
     });
   }, [SESSION, SECTIONS] as const);
+  // A report no longer opens Results by itself (chat running state R2.5): a live scenario's reader opens the strip.
+  const edge = page.locator(".v2-ws-edge--canvas");
+  if (await edge.isVisible().catch(() => false)) await edge.click();
   await expect(page.locator(".results-report-unified-toolbar .rc-trust")).toBeVisible({ timeout: 15_000 });
 }
 

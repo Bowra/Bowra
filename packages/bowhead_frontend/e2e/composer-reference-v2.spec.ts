@@ -489,18 +489,18 @@ for (const drive of [false, true]) {
       const select = async () => {
         const chooser = page.waitForEvent("filechooser");
         await trigger.click();
-        if (drive) {
-          const menu = page.getByRole("menu");
-          await expect(menu).toBeVisible();
-          const box = (await menu.boundingBox())!;
-          expect(box.x).toBeGreaterThanOrEqual(0);
-          expect(box.y).toBeGreaterThanOrEqual(0);
-          expect(box.x + box.width).toBeLessThanOrEqual(viewport);
-          expect(box.y + box.height).toBeLessThanOrEqual(844);
-          expect(await composer.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
-          await page.getByRole("menuitem", { name: "Upload File", exact: true }).click();
-          await expect(trigger).toHaveAttribute("aria-expanded", "false");
-        }
+        const menu = page.getByRole("menu");
+        await expect(menu).toBeVisible();
+        const box = (await menu.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport);
+        expect(box.y + box.height).toBeLessThanOrEqual(844);
+        expect(await composer.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+        await expect(page.getByRole("menuitem", { name: "Choose from Library" })).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: /Google Drive/ })).toHaveCount(drive ? 1 : 0);
+        await page.getByRole("menuitem", { name: "Upload File", exact: true }).click();
+        await expect(trigger).toHaveAttribute("aria-expanded", "false");
         return chooser;
       };
       await (await select()).setFiles([]);
@@ -531,6 +531,8 @@ test("Add source menu retains keyboard focus across a desktop column resize", as
   await page.locator(".test-composer").evaluate((node) => { node.style.width = "400px"; });
   await expect(page.locator("[data-composer-layout-v2]")).toHaveAttribute("data-layout-mode", "compact");
   await expect(upload).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Choose from Library" })).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: /Google Drive/ })).toBeFocused();
   await page.keyboard.press("Escape");

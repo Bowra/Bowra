@@ -119,6 +119,7 @@ WEB_EXTRACT = "web_extract"
 WEB_FETCH = "web_fetch"
 WEB_MAP = "web_map"
 WEB_SEARCH = "web_search"
+WECOM_NOTIFY = "wecom_notify"
 WRITE_REPORT = "write_report"
 
 # 现役工具名（**只含 canonical**）—— 契约测试 / role binding 校验用。
@@ -236,6 +237,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "web_fetch",
     "web_map",
     "web_search",
+    "wecom_notify",
     "write_report",
 })
 

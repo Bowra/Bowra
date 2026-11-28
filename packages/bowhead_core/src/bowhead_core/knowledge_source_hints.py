@@ -10,8 +10,9 @@ from typing import Any
 import anyio
 
 from bowhead_core.kb.document import is_parse_failure_placeholder
+from bowhead_core.kb.knowledge_base_access import named_knowledge_base_id
 from bowhead_core.kb.permission import ScopeContext
-from bowhead_core.knowledge_source_runtime import readable_source
+from bowhead_core.knowledge_source_runtime import knowledge_base_filter_of, knowledge_levels_of, readable_source
 
 _MAX_CANDIDATES = 100
 _MAX_SOURCES = 12
@@ -36,6 +37,9 @@ async def _preview(ctx: Any, file: Any) -> dict[str, Any]:
     try:
         caller = ScopeContext(user_id=ctx.user_id, workspace_id=ctx.workspace_id, team_id=ctx.team_id)
         with anyio.move_on_after(0.15) as budget:
+            if named_knowledge_base_id(file):
+                # readable_source already admitted it with the caller's levels; the preview needs them too.
+                caller.knowledge_levels = await knowledge_levels_of(ctx)
             chunks = await retriever.preview_source(file, caller, authorize)
         if budget.cancel_called:
             return {}
@@ -70,6 +74,10 @@ async def _collect_source_hint(ctx: Any) -> tuple[str, dict[str, str]] | None:
         scope.require_context(ctx)
         if scope.file_ids == ():
             return None
+    # An Agent's selected knowledge bases the caller can use here; none → no hint.
+    knowledge_bases = await knowledge_base_filter_of(ctx)
+    if knowledge_bases == ():
+        return None
     candidates = await files.list_for_scopes_filtered(
         team_id=ctx.team_id,
         personal_owner_id=ctx.user_id,
@@ -78,12 +86,13 @@ async def _collect_source_hint(ctx: Any) -> tuple[str, dict[str, str]] | None:
         statuses=["done"],
         candidate_limit=_MAX_CANDIDATES,
         allowed_file_ids=scope.file_ids if scope is not None else None,
+        **({"knowledge_base_ids": knowledge_bases} if knowledge_bases is not None else {}),
     )
     entries: list[dict[str, Any]] = []
     sources: dict[str, str] = {}
     for candidate in candidates:
         generation = candidate.active_generation_id
-        if not generation or candidate.source_absent or (scope is not None and not scope.permits(candidate.file_id)):
+        if not generation or candidate.source_absent or (scope is not None and not scope.permits(candidate)):
             continue
         if not await readable_source(ctx, candidate.file_id, generation=generation, enforce=True):
             continue

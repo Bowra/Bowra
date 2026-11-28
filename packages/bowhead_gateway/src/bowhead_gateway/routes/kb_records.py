@@ -8,6 +8,10 @@ Endpoints:
 
 P0-R1 cross-ws leak 防御: GET 强制 workspace_id 过滤; PATCH 验 record.workspace_id ==
 caller's workspace before mutating.
+
+Records are stored under the file's upload Space whoever owns the file, so every route
+also limits them to files the caller can read (``kb_authorization``): a list leaves the
+others out, and a single record of an unreadable file answers like a missing one.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
 from bowhead_gateway.access_context import build_access_context_from_request, has_workspace_access_source
+from bowhead_gateway.kb_authorization import kb_file_decisions, readable_kb_file_ids
 from bowhead_gateway.routes.auth import _current_user
 
 logger = logging.getLogger(__name__)
@@ -29,7 +34,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from bowhead_core.access_control import AccessContext
     from bowhead_core.kb.doc_type_store import ExtractField, KbDocTypeStore
-    from bowhead_core.kb.extracted_record_store import KbExtractedRecordStore
+    from bowhead_core.kb.extracted_record_store import KbExtractedRecordDTO, KbExtractedRecordStore
     from bowhead_core.user_store import User
 
 router = APIRouter(tags=["knowledge-base"])
@@ -105,6 +110,59 @@ def _require_member_rank(ctx: AccessContext | None) -> None:
     raise _record_error(403, "workspace_member_role_required")
 
 
+def _record_authority(request: Request, ctx: AccessContext | None) -> tuple[Any, AccessContext]:
+    """The files store and access context that decide which records the caller may see.
+
+    Without either, readability cannot be checked, so the request fails closed.
+    """
+    files_store = getattr(request.app.state, "kb_files_store", None)
+    if files_store is None or ctx is None:
+        raise _record_error(503, "kb_record_service_unavailable")
+    return files_store, ctx
+
+
+async def _readable_file_ids(request: Request, ctx: AccessContext | None) -> tuple[str, ...]:
+    """Files whose records the caller may list: own personal files, the Space's and the Team's files."""
+    files_store, ctx = _record_authority(request, ctx)
+    try:
+        allowed = await readable_kb_file_ids(
+            files_store, ctx, getattr(request.app.state, "access_control_store", None), user_store=getattr(request.app.state, "user_store", None)
+        )
+    except Exception:  # noqa: BLE001 - an undecidable ceiling fails closed (logged for ops)
+        logger.warning("kb_records: readable files lookup failed user=%s ws=%s", ctx.user_id, ctx.workspace_id, exc_info=True)
+        allowed = None
+    if allowed is None:
+        raise _record_error(503, "kb_record_service_unavailable")
+    return allowed
+
+
+async def _require_record_readable(request: Request, ctx: AccessContext | None, rec: KbExtractedRecordDTO | None) -> KbExtractedRecordDTO:
+    """Return the record only when its file is readable; otherwise answer exactly like a missing record."""
+    if rec is None:
+        raise _record_error(404, "kb_record_not_found")
+    files_store, ctx = _record_authority(request, ctx)
+    try:
+        file = await files_store.get(rec.file_id)
+        readable = (
+            file is not None
+            and (
+                await kb_file_decisions(
+                    [file],
+                    ctx,
+                    getattr(request.app.state, "access_control_store", None),
+                    files_store=files_store,
+                    user_store=getattr(request.app.state, "user_store", None),
+                )
+            )[rec.file_id]
+        )
+    except Exception:  # noqa: BLE001 - an undecidable check fails closed (logged for ops)
+        logger.warning("kb_records: record file check failed record=%s", rec.record_id, exc_info=True)
+        raise _record_error(503, "kb_record_service_unavailable") from None
+    if not readable:
+        raise _record_error(404, "kb_record_not_found")
+    return rec
+
+
 async def _doc_type_fields(request: Request, doc_type_id: str | None, workspace_id: str) -> list[ExtractField] | None:
     """Best-effort fields lookup so V1-legacy rows lazy-wrap with real type hints.
 
@@ -161,22 +219,25 @@ async def list_records_for_doc_type(
 ) -> dict:
     store = _get_record_store(request)
     ws = _ws_from_request(request, workspace_id)
-    ws, _ctx = await _require_workspace_member(
+    ws, ctx = await _require_workspace_member(
         request,
         user,
         ws,
         operation=SpaceOperation.READ_HISTORY,
     )
+    allowed = await _readable_file_ids(request, ctx)
     items = await store.list_for_doc_type(
         workspace_id=ws,
         doc_type_id=doc_type_id,
         limit=min(max(int(limit), 1), 1000),
         offset=max(int(offset), 0),
         doc_type_fields=await _doc_type_fields(request, doc_type_id, ws),
+        allowed_file_ids=allowed,
     )
     total = await store.count_for_doc_type(
         workspace_id=ws,
         doc_type_id=doc_type_id,
+        allowed_file_ids=allowed,
     )
     return {
         "items": [r.to_dict() for r in items],
@@ -195,16 +256,15 @@ async def get_record(
 ) -> dict:
     store = _get_record_store(request)
     ws = _ws_from_request(request, workspace_id)
-    ws, _ctx = await _require_workspace_member(
+    ws, ctx = await _require_workspace_member(
         request,
         user,
         ws,
         operation=SpaceOperation.READ_HISTORY,
     )
-    rec = await store.get(record_id, workspace_id=ws)
-    if rec is None:
-        # Missing records or records outside the caller's membership-verified ws both return 404, concealing existence.
-        raise _record_error(404, "kb_record_not_found")
+    # Missing records, records outside the caller's membership-verified ws and records of files the
+    # caller cannot read all return the same 404, concealing existence.
+    rec = await _require_record_readable(request, ctx, await store.get(record_id, workspace_id=ws))
     # v2 rows ignore doc_type_fields entirely (_row_to_dto) — skip the second read.
     if rec.schema_version != 2:
         fields = await _doc_type_fields(request, rec.doc_type_id, ws)
@@ -226,9 +286,7 @@ async def edit_record_field(
     ws, ctx = await _require_workspace_member(request, user, ws)
     _require_member_rank(ctx)
     # P0: caller's ws membership is verified; fetch the record in authoritative ws scope to prevent cross-ws edits.
-    rec = await store.get(record_id, workspace_id=ws)
-    if rec is None:
-        raise _record_error(404, "kb_record_not_found")
+    rec = await _require_record_readable(request, ctx, await store.get(record_id, workspace_id=ws))
     fields = await _doc_type_fields(request, rec.doc_type_id, ws)
     try:
         ok = await store.update_field(
@@ -259,9 +317,7 @@ async def update_record_verify_status(
     ws = _ws_from_request(request, workspace_id)
     ws, ctx = await _require_workspace_member(request, user, ws)
     _require_member_rank(ctx)
-    rec = await store.get(record_id, workspace_id=ws)
-    if rec is None:
-        raise _record_error(404, "kb_record_not_found")
+    rec = await _require_record_readable(request, ctx, await store.get(record_id, workspace_id=ws))
     ok = await store.update_verify_status(
         record_id,
         body.status,

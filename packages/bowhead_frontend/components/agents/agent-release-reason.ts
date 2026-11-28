@@ -46,6 +46,10 @@ const RELEASE_ERROR_KEYS: Record<string, string> = {
   agent_knowledge_access_preservation_required: "knowledge_sources_unsupported",
   agent_knowledge_source_unavailable: "knowledge_sources_load_failed",
   agent_knowledge_access_migration_required: "knowledge_sources_unsupported",
+  agent_knowledge_base_unavailable: "knowledge_sources_bases_error_unavailable",
+  agent_knowledge_bases_preparing: "knowledge_sources_bases_preparing",
+  agent_knowledge_bases_unavailable: "knowledge_sources_bases_unavailable",
+  agent_knowledge_bases_disabled: "knowledge_sources_bases_disabled",
   agent_skill_dependency_missing: "release_error_skill_dependency_missing",
   agent_dependency_blocked: "release_error_dependency_blocked",
   agent_runtime_extension_preservation_required: "release_error_extension_preservation",
@@ -75,4 +79,23 @@ export function agentReleaseBlockedText(
   if (!cause) return null;
   const items = [cause.details, cause.body].map(parseBlockedItems).find((list) => list.length > 0);
   return items ? blockedItemLines(items, t).join("\n") : null;
+}
+
+/** Reason codes of a blocked publication, safe to show by code. The gateway sends them as
+ * `detail.error.details.reason_codes`; the flatter shapes are kept for older responses. */
+export function blockedReasonCodes(cause: { body?: unknown; details?: unknown }): string[] {
+  const body = cause.body as {
+    detail?: { reason_codes?: unknown; error?: { details?: { reason_codes?: unknown } } };
+    reason_codes?: unknown;
+  } | null | undefined;
+  const details = cause.details as { reason_codes?: unknown } | null | undefined;
+  const raw = body?.detail?.error?.details?.reason_codes ?? body?.detail?.reason_codes ?? body?.reason_codes ?? details?.reason_codes;
+  return Array.isArray(raw) ? raw.filter((code): code is string => typeof code === "string" && code.length > 0) : [];
+}
+
+/** The Configure section that holds what a blocking reason is about, for the "fix it" button. */
+export function agentReleaseReasonSection(code: string): "does" | "uses" | "who" {
+  if (SENSITIVE_DATA_REASONS.has(code) || UNSAFE_INSTRUCTION_REASONS.has(code) || code === "behavior_compile_blocked") return "does";
+  if (code.includes("audience")) return "who";
+  return "uses";
 }

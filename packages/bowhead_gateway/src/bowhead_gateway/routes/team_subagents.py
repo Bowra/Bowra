@@ -252,7 +252,7 @@ async def _team_skill_catalog(store: UserStore, team_id: str) -> list[dict[str, 
 
 
 def _validation_http(exc: TeamSubagentValidationError) -> HTTPException:
-    if exc.code == "subagent_tool_not_selectable":
+    if exc.code in {"subagent_tool_not_selectable", "tool_disabled_by_team"}:
         return HTTPException(422, {"code": exc.code, "tool_ref": exc.tool_ref})
     return HTTPException(422, str(exc))
 
@@ -1156,6 +1156,8 @@ async def list_team_tools(
         "team_tools": legacy_team_tools,
         # Skill wrapper Tools are not discoverable: each Skill's grant decides them.
         "native_tools": sorted(tool.stable_ref for tool in catalog.native_tools if tool.discoverable and tool.for_selection().selectable),
+        # Turned off by the team: kept where an Agent already selected them, never offered (see the authoring catalog).
+        "team_disabled_tools": list(catalog.team_disabled_refs),
         "catalog": {
             "schema_version": catalog.schema_version,
             "fingerprint": catalog.fingerprint,

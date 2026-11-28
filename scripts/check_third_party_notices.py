@@ -264,6 +264,9 @@ def _npm_lock_license(entry: dict[str, Any]) -> str:
 
 
 def _npm_production_entries(lock_path: Path) -> dict[str, dict[str, Any]]:
+    # Community app-only inventories omit the unqualified sandbox browser bundle.
+    if lock_path == SANDBOX_BROWSER_DIR / "package-lock.json" and not lock_path.is_file() and "bowhead-sandbox" not in _inventory_dockerfiles():
+        return {}
     """Entries installed by `npm ci --omit=dev` from a v3 package-lock.
 
     Platform optionals and `devOptional` entries are included: `--omit=dev` only
@@ -659,6 +662,8 @@ def _detect_license_from_text(text: str) -> str:
 def _collect_npm(directory: Path, scope: str) -> list[Dep]:
     lock_path = directory / "package-lock.json"
     entries = _npm_production_entries(lock_path)
+    if not entries:
+        return []
     chains = _npm_introducers(lock_path, entries)
     deps = []
     for key, entry in sorted(entries.items()):

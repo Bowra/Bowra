@@ -85,7 +85,8 @@ async def _session_digest(
     from bowhead_core.workflow_distill import merge_session_digests
 
     sess = await session_store.get_session(session_id)
-    if sess is None or getattr(sess, "user_id", None) != user_id:
+    # An Owner draft trial ran an unreleased definition; it is never a workflow source (trial-tech-design §5).
+    if sess is None or getattr(sess, "user_id", None) != user_id or getattr(sess, "origin", "normal") == "agent_trial":
         raise skill_workflow_http_error(404, "workflow_turn_not_found")
 
     turns = await session_store.list_turns(session_id=session_id)
@@ -180,7 +181,7 @@ async def distill(
         if turn is None:
             raise skill_workflow_http_error(404, "workflow_turn_not_found")
         sess = await session_store.get_session(getattr(turn, "session_id", None) or "")
-        if sess is None or sess.user_id != user.id:
+        if sess is None or sess.user_id != user.id or getattr(sess, "origin", "normal") == "agent_trial":
             raise skill_workflow_http_error(404, "workflow_turn_not_found")
 
         events = await turn_log_store.list_events(body.turn_id)

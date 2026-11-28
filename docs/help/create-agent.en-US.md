@@ -2,7 +2,7 @@
 
 For a plain-text answer, describe the required format in the Agent instructions and leave the advanced output schema empty. Test the Agent and its complete Chat response separately. You can ask Coach to show an already saved engineering requirement; viewing its receipt does not start connection onboarding or create the missing tool.
 
-Open **Agents** in the main sidebar, then choose **Create Agent** when available. Open **Agents → Manage My Agents** for the existing management views. Switching Hired, Created, Shared, Archived or Team views keeps Agents selected in the sidebar. Creation eligibility is independent from the team administrator role; team governance does not grant access to another author's private drafts.
+Open **Agents** in the main sidebar, then choose **Create Agent** when available. Open **Agents → Manage My Agents** for the existing management views. Switching Hired, Created, Shared, Archived or Team approvals views keeps Agents selected in the sidebar. Creation eligibility is independent from the team administrator role; Team approvals does not grant access to another author's private drafts.
 
 You can create an Agent for your own use, review its configuration and confirm creation, then adjust and use it from its management page. The creation entry points and options depend on the features your team has enabled, so this guide describes each case by what the page shows. If the page doesn't offer an option, follow what it actually shows. Agent drafts are saved in a Space: without one, **Create Agent** explains why. Team owners and administrators can go straight to creating a Space; members ask an owner or administrator to add them to one.
 
@@ -106,7 +106,7 @@ In the creation panel on the right, starting manual creation first creates a dra
 - The draft in Canvas saves automatically; the toolbar shows **Saved** or **Saving**. Only while a save is still running or has failed does closing or switching page, conversation, or space ask you to **Keep editing** or **Discard unsaved changes**. Discarding drops only the unsaved changes; the saved draft remains. If saving fails, choose **Retry save** in the toolbar.
 - If another browser tab saved the same draft first, the page shows, field by field, the value before editing, your input, and the latest saved value. Choose for each field and then save, so changes made elsewhere aren't overwritten.
 - From the general creation entry, you can continue an unfinished draft in the current space or explicitly start a new one. The draft list shows each draft's name, source, status, last saved time, and expiry, so you can tell drafts apart; continuing a manual draft takes you straight back to the manual editor on the right.
-- Under **Created by me** in your Agents, you can also find unfinished AI and manual drafts that can still be continued. The **Continue creating** section appears only when there are drafts to continue. Once a draft is open, the page address can be used to refresh and keep viewing it.
+- Under **Created by me** in your Agents, **Continue creating** lists unfinished AI and manual drafts that can still be continued; it appears only when there are such drafts. Each draft shows its source, status, save time and expiry date, for example "Expires if not finished by Dec 1, 2026; it can't be continued after that". Choose **Continue** to open it, or **Delete…** to delete a draft you no longer need; a deleted draft can't be restored. Once a draft is open, the page address can be used to refresh and keep viewing it.
 - If the draft can't be found, check the current space, choose **View my drafts** to find other drafts, or start again. Expired drafts can't be continued. If loading fails temporarily, retry on the card.
 
 ## Draft with AI
@@ -133,6 +133,8 @@ In the Canvas editor, the object Tab holds its name and close control. After cre
 Creating an Agent releases it as v1 right away. By default only you can use it: the receipt says **Released v1 · Only you can use it** (or **Shared with selected people** when you chose people at creation) and gives two next steps. Try it first: choose **Start using** when the receipt offers it; otherwise type @ in a chat, pick the Agent, and ask your question. The receipt also lists what the Agent can use by kind, for example **1 Plugin · 3 Tools**; a Plugin counts once, not as the Tools it brings. For more confidence, add a few cases on **Evaluate**; to share it, change who can use it under **Configure › Who can use it**. Team-wide access may need administrator approval.
 
 After the Agent is created, choose **Manage Agent** to open it directly and review or adjust its configuration, or find it later under your Agents. Being added to your personal list doesn't mean you have hired it. Older Agents open their original configuration page; Agents under version management open the version workbench.
+
+Each row in My Agents has one main button: **Manage** for Agents you created and **Start using** for hired ones; the other actions (start using, pause, enable, unhire) are in the row's **⋯** menu. Rows show a label only for exceptions: paused by you, unavailable, or archived by its Owner. **Created by me** lists drafts to continue first, then the Agents that are not archived; a last line points to **Archived**. You can search by name or description, show only Agents paused by you or unavailable ones, and sort by recently updated or name. With many Agents, the first search, filter or sort loads the rest of the list, up to 500 Agents; above that the page says the search covers the first 500. **Hired by me** lists the Agents that can run first; the others are folded under **Unavailable right now**, each with its reason and one action (**Enable again** or **Unhire…**). **Shared with me** rows offer **View details** before **Hire**. Team owners and administrators also see the **Team approvals** tab, with the same address and pending count.
 
 The version workbench has three tabs: **Configure**, **Evaluate** and **Release**; only the tabs your team has enabled appear. The former **Change proposals**, **Validate and release** and **Version history** tabs are merged into these, and old links take you to the matching place automatically.
 
@@ -164,7 +166,7 @@ You can also start with Coach yourself: type **@** in the composer and choose **
 
 - The change goes into the draft only; nothing is released or applied. The new version still takes effect only after the release check on the **Release** tab.
 - If the canvas has unsaved edits, your message isn't sent to Coach and a banner appears above the composer: **Save and continue** saves the canvas and then sends the same message; **Discard edits** drops the canvas edits so you can send again.
-- Each time Coach writes the draft, a receipt row under the answer shows how many changes went into the draft; **View in canvas** opens the Agent.
+- Each time Coach writes the draft, a receipt row under the answer names the Agent and the fields it changed, for example "Written into the draft · Store weekly report · Agent instructions (1 change)". The row appears even when Coach did not open the canvas, and it is still there after a reload. **View in canvas** opens the Agent and **Test and release on the manage page** opens its management page; while the Agent is already open in the canvas, the row only says **Open on the right**. If you are no longer its Owner or it is archived, the row keeps only its first words, without buttons.
 - A Skill Coach adds must come with the Skills it requires. If any are missing, Coach writes nothing and tells you which Skills are needed.
 - After Coach writes the draft, an open editor for that Agent refreshes, unless it holds unsaved input.
 - If a tool or Skill is invalid or you lack permission, fix it under **What it can use** first.
@@ -187,6 +189,34 @@ In **Personal Settings → Account → Agents**, or in the canvas editor's **⋯
 - **Ask me first**: Coach only requests the check. Review the usage and start it from the release-check card, as with Coach evaluation requests above.
 
 Either way, a passing check doesn't release or apply the Agent by itself.
+
+## The new Agent page: Configure
+
+When your team has the new Agent page, a release bar under the Agent's name says where the Agent stands, and **Configure** is arranged in the order below. Everything you could do before is still there; some things moved.
+
+- **Coach's changes**: fields that Coach or Improve with AI wrote into the draft come first, and only when there are any. Each row has **Compare** (before and after side by side) and **Undo**.
+- **What it does**: the name, the one-line description (the main assistant uses it to decide when to ask the Agent for help; once shared, colleagues see it too), the instructions and the model. When the team allows one model, only its name shows; when it allows several, you can choose. Built-in tool guidance, the main responsibility and structured output are folded under **Advanced**, and the folded line says which ones are not set. A small tag beside a field says who changed it in the saved draft: Edited by you, Edited by Coach or Improved by AI.
+- **What it can use**: only the Plugins, Team connections, Tools and Skills you chose, each with **Remove**; **Add a Plugin, Tool or Skill** opens the catalog at the side. Knowledge sources and optional read-only methods each have a row; **Change** or **Set up** opens their usual settings at the side. A line below says whether the Agent writes or deletes anything outside, and **Manage connections** opens personal tool connections. The question mark beside "What's the difference between Plugins, Tools and Skills?" explains the three.
+- **Who can use it**: open by default. For chosen members or the whole team, "What happens once it's shared" says that every release has to pass its test and be approved, that people aren't notified and hire it under **Shared with me**, and that it runs with each person's own data permissions.
+- **More settings**: the listing (categories, translated descriptions), whether others may copy it as their own version, and pending suggestions (external pipeline proposals and members' thumbs-downs). **Change** on a row opens its usual settings. The number on the Configure tab still counts the pending suggestions.
+
+Changes are saved from the release bar: with unsaved changes it reads "You have unsaved changes" and its main button is **Save draft**. When the draft can't be saved yet, the bar says what is missing and links to the section that fixes it.
+
+### Improve the instructions with AI
+
+**Improve with AI**, beside the instructions, rewrites only that field so it reads more clearly and is better organised. To change what the Agent can use or who can use it, or when you can't say exactly what to change, use **Ask Coach to change this**. The Agent editor in the Canvas has the same button.
+
+1. Write a few lines of instructions, then choose **Improve with AI**. The button is unavailable while the instructions are empty.
+2. The page saves the draft first: when only the instructions changed it saves them right away; when other fields changed too, it asks first and names them. Once saved they can't be discarded, but the version in use doesn't change.
+3. While you wait, the instructions are read-only and the other fields stay editable; it usually takes about 5 seconds. After 30 seconds the page shows "Still improving…" and **Stop waiting**, which only stops waiting: the result still appears under the instructions when it's ready, also after a reload.
+4. The result shows side by side: the current text on the left, the AI suggestion on the right, with each sentence AI added marked "Added". When the current instructions are very short, or mention a Tool or data the Agent doesn't have, a note above the result says so.
+5. Choose **Use this version** to write it into the draft, or **Discard**. Once used, Coach's changes show "Improved by AI · Rewrote Instructions" with **Compare** and **Undo**; delete any added rule you don't want from the instructions. **Try the draft** on the release bar then shows whether the answers got better.
+
+Keep in mind:
+
+- The draft doesn't change until you choose **Use this version**, and no failure changes it; the message says why it failed and who can fix it. When the team has no model yet, only a team administrator can fix it, and the page offers a note to copy for them.
+- Only one improvement runs at a time; use or discard the last result before starting another.
+- When the Agent has no draft yet, Improve with AI first saves a draft identical to the released version; that draft stays if you discard the result.
 
 ## Describe what a good answer does
 
@@ -264,3 +294,19 @@ When the editor offers Knowledge sources, choose readable knowledge in the curre
 Search and select the files to include. Removing the last file means no knowledge files may be read; explicitly choosing current-context reading broadens the scope. Optionally set the number of search results, or leave it empty for the Team default. Save the draft and review it through the original release flow. Unavailable sources appear as numbered placeholders; restore access or revise the selection before saving.
 
 These settings govern knowledge reading and do not add uploaded task attachments to the knowledge base. Task attachments retain their original authorization.
+
+### When knowledge bases are enabled
+
+If your Team uses knowledge bases, Knowledge sources offers three choices: **Readable knowledge in the current context** (each person's own access), **Selected knowledge bases**, and **Selected files** (up to 64 fixed files).
+
+1. Choose **Selected knowledge bases**, then **Add knowledge base**.
+2. Tick the knowledge bases to include, up to 32. The list shows only the ones you can use, grouped as My knowledge bases, each of your Spaces, and Team.
+3. Save the draft and release it as usual. Files added to these knowledge bases later are searched automatically on the next run; removed files are no longer read.
+
+Things to know:
+
+- When someone else uses the Agent, it searches only the parts of these knowledge bases that person can use. A Space's knowledge bases apply only in that Space, and your My knowledge never applies to anyone else. Before sharing the Agent, make sure its users can use the knowledge bases.
+- Right after knowledge bases are turned on, the option may say they are still being prepared for Agents. Choose **Check again** after a few minutes; meanwhile, use one of the other two choices.
+- A knowledge base you can no longer use appears as a numbered placeholder. Remove it, or ask for access, before saving.
+- Switching from selected files to selected knowledge bases, or adding a knowledge base, is shown as a wider knowledge scope in the release review. Removing knowledge bases narrows it.
+- If knowledge bases are turned off again, the saved selection no longer applies: the Agent reads nothing from it, and running the Agent shows why. Choose another knowledge source to keep using the Agent with knowledge.

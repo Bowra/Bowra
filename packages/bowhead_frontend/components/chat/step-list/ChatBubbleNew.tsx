@@ -12,6 +12,9 @@ import type { ChatInlineFileData } from "./ChatInlineFile";
 import { ChatInlineImage } from "./ChatInlineImage";
 import type { ChatInlineImageData } from "./ChatInlineImage";
 import { ChatInlineKpi } from "./ChatInlineKpi";
+import { ChatInlineReport } from "./ChatInlineReport";
+import { TurnWorkFiles } from "./TurnWorkFiles";
+import type { AnswerExtras } from "@/lib/answer-extras";
 import type { KpiRowSectionData } from "./ChatInlineKpi";
 // Consolidation (2026-09-08): chat tables no longer have a separate renderer. `ChatInlineTable` merely
 // truncated to 8 rows before handing off to data-table, while `ChartTable` already collapses and offers
@@ -48,6 +51,8 @@ export interface ChatBubbleNewProps {
   isStreaming?: boolean;
   /** Inline artifacts rendered below the prose, in array order. */
   artifacts?: ChatInlineArtifact[];
+  /** The report card and the work-file line after the files (chat running state R2.2, R2.3). */
+  extras?: AnswerExtras | null;
 }
 
 /**
@@ -71,6 +76,7 @@ export const ChatBubbleNew = memo(function ChatBubbleNew({
   text,
   isStreaming = false,
   artifacts = [],
+  extras = null,
 }: ChatBubbleNewProps) {
   // chat-inline-figure-2026-08 batch 2: artifacts named by `[figure:<id>]` in the body **move beside the argument**;
   // unnamed ones **still all remain at the end** (PRD §4: models under-reference rather than overproduce;
@@ -127,11 +133,19 @@ export const ChatBubbleNew = memo(function ChatBubbleNew({
         }}
       />
 
-      {tail.length > 0 && !isStreaming ? (
+      {(tail.length > 0 || extras) && !isStreaming ? (
         <div className="chat-bubble-artifacts">
           {tail.map((a) => (
             <ArtifactSlot key={a.id} artifact={a} />
           ))}
+          {extras?.report ? <ChatInlineReport changes={extras.report} /> : null}
+          {extras ? (
+            <TurnWorkFiles
+              count={extras.workFiles}
+              delivered={artifacts.some((a) => a.kind === "file" || a.kind === "image")}
+              turnId={extras.turnId}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>

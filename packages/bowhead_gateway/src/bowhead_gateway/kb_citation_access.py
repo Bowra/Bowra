@@ -6,6 +6,10 @@
 与知识库路由同口径（只拒不记——投影不是一次访问尝试）。
 
 看的人由 `_current_user` 留在 `request.state.bowhead_user`；取不到 ⇒ 不注入判定 ⇒ 受限。
+
+Files in named Space/Team knowledge bases also need the viewer's level there, resolved in the
+file's Space (or Team) context with one query per distinct file; files in default knowledge
+bases keep the decision above. A readable verdict carries the file's knowledge base.
 """
 
 from __future__ import annotations
@@ -16,10 +20,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from bowhead_core.access_control import resource_grants_enforce_enabled
+from bowhead_core.kb.knowledge_base_access import named_knowledge_base_id
+from bowhead_core.kb.knowledge_base_store import knowledge_base_key
+from bowhead_core.kb.permission import KbPermission, ScopeContext
 from bowhead_core.source_attribution import KbFileAccess
 from bowhead_core.space_governance import SpaceOperation
 
 from bowhead_gateway.access_context import access_context_to_dict, build_access_context_from_request
+from bowhead_gateway.kb_authorization import knowledge_levels_for
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +78,17 @@ async def _judge(request: Any, user: Any, files_store: Any, file_id: str, *, exp
     except Exception:
         # Nonmember / archived space / unavailable authorization service: always restricted.
         return _FORBIDDEN
+    named = named_knowledge_base_id(file)
+    if named is not None:
+        levels = await knowledge_levels_for(
+            access_ctx,
+            files_store=files_store,
+            user_store=getattr(request.app.state, "user_store", None),
+            access_store=getattr(request.app.state, "access_control_store", None),
+        )
+        viewer = ScopeContext(user_id=user.id, workspace_id=space_id or "", team_id=access_ctx.team_id, knowledge_levels=levels)
+        if not KbPermission.can_read(file, viewer):
+            return _FORBIDDEN
     if space_id and not await _grant_allows(request, access_ctx, "kb_scope", f"workspace:{space_id}"):
         return _FORBIDDEN
     if scope == "team" and not await _grant_allows(request, access_ctx, "kb_scope", f"team:{scope_id}"):
@@ -81,7 +100,19 @@ async def _judge(request: Any, user: Any, files_store: Any, file_id: str, *, exp
         file_name=str(getattr(file, "filename", "") or "") or None,
         scope="space" if space_id else scope,
         space_id=space_id,
+        knowledge_base_id=named or await _knowledge_base_of(files_store, file),
     )
+
+
+async def _knowledge_base_of(files_store: Any, file: Any) -> str | None:
+    """The readable file's knowledge base for "Open in knowledge base" (the read safety rule)."""
+    effective = getattr(files_store, "effective_knowledge_base_ids", None)
+    if callable(effective):
+        try:
+            return (await effective([file])).get(file.file_id) or None
+        except Exception:
+            logger.warning("kb_citation_access.knowledge_base_lookup_failed file=%s", getattr(file, "file_id", ""))
+    return knowledge_base_key(file) or None
 
 
 def kb_file_access_for_request(request: Any) -> Callable[[str], Awaitable[KbFileAccess]] | None:

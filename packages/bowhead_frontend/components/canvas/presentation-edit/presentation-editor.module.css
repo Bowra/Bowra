@@ -96,6 +96,7 @@
 .editor {
   --mark-select: #1754db;
   --mark-pending: #b45309;
+  --mark-pending-ink: #7c2d12;
   --mark-quiet: #5f6368;
   --mark-halo: #ffffff;
 }
@@ -370,6 +371,7 @@
 .phoneSheet .cellInput { min-height: 44px; }
 .phoneSheetFooter { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; }
 .phoneSheetFooter > :global(button) { min-height: 44px; }
+.phoneSheetNote { grid-column: 1 / -1; margin: 0; color: var(--c-ink-3); font-size: var(--fs-sm); line-height: 1.5; }
 
 /* Focus lands on the saved summary after a save, so a screen reader hears what was saved. */
 .savedNotice { border-radius: var(--r-3); }
@@ -388,3 +390,105 @@
   0%, 40% { box-shadow: 0 0 0 1px var(--mark-halo), 0 0 0 6px color-mix(in srgb, var(--mark-select) 55%, transparent); }
   100% { box-shadow: 0 0 0 1px var(--mark-halo), 0 0 0 0 transparent; }
 }
+
+/* A referenced page looks the same in the preview, the editor and on phones: accent text on the accent tint. */
+.editor.editor .pageReference[aria-pressed="true"] { background: var(--c-accent-soft); color: var(--c-accent-text, var(--c-accent)); box-shadow: none; }
+
+/* A conflict row and its 「用我的 / 保留第 N 版」 choice. */
+.conflictRow { display: flex; flex-direction: column; gap: 8px; }
+.conflictChoice { align-self: flex-start; }
+
+/* A selected table: the cell that takes typing. */
+.cellTarget { position: absolute; box-sizing: border-box; border: 2px solid var(--mark-select); box-shadow: 0 0 0 1px var(--mark-halo); pointer-events: none; }
+
+/* A changed chart's new values, written on the chart until the new render draws them. */
+.chartMarks {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mark-halo) 92%, transparent);
+  box-shadow: 0 0 0 1px var(--mark-pending);
+  color: var(--mark-pending-ink);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.chartMarks span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* On phones, each changed text is listed under its slide. */
+.phoneChanges { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 0 0 1.1em; color: var(--c-ink-2); font-size: 0.8125rem; }
+.phoneChanges li { overflow-wrap: anywhere; }
+
+/* The editor shell (docx inline edit design §8.1, PPT design §13.8; canvas Google 式排列). */
+/* Zoomed past the stage, the page scrolls; smaller, it stays centred (margin auto never clips). */
+.stage[data-zoomed] { align-items: flex-start; justify-content: flex-start; overflow: auto; padding: 16px; }
+.stage[data-zoomed] > .page { margin: auto; }
+
+/* Page strip: number outside on the left, the unsaved dot under it, the current page outlined. */
+.strip { height: 100%; box-sizing: border-box; padding: 12px 12px 12px 8px; }
+.stripList { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.stripItem { display: flex; align-items: flex-start; gap: 6px; }
+.stripNumber {
+  flex: none;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.stripItem[data-current] .stripNumber { color: var(--c-accent-text); font-weight: 600; }
+.stripDot { width: 8px; height: 8px; border-radius: 50%; background: var(--c-warn); }
+.stripThumb { position: relative; flex: 1; min-width: 0; }
+.stripPage {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2, 6px);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline, 1px) var(--c-separator-strong);
+  cursor: pointer;
+}
+.stripPage[aria-current="page"] { box-shadow: 0 0 0 2px var(--c-accent); }
+.stripPage:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 3px; }
+.stripReference { position: absolute; right: 4px; bottom: 4px; visibility: hidden; }
+.stripReference[data-shown], .stripThumb:hover .stripReference, .stripThumb:focus-within .stripReference { visibility: visible; }
+.stripReference[aria-pressed="true"] { background: var(--c-accent-soft); color: var(--c-accent-text); }
+@media (hover: none) { .stripReference { visibility: visible; } }
+
+/* Panels: changes by page, shortcuts. */
+.changeGroup { display: flex; flex-direction: column; gap: 8px; }
+.changeGroupTitle { margin: 4px 0 0; color: var(--c-ink-2); font-size: var(--fs-sm); font-weight: 600; }
+.changeLocation { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+/* The same mark colours as the numbers on the slide, in every theme. */
+.changeNumber {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border-radius: var(--r-pill, 999px);
+  display: inline-grid;
+  place-items: center;
+  background: #b45309;
+  color: #fff;
+  font: 600 var(--fs-xs, 0.6875rem) / 1 var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+.keyGroup { display: flex; flex-direction: column; gap: 6px; }
+.keyList { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.keyRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--fs-sm); }
+.keyRow dt { color: var(--c-ink-2); }
+.keyRow dd { flex: none; margin: 0; }
+.keyRow kbd { font: inherit; color: var(--c-ink); font-variant-numeric: tabular-nums; }
+.sideEdit { display: flex; flex-direction: column; gap: 10px; }
+.noticeSlot { flex: none; padding: 8px 16px; box-shadow: inset 0 calc(-1 * var(--hairline, 1px)) 0 var(--c-separator); }
+.noticeSlot :global(.settings-notice) { margin: 0; }

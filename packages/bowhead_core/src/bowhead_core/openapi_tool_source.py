@@ -28,7 +28,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -549,6 +549,10 @@ class TeamToolEntry:
     # A Team administrator's confirmed category, set by the loader only while the confirmation
     # still matches this tool's cached definition (team_tool_categories). Never from the server.
     admin_category: str | None = None
+    notion_knowledge_binding: str | None = None
+    # An approved n8n workflow (``n8n_workflows.N8nWorkflowApproval``): this entry is a derived run tool
+    # whose handler calls the source's raw n8n tools itself. ``None`` for every other tool.
+    n8n_workflow: Any | None = None
 
 
 def openapi_entry(source_id: str, op: OpenApiOp) -> TeamToolEntry:
@@ -817,6 +821,10 @@ class RemoteMcpToolClient:
         self._call_timeout = call_timeout
         self._header_source = header_source
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         initialized = False
 
@@ -847,6 +855,30 @@ class RemoteMcpToolClient:
                 raise
         refused = headers.get("Authorization", "").removeprefix("Bearer ")
         return await asyncio.wait_for(_once(await self._header_source(refused)), bound)
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[ClientSession]:
+        """One initialized session for several calls, entered and left in the caller's task.
+
+        For an adapter that must make a bounded sequence of calls (an n8n run: check, execute,
+        poll, read the result) without reconnecting for each. A refused OAuth token during
+        ``initialize`` is renewed once, as in ``call_tool``. Each call is bounded by the
+        transport's call timeout; the caller bounds the whole sequence.
+        """
+        headers = self._headers if self._header_source is None else await self._header_source(None)
+        async with AsyncExitStack() as stack:
+            try:
+                session = await stack.enter_async_context(
+                    connect_remote_mcp(self._base_url, headers, timeout=self._timeout, call_timeout=self._call_timeout)
+                )
+            except Exception as exc:
+                if self._header_source is None or not refused_credential(exc):
+                    raise
+                refused = headers.get("Authorization", "").removeprefix("Bearer ")
+                session = await stack.enter_async_context(
+                    connect_remote_mcp(self._base_url, await self._header_source(refused), timeout=self._timeout, call_timeout=self._call_timeout)
+                )
+            yield session
 
 
 def refused_credential(exc: BaseException, _depth: int = 0) -> bool:

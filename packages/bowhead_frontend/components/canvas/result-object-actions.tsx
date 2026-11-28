@@ -89,7 +89,8 @@ export function ResultObjectActions({
   const canViewDetails = capabilities.has("view_details") && Boolean(onModeChange);
   const canViewHistory = capabilities.has("view_history") && Boolean(onOpenHistory);
   const canSendFeedback = capabilities.has("feedback_unsupported") && Boolean(onFeedbackUnsupported);
-  const canEditPresentation = capabilities.has("edit_presentation") && Boolean(onEditPresentation);
+  // Decks and, while FEATURE_DOCX_INLINE_EDIT is on, Word files (docx inline edit design §8.4).
+  const canEditPresentation = (capabilities.has("edit_presentation") || capabilities.has("edit_document")) && Boolean(onEditPresentation);
   const canPin = capabilities.has("pin_result");
   const pinActions = useResultPinActions("results", { enabled: canPin });
   const showRawAction = !compact && canViewRaw && mode !== "raw";

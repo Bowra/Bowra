@@ -105,18 +105,20 @@ describe("运行状态带外框（对话卡片规格 D1：与对话卡片同一�
     expect(rule(".bh-band__chev")).toMatchObject({ width: "28px", height: "28px" });
   });
 
-  it("三行结构只换外观：历史行与当前行系统字 12、完成勾次要色，重试 / 失败 / 进行中仍是语义色；不写行高与行数", () => {
+  it("分组只换外观（运行状态 2026-11-25）：行系统字 12、组头次要色、完成勾次要色，失败 / 进行中仍是语义色；不写行高，不藏行", () => {
     expect(rule(".bh-band__hist")).toMatchObject({ "font-family": "var(--font-control)" });
     expect(rule(".bh-band__glyph")).toEqual({ color: "var(--c-ink-3)" });
     expect(rule(".bh-band__row.is-warn .bh-band__glyph")).toEqual({ color: "var(--c-warn-ink)" });
     expect(rule(".bh-band__row.is-fail .bh-band__glyph")).toEqual({ color: "var(--c-err)" });
     expect(rule(".bh-band__foot")).toMatchObject({ "font-family": "var(--font-control)", "font-size": "var(--fs-sm)" });
-    // History rows recede by ink step (4.5:1 or better on the band surface), never by opacity on the text.
-    expect(rule(".bh-band__row--h1 :is(.bh-band__lab, .bh-band__rmeta)")).toEqual({ color: "var(--c-ink-4)" });
-    expect(rule(".bh-band__row--h2 :is(.bh-band__lab, .bh-band__rmeta)")).toEqual({ color: "var(--c-ink-3)" });
+    // One group per agent appearance: the header and Lead's folded notes read at the rows' size, a step quieter.
+    expect(rule(".bh-band__ghead")).toMatchObject({ color: "var(--c-ink-2)", "font-size": "var(--fs-sm)" });
+    expect(rule(".bh-note")).toMatchObject({ "font-size": "var(--fs-sm)", color: "var(--c-ink-3)" });
+    // "前面还有 N 步" recedes by ink step, never by opacity on the text.
+    expect(rule(".bh-band__row--more .bh-band__lab")).toEqual({ color: "var(--c-ink-4)" });
     const globals = stripComments(read("app/globals.css"));
-    expect(globals).not.toMatch(/\.bh-band__row--h[12] \.bh-band__(lab|rmeta)[^{]*\{[^}]*opacity/);
-    // Constant height relies on three rows/original line height: this sheet neither changes .bh-band__row min-height nor hides any row.
+    expect(globals).not.toMatch(/\.bh-band__row[^{]*\.bh-band__(lab|rmeta)[^{]*\{[^}]*opacity/);
+    // The card grows with its groups (PRD P1): this sheet neither changes .bh-band__row min-height nor hides any row.
     expect(rule(".bh-band__row")).toEqual({ "font-size": "var(--fs-sm)" });
     expect(RULES.filter((r) => /bh-band/.test(r.selector) && /display:\s*none/.test(r.body))).toEqual([]);
   });

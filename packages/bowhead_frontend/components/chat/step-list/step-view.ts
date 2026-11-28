@@ -94,6 +94,8 @@ export function stepToStepView(
     state: step.state,
     summary: legacyAdmissionBlock ? undefined : step.summary ?? undefined,
     durationText,
+    ...(Number.isFinite(step.startedAt?.getTime()) ? { startedAtMs: step.startedAt.getTime() } : {}),
+    ...(step.durationMs != null && !isWritingStep(step) ? { durationMs: step.durationMs } : {}),
     detail: legacyAdmissionBlock ? null : step.detail,
     subSteps: step.subSteps,
     outputArtifacts: step.outputArtifacts,

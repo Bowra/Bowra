@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 function actionText(container: HTMLElement): string {
-  return container.querySelector(".bh-band__act")?.textContent ?? "";
+  return container.querySelector(".bh-band__txt")?.textContent ?? "";
 }
 
 /** The last bytes arrived `agoMs` ago. */
@@ -58,7 +58,8 @@ describe("没信号时说实话", () => {
         transport={sampleSilentFor(1_000)} />,
     );
     expect(actionText(container)).not.toContain("band_no_signal");
-    expect(actionText(container)).toContain("band_thinking");
+    // Before the first step the heartbeat line reads as the opening (chat running state: the current row is gone).
+    expect(actionText(container)).toContain("band_preparing");
   });
 
   it("★正对照：阈值边界内（差 1 秒）仍不许说没信号", () => {
@@ -74,7 +75,8 @@ describe("没信号时说实话", () => {
       <RunningBand steps={steps} running startedAt={Date.now() - 60_000} />,
     );
     expect(actionText(container)).not.toContain("band_no_signal");
-    expect(actionText(container)).toContain("band_thinking");
+    // Before the first step the heartbeat line reads as the opening (chat running state: the current row is gone).
+    expect(actionText(container)).toContain("band_preparing");
   });
 
   it("turn 已结束（running=false）⇒ 不说没信号（那是完结不是失联）", () => {

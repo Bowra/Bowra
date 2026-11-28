@@ -1,10 +1,10 @@
-# Integrierte Tools von Drittanbietern
+# Integrierte Dienste
 
-Teamverantwortliche und Teamadministratoren können die von Bowra unterstützten Tools von Drittanbietern unter **Team-Einstellungen → Tool-Quellen** verbinden. Derzeit werden Tavily, Datarc und Power BI unterstützt. Im Auswahlfeld und in der Liste der konfigurierten Tools ist jedes Angebot mit einem eigenen Symbol gekennzeichnet.
+Teamverantwortliche und Teamadministratoren können die von Bowra unterstützten Tools von Drittanbietern unter **Fähigkeiten → Tools → Werkzeugquellen verwalten → Integrierte Dienste** verbinden. Derzeit werden Tavily, Datarc und Power BI unterstützt. Im Auswahlfeld und in der Liste der konfigurierten Tools ist jedes Angebot mit einem eigenen Symbol gekennzeichnet.
 
 ## Tavily
 
-Wählen Sie **＋ Integriertes Drittanbieter-Tool hinzufügen**, dann Tavily. Fügen Sie den API-Schlüssel ein und wählen Sie **Prüfen und speichern**. Bowra prüft den Schlüssel und speichert ihn anschließend verschlüsselt. Nach dem Speichern können Sie den Schlüssel jederzeit bearbeiten und das Tool ein- oder ausschalten.
+Wählen Sie **＋ Integrierten Dienst hinzufügen**, dann Tavily. Fügen Sie den API-Schlüssel ein und wählen Sie **Prüfen und speichern**. Bowra prüft den Schlüssel und speichert ihn anschließend verschlüsselt. Nach dem Speichern können Sie den Schlüssel jederzeit bearbeiten und das Tool ein- oder ausschalten.
 
 Ist Tavily aktiviert, können Team-Agents mit Websuche das Tool verwenden. Ist es deaktiviert, verwenden neue Suchanfragen Tavily nicht mehr. Der API-Schlüssel wird Teammitgliedern und Agents niemals angezeigt.
 
@@ -32,7 +32,7 @@ Jede Suche, jeder Lesevorgang, jeder Crawl und jede Recherche verbraucht Credits
 
 ## Datarc
 
-Wählen Sie **＋ Integriertes Drittanbieter-Tool hinzufügen → Datarc**. Geben Sie einen Konfigurationsnamen, den Endpunkt und den Verbindungsschlüssel ein. Der Endpunkt ist die Stammadresse des Datarc-Dienstes, zum Beispiel `https://openapi.datarc.cn`; geben Sie keinen bestimmten API-Pfad ein. Nach erfolgreicher Prüfung wird der Schlüssel verschlüsselt gespeichert. In der Liste erscheint die Verbindung als „Datarc – Konfigurationsname“.
+Wählen Sie **＋ Integrierten Dienst hinzufügen → Datarc**. Geben Sie einen Konfigurationsnamen, den Endpunkt und den Verbindungsschlüssel ein. Der Endpunkt ist die Stammadresse des Datarc-Dienstes, zum Beispiel `https://openapi.datarc.cn`; geben Sie keinen bestimmten API-Pfad ein. Nach erfolgreicher Prüfung wird der Schlüssel verschlüsselt gespeichert. In der Liste erscheint die Verbindung als „Datarc – Konfigurationsname“.
 
 Ein Team kann mehrere Datarc-Verbindungen hinzufügen und sie in den Tool-Einstellungen von Agents getrennt zuweisen. Weisen Sie beispielsweise „Datarc – Finanzen“ einem Finanz-Agent und „Datarc – Vertrieb“ einem Vertriebs-Agent zu. Wenn Sie eine Verbindung umbenennen, bleiben bestehende Zuweisungen erhalten. Wird eine Verbindung deaktiviert oder gelöscht, wechseln Agents nicht automatisch zu einer anderen Verbindung.
 
@@ -44,7 +44,7 @@ Je nach Berechtigungen des Schlüssels stellt Bowra **Arbeitsbereiche auflisten*
 
 ## Power BI
 
-Wählen Sie **＋ Integriertes Drittanbieter-Tool hinzufügen → Power BI**, benennen Sie die Verbindung und geben Sie die Microsoft-Entra-Mandanten-ID, die Client-ID und das Client-Geheimnis ein. Sie können eine Arbeitsbereich-ID und eine semantische Modell-ID angeben oder beide Felder leer lassen, damit automatisch ein zugängliches Modell ausgewählt wird. Bowra prüft den Abfragezugriff vor dem Speichern. Das Geheimnis wird verschlüsselt gespeichert und danach nicht mehr angezeigt. Ein Team kann mehrere Verbindungen hinzufügen, beispielsweise getrennte Finanz- und Vertriebsmodelle.
+Wählen Sie **＋ Integrierten Dienst hinzufügen → Power BI**, benennen Sie die Verbindung und geben Sie die Microsoft-Entra-Mandanten-ID, die Client-ID und das Client-Geheimnis ein. Sie können eine Arbeitsbereich-ID und eine semantische Modell-ID angeben oder beide Felder leer lassen, damit automatisch ein zugängliches Modell ausgewählt wird. Bowra prüft den Abfragezugriff vor dem Speichern. Das Geheimnis wird verschlüsselt gespeichert und danach nicht mehr angezeigt. Ein Team kann mehrere Verbindungen hinzufügen, beispielsweise getrennte Finanz- und Vertriebsmodelle.
 
 Eine Organisationsadministration muss die Anwendung in Microsoft Entra registrieren, das Client-Geheimnis erstellen, der Sicherheitsgruppe des Dienstprinzipals die Nutzung der Power-BI-API erlauben, den Dienstprinzipal zum Zielarbeitsbereich hinzufügen und ihm die Build-Berechtigung für das semantische Modell erteilen. Schlägt die Prüfung fehl, kontrollieren Sie Mandant, Arbeitsbereich, Modell und Build-Berechtigung.
 

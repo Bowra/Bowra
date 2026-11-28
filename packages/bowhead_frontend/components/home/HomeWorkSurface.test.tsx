@@ -626,6 +626,18 @@ describe("HomeWorkSurface", () => {
       expect(sections).toEqual(["home-work-proposals", "home-work-brief"]);
     });
 
+    it("an Owner draft trial's first screen keeps the composer and drops the generic cards (F24)", async () => {
+      vi.mocked(fetchHomeProposals).mockResolvedValue(proposals);
+      const { container } = renderHome({ composerSlot: <textarea data-testid="slot-composer" aria-label="Composer" />, composerOnly: true });
+      await waitFor(() => expect(fetchHomeSnapshot).toHaveBeenCalled());
+      expect(screen.getByTestId("slot-composer")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+      expect(container.querySelector(".home-work-layout")).toBeNull();
+      expect(container.querySelector(".home-work-proposal")).toBeNull();
+      expect(container.querySelector(".home-work-footer")).toBeNull();
+      expect(screen.queryByText("Create an editable board deck")).not.toBeInTheDocument();
+    });
+
     it("brand appears once: the home page has no watermark or wordmark, only the updated time", async () => {
       vi.mocked(fetchHomeProposals).mockResolvedValue(proposals);
       const { container } = renderHome();

@@ -708,7 +708,7 @@ CREATE TABLE IF NOT EXISTS team_tool_source (
   tool_overrides_json  TEXT NOT NULL DEFAULT '{}',    -- cca P2: per-op {operationId:{description}} desc overrides
   visibility           TEXT NOT NULL DEFAULT 'team_wide',  -- team_wide|creator_only (留字段)
   created_by           TEXT,
-  status               TEXT NOT NULL DEFAULT 'enabled',   -- enabled|disabled|failed
+  status               TEXT NOT NULL DEFAULT 'enabled',   -- enabled|disabled
   created_at           TEXT NOT NULL,
   updated_at           TEXT NOT NULL
 );
@@ -2559,14 +2559,24 @@ class UserStore:
         prompts_schema: list[dict[str, Any]] | None = None,
         tool_overrides: dict[str, dict[str, Any]] | None = None,
         status: str | None = None,
+        auth_type: str | None = None,
+        auth: dict[str, Any] | None = None,
         expected_updated_at: str | None = None,
     ) -> str | None:
-        """Edit display metadata (§9#9). Does NOT touch auth (see update_team_tool_source_auth) or the
-        registered tool name (that derives from the immutable id, §8.1/F12). ``tool_overrides`` is the
-        per-op description override map (tools sprint WP1c — editable descriptions post-create)."""
+        """Edit source metadata and optionally replace auth in the same update."""
         sets: list[str] = []
         params: list[Any] = []
         prompt_cache = validate_mcp_prompt_cache(prompts_schema) if prompts_schema is not None else None
+        if auth_type is not None:
+            from bowhead_core.llm_config_crypto import encrypt_llm_config
+
+            auth_ref = None if auth_type == "none" else encrypt_llm_config(auth or {})
+            if auth_ref is not None and auth_ref.startswith("PLAIN:"):
+                raise RuntimeError(
+                    "BOWHEAD_FERNET_KEY required to store tool auth credentials (refusing to persist plaintext for auth_type != 'none')",
+                )
+            sets.extend(("auth_type=?", "auth_ref=?"))
+            params.extend((auth_type, auth_ref))
         if name is not None:
             sets.append("name=?")
             params.append(name)
@@ -2621,7 +2631,6 @@ class UserStore:
             await db.commit()
             return updated_at if cursor.rowcount == 1 else None
 
-    @_repeat_when_authority_busy
     async def update_team_tool_source_auth(
         self,
         team_id: str,
@@ -2630,26 +2639,13 @@ class UserStore:
         auth_type: str,
         auth: dict[str, Any] | None = None,
     ) -> None:
-        """Encrypt + store upstream auth creds (§6.2). F14 hard guard: when auth_type != none, REFUSE to
-        store if no BOWHEAD_FERNET_KEY (encrypt would fall back to plaintext) — tool creds must never be
-        at rest in plaintext."""
-        from bowhead_core.llm_config_crypto import encrypt_llm_config
-
-        if auth_type == "none":
-            auth_ref: str | None = None
-        else:
-            token = encrypt_llm_config(auth or {})
-            if token.startswith("PLAIN:"):
-                raise RuntimeError(
-                    "BOWHEAD_FERNET_KEY required to store tool auth credentials (refusing to persist plaintext for auth_type != 'none')",
-                )
-            auth_ref = token
-        async with diagnostic_connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE team_tool_source SET auth_type=?, auth_ref=?, updated_at=? WHERE id=? AND team_id=?",
-                (auth_type, auth_ref, _now(), source_id, team_id),
-            )
-            await db.commit()
+        """Encrypt and replace the stored upstream credentials."""
+        await self.update_team_tool_source_meta(
+            team_id,
+            source_id,
+            auth_type=auth_type,
+            auth=auth,
+        )
 
     async def get_team_tool_auth_decrypted(self, team_id: str, source_id: str) -> dict[str, Any]:
         """Decrypt upstream creds for execute-time header injection. {} if none. team-bound read."""
@@ -3831,6 +3827,13 @@ class UserStore:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
 
+    async def assert_can_add_team_seat(self, team_id: str, *, connection: aiosqlite.Connection) -> None:
+        """Check the seat ceiling in the same transaction that admits the member."""
+        _require_read_transaction(connection)
+        if self._seat_guard is not None:
+            active = await self.count_active_seats(team_id, conn=connection)
+            await self._seat_guard.assert_can_add_seat(team_id, active_count=active)
+
     async def create_user(
         self,
         *,
@@ -3843,15 +3846,18 @@ class UserStore:
         email_verified: bool = False,
         avatar_url: str | None = None,
         replace_deleted_user_id: str | None = None,
+        connection: aiosqlite.Connection | None = None,
     ) -> User:
         email = normalize_email(email)
         # Licensing §4.2: the seat-check + INSERT run on ONE connection inside a BEGIN IMMEDIATE tx so two
         # concurrent same-team registrations cannot both read `max_seats-1` and both insert (TOCTOU/LIC-3).
         # The team read also moves onto this conn (was a separate short-lived conn). The seat gate is the
         # injected resolver; in shadow mode (101 default) it logs a would-deny and returns — zero behavior change.
-        async with diagnostic_connect(self.db_path) as db:
+        _require_read_transaction(connection)
+        async with nullcontext(connection) if connection is not None else diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row  # _row_to_team needs key access
-            await db.execute("BEGIN IMMEDIATE")
+            if connection is None:
+                await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(
                     "SELECT * FROM teams WHERE id = ?",
@@ -3878,10 +3884,7 @@ class UserStore:
                         db,
                         replace_deleted_user_id,
                     )
-                if self._seat_guard is not None:
-                    active = await self.count_active_seats(team_id, conn=db)
-                    # raises EntitlementDenied(seat_exceeded / frozen-team reason) when enforce=1; gateway adapts
-                    await self._seat_guard.assert_can_add_seat(team_id, active_count=active)
+                await self.assert_can_add_team_seat(team_id, connection=db)
                 quota = team.tier_credits.get(tier, 0)
                 u = User(
                     id=_id("usr"),
@@ -3927,7 +3930,8 @@ class UserStore:
                     "INSERT INTO team_members(id,user_id,team_id,role,status,created_at) VALUES (?,?,?,?,?,?)",
                     (_id("om"), u.id, team_id, "member", "active", _now()),
                 )
-                await db.commit()
+                if connection is None:
+                    await db.commit()
             except Exception:
                 await db.rollback()
                 raise
@@ -5551,6 +5555,18 @@ class UserStore:
             ) as cur:
                 rows = await cur.fetchall()
         return [{"id": str(row["id"]), "name": str(row["name"]), "role": str(row["role"])} for row in rows]
+
+    async def team_membership_was_removed(self, user_id: str, team_id: str) -> bool:
+        """An explicit removal supersedes the original single-Team login binding."""
+        async with (
+            open_pooled_read_ctx(self.db_path) as db,
+            db.execute(
+                "SELECT 1 FROM team_members m JOIN teams t ON t.id=m.team_id "
+                "WHERE m.user_id=? AND m.team_id=? AND m.status='removed' AND t.created_by_user_id IS NOT m.user_id",
+                (user_id, team_id),
+            ) as cursor,
+        ):
+            return await cursor.fetchone() is not None
 
     async def user_has_active_team_membership(self, user_id: str, team_id: str) -> bool:
         async with (
@@ -7410,6 +7426,8 @@ class UserStore:
         self,
         user_id: str,
         new_hash: str,
+        *,
+        verify_email: bool = False,
     ) -> bool:
         """G10 P0-S-3 atomic password update with pwd_version + session_token_version bump."""
         async with diagnostic_connect(self.db_path) as db:
@@ -7418,11 +7436,12 @@ class UserStore:
                 now = _now()
                 cur = await db.execute(
                     "UPDATE users SET password_hash = ?, "
+                    "email_verified = CASE WHEN ? THEN 1 ELSE email_verified END, "
                     "pwd_version = pwd_version + 1, "
                     "session_token_version = session_token_version + 1, "
                     "last_password_change_at = ? "
                     "WHERE id = ? AND status = 'active'",
-                    (new_hash, now, user_id),
+                    (new_hash, verify_email, now, user_id),
                 )
                 changed = cur.rowcount > 0
                 if changed:
@@ -8569,6 +8588,7 @@ class UserStore:
         ip: str | None = None,
         user_agent: str | None = None,
         delete_identity: bool = False,
+        connection: aiosqlite.Connection | None = None,
     ) -> MemberDeactivationResult:
         """Remove ANOTHER member from one team and free that team's seat.
 
@@ -8584,9 +8604,13 @@ class UserStore:
         from bowhead_core.audit_actions import AuditAction
         from bowhead_core.team_subagent_store import TeamSubagentStore
 
-        async with diagnostic_connect(self.db_path) as db:
+        _require_read_transaction(connection)
+        if connection is not None and delete_identity:
+            raise ValueError("Account retirement must own its transaction")
+        async with nullcontext(connection) if connection is not None else diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("BEGIN IMMEDIATE")
+            if connection is None:
+                await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(
                     "SELECT u.status AS identity_status,u.email,tm.status AS membership_status "
@@ -8739,7 +8763,8 @@ class UserStore:
                     user_agent=user_agent,
                     conn=db,  # atomic — audit in the same tx
                 )
-                await db.commit()
+                if connection is None:
+                    await db.commit()
                 if delete_identity:
                     from bowhead_core.account_deletion import finish_account_retirement_execution
 

@@ -16,6 +16,8 @@ Dans **Sessions actives**, consultez la dernière activité enregistrée pour ch
 
 Choisissez le mode système, clair ou sombre, puis ajustez couleurs, fond, police, taille du texte, densité, angles ou animations. La page affiche l’apparence effective et sa provenance. Effacez un choix personnel pour reprendre le réglage par défaut. **Effacer l’apparence personnelle** efface le thème et les préférences de lecture personnels. Les styles et options d’accessibilité des graphiques se règlent séparément. [Choisir ou publier un style de graphique](chart-styles.fr-FR.md)
 
+**Affichage du déroulement** définit comment une conversation en cours montre ce que font ses agents : Liste (par défaut), Pastilles, Couloirs ou Chronologie. Le choix est enregistré aussitôt dans votre compte. Un choix fait sur la carte de déroulement d’une conversation modifie le même réglage ; il s’applique donc dans tout navigateur et sur tout appareil. Il ne change que ce que vous voyez, pas les réponses ni les résultats.
+
 ## Exportation
 
 Ouvrez le rapport et choisissez **Exporter**, dans **Plus** sur un écran étroit. Sélectionnez un format proposé. La page d’exportation personnelle explique les options. Pour compléter un PowerPoint existant, envoyez-le comme modèle dans le chat. [Remplir ou mettre à jour un modèle PowerPoint](powerpoint-templates.fr-FR.md)

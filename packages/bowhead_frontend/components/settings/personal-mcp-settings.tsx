@@ -110,7 +110,6 @@ export function PersonalMcpSettings() {
   const [connections, setConnections] = useState<PersonalMcpConnection[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [slackConnectable, setSlackConnectable] = useState(false);
-  const [oauthConnectable, setOauthConnectable] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PersonalMcpConnection | null>(null);
   const [name, setName] = useState("");
@@ -151,12 +150,11 @@ export function PersonalMcpSettings() {
   }, []);
   useEffect(() => {
     let active = true;
-    void personalMcpApi<{ enabled: boolean; slack_connectable?: boolean; oauth_connectable?: boolean }>("/capabilities")
+    void personalMcpApi<{ enabled: boolean; slack_connectable?: boolean }>("/capabilities")
       .then((capability) => {
         if (!active || !capability.enabled) return null;
         setEnabled(true);
         setSlackConnectable(Boolean(capability.slack_connectable));
-        setOauthConnectable(Boolean(capability.oauth_connectable));
         return personalMcpApi<{ connections: PersonalMcpConnection[] }>("");
       })
       .then((data) => {
@@ -249,7 +247,7 @@ export function PersonalMcpSettings() {
       resetForm();
       await load();
     } catch (cause) {
-      if (errorCode(cause) === "personal_mcp_needs_oauth" && oauthConnectable && !editing) {
+      if (errorCode(cause) === "personal_mcp_needs_oauth" && !editing) {
         // The service wants a sign-in: keep the member's input and offer it in place.
         setAuthType("oauth");
         setValue("");
@@ -363,7 +361,6 @@ export function PersonalMcpSettings() {
                   key={`${connection.id}:${connection.version}`}
                   connection={connection}
                   busy={busy}
-                  signInAvailable={oauthConnectable}
                   onSignIn={() => startSignIn({ connection_id: connection.id, version: connection.version }, false)}
                   onEdit={() => edit(connection)}
                   onRefresh={() => refresh(connection)}
@@ -464,7 +461,7 @@ export function PersonalMcpSettings() {
                       <option value="none">{t("none")}</option>
                       <option value="bearer">Bearer Token</option>
                       <option value="api_key">API Key</option>
-                      {oauthConnectable || editing?.auth_type === "oauth" ? <option value="oauth">{t("authSignIn")}</option> : null}
+                      <option value="oauth">{t("authSignIn")}</option>
                     </select>
                   </label>
                   {authType === "api_key" ? (
@@ -534,13 +531,8 @@ export function PersonalMcpSettings() {
   );
 }
 
-function connectionStatusText(
-  t: ReturnType<typeof useTranslations>,
-  connection: PersonalMcpConnection,
-  signInAvailable: boolean,
-): string {
+function connectionStatusText(t: ReturnType<typeof useTranslations>, connection: PersonalMcpConnection): string {
   if (connection.auth_type === "oauth") {
-    if (!signInAvailable && connection.status !== "disabled") return t("signInOff");
     if (connection.status === "ready") return t("signedInAt", { host: connection.provider_host ?? "" });
     if (connection.status === "authorizing") return t("signInNotFinished");
     if (connection.status === "needs_reauth") return t("signInEnded");
@@ -554,7 +546,6 @@ function connectionStatusText(
 function ConnectionEditor({
   connection,
   busy,
-  signInAvailable,
   onSignIn,
   onEdit,
   onRefresh,
@@ -562,7 +553,6 @@ function ConnectionEditor({
 }: {
   connection: PersonalMcpConnection;
   busy: boolean;
-  signInAvailable: boolean;
   onSignIn: () => void;
   onEdit: () => void;
   onRefresh: () => void;
@@ -605,7 +595,6 @@ function ConnectionEditor({
   const authorizing = signedIn && connection.status === "authorizing";
   // A signed-in connection whose sign-in ended, or that never finished signing in, waits for the owner.
   const waitingForSignIn = authorizing || (signedIn && connection.status === "needs_reauth");
-  const offerSignIn = signedIn && signInAvailable;
   // Enabling cannot stand in for signing in again: a connection waiting for sign-in can only be turned off.
   const canEnable = connection.status !== "ready" && !waitingForSignIn;
   return (
@@ -613,7 +602,7 @@ function ConnectionEditor({
       <legend>{connection.name}</legend>
       <p>{connection.endpoint}</p>
       <p className={`personal-mcp-connection-status is-${connection.status}`}>
-        {connectionStatusText(t, connection, signInAvailable)}
+        {connectionStatusText(t, connection)}
       </p>
       {connection.tools.map((tool) => (
         <label key={tool.id}>
@@ -649,7 +638,7 @@ function ConnectionEditor({
         </div>
       )}
       <div className="personal-mcp-connection-actions">
-        {offerSignIn && waitingForSignIn ? (
+        {waitingForSignIn ? (
           <button className="personal-mcp-connection-sign-in" type="button" onClick={onSignIn}>
             {authorizing ? t("continueSignInAction") : t("signInAgain")}
           </button>
@@ -659,7 +648,7 @@ function ConnectionEditor({
             {t("refreshTools")}
           </button>
         )}
-        {offerSignIn && !waitingForSignIn ? (
+        {signedIn && !waitingForSignIn ? (
           <button type="button" onClick={onSignIn}>
             {t("signInAgain")}
           </button>

@@ -22,8 +22,10 @@ public/legal/
 /app/(app)/team/settings/license/page.tsx
 /app/(app)/team/settings/oidc/page.test.tsx
 /app/(app)/team/settings/oidc/page.tsx
+/app/(app)/team/settings/integrations/wecom/
 /components/admin/audit/audit-filter-bar.tsx
 /components/admin/audit/audit-table.tsx
+/components/settings/wecom-integration-detail.tsx
 /components/settings/local-license.test.tsx
 /components/settings/local-license.tsx
 /components/settings/local-oidc.test.tsx
@@ -33,6 +35,7 @@ public/legal/
 /components/settings/team-theme.test.tsx
 /components/settings/team-theme.tsx
 /e2e/theme-appearance-v3.spec.ts
+/e2e/wecom-settings.spec.ts
 /edition/activation.test.tsx
 /edition/activation.tsx
 /edition/help-sources/
@@ -65,3 +68,5 @@ out-de-DE/
 out-fr-FR/
 # Visual self-check: the preview transform sent to the sandbox (npm run build:html-preview-transform).
 /dist/
+/edition/directory-provisioning.tsx
+/edition/directory-provisioning.test.tsx

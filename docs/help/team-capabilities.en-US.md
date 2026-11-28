@@ -14,6 +14,14 @@ Agents use the latest contents on their next run. A run already in progress keep
 
 A Plugin helps select resources. Whether a Tool or Skill can actually run still depends on the current user, Agent, and resource permissions and availability.
 
+When Coach is available, ask in chat, “Add Notion Team Knowledge to my Research Agent.” Coach adds the enabled team Plugin to your Agent's draft. Publish the draft from the Agent's **Release** tab to use the change. If the team connection needs authorization or the Plugin still needs setup, a team admin handles that first.
+
+## Answer from team Notion pages
+
+Team owners and admins can select **Notion Team Knowledge** under **Start from a template** when creating a Team Plugin. Choose the team's Notion source. In Tool Sources, authorize and enable the source and import the search and page-reading tools before using the template. You can include database queries when that tool is available. Review the source and tools, then save. The connection uses the Notion account chosen by the administrator, so use an account whose accessible content can be shared with the intended members.
+
+Add the Plugin to your Agent, then ask about a project decision or paste a Notion page link. The Agent looks up the answer and links to the supporting pages. To open a link in Notion, you need access to it in your own account. If the source is disconnected or reauthorized with a different account or workspace, ask a team admin to review the connection and the Plugin's tool selection.
+
 ## Turn off Plugins and built-in Tools
 
 - **Plugins**: each Plugin has a **Me** switch that applies only to you; the notice at the bottom lets you undo it. Team owners and team admins also see a **Team** switch. Before a team-wide change takes effect, Bowra lists the affected Agents (including built-in Agents) and scheduled tasks; the change applies from their next run. When the team turns a Plugin off, members cannot turn it back on for themselves.
@@ -24,7 +32,7 @@ A Plugin helps select resources. Whether a Tool or Skill can actually run still 
 
 Team owners and admins first see the existing list by choosing **Manage Team Plugins** in **Capability Center → Plugins**. This manager includes disabled team Plugins so administrators can enable them again. If there are no team Plugins yet, the page shows an empty state; select **Create Plugin** in the upper right to add one. Select a Plugin name to edit it, or select **Cancel** to return to the list. Enter a name and description, select Tools and Skills, then save. When a built-in connection offers a preset, such as Shopify, choose it under **Start from a template** to fill in the form first; nothing is saved until you save.
 
-Tools and Skills are listed in groups: one group for each team connection (team Tool Sources and enabled built-in third-party connections), then built-in Tools grouped as on the Tools page, then Skills. Each group shows how many of its items are selected, and groups that already contain a selection open automatically. Type in the search field to find an item by name, purpose, or source. An item that cannot be selected says why; when an admin can fix it, for example by confirming a Tool's category, the reason links to that setting. If a Tool or Skill already in the Plugin becomes unavailable, it appears at the top under **Selections no longer available**; clear it, then save.
+Tools and Skills are listed in groups: one group for each team connection (team Tool Sources and enabled built-in service connections), then built-in Tools grouped as on the Tools page, then Skills. Each group shows how many of its items are selected, and groups that already contain a selection open automatically. Type in the search field to find an item by name, purpose, or source. An item that cannot be selected says why; when an admin can fix it, for example by confirming a Tool's category, the reason links to that setting. If a Tool or Skill already in the Plugin becomes unavailable, it appears at the top under **Selections no longer available**; clear it, then save.
 
 Editing an existing Plugin updates the resources used by Agents that selected it on their next run. Before disabling one, tell affected Agent owners to update their configuration.
 

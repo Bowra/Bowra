@@ -1,0 +1,66 @@
+/* Owner draft trial (docs/sprints/agent-page-redesign-2026-11-24/trial-tech-design.md §7, canvas ⑪/⑫).
+   Violet marks the trial only: the band, the per-answer draft label, the divider and the composer chip; each one
+   also carries words, never colour alone. */
+:root {
+  --am-trial-ink: #5b21b6;
+  --am-trial-soft: #f3edff;
+  --am-trial-line: #d6c6f7;
+}
+[data-theme="dark"] {
+  --am-trial-ink: #c9b4fb;
+  --am-trial-soft: #231a38;
+  --am-trial-line: #45366b;
+}
+
+/* 测试用例 › 试用记录 */
+.am-trial-list-slot:empty { display: none; }
+.am-trial-list { display: grid; gap: 10px; margin-top: 18px; padding: 14px 16px; border-radius: var(--r-4); background: var(--c-surface); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); }
+.am-trial-list-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.am-trial-list-head h3 { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 0.9375rem; font-weight: 650; }
+.am-trial-list-meta { color: var(--c-ink-3); font-size: 0.75rem; font-weight: 400; }
+.am-trial-list-rows { margin: 0; padding: 0; list-style: none; display: grid; }
+.am-trial-list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: var(--hairline, 0.5px) solid var(--c-separator); }
+.am-trial-list-row:first-child { border-top: 0; }
+.am-trial-list-text { display: grid; gap: 2px; min-width: 0; }
+.am-trial-list-question { overflow-wrap: anywhere; font-size: 0.875rem; }
+.am-trial-list-row-meta { color: var(--c-ink-3); font-size: 0.75rem; }
+.am-trial-list-open { flex: none; padding: 6px 10px; border-radius: 999px; color: var(--c-accent-text); font-size: 0.8125rem; text-decoration: none; }
+.am-trial-list-open:hover { background: var(--c-surface-2); }
+.am-trial-list-open:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+
+/* The trial chat */
+.bh-trial-band { position: sticky; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px auto; width: min(840px, calc(100% - 32px)); box-sizing: border-box; padding: 10px 14px; border-radius: var(--r-3); background: var(--am-trial-soft); box-shadow: 0 0 0 1px var(--am-trial-line); color: var(--c-ink); }
+.bh-trial-band[data-state="ended"] { background: var(--c-surface-2); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); }
+.bh-trial-band-icon { flex: none; color: var(--am-trial-ink); }
+.bh-trial-band-text { flex: 1 1 240px; display: grid; gap: 2px; min-width: 0; font-size: 0.875rem; }
+.bh-trial-band-text b { color: var(--am-trial-ink); font-weight: 650; overflow-wrap: anywhere; }
+.bh-trial-band-meta { color: var(--c-ink-2); font-size: 0.75rem; }
+.bh-trial-band-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.bh-trial-notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 0 auto 8px; width: min(840px, calc(100% - 32px)); box-sizing: border-box; padding: 8px 12px; border-radius: var(--r-3); background: var(--c-surface-2); font-size: 0.8125rem; }
+.bh-trial-notice[data-tone="error"] { background: color-mix(in srgb, var(--c-danger) 10%, var(--c-surface)); color: var(--c-ink); }
+.bh-trial-notice-close { flex: none; border: 0; background: none; padding: 0; font: inherit; font-size: 0.75rem; color: var(--c-accent-text); text-decoration: underline; cursor: pointer; }
+.bh-trial-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 8px; border-radius: 999px; background: var(--am-trial-soft); box-shadow: 0 0 0 1px var(--am-trial-line); color: var(--am-trial-ink); font-size: 0.75rem; font-weight: 600; overflow-wrap: anywhere; }
+.bh-bot-block > .bh-trial-chip { margin: 2px 0 6px; }
+.bh-trial-divider { margin: 10px 0; padding: 4px 0; text-align: center; color: var(--am-trial-ink); font-size: 0.75rem; font-weight: 600; }
+.bh-trial-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.bh-trial-saved { display: flex; align-items: center; gap: 4px; margin: 4px 0 0; color: var(--c-ink-2); font-size: 0.8125rem; }
+.bh-trial-saved[data-tone="error"] { color: var(--c-danger); }
+.bh-trial-saved a { color: var(--c-accent-text); }
+.composer-v2__trial-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.composer-v2__trial-preparing { color: var(--c-ink-3); font-size: 0.75rem; }
+/* Unsaved Canvas edits: a plain note, not a warning (sending saves them). */
+.composer-v2__trial-hint { margin: 0; padding: 6px 12px 0; color: var(--c-ink-2); font-size: 0.8125rem; line-height: 1.5; }
+.bh-trial-confirm-line { color: var(--c-ink-2); font-weight: 600; }
+.bh-trial-first { display: grid; gap: 6px; margin: 0 auto 10px; width: min(840px, calc(100% - 32px)); box-sizing: border-box; }
+.bh-trial-first-title { margin: 0; font-size: 0.9375rem; font-weight: 600; color: var(--c-ink); }
+.bh-trial-first-meta { margin: 0; color: var(--c-ink-3); font-size: 0.75rem; }
+.bh-trial-first-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.bh-trial-first-list > .settings-button { max-width: 100%; white-space: normal; text-align: start; height: auto; min-block-size: 32px; }
+
+@media (max-width: 640px) {
+  .bh-trial-band { width: calc(100% - 24px); }
+  .bh-trial-band-actions { inline-size: 100%; }
+  /* Touch targets: beat the shared small-button height (:root:root .settings-button--sm). */
+  :root:root .bh-trial-band-actions > .settings-button { min-height: 44px; flex: 1 1 0; }
+  :root:root .bh-trial-first-list > .settings-button { min-height: 44px; }
+}

@@ -64,14 +64,39 @@ export function setMatrixSnapshot(snap: MatrixSnapshot | null): void {
   _emit();
 }
 
+/** Whether a delta belongs to the snapshot held: same projection digest (when both carry one) and every cell
+ * inside its rows and columns. A delta never adds rows or columns; those changes arrive as full snapshots. */
+function _deltaFits(cells: Record<string, MatrixCellVM>, projectionDigest: string | undefined): boolean {
+  const snap = _snapshot;
+  if (!snap) return false;
+  if (projectionDigest !== undefined && snap.projectionDigest !== undefined && projectionDigest !== snap.projectionDigest) return false;
+  const keys = Object.keys(cells);
+  if (keys.length === 0) return true;
+  const rows = new Set(snap.rows.map((r) => r.fileId));
+  const columns = new Set(snap.columns.map((c) => c.columnId));
+  return keys.every((key) => {
+    const sep = key.indexOf(":");
+    return sep > 0 && rows.has(key.slice(0, sep)) && columns.has(key.slice(sep + 1));
+  });
+}
+
 /** Delta-protocol entry: cells keyed `fileId:columnId`; buffer, then apply together.
- * Mark running/queued→done cells flashing; clear after FLASH_MS (pulse animation). */
-export function applyMatrixDelta(cells: Record<string, MatrixCellVM>, seq: number, runs?: MatrixRunVM[]): void {
+ * Mark running/queued→done cells flashing; clear after FLASH_MS (pulse animation).
+ * Returns false and applies nothing when the delta does not fit the snapshot held (step 1 S6): the caller
+ * reloads in full instead. */
+export function applyMatrixDelta(
+  cells: Record<string, MatrixCellVM>,
+  seq: number,
+  runs?: MatrixRunVM[],
+  projectionDigest?: string,
+): boolean {
+  if (!_deltaFits(cells, projectionDigest)) return false;
   for (const [key, cell] of Object.entries(cells)) _pending.set(key, cell);
   _pendingSeq = seq;
   if (runs !== undefined) _pendingRuns = runs;
-  if (_flushTimer) return;
+  if (_flushTimer) return true;
   _flushTimer = setTimeout(_flushPending, FLUSH_MS);
+  return true;
 }
 
 function _flushPending(): void {

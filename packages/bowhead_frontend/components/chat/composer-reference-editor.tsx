@@ -97,6 +97,7 @@ type Props = {
   hasAttachments?: boolean;
   entryMode?: ReferenceEntryMode;
   onChange: (document: InputDocument, scope: ComposerPersistenceScope) => void;
+  onPasteImages?: (clipboard: DataTransfer | null) => boolean;
   /** Intent only. The owning Composer must validate/admit/persist before issuing HTTP. */
   onSubmitIntent: (
     document: InputDocument,
@@ -243,6 +244,10 @@ function ScopedReferenceEditor(
         if (!current.isCurrent()) return;
         queryRef.current = current.readOnly ? null : value;
         setQuery(queryRef.current);
+      },
+      onPasteImages: (clipboard) => {
+        const current = latest.current;
+        return current.isCurrent() && !current.readOnly && Boolean(current.onPasteImages?.(clipboard));
       },
       onRejected: (reason) => {
         if (latest.current.isCurrent())

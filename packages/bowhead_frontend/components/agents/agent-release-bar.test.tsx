@@ -15,9 +15,11 @@ import {
   getAgentEvalManager,
   getAgentVersionCaseChanges,
   getAgentVersionWorkbench,
+  testAgentChange,
   type AgentVersionWorkbench,
 } from "@/lib/agents-api";
 import { AgentReleaseBar } from "./agent-release-bar";
+import { AgentTrialLayoutContext } from "./agent-trial-layout";
 import type { ReleaseBarHost } from "./agent-version-validation";
 import { AgentVersionWorkbenchPanel } from "./agent-version-workbench";
 import { releaseBarState } from "./release-bar-state";
@@ -361,6 +363,91 @@ describe("AgentVersionWorkbenchPanel with the release bar", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
+  it("asks before 测试这次修改 while cases are unsaved: 保存并测试 focused, or the saved cases only", async () => {
+    vi.mocked(testAgentChange).mockResolvedValue({} as never);
+    const save = vi.fn(async () => true);
+    renderPanel({ view: "proposals", releaseBar: host({ cases: { dirtyCount: 2, save } }) });
+    fireEvent.click(await waitFor(() => bar().getByRole("button", { name: "测试这次修改" })));
+    const dialog = await screen.findByRole("alertdialog", { name: "用例有 2 项修改还没保存" });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("保存并测试"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "只用已保存的用例测试" }));
+    await waitFor(() => expect(testAgentChange).toHaveBeenCalledTimes(1));
+    expect(save).not.toHaveBeenCalled();
+
+    fireEvent.click(await waitFor(() => bar().getByRole("button", { name: "测试这次修改" })));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "保存并测试" }));
+    await waitFor(() => expect(testAgentChange).toHaveBeenCalledTimes(2));
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("sums the latest test on 测试用例 over quality cases, with the safety check on its own line", async () => {
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({
+      ...PRIVATE_DRAFT,
+      candidate_identity: { audience_mode: "private", candidate_hash: `sha256:${"1".repeat(64)}`, candidate_id: "arc_1", revision_id: "arv_c", row_version: 1, state: "prepared", base_release_id: "arl_3" },
+      active_snapshot_identity: { id: "asn_1", hash: `sha256:${"2".repeat(64)}`, created_at: "2026-11-25T09:50:00Z", execution_id: "aex_1" },
+      primary_action: { kind: "activate_candidate", enabled: true, disabled_reason_codes: [] },
+      readiness: "ready",
+    });
+    const manager = suites(4) as unknown as { suites: Array<Record<string, unknown> & { revision: Record<string, unknown> }> };
+    vi.mocked(getAgentEvalManager).mockResolvedValue({
+      ...manager,
+      suites: [...manager.suites, { ...manager.suites[0], suite_id: "aes_p", suite_kind: "platform_contract", revision: { ...manager.suites[0].revision, suite_revision_id: "aev_p" } }],
+    } as never);
+    vi.mocked(getAgentVersionCaseChanges).mockResolvedValue({
+      kind: "agent_version_case_changes", schema_version: 1, execution_id: "aex_1",
+      snapshot: { id: "asn_1", hash: "h", created_at: "2026-11-25T09:50:00Z" },
+      baseline: { release_id: "arl_3", release_sequence: 3 }, candidate: { candidate_id: "arc_1", release_sequence: 4 },
+      summary: { case_count: 5, worse: 1, unstable: 0, better: 1, not_comparable: 0, unchanged_required_failures: 0 },
+      items: [
+        { suite_revision_id: "aev_1", suite_name: "门店周报", case_revision_id: "c1", case_key: "q1", case_label: "a", change: "better", classification: "x", reason_codes: [], key_case: false, baseline: null, candidate: { passed: 3, runs: 3 } },
+        { suite_revision_id: "aev_1", suite_name: "门店周报", case_revision_id: "c2", case_key: "q2", case_label: "b", change: "worse", classification: "x", reason_codes: [], key_case: false, baseline: null, candidate: { passed: 0, runs: 3 } },
+      ],
+      next_offset: null,
+    });
+    const onOpenRelease = vi.fn();
+    renderPanel({ view: "evaluate", releaseBar: host(), onOpenRelease });
+    const card = await screen.findByRole("region", { name: "最近一次测试" });
+    expect(await within(card).findByText("变好 1")).toBeTruthy();
+    expect(within(card).getByText("持平 2")).toBeTruthy();
+    expect(within(card).getByText("变差 1")).toBeTruthy();
+    expect(within(card).getByText("基础安全检查通过")).toBeTruthy();
+    expect(within(card).getByText(/草稿对比已发布的 v3/)).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "看全部结果" }));
+    expect(onOpenRelease).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".am-ci-test")).toBeNull();
+  });
+
+  it("points at the version history once the tested draft was released", async () => {
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...PRIVATE_DRAFT, next_draft_identity: null, private_release: null });
+    const onOpenHistory = vi.fn();
+    renderPanel({ view: "evaluate", releaseBar: host(), lastReleaseTest: { sequence: 3 }, onOpenHistory });
+    const card = await screen.findByRole("region", { name: "最近一次测试" });
+    expect(within(card).getByText("上次的测试随 v3 发布了，见版本历史")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "版本历史" }));
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts nothing when saving the cases fails", async () => {
+    const save = vi.fn(async () => false);
+    renderPanel({ view: "proposals", releaseBar: host({ cases: { dirtyCount: 1, save } }) });
+    fireEvent.click(await waitFor(() => bar().getByRole("button", { name: "测试这次修改" })));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "保存并测试" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(testAgentChange).not.toHaveBeenCalled();
+  });
+
+  it("names what blocks saving and links to the section that fixes it", async () => {
+    const onSelect = vi.fn();
+    renderPanel({
+      view: "proposals",
+      releaseBar: host({ dirty: true, saveBlocked: true, saveBlockedLink: { problem: "至少选择一个插件、工具或技能", label: "去「它能用什么」修改", onSelect } }),
+    });
+    await waitFor(() => expect(bar().getByText(/还不能保存：至少选择一个插件、工具或技能/)).toBeTruthy());
+    fireEvent.click(bar().getByRole("button", { name: "去「它能用什么」修改" }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(bar().getByRole("button", { name: "保存草稿" })).toHaveProperty("disabled", true);
+  });
+
   it("keeps a decline visible with the reviewer's reason and the next step it calls for", async () => {
     vi.mocked(getAgentVersionWorkbench).mockResolvedValue({
       ...PRIVATE_DRAFT,
@@ -416,5 +503,76 @@ describe("AgentVersionWorkbenchPanel with the release bar", () => {
     expect(bar().queryByRole("button", { name: /发布为|提交审批/ })).toBeNull();
     fireEvent.click(bar().getByRole("button", { name: "撤回提交…" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+  });
+});
+
+describe("试用草稿 on the release bar (Owner draft trial)", () => {
+  const trialHost = (overrides: Partial<NonNullable<ReleaseBarHost["trial"]>> = {}): NonNullable<ReleaseBarHost["trial"]> => ({
+    dirtyFields: [],
+    savedDraftEqualsRelease: false,
+    saveDraft: vi.fn(async () => true),
+    ...overrides,
+  });
+
+  it("is a quiet action next to the test and the release", async () => {
+    renderPanel({ releaseBar: host({ trial: trialHost() }) });
+    const tryDraft = await waitFor(() => bar().getByRole("button", { name: "试用草稿" }));
+    expect(tryDraft.className).toContain("ghost");
+    expect(bar().getByRole("button", { name: "发布为 v4…" }).className).toContain("primary");
+  });
+
+  it("is absent while the capability is off", async () => {
+    renderPanel({ releaseBar: host() });
+    await waitFor(() => expect(bar().getByRole("button", { name: "发布为 v4…" })).toBeTruthy());
+    expect(bar().queryByRole("button", { name: "试用草稿" })).toBeNull();
+  });
+
+  it("reads 试用审批中的版本 while the draft is in review", async () => {
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({
+      ...PRIVATE_DRAFT,
+      private_release: null,
+      candidate_identity: {
+        audience_mode: "custom",
+        candidate_hash: `sha256:${"1".repeat(64)}`,
+        candidate_id: "arc_1",
+        revision_id: "arv_4",
+        row_version: 2,
+        state: "pending",
+      },
+      display_state: "pending_review",
+      readiness: "ready",
+      primary_action: { kind: "wait_for_review", enabled: false, disabled_reason_codes: [] },
+    });
+    renderPanel({ releaseBar: host({ shared: true, liveAudience: "custom", trial: trialHost() }) });
+    await waitFor(() => expect(bar().getByRole("button", { name: "试用审批中的版本" })).toBeTruthy());
+  });
+
+  it("lists the trials below the cases on 测试用例", async () => {
+    const listSlot = document.createElement("div");
+    document.body.appendChild(listSlot);
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({
+      ...PRIVATE_DRAFT,
+      recent_trials: [{ session_id: "s_1", first_question: "本周销售情况怎么样？", last_message_at: "2026-11-25T06:41:00Z", turn_count: 1, drafts_used: [], released_as: null }],
+    });
+    try {
+      renderPanel({ view: "evaluate", releaseBar: host({ trial: trialHost({ listSlot }) }) });
+      await waitFor(() => expect(within(listSlot).getByRole("link", { name: "打开试用：本周销售情况怎么样？" })).toBeTruthy());
+      expect(within(listSlot).getByRole("button", { name: "新的试用" })).toBeTruthy();
+    } finally {
+      listSlot.remove();
+    }
+  });
+
+  it("steps the Canvas band's primary down to secondary beside a trial chat", () => {
+    const state = releaseBarState({ workbench: PRIVATE_DRAFT, kind: "prepare", test: "not_tested", hasOwnerCases: true, blockedByRegression: false, dirty: false, archived: false, shared: false })!;
+    renderIntl(
+      <AgentTrialLayoutContext.Provider value>
+        <AgentReleaseBar state={state} status="草稿有修改" meta={null} variant="canvas" actions={{ release: { label: "发布为 v4…", onSelect: vi.fn() } }} />
+      </AgentTrialLayoutContext.Provider>,
+      { locale: "zh-CN" },
+    );
+    const region = screen.getByRole("region", { name: "发布进度" });
+    expect(region.querySelectorAll(".settings-button--primary")).toHaveLength(0);
+    expect(within(region).getByRole("button", { name: "发布为 v4…" })).toBeTruthy();
   });
 });

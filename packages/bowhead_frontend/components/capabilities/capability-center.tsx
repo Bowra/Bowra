@@ -20,7 +20,6 @@ import {
 import {
   capabilityOverviewGroups,
 } from "@/lib/navigation-centers";
-import { builtinTools, localizedToolText } from "@/lib/tool-display";
 import {
   fetchBuiltinPlugins,
   fetchBuiltinTools,
@@ -28,7 +27,7 @@ import {
   type BuiltinToolState,
 } from "@/lib/builtin-resources-api";
 import { PluginStateList } from "./plugin-state-list";
-import { ToolStateList } from "./tool-state-list";
+import { ToolsCatalog } from "./tools-catalog";
 import { PersonalOverview, PluginOverview, SkillsOverview, ToolOverview, useResourceState } from "./resource-overview";
 import { teamRoleForUser } from "@/lib/settings-navigation";
 import styles from "./capability-center.module.css";
@@ -248,8 +247,8 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: CatalogType }) {
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState("");
-  // Team/personal state of built-in Plugins and Tools; null when unavailable,
-  // in which case the read-only Tool catalog below stays as it was.
+  // Team/personal state of built-in Plugins and Tools; null when unavailable, in which case the Tools page
+  // lists the built-in Tools read-only and the Plugins page explains the failure with a retry.
   const [plugins, setPlugins] = useState<BuiltinPluginsView | null>(null);
   const [stateTools, setStateTools] = useState<BuiltinToolState[] | null>(null);
   const [stateVersion, setStateVersion] = useState(0);
@@ -287,51 +286,6 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: CatalogType }) {
   }, [retry, stateVersion]);
   const reloadState = () => setStateVersion((value) => value + 1);
   const needle = query.trim().toLocaleLowerCase();
-  const builtin = builtinTools({
-    googleWorkspace: Boolean(me.capabilities?.google_workspace),
-  });
-  const rows =
-    type === "plugins"
-      ? []
-      : [
-          ...builtin.map((item) => ({
-            id: item.ref,
-            name: item.name,
-            description: item.blurb,
-            source: t("builtin_source"),
-            detail: t("runtime_access"),
-          })),
-          ...(catalog?.tools
-            .filter((item) => item.source_kind !== "native")
-            .map((item) => {
-              const text = localizedToolText(item);
-              return {
-                id: item.stable_ref,
-                ...text,
-                source: item.source_display_name || t("team_source"),
-                detail: t(item.selectable ? "selectable" : "unavailable"),
-              };
-            }) ?? []),
-        ];
-  const visible = rows.filter((item) =>
-    `${item.name} ${item.description} ${item.source}`.toLocaleLowerCase().includes(needle),
-  );
-  const renderRows = (items: typeof rows) => (
-    <ul className={styles.list}>
-      {items.map((item) => (
-        <li key={item.id}>
-          <div>
-            <h3>{item.name}</h3>
-            <p>{item.description}</p>
-          </div>
-          <div className={styles.meta}>
-            <span>{item.source}</span>
-            <small>{item.detail}</small>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
   const failed = (
     <div role="alert">
       <p>{t("load_failed")}</p>
@@ -349,52 +303,38 @@ function DiscoveryCatalog({ me, type }: { me: MeUser; type: CatalogType }) {
           className="ui-input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          aria-label={t("catalog_search")}
-          placeholder={t("catalog_search")}
+          aria-label={t(type === "tools" ? "tools_search" : "catalog_search")}
+          placeholder={t(type === "tools" ? "tools_search" : "catalog_search")}
         />
       </div>
       {error ? (
         failed
-      ) : !catalog || (type === "plugins" && stateRound !== retry) ? (
+      ) : !catalog || stateRound !== retry ? (
+        // Both catalogs wait for the Team state so the list does not change shape when it arrives.
         <p role="status">{t("loading")}</p>
+      ) : type === "plugins" ? (
+        plugins ? (
+          <PluginStateList
+            builtin={plugins.plugins}
+            team={catalog.capabilities}
+            teamMyDisabled={plugins.team_plugins_my_disabled}
+            admin={admin}
+            needle={needle}
+            onChanged={reloadState}
+          />
+        ) : (
+          failed
+        )
       ) : (
-        <>
-          {type === "plugins" ? (
-            plugins ? (
-              <PluginStateList
-              builtin={plugins.plugins}
-              team={catalog.capabilities}
-              teamMyDisabled={plugins.team_plugins_my_disabled}
-              admin={admin}
-              needle={needle}
-              onChanged={reloadState}
-              />
-            ) : (
-              failed
-            )
-          ) : type === "tools" && plugins && stateTools ? (
-            <>
-              <ToolStateList
-                tools={stateTools}
-                plugins={plugins.plugins}
-                admin={admin}
-                googleWorkspace={Boolean(me.capabilities?.google_workspace)}
-                needle={needle}
-                onChanged={reloadState}
-              />
-              {visible.some((item) => item.source !== t("builtin_source")) ? (
-                <section aria-label={t("external_tools")}>
-                  <h2 className="ui-section-title">{t("external_tools")}</h2>
-                  {renderRows(visible.filter((item) => item.source !== t("builtin_source")))}
-                </section>
-              ) : null}
-            </>
-          ) : visible.length === 0 ? (
-            <p role="status">{t(needle ? "no_results" : "catalog_empty")}</p>
-          ) : (
-            renderRows(visible)
-          )}
-        </>
+        <ToolsCatalog
+          me={me}
+          catalog={catalog}
+          states={stateTools}
+          plugins={plugins?.plugins ?? null}
+          admin={admin}
+          needle={needle}
+          onChanged={reloadState}
+        />
       )}
     </section>
   );

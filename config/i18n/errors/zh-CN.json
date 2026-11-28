@@ -110,6 +110,7 @@
   "client_refresh_required": "当前页面版本无法安全发起新的发送。请保留草稿并刷新页面。",
   "chart_selection_unavailable": "图表选择已变更或不可用。重新打开图表并选择范围后，再发送保留的草稿。",
   "presentation_selection_unavailable": "引用的演示文稿元素已变更或不可用。重新打开文件、在编辑里选中这个元素后，再发送保留的草稿。",
+  "document_selection_unavailable": "引用的 Word 段落或页面已变更或不可用。重新打开文件、再次引用这一段或这些页后，再发送保留的草稿。",
   "subagent_draft_unsaved_changes": "右侧有未保存修改。先保存或放弃修改，再发送这条消息；输入内容已保留。",
   "subagent_draft_store_unavailable": "草稿功能暂时不可用（服务可能正在升级），请稍后再试；你的智能体不受影响。",
   "clock_tamper": "服务器时间异常，当前操作暂不可用，请联系系统管理员检查系统时钟。",
@@ -527,10 +528,10 @@
   "source_projection_unavailable": "暂时无法确认这份报告的来源可见范围，请稍后重试。",
   "stale_license": "当前已安装更新的许可证，不能用旧许可证覆盖；请上传签发时间更晚的许可证。",
   "steer_parent_not_active": "原任务已不再运行，请刷新后重新发送补充内容。",
-  "subagent_action_forbidden": "只有当前有效负责人可以执行这个智能体操作，请刷新页面确认最新负责人和状态。",
+  "subagent_action_forbidden": "只有当前有效所有者可以执行这个智能体操作，请刷新页面确认最新所有者和状态。",
   "subagent_audience_invalid": "可见范围无效；请选择当前团队的有效成员或组，指定范围至少 1 个且最多 200 个。",
   "subagent_if_match_required": "修改前需要先刷新该智能体。",
-  "subagent_lifecycle_action_required": "该成员仍负责已启用的共享 Agent。请先到 Agent 管理页转移负责人或停用这些 Agent。",
+  "subagent_lifecycle_action_required": "该成员仍是已启用的共享 Agent 的所有者。请先到 Agent 管理页转移所有权或停用这些 Agent。",
   "subagent_version_conflict": "该智能体已在其他位置发生变更，请刷新后重新应用你的修改。",
   "submission_abandoned": "这次发送已被放弃，请重新发送。",
   "submission_contract_inactive": "当前发送模式已下线，请刷新页面后重试。",
@@ -661,7 +662,7 @@
   "agent_automation_execution_context_missing": "此历史评估缺少可验证的 CI 授权上下文，请使用当前有效授权发起新评估。",
   "agent_automation_authority_lost": "评估因原授权失效而停止，请检查权限后再重新发起。",
   "agent_automation_preparation_not_found": "当前授权和操作身份下没有可用的候选准备记录。",
-  "agent_eval_plan_behind": "测试用例已在该候选版本准备后保存，测试计划已落后。请负责人在智能体发布页点击“更新测试计划”，再重新运行对比。",
+  "agent_eval_plan_behind": "测试用例已在该候选版本准备后保存，测试计划已落后。请所有者在智能体发布页点击“更新测试计划”，再重新运行对比。",
   "skill_write_conflict": "此 Skill 在保存期间发生了变化。请先读取当前版本，再提交修改。",
   "document_not_found": "所选文档已不可用，消息内容已保留。",
   "document_revision_conflict": "所选草稿已变更或无法继续修改，请打开当前草稿后重试；消息内容已保留。",
@@ -754,5 +755,5 @@
   "personal_mcp_sign_in_renewal_unavailable": "续期登录时服务没有响应。你的登录仍然有效，请稍后重试。",
   "personal_mcp_oauth_endpoint_locked": "登录式连接不能修改地址。如需使用其他地址，请新建连接。",
   "personal_mcp_oauth_sign_in_required": "此连接需要通过登录服务来创建，请点击「继续登录」。",
-  "personal_mcp_oauth_unavailable": "当前部署暂不支持登录式连接。"
+  "tool_disabled_by_team": "团队已关闭这个内置工具，不能再添加到智能体或插件。已经选了它的智能体和插件保持不变，运行时不会使用它。负责人或管理员可在「能力中心 → 工具」重新开启。"
 }

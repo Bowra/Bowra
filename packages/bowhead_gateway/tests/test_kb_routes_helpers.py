@@ -269,3 +269,42 @@ def test_resolve_kb_mime_recovers_csv_and_allows_it() -> None:
         assert _resolve_kb_mime(sniffed, "门店销售.CSV") == "text/csv", sniffed
     assert "text/csv" in _ALLOWED_MIMES
     assert _resolve_kb_mime("text/plain", "notes.txt") == "text/plain"
+
+
+# ─── Space viewer: read-only for Space knowledge ─────────────────
+
+
+class _ViewerStore:
+    """Fake user store: u_alice is a viewer of ws_42 in team_test."""
+
+    async def get_user_team_id(self, user_id: str) -> str:
+        return "team_test"
+
+    async def get_workspace_team_id(self, ws_id: str) -> str:
+        return "team_test"
+
+    async def get_member_role(self, ws_id: str, user_id: str) -> str | None:
+        return "viewer" if (ws_id, user_id) == ("ws_42", "u_alice") else None
+
+    async def get_workspace(self, ws_id: str) -> dict | None:
+        return {"id": ws_id, "status": "active"} if ws_id == "ws_42" else None
+
+    async def get_team_role(self, user_id: str, team_id: str) -> str | None:
+        return None
+
+    async def is_team_admin(self, user_id: str) -> bool:
+        return False
+
+
+async def test_scope_context_marks_space_viewer_read_only() -> None:
+    from bowhead_gateway.routes.kb import _make_scope_context_checked
+    from starlette.requests import Request
+
+    app = SimpleNamespace(state=SimpleNamespace(user_store=_ViewerStore()))
+    request = Request({"type": "http", "headers": [(b"x-space-id", b"ws_42")], "app": app})
+    ctx = await _make_scope_context_checked(_user(), request)
+    assert ctx.space_viewer is True
+    own_upload = _file(scope="space", scope_id="ws_42", uploaded_by="u_alice")
+    enriched = _enrich_dto(own_upload, ctx)
+    assert enriched.can_delete is False
+    assert enriched.can_change_scope is False

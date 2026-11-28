@@ -58,6 +58,7 @@ import {
 } from "@/lib/theme-config";
 
 import styles from "./personal-appearance-settings.module.css";
+import { RunningViewStyleSetting } from "./running-view-style-setting";
 
 type Option<T extends string> = {
   value: T;
@@ -364,6 +365,11 @@ export function PersonalAppearanceSettings() {
             }
           />
         </SettingRow>
+
+        {/* Chat running state R3.2: its own account setting, also written by the running card's switcher. */}
+        <RunningViewStyleSetting
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.runningView" label={t("runningView.title")} />}
+        />
       </AppearanceSection>
 
       <AppearanceSection

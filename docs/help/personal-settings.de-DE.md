@@ -16,6 +16,8 @@ Unter **Aktive Sitzungen** sehen Sie die letzte erfasste Aktivität je Gerät. A
 
 Wählen Sie die Systemeinstellung, den hellen oder den dunklen Modus. Passen Sie Farben, Hintergrund, Schrift, Schriftgröße, Dichte, Rundung und Animation an. Die Seite zeigt die wirksame Darstellung und ihre Herkunft. Entfernen Sie eine persönliche Einstellung, um den Standard zu übernehmen. Mit **Persönliche Darstellung löschen** werden persönliche Design- und Leseeinstellungen gelöscht. Diagrammstil und Barrierefreiheit von Diagrammen haben eigene Einstellungen. [Diagrammstile wählen oder veröffentlichen](chart-styles.de-DE.md)
 
+**Ablaufansicht** legt fest, wie eine laufende Unterhaltung zeigt, was ihre Agents tun: Liste (Standard), Chips, Bahnen oder Zeitachse. Die Auswahl wird sofort in Ihrem Konto gespeichert. Eine Auswahl auf der Ablaufkarte einer Unterhaltung ändert dieselbe Einstellung und gilt daher in jedem Browser und auf jedem Gerät. Sie ändert nur Ihre Ansicht, nicht die Antworten oder Ergebnisse.
+
 ## Export
 
 Öffnen Sie den Bericht und wählen Sie **Exportieren**, auf schmalen Bildschirmen unter **Mehr**. Wählen Sie ein angebotenes Format. Die persönliche Exportseite erklärt die Optionen. Um eine vorhandene PowerPoint-Datei auszufüllen, verwenden Sie sie als Vorlage im Chat. [Eine PowerPoint-Vorlage ausfüllen oder aktualisieren](powerpoint-templates.de-DE.md)

@@ -63,6 +63,33 @@ class KbMaintenanceStore:
             )
             await db.commit()
 
+    async def team_files_page(self, team_id: str, *, after: str, limit: int):
+        """One Team's rows after a file ID in file ID order, soft-deleted rows included: their chunks remain."""
+        async with diagnostic_connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM kb_files WHERE team_id=? AND file_id>? ORDER BY file_id LIMIT ?", (team_id, after, limit)) as cursor:
+                rows = await cursor.fetchall()
+            return [_row_to_dto(row) for row in rows]
+
+    async def state_value(self, key: str) -> dict[str, Any] | None:
+        async with diagnostic_connect(self.path) as db, db.execute("SELECT value FROM kb_maintenance_state WHERE key=?", (key,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            value = json.loads(row[0])
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    async def save_state_value(self, key: str, value: dict[str, Any]) -> None:
+        async with diagnostic_connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO kb_maintenance_state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(value, sort_keys=True)),
+            )
+            await db.commit()
+
     async def observe(self, file, decision, *, index_version: str):
         item = {
             "state": decision.state,

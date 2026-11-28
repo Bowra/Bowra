@@ -426,7 +426,7 @@ describe("scoped model settings", () => {
     unconfigured.config.media.active.image_gen = "";
     vi.mocked(configApi.fetchAdminLlmConfig).mockResolvedValue(unconfigured);
     show("external");
-    const imageRow = (await screen.findByText("图片生成")).parentElement as HTMLElement;
+    const imageRow = (await screen.findByText("图片生成")).closest(".overview-external-rows > div") as HTMLElement;
     expect(within(imageRow).getByText("未配置")).toBeTruthy();
     fireEvent.click(within(imageRow).getByRole("button", { name: "配置" }));
     expect(navigation.push).toHaveBeenCalledWith("/team/settings/models/external/image/");

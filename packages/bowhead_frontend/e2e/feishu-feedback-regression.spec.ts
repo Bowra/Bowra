@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { mockAuthedApp } from "./_app-mocks";
+import { rememberResultsOpen } from "./_results-open";
 
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
@@ -211,6 +212,8 @@ test.describe("Feishu feedback regression dogfood", () => {
 
   test("owner report intent follows same-session soft navigation, history, and reload", async ({ page }) => {
     await mockAuthedApp(page);
+    // The owner left Results open in this conversation (chat running state R2.7); `report=1` maximizes it.
+    await rememberResultsOpen(page, ["sess_owner_report"]);
     await page.route("**/api/v1/sessions/sess_owner_report", async (route) => {
       await route.fulfill(json({
         session: {

@@ -223,9 +223,9 @@ async def test_an_upload_is_saved_as_a_new_file_that_later_edits_version(stores,
     assert second["version_no"] == 2 and second["new_file"] is False
 
     reopened = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": upload.id}).json()
-    assert reopened["edited_copies"] == [{"artifact_id": second["artifact_id"], "filename": "客户模板（已修改）.pptx", "version_no": 2}], (
-        "Reopening the upload offers the newest version of the file already made from it"
-    )
+    assert reopened["edited_copies"] == [
+        {"artifact_id": second["artifact_id"], "filename": "客户模板（已修改）.pptx", "version_no": 2, "made_by": "you"}
+    ], "Reopening the upload offers the newest version of the file already made from it"
 
 
 async def test_reopening_an_upload_offers_the_copy_a_helper_made_from_it(stores, client):
@@ -256,7 +256,36 @@ async def test_reopening_an_upload_offers_the_copy_a_helper_made_from_it(stores,
     )
     await _agent_deck(store)
     inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": upload.id}).json()
-    assert inventory["edited_copies"] == [{"artifact_id": copy.id, "filename": "客户模板（已修改）.pptx", "version_no": 1}]
+    assert inventory["edited_copies"] == [{"artifact_id": copy.id, "filename": "客户模板（已修改）.pptx", "version_no": 1, "made_by": "ai"}]
+
+    # Only three versions are kept: once the first one (which named the upload) is pruned, the newest still does.
+    second = await store.put_bytes(
+        content=_deck("再改一次"),
+        filename="客户模板（已修改）.pptx",
+        mime=PPTX,
+        created_by="u_owner",
+        source="python_sandbox",
+        kind="deliverable",
+        created_by_turn="t1",
+        session_id="s_e",
+        workspace_id="ws_e",
+        version_of_target=copy.id,
+    )
+    assert second.derived_from == upload.id
+    import aiosqlite
+
+    async with aiosqlite.connect(store.db_path) as db:  # what pruning does to the first version alone
+        await db.execute("UPDATE artifacts SET deleted_at='2026-11-25T12:30:44+00:00' WHERE id=?", (copy.id,))
+        await db.commit()
+    reopened = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": upload.id}).json()
+    expected = [{"artifact_id": second.id, "filename": "客户模板（已修改）.pptx", "version_no": 2, "made_by": "ai"}]
+    assert reopened["edited_copies"] == expected
+    # A copy saved before versions carried the source: its pruned first version is still read.
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE artifacts SET derived_from=NULL WHERE id=?", (second.id,))
+        await db.commit()
+    legacy = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": upload.id}).json()
+    assert legacy["edited_copies"] == expected
 
 
 async def test_the_owner_fences_hide_other_sessions_and_denied_spaces(stores, client):
@@ -293,6 +322,38 @@ def test_results_offer_editing_only_for_owned_decks():
     pdf = SimpleNamespace(kind="deliverable", producer_kind="python_sandbox", source="python_sandbox", mime="application/pdf", filename="deck.pdf")
     assert _presentation_editable(deck) and _presentation_editable(upload)
     assert not _presentation_editable(template) and not _presentation_editable(pdf)
+
+
+async def test_the_inventory_says_which_version_a_save_pushes_out(stores, client):
+    """Design §13.7: before saving, the editor can say the oldest kept version will go."""
+    store, _ = stores
+    http, _, _ = client
+    async with aiosqlite.connect(store.db_path) as db:
+        # Minimal shape of AccessControlStore's share grants; without the table pruning fails closed.
+        await db.execute("CREATE TABLE IF NOT EXISTS resource_grants (resource_kind TEXT, resource_id TEXT, revoked_at TEXT)")
+        await db.commit()
+    first = await _agent_deck(store, "t1")
+    second = await _agent_deck(store, "t2", first.id, title="v2")
+    inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": second.id}).json()
+    assert inventory["drops_on_save"] == [], "Without the KB store nothing is pruned, so nothing is said"
+
+    protected: set[str] = set()
+
+    async def artifact_ids_in_kb(ids):
+        return [item for item in ids if item in protected]
+
+    http.app.state.kb_files_store = SimpleNamespace(artifact_ids_in_kb=artifact_ids_in_kb)
+    inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": second.id}).json()
+    assert inventory["drops_on_save"] == [], "Three versions after the save: none goes"
+    saved = http.post(
+        "/api/v1/sessions/s_e/results/presentation-edits",
+        json={"artifact_id": second.id, "edits": [_title_edit(inventory, "v2", "v3")]},
+    ).json()
+    inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": saved["artifact_id"]}).json()
+    assert inventory["drops_on_save"] == [1]
+    protected.add(first.id)
+    inventory = http.post("/api/v1/sessions/s_e/results/presentation-edit/inventory", json={"artifact_id": saved["artifact_id"]}).json()
+    assert inventory["drops_on_save"] == [], "A version in a knowledge base stays"
 
 
 async def test_a_running_turn_holds_pruning_of_a_file_only_people_saved(stores, client):

@@ -25,6 +25,7 @@ ResultCapability = Literal[
     "view_run_details",
     "feedback_unsupported",
     "edit_presentation",
+    "edit_document",
 ]
 ResultRelationRole = Literal[
     "report_chart_data",
@@ -172,6 +173,9 @@ class ResultsFiltersV1(_ContractModel):
     primary: Literal["all", "deliverables", "evidence"] = "all"
     secondary: Literal["all", "data", "code", "input"] = "all"
     technical_only: bool = False
+    # Chat running state R2.3: only the files one Turn saved (stored `created_by_turn`); the report and code are not
+    # a Turn's files. Older clients omit it.
+    turn_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ResultsQueryRequestV1(_ContractModel):

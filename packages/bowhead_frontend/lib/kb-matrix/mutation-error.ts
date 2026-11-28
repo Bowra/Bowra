@@ -17,11 +17,32 @@ export type KbMatrixMutationErrorKey =
   | "err_cross_verify_not_applicable"
   | "err_promotion_sole"
   | "err_invalid_promotion"
+  | "err_column_name_invalid"
+  | "err_column_name_duplicate"
+  | "err_column_busy"
+  | "err_matrix_column_limit_add"
+  | "err_matrix_column_limit_create"
+  | "err_matrix_file_limit_add"
+  | "err_matrix_file_limit_create"
+  | "err_matrix_files_batch_limit"
+  | "err_matrix_name_invalid"
+  | "err_remove_requires_owner"
   | "err_cell_value_too_large"
   | "err_cell_value_not_serializable"
   | "err_cell_not_edited"
   | "err_cell_verified_required"
   | "err_cell_verify_requires_done"
+  | "err_verify_files_empty"
+  | "err_verify_files_not_in_matrix"
+  | "err_visibility_personal_files"
+  | "err_visibility_personal_files_hidden"
+  | "err_visibility_runs_active"
+  | "err_navigation_role_private"
+  | "err_navigation_columns_block_private"
+  | "err_visibility_unavailable"
+  | "err_creator_required"
+  | "err_grad_personal_files"
+  | "err_visibility_changed"
   | "err_grad_rows_failed"
   | "err_grad_too_many_files"
   | "grad_over"
@@ -72,11 +93,19 @@ export const KB_MATRIX_MUTATION_ERROR_KEY: Readonly<
   cross_verify_not_applicable: "err_cross_verify_not_applicable",
   promote_must_be_sole_change: "err_promotion_sole",
   invalid_promotion: "err_invalid_promotion",
+  column_name_invalid: "err_column_name_invalid",
+  matrix_name_invalid: "err_matrix_name_invalid",
   cell_value_too_large: "err_cell_value_too_large",
   cell_value_not_serializable: "err_cell_value_not_serializable",
   not_edited: "err_cell_not_edited",
   verified_required: "err_cell_verified_required",
   verify_requires_done: "err_cell_verify_requires_done",
+  matrix_verify_files_empty: "err_verify_files_empty",
+  // Step 1 S8: only-me matrices.
+  matrix_navigation_role_private: "err_navigation_role_private",
+  matrix_visibility_unavailable: "err_visibility_unavailable",
+  matrix_creator_required: "err_creator_required",
+  matrix_visibility_changed: "err_visibility_changed",
   graduation_rows_failed: "err_grad_rows_failed",
   column_name_too_long: "err_grad_colname_long",
   empty_matrix: "err_grad_empty",
@@ -115,6 +144,16 @@ function columnsValue(payload: Record<string, unknown>): string {
     : "";
 }
 
+/** The file names a refusal lists (the caller's own files; at most the first 20 from the server). */
+function filesValue(payload: Record<string, unknown>): string {
+  return Array.isArray(payload.files)
+    ? payload.files
+        .map((f) => (f && typeof f === "object" && "name" in f ? String((f as { name: unknown }).name) : ""))
+        .filter(Boolean)
+        .join(", ")
+    : "";
+}
+
 /**
  * Map create/edit/graduate failures without exposing backend prose, codes, or
  * HTTP function/status fallbacks.
@@ -126,6 +165,88 @@ export function kbMatrixMutationError(
     return { key: isNetworkFailure(error) ? "err_mutation_network" : "err_mutation_generic" };
   }
 
+  if (
+    error.code === "matrix_column_limit" ||
+    error.code === "matrix_file_limit"
+  ) {
+    // count is what the matrix holds now (0 for a new matrix); requested is the size after the change.
+    const count = Number(error.payload.count ?? 0);
+    const columns = error.code === "matrix_column_limit";
+    const key: KbMatrixMutationErrorKey =
+      count > 0
+        ? columns
+          ? "err_matrix_column_limit_add"
+          : "err_matrix_file_limit_add"
+        : columns
+          ? "err_matrix_column_limit_create"
+          : "err_matrix_file_limit_create";
+    return {
+      key,
+      values: {
+        limit: Number(error.payload.limit ?? 0),
+        count,
+        requested: Number(error.payload.requested ?? 0),
+      },
+    };
+  }
+  if (error.code === "matrix_files_batch_limit") {
+    return {
+      key: "err_matrix_files_batch_limit",
+      values: {
+        limit: Number(error.payload.limit ?? 0),
+        requested: Number(error.payload.requested ?? 0),
+      },
+    };
+  }
+  if (error.code === "matrix_remove_requires_owner") {
+    return {
+      key: "err_remove_requires_owner",
+      values: {
+        edited: Number(error.payload.edited ?? 0),
+        verified: Number(error.payload.verified ?? 0),
+      },
+    };
+  }
+  if (error.code === "matrix_verify_files_not_in_matrix") {
+    return {
+      key: "err_verify_files_not_in_matrix",
+      values: { count: Number(error.payload.count ?? 0) },
+    };
+  }
+  if (error.code === "matrix_personal_files_block_space") {
+    // Name the caller's own personal files; other people's are only counted.
+    const count = Number(error.payload.count ?? 0);
+    return count > 0
+      ? { key: "err_visibility_personal_files", values: { count, files: filesValue(error.payload) } }
+      : { key: "err_visibility_personal_files_hidden", values: { count: Number(error.payload.hidden ?? 0) } };
+  }
+  if (error.code === "matrix_graduation_personal_files") {
+    return {
+      key: "err_grad_personal_files",
+      values: { count: Number(error.payload.count ?? 0), files: filesValue(error.payload) },
+    };
+  }
+  if (error.code === "matrix_visibility_runs_active") {
+    return { key: "err_visibility_runs_active", values: { count: Number(error.payload.count ?? 0) } };
+  }
+  if (error.code === "matrix_navigation_columns_block_private") {
+    return { key: "err_navigation_columns_block_private", values: { cols: columnsValue(error.payload) } };
+  }
+  if (error.code === "column_name_duplicate") {
+    return {
+      key: "err_column_name_duplicate",
+      values: { name: String(error.payload.name ?? "") },
+    };
+  }
+  if (error.code === "column_busy") {
+    return {
+      key: "err_column_busy",
+      values: {
+        name: String(error.payload.name ?? ""),
+        count: Number(error.payload.pending ?? 0),
+      },
+    };
+  }
   if (error.code === "too_many_files_to_graduate") {
     return {
       key: "err_grad_too_many_files",

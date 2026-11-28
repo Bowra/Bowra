@@ -6,9 +6,14 @@ import sqlite3
 import pytest
 from bowhead_core.agent_change_proposal_store import AgentChangeProposalError
 from bowhead_core.agent_dependency_compiler import AgentDependencyCompiler
+from bowhead_core.notion_knowledge import NOTION_KNOWLEDGE_SKILL, NOTION_MCP_URL, NOTION_RESEARCH_OPERATIONS, notion_knowledge_tool_ref
+from bowhead_core.resource_disable import KEY_TEAM_PLUGINS_DISABLED
 from bowhead_core.team_plugin_store import TeamPluginStore
+from bowhead_core.user_settings_store import UserSettingsStore
+from bowhead_core.user_store import TeamToolSource, _now
 from bowhead_gateway.agent_coach_resources import AgentCoachResources
 from bowhead_gateway.routes import agents
+from cryptography.fernet import Fernet
 from starlette.requests import Request
 from test_agent_coach_proposals import working_agent
 from test_agents_routes import app_client as app_client
@@ -140,3 +145,91 @@ async def test_removed_optional_resource_fields_compile_as_empty(validation_cont
     request["operations"] = [{"op": "remove", "path": "/definition/skill_grants"}]
     result = await resource.authoring.validate_change(**request)
     assert result["validation_report"]["checks"]["dependencies"]["status"] == "passed"
+
+
+@pytest.mark.parametrize("state", ["enabled", "disabled_by_me", "disabled_by_team", "source_disabled"])
+async def test_member_can_add_an_available_notion_plugin_to_owned_draft(validation_context, monkeypatch, state):
+    resource, target, path = validation_context
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    team_id = resource.user.team_id
+    user_id = resource.user.id
+    plugins = TeamPluginStore(str(path))
+    source = TeamToolSource(
+        id="ots_notion_knowledge",
+        team_id=team_id,
+        name="Company Notion",
+        kind="mcp",
+        base_url=NOTION_MCP_URL,
+        status="enabled",
+        selected_op_ids=list(NOTION_RESEARCH_OPERATIONS),
+        tools_schema=[
+            {"name": operation, "annotations": {"readOnlyHint": True, "destructiveHint": False}} for operation in NOTION_RESEARCH_OPERATIONS
+        ],
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    await resource.store.create_team_tool_source(source)
+    await resource.store.update_team_tool_source_auth(team_id, source.id, auth_type="oauth", auth={"oauth_tokens": {"access_token": "fixture"}})
+    exact = await AgentDependencyCompiler().exact_grants_for_legacy_names((NOTION_KNOWLEDGE_SKILL,), team_id=team_id)
+    plugin = await plugins.create(
+        team_id=team_id,
+        actor_user_id="owner_1",
+        name="Notion Team Knowledge",
+        description="Search and cite team pages",
+        tool_refs=[notion_knowledge_tool_ref(source.id, operation, "initial") for operation in NOTION_RESEARCH_OPERATIONS],
+        skill_grants=[grant.to_canonical_dict() for grant in exact],
+    )
+    existing = await plugins.create(
+        team_id=team_id, actor_user_id="owner_1", name="Web reading", description="Read supplied pages", tool_refs=["web_fetch"], skill_grants=[]
+    )
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE teams SET created_by_user_id='owner_1' WHERE id=?", (team_id,))
+        baseline = json.loads(db.execute("SELECT definition_json FROM team_subagent_working_copy").fetchone()[0])
+        baseline["capability_ids"] = [existing["id"]]
+        db.execute("UPDATE team_subagent_working_copy SET definition_json=?", (json.dumps(baseline),))
+        live_release = db.execute("SELECT live_release_id FROM team_subagent WHERE id=?", (target["agent_id"],)).fetchone()[0]
+    assert not await resource.store.is_team_admin(user_id, team_id)
+    catalog = await resource.search(kind="capability", query="Notion", offset=0, limit=10)
+    (item,) = catalog["items"]
+    assert item["can_author"] is False
+    reference = item["reference"]
+    selected = await resource.get(reference=reference)
+    assert selected["ok"] and selected["resource"]["can_select"] is True, selected
+    assert selected["resource"]["tool_refs"] == plugin["tool_refs"]
+    request = intent(target, "capability_ids", [existing["id"], plugin["id"]])
+    preview = await resource.authoring.validate_change(**request)
+    assert preview["dependency_validation"]["status"] == "ready", preview
+
+    if state == "disabled_by_me":
+        await UserSettingsStore(path).set(user_id, KEY_TEAM_PLUGINS_DISABLED, json.dumps([plugin["id"]]))
+        current = await resource.get(reference=reference)
+        assert not current["resource"]["can_select"] and current["resource"]["restriction"] == state
+    elif state == "disabled_by_team":
+        await plugins.set_enabled(team_id=team_id, plugin_id=plugin["id"], enabled=False, expected_row_version=plugin["row_version"])
+    elif state == "source_disabled":
+        await resource.store.update_team_tool_source_meta(team_id, source.id, status="disabled")
+
+    async def save_binding():
+        return await resource.authoring.propose_change(
+            **request,
+            rationale="Add the team's Notion Plugin",
+            request_id="install-notion",
+            turn_id="turn-install",
+            resource_context={"original_parent": target, "resources": [{"reference": reference}]},
+        )
+
+    if state == "enabled":
+        receipt = await save_binding()
+        assert receipt["effect"] == "draft_updated" and not receipt["released"]
+        replay = await save_binding()
+        assert replay["proposal_id"] == receipt["proposal_id"] and not replay["applied_by_this_call"]
+        baseline["capability_ids"].append(plugin["id"])
+    else:
+        code = "resource_binding_plugin_disabled_by_me" if state == "disabled_by_me" else "resource_binding_plugin_unavailable_or_changed"
+        with pytest.raises(AgentChangeProposalError, match=code):
+            await save_binding()
+
+    with sqlite3.connect(path) as db:
+        saved = json.loads(db.execute("SELECT definition_json FROM team_subagent_working_copy").fetchone()[0])
+        assert saved == baseline
+        assert db.execute("SELECT live_release_id FROM team_subagent WHERE id=?", (target["agent_id"],)).fetchone()[0] == live_release

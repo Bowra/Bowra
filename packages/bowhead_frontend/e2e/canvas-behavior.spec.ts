@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { rememberResultsOpen } from "./_results-open";
 
 import { enableResultsWorkspace, mockAuthedApp } from "./_app-mocks";
 
@@ -58,6 +59,7 @@ async function open(page: Page, width: number, restoreSavedReport = false) {
   }
   // The Results toolbar belongs to the Results workspace (deployment flag); the e2e mock reports it on.
   await enableResultsWorkspace(page);
+  await rememberResultsOpen(page, [SESSION]);
   await page.goto(`/?session=${SESSION}`);
   await expect(page.locator("textarea").first()).toBeEditable({ timeout: 15_000 });
 }
@@ -74,7 +76,12 @@ async function hydrate(page: Page, sections: unknown[] = SECTIONS) {
 
 /** At mobile width, switch to “成果” first (segmented control’s second item). */
 async function showResults(page: Page, width: number) {
-  if (width >= 1200) return;
+  if (width >= 1200) {
+    // A report no longer opens Results by itself (chat running state R2.5): the reader opens it from the strip.
+    const edge = page.locator(".v2-ws-edge--canvas");
+    if (await edge.isVisible().catch(() => false)) await edge.click();
+    return;
+  }
   await page.getByRole("tab", { name: /^成果/ }).click();
   // Mobile Results first shows navigation (list/details): open this report.
   const nav = page.getByRole("navigation", { name: "成果导航" });

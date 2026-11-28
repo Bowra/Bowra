@@ -25,6 +25,7 @@ import { fetchLlmCatalog, type LlmCatalog } from "@/lib/llm-config-api";
 import { usePreferredModel } from "@/lib/use-preferred-model";
 import { trackComposerEvent } from "@/lib/metrics";
 import { CharIcon } from "@/components/char-icon";
+import { useAppRouter } from "@/lib/use-app-router";
 
 /** Menu width (px); useMenu narrows to available width on narrow screens. */
 const MODEL_MENU_WIDTH = 252;
@@ -60,6 +61,18 @@ function ModelMenuItem({
       {...itemProps}
     >
       {children}
+    </button>
+  );
+}
+
+/** For team owners and administrators: the way from choosing a model to managing the team's models (2026-11-25 walk). */
+function ManageModelsItem({ label }: { label: string }) {
+  const router = useAppRouter();
+  const itemProps = useMenuItem({ role: "menuitem", label, onSelect: () => router.push("/team/settings/models/") });
+  return (
+    <button type="button" className="composer-v2__model-menu-item legacy-menu-model-item legacy-menu-model-item--manage" {...itemProps}>
+      <span className="legacy-menu-model-mark" />
+      <span>{label}</span>
     </button>
   );
 }
@@ -287,6 +300,7 @@ export function ModelPicker({
               })}
             </div>
           ))}
+          {canManageModels ? <ManageModelsItem label={t("manage")} /> : null}
         </div>
       </MenuFloating>
     </div>

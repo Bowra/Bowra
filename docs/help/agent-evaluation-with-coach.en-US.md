@@ -11,7 +11,7 @@ If a member gave a thumbs down without a comment, Coach first asks what's wrong 
 
 ## Review suggestions without choosing every item
 
-Coach's changes to an existing Agent are already in its draft. Check them in **Configure** and use the existing undo controls if needed; no second acceptance is required.
+Coach's changes to an existing Agent are already in its draft. Check them in **Configure** and use the existing undo controls if needed; no second acceptance is required. In Chat, a **Written into the draft** row under Coach's answer names the Agent and the changed fields, with **View in canvas** and **Test and release on the manage page**.
 
 For a pending proposal in **Configure**, review its purpose and affected fields, then choose **Save these changes to draft**. Expand **Review or adjust changes** only when you want to inspect differences or take part of the proposal.
 
@@ -50,6 +50,17 @@ Automatic reruns are collapsed below the results. Expand them when needed; **Che
 On **Evaluate**, you can remove any case, including the last one, then choose **Save tests**. Saving no cases removes your custom suite from future tests; earlier results stay in history. You can add cases again at any time. A removed suite cannot be run on its own. **Test this change** still runs the basic safety check.
 
 Having no custom cases does not prevent release and does not require an acceptance reason. The page and shared-Agent review state that answer quality has not been evaluated. Other safety checks, actual test failures and shared-Agent review still apply.
+
+### Test cases on the new Agent page
+
+When your team has the new Agent page, the **Evaluate** tab is called **Test cases**, and the only test button is **Test this change** on the release bar. From top to bottom:
+
+- **Latest test**: when it ran, what it compared (the draft against which released version), how many of your own cases got better, stayed the same or got worse, and the basic safety check on its own line as passed or failed. When the draft changed after the test, it says the current draft hasn't been tested yet. **See all results** opens the details on **Versions**. Right after a release it says the last test was released with vN and points to the version history.
+- One sentence on how cases are used; the basic safety check always runs too, with nothing for you to maintain.
+- **Suggestions to adopt**: cases suggested by Coach, AI or conversations wait here instead of on **Configure**, and the tab shows how many there are. Adopting adds them to the suite below. While the suite has unsaved changes you can't adopt; save or discard them first.
+- **The suite**: the **Add a case** menu has Write one, Draft from conversations and Suggest cases automatically. The suite's "⋯" holds **Test on released vN** (runs these cases on the released version alone), the last results on the released version, running the basic safety check on its own, rerunning after important changes, and updating to the current defaults. When the Agent has no draft, the footer also offers **Test on released vN** once the cases are saved.
+
+Case changes are saved in the suite itself: with unsaved changes, the footer says how many and offers **Discard changes** and **Save cases**. **Test this change** then asks first: **Save and test**, or **Test with the saved cases only**; unsaved changes don't take part in the test. Leaving the page with unsaved cases asks you first.
 
 ## Check Coach's verdicts
 

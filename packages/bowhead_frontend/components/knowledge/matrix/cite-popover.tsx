@@ -72,6 +72,21 @@ export function locateExcerpt(
   };
 }
 
+/**
+ * Where the quote sits, for the source line (document matrix step 1 S7): the page when the file
+ * has pages (PDF, slides, images), otherwise the paragraph from the chunk position. Cells written
+ * before S7 keep the page they stored and have no chunk position.
+ */
+export function sourcePlaceLabel(
+  t: ReturnType<typeof useTranslations>,
+  page: number | null | undefined,
+  chunkIndex: number | null | undefined,
+): string | null {
+  if (page != null) return t("page_n", { n: page });
+  if (chunkIndex != null && chunkIndex > 0) return t("paragraph_n", { n: chunkIndex });
+  return null;
+}
+
 export interface CitePopoverProps {
   anchor: DOMRect;
   fileId: string;
@@ -83,6 +98,7 @@ export function CitePopover({ anchor, fileId, fileName, cell }: CitePopoverProps
   const t = useTranslations("kbMatrix");
   const chunk = useKbChunkContent(fileId, cell.chunkId, undefined, { single: true });
   const located = chunk.status === "ready" ? locateExcerpt(chunk.content, cell.sourceExcerpt) : null;
+  const place = sourcePlaceLabel(t, cell.page, cell.chunkIndex);
 
   const left = Math.max(8, Math.min(anchor.right - 288, (typeof window !== "undefined" ? window.innerWidth : 1440) - 296));
   const top = anchor.bottom + 6;
@@ -104,7 +120,7 @@ export function CitePopover({ anchor, fileId, fileName, cell }: CitePopoverProps
       </div>
       <div className="src">
         {fileName}
-        {cell.page != null ? ` · ${t("page_n", { n: cell.page })}` : ""}
+        {place ? ` · ${place}` : ""}
       </div>
     </div>
   );

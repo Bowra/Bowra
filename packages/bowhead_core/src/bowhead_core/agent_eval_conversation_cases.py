@@ -128,6 +128,27 @@ _PENDING_FEEDBACK_SQL = (
 )
 
 
+# Case candidates (存为用例) also take the Owner's own trial Turns of this Agent: answers its saved draft
+# gave in an Owner draft trial (trial-tech-design §5). Nobody else's trial is ever readable here, and the
+# alignment loop keeps reading ordinary Turns only.
+_OWNER_TRIAL_ORIGIN = """(session.origin='normal' OR (
+  session.origin='agent_trial' AND binding.user_id=:user
+  AND EXISTS(SELECT 1 FROM agent_owner_trial_turn trial
+             WHERE trial.turn_id=turn.id AND trial.agent_id=binding.requested_agent_id AND trial.owner_user_id=:user)
+))"""
+assert _READABLE_TURNS_SQL.count("session.origin='normal'") == 1
+_READABLE_TURNS_WITH_OWNER_TRIALS_SQL = _READABLE_TURNS_SQL.replace("session.origin='normal'", _OWNER_TRIAL_ORIGIN)
+
+
+async def _candidate_turns_sql(db: aiosqlite.Connection, *, include_owner_trials: bool) -> str:
+    from bowhead_core.sqlite_readable_schema import readable_table_exists
+
+    # A frozen legacy single-file database has no trials.
+    if include_owner_trials and await readable_table_exists(db, "agent_owner_trial_turn"):
+        return _READABLE_TURNS_WITH_OWNER_TRIALS_SQL
+    return _READABLE_TURNS_SQL
+
+
 class AgentEvalConversationError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
@@ -135,13 +156,16 @@ class AgentEvalConversationError(RuntimeError):
 
 
 async def list_conversation_candidates(
-    db_path: str, *, team_id: str, agent_id: str, user_id: str, limit: int = MAX_CANDIDATES
+    db_path: str, *, team_id: str, agent_id: str, user_id: str, limit: int = MAX_CANDIDATES, include_owner_trials: bool = False
 ) -> list[dict[str, Any]]:
-    """Newest first; a question preview and who shared it, never the answer."""
+    """Newest first; a question preview and who shared it, never the answer.
+
+    ``include_owner_trials`` adds the requester's own Owner-draft-trial Turns of this Agent.
+    """
     async with open_shared_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            _READABLE_TURNS_SQL + " ORDER BY answered_at DESC,turn.id DESC LIMIT :limit",
+            await _candidate_turns_sql(db, include_owner_trials=include_owner_trials) + " ORDER BY answered_at DESC,turn.id DESC LIMIT :limit",
             {"team": team_id, "agent": agent_id, "user": user_id, "limit": max(1, min(limit, MAX_CANDIDATES))},
         ) as cursor:
             rows = await cursor.fetchall()
@@ -157,7 +181,9 @@ async def list_conversation_candidates(
     ]
 
 
-async def read_conversation_turns(db_path: str, *, team_id: str, agent_id: str, user_id: str, turn_ids: Sequence[str]) -> list[dict[str, str]]:
+async def read_conversation_turns(
+    db_path: str, *, team_id: str, agent_id: str, user_id: str, turn_ids: Sequence[str], include_owner_trials: bool = False
+) -> list[dict[str, str]]:
     """Every requested turn, in request order, or `agent_eval_conversation_unavailable`.
 
     A turn the requester can't read (someone else's unshared or withdrawn Turn, or one that no longer
@@ -170,7 +196,7 @@ async def read_conversation_turns(db_path: str, *, team_id: str, agent_id: str, 
     async with open_shared_ctx(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            _READABLE_TURNS_SQL + " AND turn.id IN (SELECT value FROM json_each(:turns))",
+            await _candidate_turns_sql(db, include_owner_trials=include_owner_trials) + " AND turn.id IN (SELECT value FROM json_each(:turns))",
             {"team": team_id, "agent": agent_id, "user": user_id, "turns": json.dumps(unique)},
         ) as cursor:
             rows = {str(row["turn_id"]): row for row in await cursor.fetchall()}

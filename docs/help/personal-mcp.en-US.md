@@ -12,7 +12,7 @@ Saved credentials cannot be read back. Leave credentials blank while editing to 
 
 ## Sign in to a service with your own account
 
-Some MCP services ask you to sign in with your own account instead of giving you a token, for example Notion, Linear, Sentry or n8n. When your deployment offers it, choose **Sign in to the service** under **Authentication**. If you leave **No authentication** and the service asks for a sign-in, the dialog switches to it and names where you will sign in.
+Some MCP services ask you to sign in with your own account instead of giving you a token, for example Notion, Linear, Sentry or n8n. Choose **Sign in to the service** under **Authentication**. If you leave **No authentication** and the service asks for a sign-in, the dialog switches to it and names where you will sign in.
 
 1. Enter a name and the remote MCP address, then choose **Continue to Sign In**.
 2. Sign in at the service and approve the access it asks for. Some services let you narrow what Bowhead may do (for example read only); the tools that work later follow that choice.
@@ -24,12 +24,12 @@ A sign-in that was cancelled or not finished shows **Sign-in not finished** with
 
 Some services only accept apps registered by their administrator (for example GitHub, Google and Microsoft). Bowhead cannot sign in to those yet; use a personal token or API key if the service offers one.
 
-| Situation                                                           | Where to connect                        | Whose account the service sees                  |
-| ------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------- |
-| The team shares one service account managed by an administrator     | Team settings → Tool Sources            | The administrator's sign-in, shared by the team |
-| Each person should act as themselves and the service offers sign-in | My Connections → Sign in to the service | Your own                                        |
-| The service gives you a personal token or API key                   | My Connections → Bearer Token / API Key | Your own                                        |
-| Slack                                                               | My Connections → Connect My Slack       | Your own, through the team's Slack app          |
+| Situation                                                           | Where to connect                                | Whose account the service sees                  |
+| ------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| The team shares one service account managed by an administrator     | Capability Center → Tools → Manage tool sources | The administrator's sign-in, shared by the team |
+| Each person should act as themselves and the service offers sign-in | My Connections → Sign in to the service         | Your own                                        |
+| The service gives you a personal token or API key                   | My Connections → Bearer Token / API Key         | Your own                                        |
+| Slack                                                               | My Connections → Connect My Slack               | Your own, through the team's Slack app          |
 
 ## Connect your Slack
 

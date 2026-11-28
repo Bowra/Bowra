@@ -96,21 +96,26 @@ def is_uniform(image: Any) -> bool:
 
 
 def tile(images: Sequence[Any], labels: Sequence[str]) -> Any:
-    """One sheet: ``SHEET_COLUMNS`` columns of ``SHEET_TILE_WIDTH`` px tiles, each labelled."""
+    """One sheet: ``SHEET_COLUMNS`` columns of ``SHEET_TILE_WIDTH`` px tiles, each labelled and at its image's aspect.
+
+    A row is as tall as its tallest tile, so HTML screens of different heights are not stretched.
+    """
     from PIL import Image, ImageDraw
 
     pad, label_height = 10, 20
-    first = images[0]
-    tile_height = round(first.height * SHEET_TILE_WIDTH / first.width)
-    rows = (len(images) + SHEET_COLUMNS - 1) // SHEET_COLUMNS
-    columns = min(SHEET_COLUMNS, len(images))
-    sheet = Image.new("RGB", (columns * (SHEET_TILE_WIDTH + pad) + pad, rows * (tile_height + label_height + pad) + pad), (200, 204, 210))
+    sized = [image.resize((SHEET_TILE_WIDTH, max(1, round(image.height * SHEET_TILE_WIDTH / image.width)))) for image in images]
+    rows = [sized[start : start + SHEET_COLUMNS] for start in range(0, len(sized), SHEET_COLUMNS)]
+    heights = [max(item.height for item in row) for row in rows]
+    columns = min(SHEET_COLUMNS, len(sized))
+    sheet = Image.new("RGB", (columns * (SHEET_TILE_WIDTH + pad) + pad, sum(heights) + len(rows) * (label_height + pad) + pad), (200, 204, 210))
     draw = ImageDraw.Draw(sheet)
-    for index, (image, label) in enumerate(zip(images, labels, strict=True)):
-        row, column = divmod(index, SHEET_COLUMNS)
-        x, y = pad + column * (SHEET_TILE_WIDTH + pad), pad + row * (tile_height + label_height + pad)
-        draw.text((x, y + 3), label, fill=(20, 20, 20))
-        sheet.paste(image.resize((SHEET_TILE_WIDTH, tile_height)), (x, y + label_height))
+    y = pad
+    for row_index, row in enumerate(rows):
+        for column, (image, label) in enumerate(zip(row, labels[row_index * SHEET_COLUMNS :], strict=False)):
+            x = pad + column * (SHEET_TILE_WIDTH + pad)
+            draw.text((x, y + 3), label, fill=(20, 20, 20))
+            sheet.paste(image, (x, y + label_height))
+        y += heights[row_index] + label_height + pad
     return sheet
 
 
@@ -238,22 +243,25 @@ def render_image_view(data: bytes) -> dict[str, Any]:
 
 
 SCREEN_HEIGHT = 800
-# A screen ends in the middle of the tallest blank band between these heights below its top. Cut every 800 px, 60 of
-# 110 cuts in 25 agent pages ran through content, and models fixed charts that only looked clipped at a screen edge
-# (docs/sprints/chat-dogfood-findings-2026-11-23/spike.md §6).
+# A screen ends in the middle of the lowest blank band between these heights below its top. Cut every 800 px, 60 of
+# 110 cuts in 25 agent pages ran through content, and models fixed charts that only looked clipped at a screen edge.
+# The tallest band moved slide footers to the next screen and cut solid covers, and models reflowed decks to fit the
+# screens; the lowest band keeps a slide with its footer (docs/sprints/chat-dogfood-findings-2026-11-23/spike.md §6).
 MIN_SCREEN_HEIGHT = 400
 MIN_BLANK_BAND = 8
 # A blank row has at most this many colour changes across its width, such as the edges of a card.
 MAX_BLANK_ROW_CHANGES = 6
 _COLOUR_STEP = 48
-# The sheet's background colour; it fills a screen below its cut.
-SCREEN_FILL = (200, 204, 210)
+# Without a measured layout, a blank row must also be light and near-neutral on average: rows of a solid colour block
+# (a purple divider slide) have few colour changes too, and cuts inside them read as overflowing strips (an observed deployment).
+NEUTRAL_LIGHT_MIN = 180
+NEUTRAL_SPREAD = 30
 
 
 @dataclass(frozen=True)
 class _Screen:
-    image: Any  # the screen, filled to SCREEN_HEIGHT
-    part: Any  # the part of the page it shows
+    image: Any  # the part of the page the screen shows, at its own height: grey filled up to 800 px read as page
+    # whitespace, and a helper reflowed a deck to fit the screens (an observed deployment, findings spike §6)
     through_content: bool  # its bottom cut runs through content: no blank band was found
 
 
@@ -269,7 +277,13 @@ def _blank_rows(image: Any) -> list[bool]:
     changes = ImageChops.add(ImageChops.add(red, green), blue).point(lambda value: 255 if value > _COLOUR_STEP else 0)
     # A one-pixel-wide box resize gives each row's mean; float mode keeps single changes countable.
     means = array("f", changes.convert("F").resize((1, height), Image.Resampling.BOX).tobytes())
-    return [mean * (width - 1) / 255 <= MAX_BLANK_ROW_CHANGES + 0.5 for mean in means]
+    colours = image.convert("RGB").resize((1, height), Image.Resampling.BOX).tobytes()
+    blank = []
+    for row, mean in enumerate(means):
+        red, green, blue = colours[3 * row : 3 * row + 3]
+        low, high = min(red, green, blue), max(red, green, blue)
+        blank.append(mean * (width - 1) / 255 <= MAX_BLANK_ROW_CHANGES + 0.5 and low >= NEUTRAL_LIGHT_MIN and high - low <= NEUTRAL_SPREAD)
+    return blank
 
 
 def _screen_cuts(image: Any) -> list[tuple[int, int, bool]]:
@@ -282,15 +296,15 @@ def _screen_cuts(image: Any) -> list[tuple[int, int, bool]]:
         if height - top <= SCREEN_HEIGHT:
             cuts.append((top, height, False))
             break
-        best, best_length, start = None, 0, None
+        best, start = None, None
         for row in range(top + MIN_SCREEN_HEIGHT, top + SCREEN_HEIGHT + 1):
             if not blank[row]:
                 start = None
                 continue
             start = row if start is None else start
-            if row - start + 1 >= best_length:
-                best, best_length = (start + row) // 2, row - start + 1
-        if best is not None and best_length >= MIN_BLANK_BAND:
+            if row - start + 1 >= MIN_BLANK_BAND:
+                best = (start + row) // 2
+        if best is not None:
             cuts.append((top, best, False))
             top = best
         else:
@@ -299,19 +313,26 @@ def _screen_cuts(image: Any) -> list[tuple[int, int, bool]]:
     return cuts
 
 
-def _screens(image: Any) -> list[_Screen]:
-    """A page capture cut at blank bands into screens of at most 1280x800, each filled to 800 px with ``SCREEN_FILL``."""
-    from PIL import Image
+def _screens(image: Any, layout: Any = None) -> list[_Screen]:
+    """A page capture cut into screens of at most 1280x800, each at its own height.
 
-    screens = []
-    for top, bottom, through_content in _screen_cuts(image):
-        part = image.crop((0, top, image.width, bottom))
-        screen = part
-        if part.height < SCREEN_HEIGHT:
-            screen = Image.new("RGB", (image.width, SCREEN_HEIGHT), SCREEN_FILL)
-            screen.paste(part, (0, 0))
-        screens.append(_Screen(screen, part, through_content))
-    return screens
+    With the page's measured layout (``visual_layout.PageLayout``) screens end at its block boundaries; without one,
+    at blank bands of the pixels (``_screen_cuts``).
+    """
+    if layout is not None:
+        from bowhead_core.visual_layout import screen_cuts
+
+        return [_Screen(image.crop((0, cut.top, image.width, cut.bottom)), cut.crossing is not None) for cut in screen_cuts(layout, image.height)]
+    return [_Screen(image.crop((0, top, image.width, bottom)), through_content) for top, bottom, through_content in _screen_cuts(image)]
+
+
+def _screen_sizes(indices: Sequence[int], screens: Sequence[_Screen]) -> str:
+    """``1280x740 px`` for one screen, ``1280 px wide and 740, 780 px tall`` for several."""
+    width = screens[indices[0]].image.width
+    heights = [screens[index].image.height for index in indices]
+    if len(heights) == 1:
+        return f"{width}x{heights[0]} px"
+    return f"{width} px wide and {', '.join(str(height) for height in heights)} px tall"
 
 
 def _cut_through(indices: Iterable[int], screens: Sequence[_Screen]) -> str:
@@ -323,17 +344,58 @@ def _cut_through(indices: Iterable[int], screens: Sequence[_Screen]) -> str:
     )
 
 
+def _element_or_region_view(image: Any, layout: Any, element: str | None, region: Any) -> dict[str, Any]:
+    """One element (a ref) or one part of an HTML capture, at the capture's resolution (visual-geometry §5b)."""
+    from bowhead_core import visual_layout as vl
+
+    try:
+        if element is not None:
+            crop, description = vl.element_target(layout, element, image.height)
+        else:
+            crop, description = vl.region_target(region, image.width, image.height, layout.height if layout is not None else image.height)
+    except vl.ViewTargetInvalid as exc:
+        return {"status": "not_completed", "reason": "view_target_invalid", "message": str(exc)}
+    left, right = min(crop.x, image.width - 1), min(crop.x + crop.w, image.width)
+    slices = vl.crop_slices(layout, crop)
+    parts = [image.crop((left, top, right, bottom)) for top, bottom in slices]
+    label = f"Element {element}" if element is not None else "Region"
+    heights = ", ".join(str(part.height) for part in parts)
+    size = f"{right - left}x{parts[0].height} px" if len(parts) == 1 else f"{right - left} px wide and {heights} px tall"
+    rest = f"page y {slices[-1][1]:,}-{crop.bottom:,}" if slices[-1][1] < crop.bottom else None
+    return {
+        "status": "shown",
+        "pages": 1,
+        "crop": True,
+        "shown": f"{description}, {size}" + ("" if len(parts) == 1 else f" in {len(parts)} images"),
+        "not_shown": rest,
+        "page_px": [right - left, max(part.height for part in parts)],
+        "images": [{**encode(part), "label": label if len(parts) == 1 else f"{label}, part {n}"} for n, part in enumerate(parts, start=1)],
+    }
+
+
 def render_screens_view(
-    png: bytes, *, kind: str, pages: Sequence[int] | None = None, detail: str = "sheet", text_present: bool = True
+    png: bytes,
+    *,
+    kind: str,
+    pages: Sequence[int] | None = None,
+    detail: str = "sheet",
+    text_present: bool = True,
+    layout: dict[str, Any] | None = None,
+    element: str | None = None,
+    region: Any = None,
 ) -> dict[str, Any]:
     """An HTML page capture (slice B) as screens; an SVG capture as one image.
 
-    Screens are cut at blank bands of the page (``_screen_cuts``), each filled to 1280x800. Default:
-    the first screen at full width and, for a longer page, every screen in a numbered sheet. ``detail`` ``full`` shows up to ``MAX_FULL_PAGES`` chosen screens at
-    full width. A capture whose screens are all one colour while the page has text is
-    ``blank_render``.
+    With the page's measured ``layout`` (``visual_layout``) screens end at the page's block boundaries, each screen is
+    named by its page range, block and elements, and the measured findings come with the view; without one they end at
+    blank bands of the pixels. Each screen has its own height. Default: the first screen at full width and, for a longer
+    page, every screen in a numbered sheet. ``detail`` ``full`` shows up to ``MAX_FULL_PAGES`` chosen screens at full
+    width. ``element`` (a ref) or ``region`` (page pixels) shows one element or part instead. A capture whose screens are
+    all one colour while the page has text is ``blank_render``.
     """
     from PIL import Image
+
+    from bowhead_core import visual_layout as vl
 
     image = Image.open(io.BytesIO(png))
     image.load()
@@ -352,42 +414,71 @@ def render_screens_view(
             "page_px": [image.width, image.height],
             "images": [{**encode(image), "label": "SVG", "page": 1}],
         }
-    screens = _screens(image)
+    page_layout = None
+    if isinstance(layout, dict):
+        try:
+            page_layout = vl.parse_layout(layout)
+        except vl.LayoutInvalid:
+            page_layout = None
+    if element is not None or region is not None:
+        return _element_or_region_view(image, page_layout, element, region)
+    screens = _screens(image, page_layout)
     total = len(screens)
-    if text_present and all(is_uniform(screen.part) for screen in screens):
+    if text_present and all(is_uniform(screen.image) for screen in screens):
         return {"status": "not_completed", "reason": "blank_render", "pages": total}
+    cuts = vl.screen_cuts(page_layout, image.height) if page_layout is not None else None
+
+    def facts(view: dict[str, Any], lines: Sequence[int], mapped: Sequence[int] = ()) -> dict[str, Any]:
+        if page_layout is not None and cuts is not None:
+            view["screen_notes"] = [vl.screen_line(page_layout, cuts, index, image.height) for index in lines]
+            if mapped:
+                view["screen_map"] = vl.screen_map(page_layout, cuts, mapped, image.height)
+            view["layout_findings"] = vl.findings_sentence(page_layout)
+        return view
+
+    def through(indices: Iterable[int]) -> str:
+        # The layout's screen lines name what a cut crosses; pixel cuts say it here.
+        return "" if page_layout is not None else _cut_through(indices, screens)
+
     wanted = sorted({index for index in (pages if pages is not None else range(total)) if 0 <= index < total})
     if not wanted:
         return {"status": "not_completed", "reason": "render_failed", "pages": total}
-    width, height = screens[0].image.width, SCREEN_HEIGHT
+    width = screens[0].image.width
     if detail == "full" or len(wanted) == 1:
         shown, rest = wanted[:MAX_FULL_PAGES], wanted[MAX_FULL_PAGES:]
         noun = "screen" if len(shown) == 1 else "screens"
-        return {
-            "status": "shown",
-            "pages": total,
-            "shown": f"{noun} {page_ranges([i + 1 for i in shown])}, each at {width}x{height} px{_cut_through(shown, screens)}",
-            "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
-            "page_px": [width, height],
-            "images": [{**encode(screens[index].image), "label": f"Screen {index + 1}", "page": index + 1} for index in shown],
-        }
+        return facts(
+            {
+                "status": "shown",
+                "pages": total,
+                "shown": f"{noun} {page_ranges([i + 1 for i in shown])}, {_screen_sizes(shown, screens)}{through(shown)}",
+                "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
+                "page_px": [width, max(screens[index].image.height for index in shown)],
+                "images": [{**encode(screens[index].image), "label": f"Screen {index + 1}", "page": index + 1} for index in shown],
+            },
+            shown,
+        )
     in_sheet, rest = wanted[:MAX_PAGES_PER_SHEET], wanted[MAX_PAGES_PER_SHEET:]
     sheet = tile([screens[index].image for index in in_sheet], [f"Screen {index + 1}" for index in in_sheet])
-    tile_height = round(height * SHEET_TILE_WIDTH / width)
-    return {
-        "status": "shown",
-        "pages": total,
-        "shown": (
-            f"screen {wanted[0] + 1} at {width}x{height} px, then screens {page_ranges([i + 1 for i in in_sheet])} in 1 sheet, "
-            f"each screen at {SHEET_TILE_WIDTH}x{tile_height} px{_cut_through(in_sheet, screens)}"
-        ),
-        "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
-        "page_px": [SHEET_TILE_WIDTH, tile_height],
-        "images": [
-            {**encode(screens[wanted[0]].image), "label": f"Screen {wanted[0] + 1}", "page": wanted[0] + 1},
-            {**encode(sheet), "label": f"screens {page_ranges([i + 1 for i in in_sheet])}", "pages": [i + 1 for i in in_sheet]},
-        ],
-    }
+    tile_height = round(max(screens[index].image.height for index in in_sheet) * SHEET_TILE_WIDTH / width)
+    return facts(
+        {
+            "status": "shown",
+            "pages": total,
+            "shown": (
+                f"screen {wanted[0] + 1} at {_screen_sizes([wanted[0]], screens)}, then screens {page_ranges([i + 1 for i in in_sheet])} "
+                f"in 1 sheet, each screen {SHEET_TILE_WIDTH} px wide{through(in_sheet)}"
+            ),
+            "not_shown": f"screens {page_ranges([i + 1 for i in rest])}" if rest else None,
+            "page_px": [SHEET_TILE_WIDTH, tile_height],
+            "images": [
+                {**encode(screens[wanted[0]].image), "label": f"Screen {wanted[0] + 1}", "page": wanted[0] + 1},
+                {**encode(sheet), "label": f"screens {page_ranges([i + 1 for i in in_sheet])}", "pages": [i + 1 for i in in_sheet]},
+            ],
+        },
+        [wanted[0]],
+        in_sheet,
+    )
 
 
 def html_content_snapshot(text: str) -> dict[str, Any]:
@@ -689,10 +780,13 @@ def visual_worker_entry(control: dict[str, Any], data: bytes, extra: dict[str, b
     if op == "screens_view":
         view = render_screens_view(
             data,
-            kind=control.get("kind") or "html",
+            kind=control.get("capture_kind") or "html",
             pages=control.get("pages"),
             detail=control.get("detail") or "sheet",
             text_present=bool(control.get("text_present")),
+            layout=control.get("layout"),
+            element=control.get("element"),
+            region=control.get("region"),
         )
         if "svg" in extra:
             view["snapshot"] = svg_content_snapshot(extra["svg"])

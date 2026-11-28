@@ -1,17 +1,18 @@
 # Ajouter un outil MCP d’équipe
 
-Les propriétaires et administrateurs peuvent ajouter un outil MCP dans **Paramètres de l’équipe → Sources d’outils** pour que les Agents utilisent certaines capacités d’un service externe. Vous ajoutez le service et ses outils sélectionnés ; cela ne donne pas automatiquement aux membres un accès à un compte de ce service.
+Les propriétaires et administrateurs peuvent ajouter un outil MCP dans **Centre de capacités → Outils → Gérer les sources d’outils** pour que les Agents utilisent certaines capacités d’un service externe. Vous ajoutez le service et ses outils sélectionnés ; cela ne donne pas automatiquement aux membres un accès à un compte de ce service.
 
 Si chaque membre doit utiliser son propre compte sur le service plutôt qu’un compte partagé, les membres peuvent s’authentifier dans **Mes connexions** ; voir [Connecter un service MCP personnel](personal-mcp.fr-FR.md).
 
 ## Ajouter le service et sélectionner les outils
 
-1. Ouvrez **Paramètres de l’équipe → Sources d’outils → Ajouter un outil MCP**.
+1. Ouvrez **Centre de capacités → Outils → Gérer les sources d’outils**, onglet **Sources d’outils externes**, puis **Ajouter un outil MCP**.
 2. Choisissez **Serveur MCP** et saisissez son adresse. Si nécessaire, fournissez les identifiants ou terminez l’autorisation demandée.
 3. Attendez le chargement des outils, puis sélectionnez ceux nécessaires aux Agents.
 4. Saisissez un nom de source et confirmez. La liste permet ensuite de la consulter, vérifier, désactiver ou modifier.
 
 Les identifiants enregistrés ne peuvent pas être relus ou affichés. Utilisez uniquement des services de confiance et les droits minimaux. Le cloud exige des adresses HTTPS publiques ; les déploiements internes acceptent les adresses internes.
+Si le service utilise OAuth, connectez un compte dont les contenus accessibles peuvent être partagés avec l’équipe. Les agents des membres autorisés utilisent les droits de ce compte. Après l’autorisation, choisissez les outils de la source, enregistrez la sélection, puis activez la source. Pour parcourir une longue liste, filtrez par catégorie et sélectionnez ou désélectionnez les résultats affichés. Si le service refuse l’adresse de retour, ouvrez Bowhead via une adresse publique HTTPS vérifiée, puis relancez l’autorisation.
 
 ## Gérer les outils ajoutés
 
@@ -68,3 +69,23 @@ Les propriétaires et administrateurs peuvent indiquer ce que fait chaque outil 
 3. Sélectionnez **Enregistrer**. La modification s’applique à partir de la tâche suivante.
 
 Un outil confirmé en lecture seule s’exécute sans demande, et un outil sans indication dont la catégorie est confirmée peut être sélectionné pour les Agents. Si le service modifie ensuite la définition d’un outil, sa confirmation ne s’applique plus et la liste demande de la confirmer à nouveau. Ne confirmez **Lecture seule** que pour les outils qui ne peuvent pas modifier de données.
+
+## Exécuter des workflows n8n
+
+Lorsque votre déploiement active les outils de workflow n8n, une source MCP connectée au serveur MCP d’instance de n8n (une adresse qui se termine par `/mcp-server/http`) peut proposer des workflows n8n comme outils. Chaque workflow approuvé exécute sa version publiée dans n8n et attend le résultat ; il s’exécute donc toujours de la même façon.
+
+1. Dans n8n, publiez le workflow et activez **Available in MCP**. Les workflows démarrés par un webhook ou une planification peuvent être approuvés.
+2. Dans Bowhead, choisissez **Workflows n8n** dans les actions de la source (menu **⋯** à droite de la carte). Les workflows non publiés ou non disponibles dans MCP sont comptés, mais pas listés.
+3. Sélectionnez **Examiner** à côté d’un workflow. Choisissez sa catégorie selon ce qu’il fait aux données, rédigez la description que lit le modèle et vérifiez le schéma d’entrée : les champs du corps de la requête webhook. Le brouillon liste les champs que lit la version publiée ; ajoutez les types et marquez les champs obligatoires.
+4. Sélectionnez **Approuver**. Le workflow devient un outil à partir de la tâche suivante.
+
+L’assistant peut utiliser les workflows approuvés dans n’importe quelle tâche. Pour donner à un Agent personnalisé les workflows d’une source, créez un Plugin à partir du modèle **Workflows n8n** dans **Paramètres de l’équipe → Plugins**, puis sélectionnez ce Plugin dans l’Agent.
+
+À savoir :
+
+- Une exécution attend jusqu’à 5 minutes, ou 15 minutes dans une tâche planifiée. Une exécution plus longue est signalée comme toujours en cours, avec un lien vers l’exécution dans n8n.
+- Si le workflow est republié dans n8n, les exécutions s’arrêtent avec « version modifiée » jusqu’à ce que vous examiniez et approuviez la nouvelle version.
+- Les workflows en lecture seule s’exécutent sans demande, y compris dans les tâches planifiées. Les workflows qui écrivent ou suppriment des données demandent confirmation au membre qui a lancé la tâche à chaque exécution, et nécessitent que la confirmation des appels soit activée.
+- Les workflows s’exécutent avec le compte n8n qui a autorisé la source. Quand n8n le demande, n’accordez que la lecture des workflows, leur exécution et la lecture des exécutions.
+- Il n’est pas nécessaire d’importer les propres outils de n8n pour exécuter les workflows approuvés. Importer `execute_workflow` permet à l’assistant d’exécuter sans votre approbation n’importe quel workflow disponible dans MCP ; laissez-le donc désélectionné.
+- n8n limite les requêtes MCP d’une même adresse (100 par 5 minutes par défaut). Bowhead reste sous cette limite ; un administrateur n8n peut l’augmenter avec `N8N_MCP_SERVER_RATE_LIMIT`.

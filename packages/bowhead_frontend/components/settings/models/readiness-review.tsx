@@ -184,7 +184,8 @@ export function ReadinessReview({
       {attention.length ? <div className="readiness-rows">{attention.map(rowView)}</div> : null}
       {settled.length ? (
         <details className="readiness-settled">
-          <summary>{t("readiness_settled", { count: settled.length })}</summary>
+          {/* "其余" only makes sense under rows shown above it (walk W8). */}
+          <summary>{t(attention.length ? "readiness_settled" : "readiness_settled_all", { count: settled.length })}</summary>
           <div className="readiness-rows">{settled.map(rowView)}</div>
         </details>
       ) : null}

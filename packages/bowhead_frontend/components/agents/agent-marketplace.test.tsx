@@ -164,8 +164,8 @@ describe("AgentMarketplace", () => {
     vi.mocked(listAgentCatalog).mockResolvedValue(result([ITEM, blocked] as never));
     renderIntl(<AgentMarketplace />);
 
-    expect(await screen.findByText("需要负责人处理")).toBeTruthy();
-    expect(screen.getByText("请联系负责人 Avery 或团队管理员检查")).toBeTruthy();
+    expect(await screen.findByText("需要所有者处理")).toBeTruthy();
+    expect(screen.getByText("请联系所有者 Avery 或团队管理员检查")).toBeTruthy();
     expect(screen.getAllByText("当前不可用")).toHaveLength(1);
     expect(screen.queryByText("需要聘用")).toBeNull();
   });
@@ -182,8 +182,8 @@ describe("AgentMarketplace", () => {
     vi.mocked(listAgentCatalog).mockResolvedValue(result([pending] as never));
     renderIntl(<AgentMarketplace />);
 
-    expect(await screen.findByText("需要负责人处理")).toBeTruthy();
-    expect(screen.getByText("请联系负责人 Avery 或团队管理员检查")).toBeTruthy();
+    expect(await screen.findByText("需要所有者处理")).toBeTruthy();
+    expect(screen.getByText("请联系所有者 Avery 或团队管理员检查")).toBeTruthy();
     expect(screen.getByText("当前不可用")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /聘用/ })).toBeNull();
   });

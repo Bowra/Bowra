@@ -15,7 +15,9 @@ import { useEffect, useRef, useState } from "react";
  * Pure local UI state, never sent to server or affecting chat data; when disabled it neither reads nor writes.
  */
 
-export const RESULTS_SEEN_STORAGE_KEY = "bowhead.results_seen.v1";
+// v2 (chat running state R2.6): the report counts as one item (`reportStateKey`), not one per section. v1 records
+// held section ids, so reading them would count every existing report as new once.
+export const RESULTS_SEEN_STORAGE_KEY = "bowhead.results_seen.v2";
 const MAX_SESSIONS = 40;
 const MAX_IDS_PER_SESSION = 500;
 
@@ -56,9 +58,23 @@ export function writeSeenRecord(sessionId: string, seen: Set<string>, now = Date
   }
 }
 
+/**
+ * One id for the report's current state: any section added, removed or revised gives a new id, so a report a Turn
+ * changed counts as one new item. Short and stable: a 32-bit hash of the section ids and revisions.
+ */
+export function reportStateKey(sections: readonly { id: string; rev?: number }[]): string | null {
+  if (sections.length === 0) return null;
+  let hash = 5381;
+  const text = sections.map((section) => `${section.id}@${section.rev ?? 0}`).join(",");
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  return `report:${(hash >>> 0).toString(36)}`;
+}
+
 export interface ResultsSeenStep {
   seen: Set<string>;
   hasNew: boolean;
+  /** How many results are new (chat running state R2.6: the strip shows the count). */
+  newCount: number;
   /** Whether seen must be persisted locally. */
   persist: boolean;
 }
@@ -75,12 +91,12 @@ export function stepResultsSeen(
 ): ResultsSeenStep {
   const unseen = ids.filter((id) => !seen.has(id));
   if (visible || !countNew) {
-    if (unseen.length === 0) return { seen, hasNew: false, persist: false };
+    if (unseen.length === 0) return { seen, hasNew: false, newCount: 0, persist: false };
     const next = new Set(seen);
     for (const id of unseen) next.add(id);
-    return { seen: next, hasNew: false, persist: true };
+    return { seen: next, hasNew: false, newCount: 0, persist: true };
   }
-  return { seen, hasNew: unseen.length > 0, persist: false };
+  return { seen, hasNew: unseen.length > 0, newCount: unseen.length, persist: false };
 }
 
 /**
@@ -89,6 +105,7 @@ export function stepResultsSeen(
  * @param ids All current result ids (report chapters + result list).
  * @param visible Whether Results pane is currently visible.
  * @param running Whether current turn is running (once observed, later results count as new).
+ * @returns How many results are new; 0 when none (the dot and the strip's count read it).
  */
 export function useResultsNewIndicator({
   enabled,
@@ -102,8 +119,8 @@ export function useResultsNewIndicator({
   ids: readonly string[];
   visible: boolean;
   running: boolean;
-}): boolean {
-  const [hasNew, setHasNew] = useState(false);
+}): number {
+  const [newCount, setNewCount] = useState(0);
   const stateRef = useRef<{
     sessionId: string;
     seen: Set<string>;
@@ -120,7 +137,7 @@ export function useResultsNewIndicator({
   useEffect(() => {
     if (!enabled || !sessionId) {
       stateRef.current = null;
-      setHasNew(false);
+      setNewCount(0);
       return;
     }
     let state = stateRef.current;
@@ -147,8 +164,8 @@ export function useResultsNewIndicator({
       state.persisted = true;
     }
     if (visible && currentIds.length > 0) state.sawVisible = true;
-    setHasNew(step.hasNew);
+    setNewCount(step.newCount);
   }, [enabled, sessionId, idsKey, visible, running]);
 
-  return enabled && Boolean(sessionId) && hasNew;
+  return enabled && sessionId ? newCount : 0;
 }

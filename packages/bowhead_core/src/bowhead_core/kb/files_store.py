@@ -10,6 +10,7 @@ P1-S3: idx_kb_files_workspace 加 workspace_id != '' partial index
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,6 +22,19 @@ import aiosqlite
 
 from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.kb.ingestion import KnowledgeAction
+from bowhead_core.kb.knowledge_base_access import KnowledgeCaller, KnowledgeLevels, TeamPrincipals, resolve_knowledge_levels
+from bowhead_core.kb.knowledge_base_store import (
+    KnowledgeBaseRow,
+    default_for_scope,
+    default_knowledge_base_id,
+    effective_knowledge_base_id,
+    ensure_default_for_scope,
+    get_knowledge_base,
+    home_for_scope,
+    is_retention_abort,
+    require_live_target,
+    stored_homes,
+)
 from bowhead_core.kb.parse_recovery import (
     UNFINISHED_PARSE_STATUSES,
     heartbeat_iso,
@@ -37,6 +51,21 @@ class KbReadinessStats:
     active_file_count: int
     image_file_count: int
     scanned_pdf_evidence_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class KbFileAccessRow:
+    """The ``kb_files`` columns that file access decisions read (``KbPermission`` and grants)."""
+
+    file_id: str
+    scope: str
+    scope_id: str
+    workspace_id: str
+    team_id: str
+    uploaded_by: str
+    soft_deleted_at: str | None
+    # The stored knowledge base (0239); None before the revision. Named ones need the caller's level.
+    knowledge_base_id: str | None = None
 
 
 # Sprint file-upload-presign Phase 1.3: 'awaiting_upload' / 'queued' added.
@@ -200,6 +229,8 @@ def _row_to_dto(row: aiosqlite.Row) -> KbFileDTO:
         soft_deleted_at=row["soft_deleted_at"],
         ingestion_action_id=row["ingestion_action_id"] if "ingestion_action_id" in keys else None,
         membership_revision=int(row["membership_revision"]) if "membership_revision" in keys else 1,
+        # Appended by 0239; the frozen pre-split schema has no such column.
+        knowledge_base_id=row["knowledge_base_id"] if "knowledge_base_id" in keys else None,
         # Routes fill can_delete/can_change_scope from caller permissions; DTO defaults False.
         can_delete=False,
         can_change_scope=False,
@@ -211,6 +242,15 @@ class KbFilesStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
+        # Whether kb_files carries the 0239 `knowledge_base_id` column (absent from the frozen
+        # pre-split schema, where writers keep naming only the scope columns).
+        self._knowledge_base_column: bool | None = None
+
+    async def _knowledge_bases_present(self, db: aiosqlite.Connection) -> bool:
+        if self._knowledge_base_column is None:
+            async with db.execute("SELECT 1 FROM pragma_table_info('kb_files') WHERE name='knowledge_base_id'") as cursor:
+                self._knowledge_base_column = await cursor.fetchone() is not None
+        return self._knowledge_base_column
 
     async def initialize(self) -> None:
         """两步: TABLE → INDEX. ALTER 用于 legacy DB upgrade (V1 不需, V2 加列时用).
@@ -425,13 +465,22 @@ class KbFilesStore:
         file_id = f"kbf_{uuid4().hex[:12]}"
         now = _now()
         async with diagnostic_connect(self._db_path) as db:
+            # Dual write: the row joins its scope's default knowledge base in the same transaction.
+            knowledge_base = (
+                (await ensure_default_for_scope(db, scope=scope, scope_id=scope_id, team_id=team_id, now=now),)
+                if await self._knowledge_bases_present(db)
+                else ()
+            )
             await db.execute(
                 """INSERT INTO kb_files
                 (file_id, artifact_id, filename, mime_type, size_bytes,
                  scope, scope_id, workspace_id, team_id,
                  uploaded_by, uploaded_at, use_llm_marker, doc_type_id,
-                 parse_status, parse_heartbeat_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 parse_status, parse_heartbeat_at"""
+                + (", knowledge_base_id" if knowledge_base else "")
+                + ") VALUES ("
+                + ", ".join("?" for _ in range(15 + len(knowledge_base)))
+                + ")",
                 (
                     file_id,
                     artifact_id,
@@ -448,6 +497,7 @@ class KbFilesStore:
                     doc_type_id,
                     initial_parse_status,
                     now,
+                    *knowledge_base,
                 ),
             )
             await db.commit()
@@ -668,9 +718,14 @@ class KbFilesStore:
         q: str | None = None,
         order_by: str = "uploaded_at",
         order_dir: str = "desc",
+        knowledge_base_id: str | None = None,
+        team_id: str = "",
     ) -> list[KbFileDTO]:
         """[kb-management REQ-1.1/1.2] Scope-listing with SQL-side metadata
         filters + deterministic ordering, for the paginated /kb/files endpoint.
+
+        ``knowledge_base_id`` (with the home's ``team_id``) keeps one knowledge base of this scope's
+        home: a named one by its ID, the home's default also with rows naming none (read safety rule).
 
         Returns ALL matching active rows (no LIMIT/OFFSET): the route applies the
         Python-side resource-grant filter (`_filter_kb_files_by_file_grants`,
@@ -705,6 +760,19 @@ class KbFilesStore:
         else:  # team
             where = ["scope = 'team'", "scope_id = ?"]
             params = [scope_id]
+        if knowledge_base_id is not None:
+            async with open_pooled_read_ctx(self._db_path) as db:
+                present = await self._knowledge_bases_present(db)
+            is_default = knowledge_base_id == default_for_scope(scope, scope_id, team_id)
+            if not present:
+                if not is_default:
+                    return []
+            elif is_default:
+                where.append("(knowledge_base_id IS NULL OR knowledge_base_id = ?)")
+                params.append(knowledge_base_id)
+            else:
+                where.append("knowledge_base_id = ?")
+                params.append(knowledge_base_id)
         return await self._list_filtered(
             where,
             params,
@@ -736,6 +804,7 @@ class KbFilesStore:
         candidate_limit: int | None = None,
         allowed_file_ids: tuple[str, ...] | None = None,
         after_file_id: str | None = None,
+        knowledge_base_ids: tuple[str, ...] | None = None,
     ) -> list[KbFileDTO]:
         """Cross-scope listing: the union of the single-scope branches of
         :meth:`list_for_scope_filtered` in one query.
@@ -748,28 +817,29 @@ class KbFilesStore:
 
         ``team_id`` additionally pins every row to the caller's team in SQL; the
         route keeps its own team check as well (defense in depth).
+
+        ``knowledge_base_ids`` keeps the files in those knowledge bases now: a named one by its
+        ID, and an enabled home's default (recognized by its deterministic ID) also with rows that
+        name none (read safety rule). It filters; it never grants.
         """
         if not team_id:
             return []
         if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 256):
             raise ValueError("Invalid candidate limit")
-        if allowed_file_ids == ():
+        if allowed_file_ids == () or knowledge_base_ids == ():
             return []
-        branches: list[str] = []
-        params: list[Any] = []
-        if personal_owner_id:
-            branches.append("(scope = 'personal' AND scope_id = ?)")
-            params.append(personal_owner_id)
-        if space_id:
-            branches.append("(scope IN ('space', 'workspace') AND workspace_id = ?)")
-            params.append(space_id)
-        if team_scope_id:
-            branches.append("(scope = 'team' AND scope_id = ?)")
-            params.append(team_scope_id)
-        if not branches:
+        scoped = self._scope_union(team_id, personal_owner_id, space_id, team_scope_id)
+        if scoped is None:
             return []
-        where = ["team_id = ?", f"({' OR '.join(branches)})"]
-        params = [team_id, *params]
+        where, params = scoped
+        if knowledge_base_ids is not None:
+            async with open_pooled_read_ctx(self._db_path) as db:
+                keyed = await self._knowledge_bases_present(db)
+            selected = self._knowledge_base_union(team_id, personal_owner_id, space_id, team_scope_id, knowledge_base_ids, keyed=keyed)
+            if selected is None:
+                return []
+            where.append(selected[0])
+            params.extend(selected[1])
         if allowed_file_ids is not None:
             where.append("file_id IN ({})".format(",".join("?" for _ in allowed_file_ids)))
             params.extend(allowed_file_ids)
@@ -791,6 +861,121 @@ class KbFilesStore:
             order_dir=order_dir,
             candidate_limit=candidate_limit,
         )
+
+    @staticmethod
+    def _scope_union(
+        team_id: str, personal_owner_id: str | None, space_id: str | None, team_scope_id: str | None
+    ) -> tuple[list[str], list[Any]] | None:
+        """The cross-scope predicate of :meth:`list_for_scopes_filtered`; None when no scope is enabled."""
+        branches: list[str] = []
+        params: list[Any] = []
+        if personal_owner_id:
+            branches.append("(scope = 'personal' AND scope_id = ?)")
+            params.append(personal_owner_id)
+        if space_id:
+            branches.append("(scope IN ('space', 'workspace') AND workspace_id = ?)")
+            params.append(space_id)
+        if team_scope_id:
+            branches.append("(scope = 'team' AND scope_id = ?)")
+            params.append(team_scope_id)
+        if not branches:
+            return None
+        return ["team_id = ?", f"({' OR '.join(branches)})"], [team_id, *params]
+
+    @staticmethod
+    def _knowledge_base_union(
+        team_id: str,
+        personal_owner_id: str | None,
+        space_id: str | None,
+        team_scope_id: str | None,
+        knowledge_base_ids: tuple[str, ...],
+        *,
+        keyed: bool,
+    ) -> tuple[str, list[Any]] | None:
+        """The predicate of :meth:`list_for_scopes_filtered`'s ``knowledge_base_ids``; None when nothing can match.
+
+        Before revision 0239 (``keyed`` False) every file is in its home's default and no row can
+        name a named knowledge base.
+        """
+        selected = set(knowledge_base_ids)
+        branches: list[str] = []
+        params: list[Any] = []
+        defaults: set[str] = set()
+        homes = (
+            ("personal", personal_owner_id, "(scope = 'personal' AND scope_id = ?)"),
+            ("space", space_id, "(scope IN ('space', 'workspace') AND workspace_id = ?)"),
+            ("team", team_scope_id, "(scope = 'team' AND scope_id = ?)"),
+        )
+        for home, home_id, predicate in homes:
+            if not home_id:
+                continue
+            default = default_knowledge_base_id(team_id, home, home_id)
+            defaults.add(default)
+            if default not in selected:
+                continue
+            if keyed:
+                branches.append(f"({predicate} AND (knowledge_base_id IS NULL OR knowledge_base_id = ?))")
+                params.extend([home_id, default])
+            else:
+                branches.append(predicate)
+                params.append(home_id)
+        named = sorted(selected - defaults)
+        if named and keyed:
+            branches.append("knowledge_base_id IN ({})".format(",".join("?" for _ in named)))
+            params.extend(named)
+        if not branches:
+            return None
+        return f"({' OR '.join(branches)})", params
+
+    async def list_access_rows_for_scopes(
+        self,
+        *,
+        team_id: str,
+        personal_owner_id: str | None,
+        space_id: str | None,
+        team_scope_id: str | None,
+    ) -> list[KbFileAccessRow]:
+        """The active files :meth:`list_for_scopes_filtered` would list, as access rows only.
+
+        For callers that decide access over many files at once: building full DTOs for a
+        large Team costs an order of magnitude more than the query.
+        """
+        scoped = self._scope_union(team_id, personal_owner_id, space_id, team_scope_id) if team_id else None
+        if scoped is None:
+            return []
+        where, params = scoped
+        async with open_pooled_read_ctx(self._db_path) as db:
+            columns = "file_id,scope,scope_id,workspace_id,team_id,uploaded_by,soft_deleted_at"
+            if await self._knowledge_bases_present(db):
+                columns += ",knowledge_base_id"
+            async with db.execute(
+                f"SELECT {columns} FROM kb_files WHERE " + " AND ".join([*where, "soft_deleted_at IS NULL"]),  # noqa: S608 -- Fixed columns, bound values.
+                params,
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [KbFileAccessRow(*row) for row in rows]
+
+    async def resolve_knowledge_levels(
+        self,
+        caller: KnowledgeCaller,
+        *,
+        load_team_principals: Callable[[], Awaitable[TeamPrincipals]] | None = None,
+        named: bool = True,
+    ) -> KnowledgeLevels:
+        """The caller's level on every knowledge base it can use in its context (one indexed read).
+
+        ``named`` False hides named knowledge bases (the knowledge base switch off, C3).
+        """
+        async with open_pooled_read_ctx(self._db_path) as db:
+            present = await self._knowledge_bases_present(db)
+            return await resolve_knowledge_levels(db if present else None, caller, load_team_principals=load_team_principals, named=named)
+
+    async def get_knowledge_base(self, knowledge_base_id: str) -> KnowledgeBaseRow | None:
+        """One stored knowledge base, deleted ones included; None when unknown or before revision 0239."""
+        async with open_pooled_read_ctx(self._db_path) as db:
+            if not await self._knowledge_bases_present(db):
+                return None
+            return await get_knowledge_base(db, knowledge_base_id)
 
     async def _list_filtered(
         self,
@@ -982,14 +1167,88 @@ class KbFilesStore:
         scope_id: str,
         workspace_id: str,
         team_id: str,
+        knowledge_base_id: str | None = None,
     ) -> None:
-        """[P0-P2] scope change 更新 4 个 routing 字段."""
+        """[P0-P2] Update the four routing fields and the knowledge base in one transaction.
+
+        The file moves to ``knowledge_base_id`` when it names a knowledge base live in the target
+        Team and home (checked here; ``knowledge_base_unavailable`` otherwise), else to the target
+        scope's default, as today's scope change does.
+        """
         async with diagnostic_connect(self._db_path) as db:
+            if await self._knowledge_bases_present(db):
+                await db.execute("BEGIN IMMEDIATE")
+                try:
+                    default = default_for_scope(scope, scope_id, team_id)
+                    if knowledge_base_id and knowledge_base_id != default:
+                        home, home_id = home_for_scope(scope, scope_id)
+                        await require_live_target(db, knowledge_base_id, team_id=team_id, home=home, home_id=home_id)
+                        target = knowledge_base_id
+                    else:
+                        target = await ensure_default_for_scope(db, scope=scope, scope_id=scope_id, team_id=team_id)
+                    await db.execute(
+                        "UPDATE kb_files SET scope = ?, scope_id = ?, workspace_id = ?, team_id = ?, knowledge_base_id = ? WHERE file_id = ?",
+                        (scope, scope_id, workspace_id, team_id, target, file_id),
+                    )
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+                return
+            if knowledge_base_id and knowledge_base_id != default_for_scope(scope, scope_id, team_id):
+                from bowhead_core.kb.ingestion import KnowledgeWriteError
+
+                raise KnowledgeWriteError("knowledge_base_unavailable")
             await db.execute(
                 "UPDATE kb_files SET scope = ?, scope_id = ?, workspace_id = ?, team_id = ? WHERE file_id = ?",
                 (scope, scope_id, workspace_id, team_id, file_id),
             )
             await db.commit()
+
+    async def set_knowledge_base(self, file_id: str, knowledge_base_id: str, *, expected: str | None) -> bool:
+        """Move an active file to another knowledge base of its own home: a metadata-only change.
+
+        ``knowledge_base_id`` is a named knowledge base live in the file's Team and home, or that
+        home's default. ``expected`` is the stored value the caller checked (None for none); a
+        moved, removed or rescoped file answers False and changes nothing.
+        """
+        async with diagnostic_connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                async with db.execute("SELECT * FROM kb_files WHERE file_id=? AND soft_deleted_at IS NULL", (file_id,)) as cursor:
+                    row = await cursor.fetchone()
+                if row is None or row["knowledge_base_id"] != expected:
+                    await db.rollback()
+                    return False
+                home, home_id = home_for_scope(row["scope"], row["scope_id"])
+                default = default_for_scope(row["scope"], row["scope_id"], row["team_id"])
+                if knowledge_base_id == default:
+                    await ensure_default_for_scope(db, scope=row["scope"], scope_id=row["scope_id"], team_id=row["team_id"])
+                else:
+                    await require_live_target(db, knowledge_base_id, team_id=row["team_id"], home=home, home_id=home_id)
+                await db.execute("UPDATE kb_files SET knowledge_base_id=? WHERE file_id=?", (knowledge_base_id, file_id))
+                await db.commit()
+                return True
+            except BaseException:
+                await db.rollback()
+                raise
+
+    async def effective_knowledge_base_ids(self, files: list[KbFileDTO]) -> dict[str, str]:
+        """Each file's knowledge base under the read safety rule, with one lookup for stored named IDs.
+
+        NULL, unknown and home-mismatched values mean the default of the file's current scope.
+        """
+        named = {
+            str(file.knowledge_base_id)
+            for file in files
+            if file.knowledge_base_id and file.knowledge_base_id != default_for_scope(file.scope, file.scope_id, file.team_id)
+        }
+        homes = {}
+        if named:
+            async with open_pooled_read_ctx(self._db_path) as db:
+                homes = await stored_homes(db, named)
+        return {file.file_id: effective_knowledge_base_id(file, homes.get(str(file.knowledge_base_id or ""))) for file in files}
 
     async def update_auto_classified_doc_type(
         self,
@@ -1258,9 +1517,22 @@ class KbFilesStore:
             await db.commit()
 
     async def create_admitted(
-        self, *, action: KnowledgeAction, source_fingerprint: str, parent_file_id: str | None = None, **values: Any
+        self,
+        *,
+        action: KnowledgeAction,
+        source_fingerprint: str,
+        parent_file_id: str | None = None,
+        knowledge_base_id: str | None = None,
+        **values: Any,
     ) -> tuple[str, bool, str]:
-        """Reconcile one explicit action and create membership in one write transaction."""
+        """Reconcile one explicit action and create membership in one write transaction.
+
+        ``knowledge_base_id`` names the target knowledge base; None or the scope's default adds to
+        the default, with today's receipt shape. A named target must be live in the same Team and
+        home, checked in this transaction, and joins the receipt's destination. The 0238 retention
+        guard's abort (the original is in the automatic trash or being purged) is reported as
+        ``knowledge_source_in_trash``.
+        """
         import json
 
         from bowhead_core.kb.ingestion import KnowledgeWriteError, canonical_hash
@@ -1270,6 +1542,11 @@ class KbFilesStore:
         if destination["scope"] == "workspace":
             destination["scope"] = "space"
             values["scope"] = "space"
+        default = default_for_scope(values["scope"], values["scope_id"], values["team_id"])
+        named = knowledge_base_id if knowledge_base_id and knowledge_base_id != default else None
+        if named:
+            # Receipts name the knowledge base only for named targets, so default adds replay as before.
+            destination["knowledge_base_id"] = named
         intent_hash = canonical_hash({"source": values["artifact_id"], "version": source_fingerprint, "destination": destination})
         action_key = canonical_hash({"actor": action.actor_user_id, "team": action.team_id, "action": "add", "ref": action.action_ref})
         operation_id = f"kbo_{uuid4().hex}"
@@ -1279,9 +1556,12 @@ class KbFilesStore:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
+                present = await self._knowledge_bases_present(db)
+                if named and not present:
+                    raise KnowledgeWriteError("knowledge_base_unavailable")
                 if parent_file_id is not None:
                     async with db.execute(
-                        "SELECT team_id,uploaded_by,scope,scope_id,soft_deleted_at,ingestion_action_id FROM kb_files WHERE file_id=?",
+                        "SELECT * FROM kb_files WHERE file_id=?",
                         (parent_file_id,),
                     ) as cursor:
                         parent = await cursor.fetchone()
@@ -1291,6 +1571,8 @@ class KbFilesStore:
                         or not parent["ingestion_action_id"]
                         or (parent["team_id"], parent["uploaded_by"], parent["scope"], parent["scope_id"])
                         != (action.team_id, action.actor_user_id, values["scope"], values["scope_id"])
+                        # A bundle's files join the knowledge base its marker joined.
+                        or (present and (parent["knowledge_base_id"] if parent["knowledge_base_id"] != default else None) != named)
                     ):
                         raise KnowledgeWriteError("knowledge_bundle_operation_retired")
                 async with db.execute("SELECT * FROM kb_membership_operations WHERE action_key=?", (action_key,)) as cursor:
@@ -1308,9 +1590,12 @@ class KbFilesStore:
                 created = not existing
                 if existing:
                     row = existing[0]
-                    observed = {key: row[key] for key in destination}
+                    observed = {key: row[key] for key in ("scope", "scope_id", "team_id")}
                     if observed["scope"] == "workspace":
                         observed["scope"] = "space"
+                    stored = row["knowledge_base_id"] if present else None
+                    if stored and stored != default_for_scope(row["scope"], row["scope_id"], row["team_id"]):
+                        observed["knowledge_base_id"] = stored
                     if observed != destination:
                         raise KnowledgeWriteError("knowledge_destination_mismatch")
                     file_id, revision = str(row["file_id"]), int(row["membership_revision"])
@@ -1319,11 +1604,27 @@ class KbFilesStore:
                     status = values.get("initial_parse_status", "pending")
                     if status not in _PARSE_STATUS_VALUES:
                         raise ValueError("Unsupported initial parse status")
+                    # Dual write: a new row joins its target knowledge base (by default its scope's
+                    # default) in this transaction. Default receipts keep {scope, scope_id, team_id}.
+                    knowledge_base: tuple[str, ...] = ()
+                    if named:
+                        home, home_id = home_for_scope(values["scope"], values["scope_id"])
+                        await require_live_target(db, named, team_id=values["team_id"], home=home, home_id=home_id)
+                        knowledge_base = (named,)
+                    elif present:
+                        knowledge_base = (
+                            await ensure_default_for_scope(
+                                db, scope=values["scope"], scope_id=values["scope_id"], team_id=values["team_id"], now=now
+                            ),
+                        )
                     await db.execute(
                         """INSERT INTO kb_files
                         (file_id,artifact_id,filename,mime_type,size_bytes,scope,scope_id,workspace_id,team_id,
-                         uploaded_by,uploaded_at,use_llm_marker,doc_type_id,parse_status,parse_heartbeat_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                         uploaded_by,uploaded_at,use_llm_marker,doc_type_id,parse_status,parse_heartbeat_at"""
+                        + (",knowledge_base_id" if knowledge_base else "")
+                        + ") VALUES ("
+                        + ",".join("?" for _ in range(15 + len(knowledge_base)))
+                        + ")",
                         (
                             file_id,
                             values["artifact_id"],
@@ -1340,6 +1641,7 @@ class KbFilesStore:
                             values.get("doc_type_id"),
                             status,
                             now,
+                            *knowledge_base,
                         ),
                     )
                 if created:
@@ -1368,8 +1670,12 @@ class KbFilesStore:
                 )
                 await db.commit()
                 return file_id, created, operation_id
-            except BaseException:
+            except BaseException as exc:
                 await db.rollback()
+                if is_retention_abort(exc):
+                    # Retention contract (file library design §5): the guard read the live Content
+                    # row under its lease in this transaction and found it trashed or claimed.
+                    raise KnowledgeWriteError("knowledge_source_in_trash") from None
                 raise
 
     async def remove_admitted(self, file_id: str, *, action: KnowledgeAction) -> str:

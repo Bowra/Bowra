@@ -572,6 +572,75 @@
       }
     },
     {
+      "name": "owner_trial_agent_names_its_candidate",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_2",
+              "trial_candidate_id": "arc_2"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 试一下新草稿"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_2",
+              "trial_candidate_id": "arc_2"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 试一下新草稿"
+          }
+        ]
+      },
+      "display_text": "@经营分析师 试一下新草稿",
+      "text_content": " 试一下新草稿",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_2",
+              "trial_candidate_id": "arc_2"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 试一下新草稿"
+          }
+        ]
+      }
+    },
+    {
       "name": "null_and_empty_parameter_values",
       "input": {
         "schema_version": 1,
@@ -1734,6 +1803,50 @@
               "version": "arv_1",
               "assignment_id": "aa_1",
               "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "trial_excludes_assignment_and_release",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1",
+              "trial_candidate_id": "arc_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "system_agent_has_no_trial",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "trial_candidate_id": "arc_1"
             },
             "label": "杜邦分析",
             "parameters": {}

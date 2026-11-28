@@ -16,8 +16,10 @@ import pytest
 from bowhead_core.kb.doc_type_store import ExtractField, KbDocTypeStore
 from bowhead_core.kb.extracted_record_store import KbExtractedRecordStore
 from bowhead_core.kb.files_store import KbFilesStore
+from bowhead_core.kb.source_location import SourceChunk
 from bowhead_core.kb.structured_extractor import StructuredExtractor
 from bowhead_core.kb.worker import KbWorker
+from reportlab.pdfgen.canvas import Canvas
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -372,3 +374,75 @@ async def test_worker_doc_type_soft_deleted_skips(initialize_migrated_kb_files_d
     assert file.parse_status == "done"
     records = await rec_store.list_for_file(file_id)
     assert len(records) == 0
+
+
+class _ReadableChromaStore(_StubChromaStore):
+    """Stub store that also serves the chunks it was given, as the real store does after publishing."""
+
+    async def get_ordered_source_chunks(self, file) -> list[SourceChunk]:  # type: ignore[no-untyped-def]
+        rows = [SourceChunk(c.chunk_id, c.content, c.metadata.chunk_index, c.metadata.page) for c in self._added]
+        return sorted(rows, key=lambda c: c.chunk_index)
+
+
+@pytest.mark.asyncio
+async def test_worker_record_page_comes_from_pdf_markers(initialize_migrated_kb_files_database, tmp_path: Path) -> None:
+    """Document matrix S7 on the extraction-record path: the model's source_page is replaced by
+    the page of the PDF marker before the grounded quote; an unverified quote keeps no page."""
+    initialize_migrated_kb_files_database(tmp_path / "files.db")
+    files_store = KbFilesStore(tmp_path / "files.db")
+    await files_store.initialize()
+    dt_store = KbDocTypeStore(tmp_path / "dt.db")
+    await dt_store.initialize()
+    rec_store = KbExtractedRecordStore(tmp_path / "rec.db")
+    await rec_store.initialize()
+    dt_id = await dt_store.create(
+        workspace_id="ws_a",
+        name="Contract",
+        created_by="u1",
+        fields=[ExtractField(name="place", type="string"), ExtractField(name="penalty", type="string")],
+    )
+
+    pdf_path = tmp_path / "contract.pdf"
+    canvas = Canvas(str(pdf_path))
+    for line in ("Sales contract between Acme Trading Ltd and Beta Logistics Ltd.", "The parties sign this contract in Shanghai."):
+        canvas.drawString(72, 720, line)
+        canvas.showPage()
+    canvas.save()
+    file_id = await files_store.create(
+        artifact_id=str(pdf_path),
+        filename="contract.pdf",
+        mime_type="application/pdf",
+        size_bytes=pdf_path.stat().st_size,
+        scope="workspace",
+        scope_id="ws_a",
+        workspace_id="ws_a",
+        team_id="team_a",
+        uploaded_by="u1",
+        doc_type_id=dt_id,
+    )
+    llm_out = json.dumps(
+        {
+            "place": {"value": "Shanghai", "source_snippet": "sign this contract in Shanghai", "source_page": 1, "confidence": 0.9},
+            "penalty": {"value": "5%", "source_snippet": "a penalty of five percent", "source_page": 2, "confidence": 0.9},
+        }
+    )
+    store = _ReadableChromaStore()
+    worker = KbWorker(
+        files_store=files_store,
+        store=store,  # type: ignore[arg-type]
+        embedder=_StubEmbedder(),  # type: ignore[arg-type]
+        artifact_fetcher=None,
+        doc_type_store=dt_store,
+        extracted_record_store=rec_store,
+        structured_extractor=StructuredExtractor(router=_mock_llm_router(llm_out)),
+    )
+    await worker.parse_and_index(file_id)
+
+    records = await rec_store.list_for_file(file_id)
+    assert len(records) == 1
+    place = records[0].fields["place"][0]
+    located = next(c for c in store._added if "Shanghai" in c.content)
+    assert (place["chunk_id"], place["chunk_index"], place["page"]) == (located.chunk_id, located.metadata.chunk_index, 2)
+    penalty = records[0].fields["penalty"][0]
+    assert (penalty["chunk_id"], penalty["page"]) == (None, None)
+    assert "chunk_index" not in penalty

@@ -127,6 +127,24 @@ async def test_inline_owner_check_cross_user_404(app_client) -> None:
     assert r.status_code == 404  # Silent 404, no existence leak.
 
 
+async def test_library_transport_streams_the_authorized_file_without_a_redirect(app_client, monkeypatch) -> None:
+    client, store = app_client
+    art = await _put(store, mime="text/csv", content=b"meal,10\n", filename="expenses.csv")
+
+    async def signed_url(*args, **kwargs):
+        return "https://storage.example.test/expenses.csv"
+
+    monkeypatch.setattr(store, "download_url", signed_url)
+    url = f"/api/v1/files/{art.id}"
+    assert client.get(url, follow_redirects=False).status_code == 302
+    authorized = client.get(f"{url}?transport=proxy", follow_redirects=False)
+    assert authorized.status_code == 200
+    assert authorized.content == b"meal,10\n"
+    assert authorized.headers["Cache-Control"] == "private, no-store"
+    denied = client.get(f"{url}?transport=proxy", headers={"X-Bowhead-User-Id": "usr_intruder"})
+    assert denied.status_code == 404
+
+
 async def test_html_download_proxies_the_instance_policy_after_owner_authorization(app_client, monkeypatch) -> None:
     client, store = app_client
     monkeypatch.setenv("BOWHEAD_CANVAS_HTML_MAX_BYTES", "6291456")

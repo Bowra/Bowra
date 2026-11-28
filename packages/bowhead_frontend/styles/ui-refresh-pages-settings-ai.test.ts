@@ -88,9 +88,8 @@ describe("数据源", () => {
 });
 
 describe("工具", () => {
-  it("工具源卡片与内置工具行：发丝线外框；失败为 1px 错误色描边", () => {
+  it("工具源卡片与内置工具行：发丝线外框", () => {
     expect(on(".ai-tools-card")).toMatchObject({ border: "0", "border-radius": "var(--r-4)" });
-    expect(on(".ai-tools-card.is-failed")).toMatchObject({ "box-shadow": "0 0 0 1px var(--c-err)" });
     expect(on(".ai-tools-builtin")).toMatchObject({ border: "0", "box-shadow": "0 0 0 var(--hairline) var(--c-separator)" });
   });
 
@@ -104,7 +103,7 @@ describe("工具", () => {
     const src = read("components/settings/tools/tools-manager.tsx");
     expect(src).not.toContain("const iconBtn");
     expect(src).not.toMatch(/style=\{\{ (maxWidth: 900|marginBottom: 14, padding: "14px 16px"|position: "relative", marginBottom: 14)/);
-    expect(src).toContain('className={`legacy-ai-tools-card ai-tools-card${failed ? " is-failed" : ""}${off ? " is-off" : ""}`}');
+    expect(src).toContain('className={`legacy-ai-tools-card ai-tools-card${off ? " is-off" : ""}`}');
   });
 });
 

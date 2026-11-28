@@ -184,8 +184,9 @@ async def _helper(ctx: ToolExecutionContext, db: aiosqlite.Connection, material:
         raise OrdinaryContinuationUnavailable() from exc
     projection = asdict(binding)
     # Hashes recorded before the trial marker existed stay valid; settled helpers are never trials.
-    if projection.get("trial_candidate_id") is None:
-        projection.pop("trial_candidate_id", None)
+    for key in ("trial_candidate_id", "trial_candidate_kind", "trial_frozen_at"):
+        if projection.get(key) is None:
+            projection.pop(key, None)
     projection["behavior_descriptor"] = binding.behavior_descriptor.model_dump(mode="json") if binding.behavior_descriptor is not None else None
     digest = content_hash(projection)
     if material.get("binding_hash", digest) != digest:

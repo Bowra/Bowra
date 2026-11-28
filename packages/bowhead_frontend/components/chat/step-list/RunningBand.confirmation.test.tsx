@@ -48,7 +48,7 @@ function waitingStep(over: Partial<StepConfirmation> = {}): StepView {
 }
 
 function actionText(container: HTMLElement): string {
-  return container.querySelector(".bh-band__act")?.textContent ?? "";
+  return container.querySelector(".bh-band__txt")?.textContent ?? "";
 }
 
 describe("RunningBand while a tool call waits for confirmation", () => {

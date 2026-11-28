@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import time
-from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -309,8 +308,8 @@ async def _resolve_user(app: Any, connection: SlackConnection, slack_user_id: st
 
 async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspace_id: str, channel_id: str, thread_ts: str, text: str) -> None:
     from bowhead_core import TurnRequest
-    from bowhead_gateway._turn_runtime import _resolve_turn_datarc_runtime
     from bowhead_gateway.channel_language import resolve_channel_turn_language
+    from bowhead_gateway.datarc_context import recovered_datarc_source, resolve_datarc_turn_context
     from bowhead_gateway.turn_service import (
         admit_legacy_chat_execution,
         is_session_busy_rejection,
@@ -352,13 +351,16 @@ async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspac
     if not runtime.available:
         await _post(connection, channel_id, im_interface_message("slack_model_unconfigured", locale), thread_ts)
         return
-    datarc_client, datarc_unavailable, vector_client = await _resolve_turn_datarc_runtime(SimpleNamespace(app=app), connection.team_id)
-    datarc_workspace_id = str(workspace.get("datarc_workspace_id") or workspace_id)
-    if datarc_workspace_id.startswith("ws_") or datarc_client is None:
+    datarc_workspace_id = str(workspace.get("datarc_workspace_id") or "")
+    if not datarc_workspace_id or datarc_workspace_id.startswith("ws_"):
+        await _post(connection, channel_id, im_interface_message("channel_datarc_missing", locale), thread_ts)
+        return
+    datarc = await resolve_datarc_turn_context(app, team_id=connection.team_id, workspace_id=workspace_id, pinned_project=datarc_workspace_id)
+    if datarc.connection_binding is None:
         await _post(connection, channel_id, im_interface_message("channel_datarc_missing", locale), thread_ts)
         return
     try:
-        member_uid = await app.state.member_resolver.resolve(user.email, datarc_workspace_id, datarc=datarc_client)
+        member_uid = await app.state.member_resolver.resolve(user.email, datarc_workspace_id, datarc=datarc.datarc_client)
     except Exception:
         logger.warning("slack.member_uid_unavailable team=%s user=%s", connection.team_id, user.id, exc_info=True)
         await _post(connection, channel_id, im_interface_message("slack_data_permissions_unavailable", locale), thread_ts)
@@ -372,9 +374,11 @@ async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspac
         session_id=session_id,
         workspace_id=workspace_id,
         active_datarc_project=datarc_workspace_id,
-        datarc_client=datarc_client,
-        datarc_unavailable=datarc_unavailable,
-        vector_client=vector_client,
+        datarc_binding=datarc.connection_binding,
+        datarc_source_evidence=recovered_datarc_source(datarc, user.id, connection.team_id, member_uid),
+        datarc_client=datarc.datarc_client,
+        datarc_unavailable=datarc.datarc_unavailable,
+        vector_client=datarc.vector_client,
         team_router=runtime.router,
         user_id=user.id,
         member_uid=member_uid,

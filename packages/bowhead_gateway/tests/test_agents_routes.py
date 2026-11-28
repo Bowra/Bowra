@@ -3726,3 +3726,160 @@ async def test_knowledge_source_catalog_and_original_writer_use_current_actor_ac
     assert saved.status_code == 200, saved.text
     reopened = (await client.get("/api/v1/agents/osa_1/working-copy")).json()
     assert reopened["working_copy"]["definition"]["knowledge_access"]["file_ids"] == ["kbf_visible"]
+
+
+@pytest.fixture(scope="module")
+def knowledge_files_schema(tmp_path_factory) -> Path:
+    from alembic import command
+    from alembic.config import Config
+
+    from bowhead_core import migrations
+
+    path = tmp_path_factory.mktemp("agent-knowledge-bases") / "kb_files.db"
+    config = Config()
+    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
+    config.attributes["bowhead_target"] = "files"
+    command.upgrade(config, "head")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_knowledge_base_picker_waits_for_the_backfill_and_saves_only_usable_ones(
+    app_client, monkeypatch, tmp_path, knowledge_files_schema
+) -> None:
+    """Slice 5: the picker lists what the editor can use across their Spaces; the writer gives one generic error."""
+    import importlib
+
+    from bowhead_core.kb.files_store import KbFilesStore
+    from bowhead_core.kb.knowledge_base_store import KnowledgeBaseStore, default_knowledge_base_id
+
+    from bowhead_gateway import kb_maintenance
+
+    client, db_path = app_client
+    _enable_revisioned_agent(db_path, audience_mode="private")
+    knowledge_bases = importlib.import_module("bowhead_core.migrations.versions.0239_knowledge_bases")
+    with sqlite3.connect(db_path) as connection:
+        # The route fixture predates knowledge bases; the writer admits the mode only from that revision on.
+        connection.execute("UPDATE alembic_version SET version_num=?", (knowledge_bases.revision,))
+        for space, name in (("ws_kb", "Store operations"), ("ws_other", "Board")):
+            connection.execute(
+                "INSERT INTO workspaces(id,team_id,name,status,created_at,updated_at) VALUES(?,'team_1',?,'active','2026-10-03','2026-10-03')",
+                (space, name),
+            )
+        connection.execute(
+            "INSERT INTO workspace_members(workspace_id,user_id,role,status,joined_at) VALUES('ws_kb','user_1','member','active','2026-10-03')"
+        )
+        connection.commit()
+    files_db = tmp_path / "kb_files.db"
+    with sqlite3.connect(knowledge_files_schema) as source, sqlite3.connect(files_db) as destination:
+        source.backup(destination)
+    bases = KnowledgeBaseStore(str(files_db))
+    manual = await bases.create(
+        team_id="team_1",
+        home="space",
+        home_id="ws_kb",
+        name="Store manual",
+        description=None,
+        audience="space",
+        audience_level="use",
+        owner_user_id="owner_1",
+    )
+    hidden = await bases.create(
+        team_id="team_1",
+        home="space",
+        home_id="ws_kb",
+        name="Payroll",
+        description=None,
+        audience="members",
+        audience_level="use",
+        owner_user_id="owner_1",
+    )
+    elsewhere = await bases.create(
+        team_id="team_1",
+        home="space",
+        home_id="ws_other",
+        name="Minutes",
+        description=None,
+        audience="space",
+        audience_level="use",
+        owner_user_id="owner_1",
+    )
+    client._transport.app.state.kb_files_store = KbFilesStore(files_db)
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_SOURCE_BINDINGS", "1")
+    url = "/api/v1/agents/osa_1/knowledge-base-sources"
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", "0")
+    off = await client.get(url)
+    assert off.status_code == 200, off.text
+    assert off.json() | {"max_selected": None} == {"enabled": False, "state": "disabled", "groups": [], "selected_items": [], "max_selected": None}
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_BASES", "1")
+    state = {"value": "preparing"}
+
+    async def backfill_state(_app, _team_id, *, start=True):
+        return state["value"]
+
+    monkeypatch.setattr(kb_maintenance, "chunk_key_backfill_state", backfill_state)
+    live = (await client.get("/api/v1/agents/osa_1/working-copy")).json()["live"]
+
+    async def save(*identities):
+        policy = {"schema_version": 2, "mode": "selected_knowledge_bases", "knowledge_base_ids": list(identities)}
+        return await client.patch(
+            "/api/v1/agents/osa_1/working-copy",
+            json={
+                "definition": {**live["definition"], "knowledge_access": policy},
+                "listing": live["listing"],
+                "audience": live["audience"],
+                "expected_row_version": None,
+            },
+        )
+
+    preparing = await client.get(url)
+    assert preparing.json()["state"] == "preparing" and preparing.json()["max_selected"] == 32
+    waiting = await save(manual.id)
+    assert waiting.status_code == 422, waiting.text
+    assert waiting.json()["detail"]["error"]["code"] == "agent_knowledge_bases_preparing"
+    assert waiting.json()["detail"]["error"]["details"]["field"] == "knowledge_access.mode"
+
+    state["value"] = "ready"
+    team_default = default_knowledge_base_id("team_1", "team", "team_1")
+    picker = await client.get(url, params=[("selected", manual.id), ("selected", hidden.id)])
+    assert picker.status_code == 200, picker.text
+    groups = picker.json()["groups"]
+    assert [(group["home"], group["home_id"]) for group in groups] == [("personal", "user_1"), ("space", "ws_kb"), ("team", "team_1")]
+    assert groups[1]["name"] == "Store operations"
+    assert [item["id"] for item in groups[1]["items"]] == [default_knowledge_base_id("team_1", "space", "ws_kb"), manual.id]
+    assert [item["id"] for item in groups[2]["items"]] == [team_default]
+    assert [item["id"] for item in picker.json()["selected_items"]] == [manual.id]
+    for absent in (hidden.id, elsewhere.id, "Payroll", "Minutes"):
+        assert absent not in picker.text
+
+    unknown, unusable = await save("kbase_" + "f" * 24), await save(hidden.id)
+    assert unknown.status_code == unusable.status_code == 422
+    assert unknown.json() == unusable.json()  # no existence leak
+    assert unknown.json()["detail"]["error"]["code"] == "agent_knowledge_base_unavailable"
+    assert unknown.json()["detail"]["error"]["details"]["field"] == "knowledge_access.knowledge_base_ids"
+    assert hidden.id not in unusable.text
+    saved = await save(team_default, manual.id)
+    assert saved.status_code == 200, saved.text
+    reopened = (await client.get("/api/v1/agents/osa_1/working-copy")).json()
+    assert reopened["working_copy"]["definition"]["knowledge_access"]["knowledge_base_ids"] == sorted([team_default, manual.id])
+    malformed = await client.get(url, params=[("selected", "kbase_short")])
+    assert malformed.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_authoring_catalog_stops_offering_a_tool_the_team_turned_off(app_client) -> None:
+    client, db_path = app_client
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "INSERT INTO team_settings(team_id,key,value,updated_at,updated_by) VALUES (?,?,?,?,?)",
+            ("team_1", "builtin_tool_states", json.dumps({"web_search": {"enabled": False}}), "2026-11-28T00:00:00Z", "user_1"),
+        )
+
+    body = (await client.get("/api/v1/agents/authoring-catalog")).json()
+
+    assert "web_search" not in {tool["stable_ref"] for tool in body["tools"]}
+    assert body["team_disabled_tools"] == ["web_search"]
+    assert "bi_query" in {tool["stable_ref"] for tool in body["tools"]}

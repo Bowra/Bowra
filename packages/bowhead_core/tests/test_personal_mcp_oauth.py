@@ -102,7 +102,6 @@ def _connection(personal) -> sqlite3.Row:  # noqa: F811
 
 
 async def test_signed_in_call_renews_before_dispatch_and_keeps_the_version(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     seen = _provider(monkeypatch, [(200, {"access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rotated"})])
     calls = _remote(monkeypatch)
@@ -118,7 +117,6 @@ async def test_signed_in_call_renews_before_dispatch_and_keeps_the_version(perso
 
 
 async def test_ended_sign_in_is_not_sent_and_asks_to_sign_in_again(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _provider(monkeypatch, [(400, {"error": "invalid_grant", "error_description": "private-provider-detail"})])
     calls = _remote(monkeypatch)
@@ -134,7 +132,6 @@ async def test_ended_sign_in_is_not_sent_and_asks_to_sign_in_again(personal, mon
 
 
 async def test_unanswered_renewal_keeps_the_sign_in(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _provider(monkeypatch, [(503, {})])
     calls = _remote(monkeypatch)
@@ -144,17 +141,7 @@ async def test_unanswered_renewal_keeps_the_sign_in(personal, monkeypatch):  # n
     assert _connection(personal)["status"] == "ready"
 
 
-async def test_signed_in_connection_does_not_run_while_the_feature_is_off(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "0")
-    _sign_in(personal)
-    seen = _provider(monkeypatch, [(200, {"access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600})])
-    calls = _remote(monkeypatch)
-    result = await _approved_call(personal, monkeypatch)
-    assert result["error_kind"] == "personal_mcp_oauth_disabled" and calls == [] and seen == []
-
-
 async def test_concurrent_calls_share_one_renewal(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     seen = _provider(monkeypatch, [(200, {"access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rotated"})])
     owner, identity = personal.ctx.user_id, personal.connection_id
@@ -309,7 +296,6 @@ def _state(authorize_url: str) -> str:
 
 @pytest.mark.parametrize("prefix", ["", "/bowhead", "/ai/apps/bowhead"])
 async def test_first_sign_in_creates_a_ready_connection_with_unselected_tools(personal, monkeypatch, prefix):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _widen(personal.fixture.db_path)
     served = _identity_provider(monkeypatch)
     _discovered(monkeypatch, [_tool("notes", {"type": "object"})])
@@ -341,7 +327,6 @@ async def test_first_sign_in_creates_a_ready_connection_with_unselected_tools(pe
 
 
 async def test_signing_in_again_reports_it_and_keeps_the_selected_tool(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _identity_provider(monkeypatch)
     schema = {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}
@@ -357,7 +342,6 @@ async def test_signing_in_again_reports_it_and_keeps_the_selected_tool(personal,
 
 
 async def test_denied_sign_in_and_states_of_the_other_kind(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _widen(personal.fixture.db_path)
     _identity_provider(monkeypatch)
     async with await _oauth_client(personal) as client:
@@ -387,7 +371,6 @@ async def test_denied_sign_in_and_states_of_the_other_kind(personal, monkeypatch
 async def test_sign_in_is_offered_only_without_a_credential(personal, monkeypatch):  # noqa: F811
     from bowhead_core.personal_mcp import PersonalMcpError
 
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     served = _identity_provider(monkeypatch)
 
     async def unreachable(endpoint, headers):
@@ -406,14 +389,6 @@ async def test_sign_in_is_offered_only_without_a_credential(personal, monkeypatc
         assert admin_only.status_code == 422 and admin_only.json()["detail"]["code"] == "personal_mcp_admin_app_required"
 
 
-async def test_sign_in_routes_are_closed_while_the_feature_is_off(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "0")
-    async with await _oauth_client(personal) as client:
-        started = await client.post("/api/v1/personal-mcp/oauth/authorize", json={"name": "Notes", "endpoint": _ENDPOINT})
-        assert started.status_code == 404 and started.json()["detail"] == {"code": "personal_mcp_oauth_unavailable"}
-        assert (await client.get("/api/v1/personal-mcp/capabilities")).json()["oauth_connectable"] is False
-
-
 # ── P1: a bound connection that needs the owner (decided 2026-11-25: keep the tool, answer on call) ──
 
 
@@ -423,7 +398,6 @@ def _needs_owner(personal) -> None:  # noqa: F811
 
 
 async def test_bound_tool_needing_sign_in_stays_listed_and_never_sends(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _needs_owner(personal)
     calls = _remote(monkeypatch)
@@ -466,15 +440,6 @@ async def test_other_bound_tools_still_run_and_other_states_still_fail_closed(pe
         await build_personal_specs(personal.registry, owner, personal.binding, personal.ctx)
 
 
-async def test_sign_in_is_on_unless_the_deployment_turns_it_off(monkeypatch):
-    from bowhead_core.personal_mcp import personal_mcp_oauth_enabled
-
-    monkeypatch.delenv("FEATURE_PERSONAL_MCP_OAUTH", raising=False)
-    assert personal_mcp_oauth_enabled()
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "0")
-    assert not personal_mcp_oauth_enabled()
-
-
 # ── A refused remembered token (116 acceptance, 2026-11-25) ──────────────────
 
 
@@ -506,7 +471,6 @@ def _remember(personal, token: str = "first-access") -> None:  # noqa: F811
 
 
 async def test_revoked_access_is_reported_as_not_run_and_asks_to_sign_in_again(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _remember(personal)
     # n8n deletes the client registration when access is revoked there.
@@ -525,7 +489,6 @@ async def test_revoked_access_is_reported_as_not_run_and_asks_to_sign_in_again(p
 
 
 async def test_refused_remembered_token_is_renewed_and_the_call_runs_once(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     _remember(personal)
     seen = _provider(monkeypatch, [(200, {"access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rotated"})])
@@ -548,7 +511,6 @@ async def test_refused_static_credential_is_reported_as_not_run(personal, monkey
 
 
 async def test_signing_in_again_registers_a_new_client(personal, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("FEATURE_PERSONAL_MCP_OAUTH", "1")
     _sign_in(personal)
     owner, identity = personal.ctx.user_id, personal.connection_id
     row = _connection(personal)

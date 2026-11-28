@@ -3,7 +3,7 @@
  *
  * `lib/turn-store-goldenreplay.test.ts` pins equal terminal store states on both paths,
  * but equal stores do not guarantee equal user-visible output: identical narrative text uses
- * separate rendering paths during streaming and after completion. On 116 1.3.36 (turn t_2119144cd8b3, Lead dispatched a private subagent to list
+ * separate rendering paths during streaming and after completion. On 116 1.3.36 (turn an observed task, Lead dispatched a private subagent to list
  * facebook/react docs), streaming nested lists flattened into one paragraph:
  * 「1. React Repository Overview - 1.1 … - 1.2 … 2. Core …」, returning to lists only after persisted-content
  * rerender; persisted final_answer had 36 `\n` characters, so live rendering lost the newlines.
@@ -211,10 +211,12 @@ describe("同一组事件 · live 渲染与重放渲染一致", () => {
     expect(liveAnswerText).not.toContain("**");
   });
 
-  it("★ 流式中的答案排在产出它的执行过程之后，与重放顺序一致；派活前的旁白仍在带上方", () => {
+  it("★ 流式中的答案排在产出它的执行过程之后，与重放顺序一致；派活前的旁白收进运行过程", () => {
     // On 116, answer body rendered **above** the running band (step card), moving below execution only after submission.
     // Replay orders execution at the first step position → subsequent prose/answer; live must match.
     // Mutation: stop rendering post-step beats after band (leave all in BeatStream) → answer precedes band; this fails.
+    // Chat running state R1.9: the narration before the dispatch is followed by a step, so it folds into the running
+    // view as a Bowhead note, live and in replay, instead of staying in the text flow.
     const INTRO = "我请 Wiki 助手先读一下仓库文档。";
     const pos = (a: Element | null, b: Element | null) => {
       expect(a).toBeTruthy();
@@ -227,8 +229,9 @@ describe("同一组事件 · live 渲染与重放渲染一致", () => {
 
     const live = renderLive({ leadIntro: INTRO });
     const band = live.querySelector('[data-testid="running-band"]');
-    // Pre-dispatch narration stays above band (design 1e: prose above band).
-    expect(pos(findText(live, INTRO), band)).toBeTruthy();
+    // Pre-dispatch narration is a note in the running card, not text above it.
+    expect(findText(live, INTRO)).toBeNull();
+    expect(band?.querySelector('[data-row-kind="note"]')?.textContent).toContain(INTRO);
     // Post-dispatch answer stays below band.
     expect(pos(band, findText(live, "Glossary"))).toBeTruthy();
 
@@ -237,7 +240,9 @@ describe("同一组事件 · live 渲染与重放渲染一致", () => {
     const trace = replay.querySelector(".bh-step-list");
     // Positive control: replay also puts execution before answer.
     expect(pos(trace, findText(replay, "Glossary"))).toBeTruthy();
-    expect(pos(findText(replay, INTRO), trace)).toBeTruthy();
+    // The same note sits in the replayed trace, and the text flow does not repeat it.
+    expect(findText(replay, INTRO)).toBeNull();
+    expect(trace?.querySelector('[data-row-kind="note"]')?.textContent).toContain(INTRO);
   });
 });
 

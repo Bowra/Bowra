@@ -222,6 +222,8 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "team_chart_style_revisions",
         "team_chart_styles",
         "team_identity_provider_binding_revisions",
+        "team_file_retention",
+        "file_retention_reviews",
         "team_identity_provider_bindings",
         "team_invite_tokens",
         "team_invite_workspace_grants",
@@ -270,6 +272,14 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "teams_connections",
         "teams_identity_bindings",
         "teams_workspace_bindings",
+        "scim_connections",
+        "scim_groups",
+        "scim_members",
+        "scim_users",
+        "wecom_bindings",
+        "wecom_connections",
+        "wecom_jobs",
+        "wecom_oauth_states",
         "user_audit_log",
         "user_federated_identities",
         "user_settings",
@@ -283,6 +293,8 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "account_retention_holds",
         "kb_file_generations",
         "kb_files",
+        "kb_knowledge_base_members",
+        "kb_knowledge_bases",
         "kb_maintenance_state",
         "kb_membership_operations",
         "kb_rebuild_jobs",
@@ -305,6 +317,7 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
     "team_templates": ("kb_team_templates",),
     "matrix": (
         "kb_matrices",
+        "kb_matrix_cell_events",
         "kb_matrix_cells",
         "kb_matrix_runs",
     ),
@@ -436,6 +449,7 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "canvas_sections",
         "canvases",
         "design_flatten_exports",
+        "file_retention_state",
     ),
     "notifications": (
         "notification_deliveries",
@@ -456,6 +470,20 @@ TABLE_DOMAINS = {table: domain for domain, tables in DOMAIN_TABLES.items() for t
 # The split's frozen map (`sqlite_domain_schema.json`) never lists them; a layout upgraded only to an
 # earlier revision does not have them yet.
 APPENDED_TABLES: dict[str, tuple[str, str]] = {
+    "kb_matrix_cell_events": ("matrix", "0240_matrix_cell_events"),
+    "kb_knowledge_bases": ("files", "0239_knowledge_bases"),
+    "kb_knowledge_base_members": ("files", "0239_knowledge_bases"),
+    "team_file_retention": ("core", "0238_file_library"),
+    "file_retention_reviews": ("core", "0238_file_library"),
+    "file_retention_state": ("content", "0238_file_library"),
+    "scim_connections": ("core", "0237_team_directory"),
+    "scim_groups": ("core", "0237_team_directory"),
+    "scim_members": ("core", "0237_team_directory"),
+    "scim_users": ("core", "0237_team_directory"),
+    "wecom_bindings": ("core", "0236_wecom_integration"),
+    "wecom_connections": ("core", "0236_wecom_integration"),
+    "wecom_jobs": ("core", "0236_wecom_integration"),
+    "wecom_oauth_states": ("core", "0236_wecom_integration"),
     "notification_deliveries": ("notifications", "0226_notification_deliveries"),
     "user_result_pins": ("execution", "0232_user_result_pins"),
     "agent_owner_trial_turn": ("execution", "0234_owner_draft_trial"),
@@ -463,6 +491,14 @@ APPENDED_TABLES: dict[str, tuple[str, str]] = {
 # Columns appended to a table after the domain split exist only in the domain layout; the legacy
 # single-file schema stays frozen at the reviewed split revision.
 APPENDED_COLUMNS: dict[str, tuple[tuple[str, ...], str]] = {
+    "kb_matrices": (("visibility",), "0240_matrix_cell_events"),
+    "kb_files": (("knowledge_base_id",), "0239_knowledge_bases"),
+    "teams_identity_bindings": (("confirmed_at",), "0235_teams_personal_chat"),
+    "teams_workspace_bindings": (("team_id",), "0235_teams_personal_chat"),
+    "teams_activity_dedup": (
+        ("claim_owner", "claim_until", "delivery", "delivery_user_id", "delivery_seq", "delivery_due", "delivery_owner"),
+        "0235_teams_personal_chat",
+    ),
     "artifacts": (("version_of", "lineage_id", "version_no"), "0228_artifact_versions"),
     "chat_turn_user_sources": (("selected_skills_json",), "0229_turn_selected_skills"),
 }

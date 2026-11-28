@@ -25,9 +25,12 @@ import {
   type FilesToast,
   type KbScope,
 } from "@/components/files/file-dialogs";
+import { LibraryBrowser } from "@/components/files/library-browser";
+import { type LibraryFile } from "@/lib/file-library";
 import { FileDrawer } from "@/components/files/file-drawer";
 import { useResultPinActions } from "@/lib/use-result-pin-actions";
-import { KbColumn, kbFileHref } from "@/components/files/kb-column";
+import { KbColumn, kbStatusHref } from "@/components/files/kb-column";
+import { useKnowledgeBasesEnabled } from "@/components/knowledge/bases/use-knowledge-bases";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { Tab, TabList, Tabs } from "@/components/ui/tabs";
 import { appPath } from "@/lib/base-path";
@@ -60,6 +63,8 @@ import {
   uploadFile,
 } from "@/lib/api";
 import { fileError } from "@/lib/file-error";
+import { KB_FILE_ERROR_KEY } from "@/lib/kb-file-error";
+import { notifyKnowledgeBasesChanged } from "@/lib/knowledge-bases-api";
 import { kbFileSettling } from "@/lib/kb-file-status";
 import { useSpaceSelection } from "@/lib/use-space";
 import { toast as globalToast } from "@/lib/use-toast";
@@ -113,7 +118,26 @@ function CheckIcon() {
 }
 
 export default function FilesPage() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let current = true;
+    void fetchMe()
+      .then((me) => { if (current) setEnabled(Boolean(me.capabilities?.file_library)); })
+      .catch(() => { if (current) setEnabled(false); });
+    return () => { current = false; };
+  }, []);
+  return enabled === null ? <main aria-busy="true" /> : <FilesPageContent modern={enabled} />;
+}
+
+function FilesPageContent({ modern }: { modern: boolean }) {
+  const [revision, setRevision] = useState(0);
   const t = useTranslations("files_page");
+  const tKb = useTranslations("knowledge_base");
+  const knowledgeBases = useKnowledgeBasesEnabled();
+  /** Knowledge bases: `?add_to_kb=<id>` preselects that target in "Add to knowledge base" (the dialog does not open by itself). */
+  const [addToKbTarget] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("add_to_kb"),
+  );
   const pinActions = useResultPinActions("files");
 
   const [tab, setTab] = useState<FilesTab>("assets");
@@ -127,6 +151,8 @@ export default function FilesPage() {
   const [canPromoteToTeam, setCanPromoteToTeam] = useState<boolean | null>(null);
   const { activeId: activeSpaceId, items: spaces } = useSpaceSelection();
   const activeSpaceName = spaces.find((w) => w.id === activeSpaceId)?.name ?? null;
+  // Space viewers cannot add files to Space knowledge; Team owners and admins keep that right.
+  const activeSpaceReadOnly = canPromoteToTeam !== true && spaces.find((w) => w.id === activeSpaceId)?.role === "viewer";
 
   // Filters (category chips / business category are secondary frontend filters; the backend already fetches the tab's kind set)
   const [qInput, setQInput] = useState("");
@@ -161,6 +187,7 @@ export default function FilesPage() {
   }, []);
 
   const fetchList = useCallback(async () => {
+    if (modern) { setRevision(v=>v+1); return; }
     setLoading(true);
     setError(null);
     try {
@@ -195,9 +222,9 @@ export default function FilesPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, q, family, sort, offset, cls, biz, t]);
+  }, [modern, tab, q, family, sort, offset, cls, biz, t]);
 
-  useEffect(() => { void fetchList(); }, [fetchList]);
+  useEffect(() => { if (!modern) void fetchList(); }, [fetchList, modern]);
 
   // The server provides knowledge-base status: poll while any row is queued/processing, then stop automatically.
   const kbSettling = items.some((f) => f.kb && kbFileSettling(f.kb));
@@ -209,6 +236,7 @@ export default function FilesPage() {
 
   /** Keep all three tab counts visible; the run-data count reassures users that data is still present, just tucked away. */
   const refreshCounts = useCallback(async () => {
+    if (modern) return;
     const probe = async (tb: FilesTab) => {
       try {
         const r = await listFiles({
@@ -224,12 +252,13 @@ export default function FilesPage() {
     };
     const [a, r, tr] = await Promise.all([probe("assets"), probe("run"), probe("trash")]);
     setCounts({ assets: a, run: r, trash: tr });
-  }, []);
+  }, [modern]);
   useEffect(() => { void refreshCounts(); }, [refreshCounts]);
 
   const refreshUsage = useCallback(async () => {
+    if (modern) return;
     try { setUsage(await fetchFilesUsage()); } catch { setUsage(null); }
-  }, []);
+  }, [modern]);
   useEffect(() => { void refreshUsage(); }, [refreshUsage]);
 
   useEffect(() => {
@@ -260,7 +289,7 @@ export default function FilesPage() {
 
   /** Deep link ?focus= must work across tabs (PRD §4.2.5): the target is often in run data. */
   useEffect(() => {
-    if (focusHandled.current) return;
+    if (modern || focusHandled.current) return;
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (!focus) return;
     focusHandled.current = true;
@@ -421,20 +450,22 @@ export default function FilesPage() {
     setDlg({
       kind: "kb-add",
       name: f.filename,
-      onConfirm: (scope: KbScope) => {
+      onConfirm: (scope: KbScope, knowledgeBaseId?: string) => {
         setDlg(null);
         void (async () => {
           try {
-            const added = await promoteFileToKb(f.file_id, scope);
+            // Knowledge bases on: the chosen knowledge base of that home; off: today's call, unchanged.
+            const added = knowledgeBaseId ? await promoteFileToKb(f.file_id, scope, knowledgeBaseId) : await promoteFileToKb(f.file_id, scope);
+            if (knowledgeBases) notifyKnowledgeBasesChanged();
             await fetchList();
             // FR7.4: after adding, link to processing progress in the knowledge base (open the matching scope and file drawer)
             pushToast(t("kb.kb_added", { name: midTruncate(f.filename, 24) }), {
               label: t("kb_col.view_progress"),
-              href: kbFileHref({ file_id: added.file_id, scope, workspace_id: added.workspace_id }),
+              href: kbStatusHref({ file_id: added.file_id, scope, workspace_id: added.workspace_id }, knowledgeBases),
             });
           } catch (e) {
             const msg = (e as Error).message;
-            const messageKey = {
+            const known: Record<string, string> = {
               unsupported: "kb.kb_unsupported",
               space_required: "kb.kb_space_required",
               forbidden: "kb.kb_forbidden",
@@ -445,13 +476,15 @@ export default function FilesPage() {
               knowledge_operation_removed: "kb.kb_action_removed",
               knowledge_operation_intent_conflict: "kb.kb_write_conflict",
               knowledge_membership_conflict: "kb.kb_write_conflict",
-            }[msg] ?? "kb.kb_failed";
-            pushToast(t(messageKey));
+            };
+            // Knowledge bases: finite knowledge-base codes (not found, level, home mismatch, original in the trash).
+            const knowledgeBaseKey = known[msg] ? undefined : KB_FILE_ERROR_KEY[msg];
+            pushToast(knowledgeBaseKey ? tKb(knowledgeBaseKey) : t(known[msg] ?? "kb.kb_failed"));
           }
         })();
       },
     });
-  }, [fetchList, pushToast, t]);
+  }, [fetchList, pushToast, t, tKb, knowledgeBases]);
 
   const askRemoveFromKb = useCallback((f: FileDTO) => {
     setDlg({
@@ -462,6 +495,7 @@ export default function FilesPage() {
         void (async () => {
           try {
             await removeFileFromKb(f.file_id);
+            if (knowledgeBases) notifyKnowledgeBasesChanged();
             await fetchList();
             pushToast(t("kb.kb_removed", { name: midTruncate(f.filename, 24) }));
           } catch (e) {
@@ -476,7 +510,7 @@ export default function FilesPage() {
         })();
       },
     });
-  }, [fetchList, pushToast, t]);
+  }, [fetchList, pushToast, t, knowledgeBases]);
 
   /** P4 permanent deletion. The server only deletes files owned by the user and already in trash; knowledge-base references block deletion
    *  (returning kb_blocked). Report that count to users instead of silently deleting fewer files. */
@@ -576,6 +610,28 @@ export default function FilesPage() {
   // size line only stands in until the split loads, and the trash keeps its own count line.
   const topbarSummary = tab === "trash" ? stat : usageLine ?? stat;
 
+  const libraryDrawer = (file: LibraryFile, close: () => void) => (
+    <FileDrawer
+      key={file.file_id}
+      file={file}
+      libraryFile={file}
+      onRefresh={fetchList}
+      tab={file.deleted_at ? "trash" : "assets"}
+      onClose={close}
+      onDelete={() => askDelete(file)}
+      onRestore={() => void doRestore(file)}
+      onGotoKb={() => file.kb ? window.location.assign(kbStatusHref(file.kb, knowledgeBases)) : gotoKb()}
+      onUseInChat={() => useInNewChat(file)}
+      onAddToKb={() => askAddToKb(file)}
+      onRemoveFromKb={() => askRemoveFromKb({ ...file, file_id: file.kb_artifact_id ?? file.file_id })}
+      pin={file.deleted_at ? undefined : {
+        label: pinActions.label("file", file.lineage_id),
+        busy: pinActions.isBusy("file", file.file_id),
+        onToggle: () => void pinActions.toggle("file", file.file_id).then(() => fetchList()),
+      }}
+      onFileUpdated={() => void fetchList()}
+    />
+  );
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const body = () => {
@@ -805,7 +861,7 @@ export default function FilesPage() {
       title={t("title")}
       mainClassName="v2-main files-main"
       className="files-frame"
-      topbarMeta={
+      topbarMeta={!modern &&
         <span className="meta">
           {topbarSummary === usageLine && usageLine ? (
             <span className="usage-split" data-testid="files-usage">{usageLine}</span>
@@ -815,6 +871,12 @@ export default function FilesPage() {
         </span>
       }
     >
+      {modern ? <>
+        <LibraryBrowser revision={revision} onPage={setItems} onTab={setTab} selected={sel} onSelection={setSel}
+          onUpload={()=>uploadRef.current?.click()} renderFile={libraryDrawer} />
+        {pending.map(p=><div key={p.localId} role="status">{p.name} · {p.error ?? (p.pct ? p.pct+"%" : t("upload_uploading"))}
+          <button onClick={()=>p.error?retryUpload(p):p.ctrl.abort()}>{p.error?t("state.retry"):t("bulk.cancel")}</button></div>)}
+      </> : <>
       <PageHeader
         description={(
           <span className="f-lede" data-testid="files-lede">
@@ -916,6 +978,7 @@ export default function FilesPage() {
         {body()}
       </div>
 
+      </>}
       <input
         ref={uploadRef}
         type="file"
@@ -927,7 +990,7 @@ export default function FilesPage() {
         }}
       />
 
-      {openRow && (
+      {!modern && openRow && (
         <FileDrawer
           file={openRow}
           tab={tab}
@@ -935,7 +998,7 @@ export default function FilesPage() {
           onDelete={() => askDelete(openRow)}
           onRestore={() => void doRestore(openRow)}
           onGotoKb={() => {
-            if (openRow.kb) window.location.assign(kbFileHref(openRow.kb));
+            if (openRow.kb) window.location.assign(kbStatusHref(openRow.kb, knowledgeBases));
             else gotoKb();
           }}
           onUseInChat={() => useInNewChat(openRow)}
@@ -965,13 +1028,22 @@ export default function FilesPage() {
                   setDlg(null);
                   void (async () => {
                     const targets = rows.filter((f) => sel.includes(f.file_id));
-                    for (const f of targets) {
-                      try { await restoreFile(f.file_id); } catch { /* ignore */ }
+                    let restored = 0;
+                    const failed: string[] = [];
+                    let failureMessage = "";
+                    for (const file of targets) {
+                      try {
+                        await restoreFile(file.file_id);
+                        restored++;
+                      } catch (error) {
+                        failed.push(file.file_id);
+                        failureMessage = t(fileError(error, "restore"));
+                      }
                     }
-                    setSel([]);
+                    setSel(failed);
                     await fetchList();
                     await refreshCounts();
-                    pushToast(t("toast.restored_n", { count: targets.length }));
+                    pushToast([t("toast.restored_n", { count: restored }), failureMessage].filter(Boolean).join(" "));
                   })();
                 },
               })}
@@ -1008,6 +1080,8 @@ export default function FilesPage() {
         onClose={() => setDlg(null)}
         canPromoteToTeam={canPromoteToTeam}
         spaceName={activeSpaceName}
+        spaceReadOnly={activeSpaceReadOnly}
+        knowledgeBaseTarget={addToKbTarget}
       />
       <FilesToasts list={toasts} />
     </PageFrame>

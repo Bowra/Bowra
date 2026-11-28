@@ -6,12 +6,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from bowhead_core.datarc_selection import DatarcConnectionBinding
 from bowhead_gateway.im.error_messages import im_interface_message
 from bowhead_gateway.routes import slack as slack_routes
 from bowhead_gateway.routes import teams as teams_routes
 
-from bowhead_gateway import _turn_runtime as turn_runtime
-from bowhead_gateway import channel_language, turn_service
+from bowhead_gateway import channel_language, datarc_context, turn_service
 
 
 class _UserStore:
@@ -62,8 +62,8 @@ def started(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def _runtime(*_args: Any, **_kwargs: Any) -> Any:
         return SimpleNamespace(available=True, router=object())
 
-    async def _datarc(*_args: Any, **_kwargs: Any) -> tuple[Any, bool, Any]:
-        return object(), False, None
+    async def _datarc(_app: Any, team_id: str) -> DatarcConnectionBinding:
+        return DatarcConnectionBinding(team_id, "conn_sales", "rev_sales", object())
 
     async def _admit(*_args: Any, **_kwargs: Any) -> object:
         record["admitted"] += 1
@@ -76,7 +76,7 @@ def started(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(channel_language, "resolve_channel_turn_language", _language)
     monkeypatch.setattr(turn_service, "resolve_team_model_runtime", _runtime)
-    monkeypatch.setattr(turn_runtime, "_resolve_turn_datarc_runtime", _datarc)
+    monkeypatch.setattr(datarc_context, "resolve_team_datarc_binding", _datarc)
     monkeypatch.setattr(turn_service, "admit_legacy_chat_execution", _admit)
     monkeypatch.setattr(turn_service, "spawn_turn", _spawn)
     return record
@@ -98,8 +98,15 @@ def _teams(monkeypatch: pytest.MonkeyPatch, active_turn_id: str | None) -> tuple
     async def _send_activity(_request: Any, _activity: Any, _connection: Any, card: Any) -> None:
         cards.append(str(card))
 
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("bowhead_gateway.teams.delivery.track_delivery", AsyncMock())
     monkeypatch.setattr(teams_routes, "_send_activity", _send_activity)
     kwargs = {
+        "session_id": "teams:test",
+        "turn_id": "t_test",
+        "activity_key": "act_test",
+        "access_context": {},
         "request": SimpleNamespace(app=SimpleNamespace(state=_state(active_turn_id))),
         "activity": {"conversation": {"id": "conv_1"}},
         "connection": SimpleNamespace(id="tc_1", entra_tenant_id="tenant_a"),
@@ -150,8 +157,8 @@ async def test_teams_reports_a_busy_session_detected_at_turn_start(monkeypatch, 
 
     await teams_routes._start_turn(**kwargs)
 
-    assert len(cards) == 2
-    assert im_interface_message("channel_session_busy", "en-US") in cards[1]
+    assert len(cards) == 1
+    assert im_interface_message("channel_session_busy", "en-US") in cards[0]
 
 
 async def test_other_turn_start_failures_still_propagate(monkeypatch, started) -> None:

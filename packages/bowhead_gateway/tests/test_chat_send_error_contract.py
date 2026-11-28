@@ -67,6 +67,7 @@ CHAT_SEND_ROUTE_CODES = frozenset(
         "client_refresh_required",
         "chart_selection_unavailable",
         "presentation_selection_unavailable",
+        "document_selection_unavailable",
         "subagent_draft_unsaved_changes",
         "member_not_in_workspace",
         "datarc_identity_required",

@@ -45,6 +45,8 @@ SOURCE_TO_ORIGIN: dict[str, str] = {
     # A version the person saved in the deck editor. None of the origins describes a hand edit; the owner chose
     # (2026-11-25) to register it as other rather than add one, which is what origin_for already returned.
     "presentation_edit": "other",
+    # The same for a version saved in the Word editor (docx inline edit design §7.2).
+    "document_edit": "other",
 }
 
 VALID_ORIGINS: frozenset[str] = frozenset({"query", "compute", "upload", "export", "web", "deck", "other"})

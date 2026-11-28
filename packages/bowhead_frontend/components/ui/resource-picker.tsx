@@ -371,6 +371,7 @@ export const TOOL_GROUP_OF_PLUGIN: Record<string, ToolGroupKey> = {
   "reports-canvas": "reports",
   designs: "designs",
   "knowledge-base": "knowledge",
+  "knowledge-management": "knowledge",
   "web-research": "web",
   "code-computation": "compute",
   "image-generation": "media",
@@ -403,8 +404,11 @@ export interface PickerTool {
   riskLabel?: string | null;
 }
 
-/** Tool reference → Tools-page group, from built-in Plugin membership with a category fallback. */
-export function toolGroups(plugins: PickerPlugin[]): (ref: string) => ToolGroupKey {
+/**
+ * Tool reference → Tools-page group, from built-in Plugin membership with a category fallback.
+ * The Tools page, the Agent editor and the Plugin editor all group built-in Tools with this one rule.
+ */
+export function toolGroups(plugins: readonly Pick<PickerPlugin, "kind" | "id" | "tools">[]): (ref: string) => ToolGroupKey {
   const byPlugin = new Map<string, ToolGroupKey>();
   for (const plugin of plugins) {
     if (plugin.kind !== "builtin") continue;

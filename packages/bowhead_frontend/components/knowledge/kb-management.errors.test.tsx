@@ -276,6 +276,7 @@ describe.each(locales)("KB management errors — $locale", (entry) => {
               file_id: file.file_id,
               filename: file.filename,
               scope: "personal",
+              owner_id: "u_me",
             },
           ]}
           bulk={false}

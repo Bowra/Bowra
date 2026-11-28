@@ -543,13 +543,15 @@ export async function createSubagentFromDraft(
   return value as unknown as CreatedSubagentFromDraft;
 }
 
+/** A manual (Canvas) draft is bound to its Space: pass the context its list was read in. */
 export async function discardSubagentDraft(
   draftId: string,
   etag: string,
+  context?: SubagentDraftRequestContext,
 ): Promise<void> {
   const response = await apiFetch(`${BASE}/${encodeURIComponent(draftId)}`, {
     method: "DELETE",
-    headers: { "If-Match": etag },
+    headers: { "If-Match": etag, ...(context ? draftContextHeaders(context) : {}) },
   });
   await check(response);
 }

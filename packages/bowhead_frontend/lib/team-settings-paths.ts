@@ -15,6 +15,7 @@ export const TEAM_SETTINGS_PATH_TABS = [
   "team-appearance",
   "feedback-inbox",
   "team-operations",
+  "file-retention",
   "reference-retention",
 ] as const satisfies readonly Tab[];
 
@@ -34,6 +35,7 @@ const TEAM_SETTINGS_ROUTE_SEGMENTS: Partial<Record<TeamSettingsPathTab, string>>
   "team-appearance": "brand-appearance",
   "feedback-inbox": "feedback-inbox",
   "team-operations": "team-operations",
+  "file-retention": "file-retention",
   "reference-retention": "reference-retention",
 };
 

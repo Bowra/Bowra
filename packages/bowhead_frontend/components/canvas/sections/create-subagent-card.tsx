@@ -809,8 +809,9 @@ export function CreateSubagentCard({
   // edit mode: a selected tool_ref that's no longer in the live catalog (team tool disabled/removed)
   // renders no picker row → can't be deselected → PATCH would 422 on _validate_tool_refs, blocking
   // ALL edits. Surface stale refs as removable rows + block advancing until they're cleared.
+  // A built-in Tool the team turned off is not stale: it stays selected (the run leaves it out) and is not offered.
   const staleSel = catalog
-    ? [...sel].filter((n) => !teamTools.some((tool) => tool.tool_name === n) && !nativeTools.includes(n))
+    ? [...sel].filter((n) => !teamTools.some((tool) => tool.tool_name === n) && !nativeTools.includes(n) && !(catalog.team_disabled_tools ?? []).includes(n))
     : [];
 
   const teamSkills = skillsCatalog?.team_skills ?? [];

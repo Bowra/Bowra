@@ -374,7 +374,7 @@ def _entries(row: aiosqlite.Row) -> tuple[TeamToolEntry, ...]:
         values = [
             mcp_entry(str(row["id"]), value)
             for value in tools
-            if isinstance(value, dict) and value.get("name") and (not selected or str(value["name"]) in selected)
+            if isinstance(value, dict) and value.get("name") and (str(value["name"]) in selected or (not selected and row["auth_type"] != "oauth"))
         ]
     else:
         raise ValueError("unsupported team Tool source kind")

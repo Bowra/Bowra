@@ -23,7 +23,7 @@ import {
   setTeamPluginEnabled,
   updateTeamPlugin,
   type TeamPlugin,
-  type TeamPluginTemplate,
+  type TeamPluginTemplates,
 } from "@/lib/team-plugins-api";
 import { localizedToolText, toolDisplay } from "@/lib/tool-display";
 import { authoringSkillDescription, authoringSkillMatches, authoringSkillTitle } from "@/lib/skills-meta";
@@ -54,7 +54,7 @@ function selectionKeys(plugin: TeamPlugin | undefined): ReadonlySet<string> {
 const NO_PLUGINS: ReadonlySet<string> = new Set();
 
 /** Template kinds with reviewed copy; a kind the frontend does not know is not offered. */
-const TEMPLATE_KINDS: ReadonlySet<string> = new Set(["shopify_analysis", "shopify_content"]);
+const TEMPLATE_KINDS: ReadonlySet<string> = new Set(["shopify_analysis", "shopify_content", "notion_knowledge", "n8n_workflows"]);
 
 interface FormContents {
   name: string;
@@ -117,7 +117,8 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
   // Groups open when the form opens if they hold a selection; afterwards people open and close them.
   const [openBaseline, setOpenBaseline] = useState<ReadonlySet<string>>(() => selectionKeys(original.current));
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
-  const [templates, setTemplates] = useState<TeamPluginTemplate[] | null>(null);
+  const [templateResult, setTemplateResult] = useState<TeamPluginTemplates | null>(null);
+  const templates = templateResult?.templates;
   const [templateError, setTemplateError] = useState("");
   const [templateId, setTemplateId] = useState("");
   // The form as the last template (or Blank) left it; choosing another asks first only if people changed it since.
@@ -239,18 +240,20 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
   // One request at a time; Retry only clears the error and this effect loads again.
   const templateLoading = useRef(false);
   useEffect(() => {
-    if (!creatingOnPage || templates !== null || templateError || templateLoading.current) return;
+    if (!creatingOnPage || templateResult !== null || templateError || templateLoading.current) return;
     templateLoading.current = true;
     void listTeamPluginTemplates()
-      .then((list) => { if (mounted.current) setTemplates(list.filter((item) => TEMPLATE_KINDS.has(item.kind))); })
+      .then((result) => {
+        if (mounted.current) setTemplateResult({ ...result, templates: result.templates.filter((item) => TEMPLATE_KINDS.has(item.kind)) });
+      })
       .catch((cause: unknown) => { if (mounted.current) setTemplateError(withHttpFailureReason(t("template_load_failed"), cause, { read: true })); })
       .finally(() => { templateLoading.current = false; });
-  }, [creatingOnPage, templates, templateError, t]);
+  }, [creatingOnPage, templateResult, templateError, t]);
   const applyTemplate = async (id: string) => {
     const template = templates?.find((item) => item.id === id);
     const next: FormContents = template ? {
-      name: t(`templates.${template.kind}.name`, { connection: template.connection_name }),
-      description: t(`templates.${template.kind}.description`),
+      name: t(`templates.${template.kind}.name`, { connection: template.connection_name }).slice(0, 80),
+      description: t(`templates.${template.kind}.description`, { connection: template.connection_name }),
       tools: template.tool_refs,
       skills: template.skill_grants,
     } : BLANK_FORM;
@@ -350,7 +353,10 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
     return current && current.grant.revision !== grant.revision;
   });
   const unavailableSkills = catalog ? skills.filter((grant) => !catalog.skills.some((skill) => skill.grant.skill_ref.id === grant.skill_ref.id)) : [];
-  const unavailableTools = catalog ? tools.filter((ref) => !catalog.tools.some((tool) => tool.stable_ref === ref)) : [];
+  // A Tool the team turned off stays in the Plugin (the run leaves it out); it is not listed as unavailable.
+  const unavailableTools = catalog
+    ? tools.filter((ref) => !catalog.tools.some((tool) => tool.stable_ref === ref) && !(catalog.team_disabled_tools ?? []).includes(ref))
+    : [];
   const searching = query.trim().length > 0;
   const selectedTools = new Set(tools);
   const selectedSkills = new Set(skills.map((grant) => grant.skill_ref.id));
@@ -456,6 +462,12 @@ export function TeamPluginsContent({ hosted }: { hosted?: HostedPluginEditor }) 
               {templates.map((item) => <option key={item.id} value={item.id}>{t(`templates.${item.kind}.option`, { connection: item.connection_name })}</option>)}
             </select>
           </label> : null}
+          {creatingOnPage && templateResult?.notion_setup_required ? (
+            <p className={styles.noMatch}>
+              {t("notion_setup_required")}{" "}
+              <CapabilityLink href={settingsTabHref("tools")}>{t("notion_setup_action")}</CapabilityLink>
+            </p>
+          ) : null}
           {creatingOnPage && templateError ? <p className={styles.noMatch} role="status">{templateError} <Button size="sm" onClick={() => setTemplateError("")}>{common("retry")}</Button></p> : null}
           <label className={styles.field}>{t("name")}<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className={styles.field}>{t("description")}<textarea maxLength={1000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>

@@ -105,6 +105,7 @@ import type {
   TurnSummary,
 } from "./types";
 import { randomUuid } from "./random-id";
+import { publishAgentTrialSendRefusal, publishAgentTrialSendResponse } from "./agent-trial-notice";
 
 const INITIAL_STATE: TurnRunnerState = {
   user: null,
@@ -1241,6 +1242,8 @@ export async function postSendMessage(
     // licensing §13.2 — surface only known entitlement codes to the global
     // read-only banner. Credit and ordinary authz codes are no-ops there.
     applyEntitlementDenial(error.code);
+    // Owner draft trial: a refusal may mean the draft was released (the chat rechecks and ends the trial).
+    publishAgentTrialSendRefusal(error.code);
     throw error;
   }
   // §3.7 WARN transport — the grace/degraded health rides the POST 200 header.
@@ -1250,6 +1253,8 @@ export async function postSendMessage(
     if (chatAction && !isComposerChatActionResponse(started, chatAction)) {
       throw new Error("composer chat action response is invalid");
     }
+    // TD1: the accepted trial message used the draft under test; the trial chat says so.
+    publishAgentTrialSendResponse(started);
     return checkReferenceStarted(started);
   } catch (decodeError) {
     if (!clientSubmissionId) throw decodeError;
@@ -2195,6 +2200,8 @@ function attachStream(
   // duplicate replayed canvas frames, fixing reconnect double accumulation of section_chunk (F2). Canvas events use
   // separate canvas-sse listeners, bypassing handle() seenSeq above, so need their own cursor.
   const canvasGate: CanvasSeqGate = { maxEvtSeq: 0 };
+  // `/api/v1/chat/stream/<turnId>`: canvas edits on this stream are this Turn's (chat running state R2.1).
+  const canvasTurnId = streamUrl.split("?")[0].split("/").filter(Boolean).pop() || undefined;
 
   const clearReopen = (): void => {
     if (reopenTimer) { clearTimeout(reopenTimer); reopenTimer = null; }
@@ -3447,7 +3454,7 @@ function attachStream(
 
   // ── Per-connection listeners (reattach to new es on every reconnect) ─────────────────────────────
   const wire = (es: EventSource): void => {
-    const detach = attachCanvasSSE(es, canvasGate);
+    const detach = attachCanvasSSE(es, canvasGate, canvasTurnId);
     detachCanvas = detach;
     (["turn_started", "tool_call", "tool_result",
       "partial_answer", "final_answer",  // ν2 v2: final_answer wires chat bubble

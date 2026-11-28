@@ -149,7 +149,7 @@ class _ObservedAttempt:
             except sqlite3.OperationalError as error:
                 # The provider answered and the response is in hand; only the usage row could not be
                 # written. Keep the response and settle the row afterwards instead of discarding the
-                # call as outcome-unknown (116 t_fb8f7054b786 lost a 13-minute helper run this way).
+                # call as outcome-unknown (an observed execution lost a 13-minute helper run this way).
                 # A settlement conflict is not a storage error and still fails the call.
                 _settle_later(self.observation, usage=usage, response_digest=response_digest, error=error)
                 recorded = True
@@ -392,6 +392,21 @@ async def confirm_provider_rate_limit_rejection(
     await confirm_physical_not_applied(
         attempt,
         evidence_code="provider_http_rate_limited/v1",
+        evidence={"http_status": status_code},
+    )
+
+
+async def settle_provider_service_unavailable(
+    attempt: PhysicalInvocationAttempt | None,
+    *,
+    status_code: int,
+) -> None:
+    """Settle an HTTP 503 that supplied no usable model output to Bowhead."""
+    if status_code != 503:
+        raise ValueError("provider service unavailable requires HTTP 503")
+    await confirm_physical_not_applied(
+        attempt,
+        evidence_code="provider_http_service_unavailable/v1",
         evidence={"http_status": status_code},
     )
 

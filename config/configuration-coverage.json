@@ -13,7 +13,7 @@
       "forms": [
         "personal_appearance"
       ],
-      "reason": "Scalar choices and scalar resets are supported; colors, chart styles and whole-theme reset remain manual."
+      "reason": "Scalar choices, the run view and scalar resets are supported; colors, chart styles and whole-theme reset remain manual."
     },
     "/settings/export/": {
       "status": "informational",
@@ -188,6 +188,10 @@
     "/team/settings/public-entries/": {
       "status": "manual",
       "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/file-retention/": {
+      "status": "manual",
+      "reason": "The original Team administrator adapter previews exact inventory before applying a policy."
     },
     "/team/settings/reference-retention/": {
       "status": "manual",

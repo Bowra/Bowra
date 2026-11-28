@@ -115,6 +115,27 @@ afterEach(() => {
 });
 
 describe("SourceToolSelectionDialog", () => {
+  it("recommends only reviewed Notion read tools and clears only the filtered results", async () => {
+    vi.mocked(listSourceTools).mockResolvedValue({
+      ...CATALOG,
+      items: [
+        tool("notion-search", false, { category: "read" }),
+        tool("notion-fetch", false, { category: "read" }),
+        tool("notion-query-data-sources", false, { category: "unknown" }),
+        tool("notion-delete-pages", false, { category: "destructive" }),
+      ],
+    });
+    renderDialog({ ...SOURCE, base_url: "https://mcp.notion.com/mcp", selected_op_ids: [], op_count: 0, status: "disabled" });
+    fireEvent.click(await screen.findByRole("button", { name: "使用推荐的 Notion 工具" }));
+    expect(screen.getByRole("checkbox", { name: /搜索 Notion 页面/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /读取 Notion 页面/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /查询 Notion 数据库/ })).not.toBeChecked();
+    fireEvent.change(screen.getByRole("combobox", { name: "按工具类别筛选" }), { target: { value: "destructive" } });
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "清除当前结果" })).toBeDisabled();
+    expect(screen.getByText("已选 2 / 4 个")).toBeVisible();
+  });
+
   it("checks the imported tools, marks new and write tools, and keeps Save off until something changes", async () => {
     vi.mocked(listSourceTools).mockResolvedValue(CATALOG);
     renderDialog(SOURCE, ["drop_table"]);

@@ -1,6 +1,32 @@
 import { staticTranslator } from "./locale-messages";
 
 /**
+ * Why the server refused an Owner draft trial message (trial-tech-design §4.1, §4.5): the send refusals, the
+ * blocked features, and the trial codes of the answer-feedback, scheduling and file-sharing routes.
+ */
+export const AGENT_TRIAL_REFUSAL_CODES = [
+  "agent_trial_disabled",
+  "agent_trial_owner_required",
+  "agent_trial_agent_unavailable",
+  "agent_trial_candidate_not_prepared",
+  "agent_trial_candidate_unavailable",
+  "agent_trial_candidate_changed",
+  "agent_trial_extra_references",
+  "agent_trial_session_mismatch",
+  "agent_trial_reference_required",
+  "agent_trial_unavailable",
+  "agent_trial_plan_unavailable",
+  "agent_trial_mcp_references_unavailable",
+  "agent_trial_extension_skills_unavailable",
+  "agent_trial_steer_unavailable",
+  "agent_trial_helper_unavailable",
+  "agent_trial_document_tools_unavailable",
+  "agent_trial_feedback_unavailable",
+  "agent_trial_schedule_unavailable",
+  "agent_trial_file_share_unavailable",
+] as const;
+
+/**
  * Stable HTTP error codes reachable from POST /api/v1/chat/send before a turn
  * starts. SSE reason codes have a separate lifecycle and remain in
  * error-messages.ts.
@@ -42,6 +68,7 @@ export const CHAT_SEND_BACKEND_CODES = [
   "result_reference_unavailable",
   "chart_selection_unavailable",
   "presentation_selection_unavailable",
+  "document_selection_unavailable",
   "auth_session_generation_inactive",
   "chat_action_not_found",
   "client_refresh_required",
@@ -99,6 +126,9 @@ export const CHAT_SEND_BACKEND_CODES = [
   "tamper",
   "clock_tamper",
   "entitlement_unavailable",
+  // Owner draft trial refusals (published_diagnostics.AGENT_TRIAL_SEND_REFUSAL_CODES and
+  // AGENT_TRIAL_BLOCKED_FEATURE_CODES), plus the trial codes other routes answer with; each says what to do.
+  ...AGENT_TRIAL_REFUSAL_CODES,
 ] as const;
 
 export type ChatSendBackendCode = (typeof CHAT_SEND_BACKEND_CODES)[number];

@@ -130,7 +130,7 @@ describe("CoachChangesSection", () => {
   it("waits for unsaved canvas edits before undoing", () => {
     renderSection([coachRow(PROMPT)], { editorDirty: true });
     expect(screen.getByRole("button", { name: "撤销" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("画布里有没保存的修改。先保存或放弃，再撤销 Coach 的修改。")).toBeTruthy();
+    expect(screen.getByText("还有没保存的修改。先保存或放弃，再撤销 Coach 的修改。")).toBeTruthy();
   });
 
   it("refreshes and explains when the draft changed underneath the list", async () => {

@@ -294,3 +294,33 @@ async def test_queued_source_replacement_is_refused_before_launching_its_convert
         release.set()
         await previews.close()
         await asyncio.gather(first, second, return_exceptions=True)
+
+
+async def test_a_version_renders_once_and_is_served_from_its_kept_render(presentation_store, previews, monkeypatch):
+    """docx inline edit design §5.2: later views of the same stored object are not rendered again."""
+    store, art = presentation_store
+    inputs = []
+
+    async def convert(self, source):
+        inputs.append(source)
+        return PDF
+
+    monkeypatch.setattr(representations.AuthoringExecutor, "view_presentation", convert)
+
+    def executor():
+        return SimpleNamespace(root=store.backend.root_dir, url="http://executor", token="test")
+
+    assert (await representations.build_presentation_view(store, art, executor, previews)).body == PDF
+    assert (await representations.build_presentation_view(store, art, executor, previews)).body == PDF
+
+    def other_executor():
+        return SimpleNamespace(root=store.backend.root_dir, url="http://other-executor", token="test")
+
+    assert (await representations.build_presentation_view(store, art, other_executor, previews)).body == PDF
+    assert inputs == [b"original bytes"] * 2, "Another executor's render is not reused"
+    inputs.clear()
+    assert (await representations.build_presentation_view(store, art, executor, previews)).body == PDF
+    assert inputs == [b"original bytes"], "One render is kept per kind, so switching back renders again"
+    Path(art.path).write_bytes(b"replaced bytes")
+    assert (await representations.build_presentation_view(store, art, executor, previews)).body == PDF
+    assert inputs == [b"original bytes", b"replaced bytes"], "A replaced object renders again"

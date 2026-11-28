@@ -321,6 +321,58 @@ async def test_personal_kb_bytes_extractions_and_all_index_versions_are_erased(c
         assert db.execute("SELECT id FROM team_subagent").fetchall() == [("agent_team_wide",)]
 
 
+async def test_personal_kb_files_follow_their_scope_owner_not_their_uploader(context, tmp_path, monkeypatch):
+    """Personal KB ownership is ``scope_id`` (``KbPermission.owner_of``), as for every read and delete."""
+    from bowhead_core.kb.store import KbStore
+    from gateway_legacy_database import upgrade
+
+    monkeypatch.chdir(tmp_path)
+    upgrade(f"sqlite+aiosqlite:///{Path(context.users.db_path).with_name('bowhead.db')}")
+    context.app.state.kb_store = KbStore(str(tmp_path / "chroma"))
+    cleanup = AccountExternalCleanup(context.app)
+    context.service.external_cleanup = cleanup
+    context.service.external_quarantine = cleanup.quarantine
+    colleague = await context.users.create_user(
+        team_id=context.user.team_id, email="colleague@example.com", password="Current-password-123!", email_verified=True
+    )
+    files = {
+        # The departed user's own personal file, uploaded by a colleague (for example moved into their scope).
+        "owned_file": (colleague.id, context.user.id),
+        # A file the departed user uploaded that now sits in the colleague's personal scope.
+        "moved_file": (context.user.id, colleague.id),
+    }
+    with sqlite3.connect(tmp_path / "kb_files.db") as db:
+        for file_id, (uploader, owner) in files.items():
+            artifact = await context.service.artifacts.put_bytes(
+                content=file_id.encode(), filename=f"{file_id}.txt", mime="text/plain", created_by=uploader, scope="user"
+            )
+            db.execute(
+                "INSERT INTO kb_files(file_id,artifact_id,filename,mime_type,size_bytes,scope,scope_id,workspace_id,team_id,uploaded_by,uploaded_at,parse_status) "
+                "VALUES (?,?,?,'text/plain',7,'personal',?,'',?,?,'t','done')",
+                (file_id, artifact.id, artifact.filename, owner, context.user.team_id, uploader),
+            )
+    with sqlite3.connect(tmp_path / "kb_extracted_records.db") as db:
+        db.execute(
+            "INSERT INTO kb_extracted_records(record_id,doc_type_id,file_id,workspace_id,fields_json,extractor_model,extracted_at,last_modified_at,last_modified_by) "
+            "VALUES ('rec_owned','type','owned_file','ws','{}','synthetic','t','t','system')"
+        )
+    # Requested 31 days ago: the database's retention trigger compares holds with the real current time.
+    now = datetime.now(UTC)
+    context.service.clock = lambda: now - timedelta(days=31)
+    await context.service.request(context.user.id)
+    assert await context.service.run_once() == {"completed": 0, "failed": 0}  # Quarantine only.
+    with sqlite3.connect(tmp_path / "kb_files.db") as db:
+        quarantined = dict(db.execute("SELECT file_id,parse_error FROM kb_files").fetchall())
+    assert quarantined == {"owned_file": "account_deleted", "moved_file": None}
+
+    context.service.clock = lambda: now
+    assert await context.service.run_once() == {"completed": 1, "failed": 0}
+    with sqlite3.connect(tmp_path / "kb_files.db") as db:
+        assert "owned_file" not in {row[0] for row in db.execute("SELECT file_id FROM kb_files")}
+    with sqlite3.connect(tmp_path / "kb_extracted_records.db") as db:
+        assert db.execute("SELECT record_id FROM kb_extracted_records").fetchall() == []
+
+
 async def test_enabled_shared_agent_requires_handoff_and_keeps_account_active(context):
     from bowhead_core.user_store import TeamSubagent
 

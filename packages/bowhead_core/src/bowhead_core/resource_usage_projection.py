@@ -474,6 +474,8 @@ async def _team_executions(db: aiosqlite.Connection, *, team_id: str) -> list[ai
         JOIN turns turn_row ON turn_row.id=execution.turn_id
         JOIN sessions session ON session.id=turn_row.session_id
         WHERE execution.team_id=?
+          -- An Owner draft trial ran an unreleased revision; it is not resource usage history.
+          AND session.origin!='agent_trial'
         """,
         (team_id,),
     ) as cursor:

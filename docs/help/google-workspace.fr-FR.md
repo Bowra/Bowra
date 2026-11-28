@@ -7,7 +7,7 @@ Une fois Google Workspace connecté, les Agents peuvent lire les Google Docs, Sh
 Seuls les propriétaires et administrateurs de l’équipe peuvent configurer la connexion. Elle utilise l’application Google Cloud de votre entreprise ; Bowra ne fournit pas d’application partagée.
 
 1. Dans la console Google Cloud, créez un client OAuth de type « Application Web » avec le type d’utilisateur « Interne » (votre organisation uniquement).
-2. Ouvrez **Paramètres de l’équipe → Outils → Outils tiers intégrés** et choisissez Google Workspace. Copiez l’**URI de redirection autorisé** affiché dans « URI de redirection autorisées » et l’**Origine JavaScript autorisée** dans « Origines JavaScript autorisées ». Si la page demande d’abord une adresse d’accès, enregistrez une adresse HTTPS sous **Paramètres de l’équipe → Entrée publique**.
+2. Ouvrez **Centre de capacités → Outils → Gérer les sources d’outils → Services intégrés**, choisissez **Ajouter un service intégré** puis Google Workspace. Copiez l’**URI de redirection autorisé** affiché dans « URI de redirection autorisées » et l’**Origine JavaScript autorisée** dans « Origines JavaScript autorisées ». Si la page demande d’abord une adresse d’accès, enregistrez une adresse HTTPS sous **Paramètres de l’équipe → Entrée publique**.
 3. Déclarez les champs d’application listés sur l’écran de consentement OAuth.
 4. De retour dans Bowra, saisissez l’ID client, le secret client et le domaine Google Workspace de votre entreprise, puis activez les capacités nécessaires :
    - Base (obligatoire) : lire et écrire les fichiers choisis par les membres dans Bowra ; créer de nouveaux Docs, Slides et Sheets ;

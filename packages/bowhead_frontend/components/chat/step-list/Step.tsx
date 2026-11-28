@@ -36,6 +36,8 @@ export interface StepProps {
   autoCollapseOnDone?: boolean;
   /** expanded detail body — a tool-result renderer. Omit for a non-expandable row. */
   children?: ReactNode;
+  /** The step's id, so the style overview above the trace can bring this row into view (chat running state R3.1). */
+  stepId?: string;
 }
 
 export function Step({
@@ -49,6 +51,7 @@ export function Step({
   open: openProp,
   autoCollapseOnDone = false,
   children,
+  stepId,
 }: StepProps) {
   const meta = getToolMeta(toolName ?? null);
   const expandable = children != null && children !== false;
@@ -92,7 +95,7 @@ export function Step({
   const labelTitle = typeof label === "string" ? label : undefined;
 
   return (
-    <div className={`stp is-${status}`}>
+    <div className={`stp is-${status}`} data-step-id={stepId}>
       <button
         type="button"
         className="stp-head"

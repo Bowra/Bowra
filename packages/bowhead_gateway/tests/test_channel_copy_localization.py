@@ -70,7 +70,6 @@ _PREVIOUS_ZH_COPY = {
     "teams_datarc_missing_title": "空间数据连接不可用",
     "teams_data_permissions_unavailable_title": "数据权限不可用",
     "teams_data_permissions_unavailable": "无法确认你在该空间的数据权限，请联系管理员。",
-    "teams_clarify_in_web": "当前试点尚不在 Teams 内处理澄清，请打开 Bowhead Web 继续。",
     # Shared with Feishu: identical to the strings Slack and Teams used.
     "answer_title": "Bowhead 最终答案",
     "status_failed": "Bowhead 处理失败",
@@ -104,7 +103,7 @@ def test_previous_routine_delivery_strings_render_unchanged_in_zh_cn() -> None:
 @pytest.mark.parametrize("locale", ["de-DE", "fr-FR"])
 def test_new_channel_keys_are_translated(locale: str) -> None:
     new_keys = [key for key in IM_INTERFACE_MESSAGES["en-US"] if key.startswith(("channel_", "slack_", "teams_", "scheduled_"))]
-    assert len(new_keys) == 45
+    assert "teams_submit_answers" in new_keys
     for key in new_keys:
         if key in {"scheduled_email_subject", "scheduled_email_job"}:
             if key == "scheduled_email_subject":
@@ -348,21 +347,15 @@ async def test_slack_mirror_renders_turn_cards_in_the_message_locale(monkeypatch
 
 @pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
 async def test_teams_mirror_renders_turn_cards_in_the_message_locale(monkeypatch: pytest.MonkeyPatch, locale: str) -> None:
-    import bowhead_core
-
-    cards: list[dict[str, Any]] = []
-
-    async def _send(_request: Any, _activity: dict[str, Any], _connection: Any, card: dict[str, Any]) -> None:
-        cards.append(card)
+    from bowhead_gateway.im.turn_render import NeutralTurnState
 
     async def _body(_neutral: Any, text: str, _app: Any, *, locale: str, answer_locale: str | None = None) -> str:
         return text or _catalog("completed", answer_locale or locale)
 
-    bus = _Bus([("final_answer", {"text": ""}), ("error", {})])
-    monkeypatch.setattr(bowhead_core, "get_event_registry", lambda: _Registry(bus))
-    monkeypatch.setattr(teams, "_send_activity", _send)
     monkeypatch.setattr(teams, "teams_answer_body", _body)
-    await teams._mirror_turn(SimpleNamespace(app=None), {}, SimpleNamespace(), "t_1", locale, locale)
+    events = [("final_answer", {"text": ""}), ("error", {})]
+    neutral = NeutralTurnState(turn_id="t_1")
+    cards = [await teams.event_card(None, neutral, event, locale, locale) async for event in _Bus(events).subscribe()]
     assert cards == [
         teams._card(_catalog("answer_title", locale), _catalog("completed", locale)),
         teams._card(_catalog("status_failed", locale), _catalog("channel_turn_incomplete", locale)),
@@ -407,6 +400,10 @@ async def test_slack_and_teams_refusals_before_a_turn_follow_the_message(monkeyp
         SimpleNamespace(state=state), SimpleNamespace(id="slc_1", team_id="team_1"), SimpleNamespace(id="u_1"), "ws_1", "C1", "1.0", text
     )
     await teams._start_turn(
+        session_id="teams:test-session",
+        turn_id="t_test",
+        activity_key="test-activity",
+        access_context={},
         request=SimpleNamespace(app=SimpleNamespace(state=state)),
         activity={},
         connection=SimpleNamespace(id="tc_1", entra_tenant_id="tenant_1"),
@@ -463,14 +460,29 @@ class _TeamsStore:
     async def claim_activity(self, _activity_id: str) -> bool:
         return True
 
-    async def get_identity(self, _tenant: str, oid: str) -> tuple[str, str] | None:
+    async def get_identity(self, _tenant: str, oid: str, _team: str) -> tuple[str, str] | None:
         return ("u_1", "team_1") if oid == "oid_1" else None
 
-    async def set_workspace(self, _tenant: str, _conversation: str, _oid: str, workspace_id: str) -> None:
+    async def set_workspace(self, _tenant: str, _conversation: str, _oid: str, workspace_id: str, _team: str) -> None:
         self.saved.append(workspace_id)
 
 
 class _UserStore:
+    async def get_user(self, user_id):
+        return SimpleNamespace(id=user_id, status="active")
+
+    async def get_team_role(self, user_id, team_id):
+        return "member"
+
+    async def get_workspace_team_id(self, workspace_id):
+        return "team_1"
+
+    async def get_member_role(self, workspace_id, user_id):
+        return "member"
+
+    async def get_workspace(self, workspace_id):
+        return {"id": workspace_id, "status": "active"}
+
     async def list_workspaces_for_user(self, _user_id: str, team_id: str | None = None) -> list[dict[str, str]]:
         return [{"workspace_id": "ws_1", "name": "Sales"}]
 
@@ -518,21 +530,15 @@ async def test_teams_out_of_turn_copy_follows_preference_then_message(
 
 @pytest.mark.parametrize(("rendered", "locale"), [("zh-CN", "zh-CN"), ("de-DE", "de-DE"), (None, "en-US")])
 async def test_teams_space_switch_reply_follows_the_rendered_card_locale(monkeypatch: pytest.MonkeyPatch, rendered: str | None, locale: str) -> None:
-    cards: list[dict[str, Any]] = []
-
-    async def _send(_request: Request, _activity: dict[str, Any], _connection: Any, card: dict[str, Any]) -> None:
-        cards.append(card)
-
-    monkeypatch.setattr(teams, "_send_activity", _send)
     store = _TeamsStore()
     app = SimpleNamespace(state=SimpleNamespace(teams_store=store, user_store=_UserStore(), user_settings_store=_Settings({})))
     data: dict[str, Any] = {"verb": "bowhead.workspace.select", "workspace_id": "ws_1"}
     if rendered:
         data["locale"] = rendered
     activity = {"value": {"action": data}, "from": {"aadObjectId": "oid_1"}, "conversation": {"id": "conv_1"}}
-    await teams._handle_workspace_selection(_json_request(app, {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1")
+    receipt = await teams._handle_workspace_selection(_json_request(app, {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1")
     assert store.saved == ["ws_1"]
-    assert cards == [teams._card(_catalog("channel_space_switched_title", locale), _catalog("teams_space_switched", locale))]
+    assert receipt == teams._card(_catalog("channel_space_switched_title", locale), _catalog("teams_space_switched", locale))
 
 
 @pytest.mark.parametrize(
@@ -601,6 +607,10 @@ async def test_teams_turn_language_uses_the_client_locale(monkeypatch: pytest.Mo
     monkeypatch.setattr(teams, "_send_activity", _send)
     state = SimpleNamespace(orchestrator=object(), user_store=_CreditStore(), metrics_log=None, user_settings_store=_Settings({}))
     await teams._start_turn(
+        session_id="teams:test-session",
+        turn_id="t_test",
+        activity_key="test-activity",
+        access_context={},
         request=SimpleNamespace(app=SimpleNamespace(state=state)),
         activity={"locale": "fr-FR"},
         connection=SimpleNamespace(id="tc_1", entra_tenant_id="tenant_1"),
@@ -694,26 +704,14 @@ async def test_slack_mirror_answer_cards_follow_answer_language_and_failure_foll
 
 
 async def test_teams_mirror_answer_cards_follow_answer_language_and_failure_follows_interface(monkeypatch: pytest.MonkeyPatch) -> None:
-    import bowhead_gateway.im.turn_render as turn_render
+    from bowhead_gateway.im.turn_render import NeutralTurnState
 
-    import bowhead_core
-
-    cards: list[dict[str, Any]] = []
-
-    async def _send(_request: Any, _activity: dict[str, Any], _connection: Any, card: dict[str, Any]) -> None:
-        cards.append(card)
-
-    async def _no_labels(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    bus = _Bus([("final_answer", {"text": ""}), ("clarification_required", {}), ("error", {})])
-    monkeypatch.setattr(bowhead_core, "get_event_registry", lambda: _Registry(bus))
-    monkeypatch.setattr(teams, "_send_activity", _send)
-    monkeypatch.setattr(turn_render, "refresh_kb_citation_labels", _no_labels)
-    await teams._mirror_turn(SimpleNamespace(app=None), {}, SimpleNamespace(), "t_1", "zh-CN", "en-US")
+    events = [("final_answer", {"text": ""}), ("clarification_required", {}), ("error", {})]
+    neutral = NeutralTurnState(turn_id="t_1")
+    cards = [await teams.event_card(None, neutral, event, "zh-CN", "en-US") async for event in _Bus(events).subscribe()]
     assert cards == [
         teams._card("Bowhead final answer", "Done."),
-        teams._card("Confirm in Bowhead Web", "This pilot does not handle clarifications in Teams yet. Open Bowhead Web to continue."),
+        teams._card("Confirm in Bowhead Web", "Open the original conversation in Bowhead Web to answer this question."),
         teams._card("Bowhead 处理失败", "本次对话未完成，请稍后重试。"),
     ]
 
@@ -727,15 +725,17 @@ async def _start_turn_mirror_locales(monkeypatch: pytest.MonkeyPatch, channel: s
     """Run a Slack or Teams turn start with stubs and capture the locales handed to the mirror."""
     import asyncio
 
-    from bowhead_gateway import _turn_runtime, turn_service
+    from bowhead_core.datarc_selection import DatarcConnectionBinding
+
+    from bowhead_gateway import datarc_context, turn_service
 
     captured: list[tuple[str, str]] = []
 
     async def _runtime(*_args: Any, **_kwargs: Any) -> _Runtime:
         return _Runtime()
 
-    async def _datarc(*_args: Any) -> tuple[object, None, None]:
-        return object(), None, None
+    async def _datarc(_app: Any, team_id: str) -> DatarcConnectionBinding:
+        return DatarcConnectionBinding(team_id, "conn_sales", "rev_sales", object())
 
     async def _admit(_orchestrator: Any, _turn: Any) -> object:
         return object()
@@ -761,7 +761,7 @@ async def _start_turn_mirror_locales(monkeypatch: pytest.MonkeyPatch, channel: s
     monkeypatch.setattr(turn_service, "resolve_team_model_runtime", _runtime)
     monkeypatch.setattr(turn_service, "admit_legacy_chat_execution", _admit)
     monkeypatch.setattr(turn_service, "spawn_turn", _noop)
-    monkeypatch.setattr(_turn_runtime, "_resolve_turn_datarc_runtime", _datarc)
+    monkeypatch.setattr(datarc_context, "resolve_team_datarc_binding", _datarc)
     state = SimpleNamespace(
         orchestrator=SimpleNamespace(session_store=_Sessions()),
         user_store=_Store(),
@@ -778,8 +778,12 @@ async def _start_turn_mirror_locales(monkeypatch: pytest.MonkeyPatch, channel: s
         await slack._start_turn(SimpleNamespace(state=state), _slack_connection(), user, "ws_1", "C1", "1.0", "看 GMV")
     else:
         monkeypatch.setattr(teams, "_send_activity", _noop)
-        monkeypatch.setattr(teams, "_mirror_turn", _mirror)
+        monkeypatch.setattr("bowhead_gateway.teams.delivery.track_delivery", _mirror)
         await teams._start_turn(
+            session_id="teams:test-session",
+            turn_id="t_test",
+            activity_key="test-activity",
+            access_context={},
             request=SimpleNamespace(app=SimpleNamespace(state=state)),
             activity={},
             connection=SimpleNamespace(id="tc_1", entra_tenant_id="tenant_1"),
@@ -848,12 +852,6 @@ async def test_slack_command_receipt_uses_the_thread_session(monkeypatch: pytest
 
 
 async def test_teams_space_selection_reads_universal_action_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    cards: list[dict[str, Any]] = []
-
-    async def _send(_request: Request, _activity: dict[str, Any], _connection: Any, card: dict[str, Any]) -> None:
-        cards.append(card)
-
-    monkeypatch.setattr(teams, "_send_activity", _send)
     store = _TeamsStore()
     app = SimpleNamespace(state=SimpleNamespace(teams_store=store, user_store=_UserStore(), user_settings_store=_Settings({})))
     # The shape Bot Framework sends for an Action.Execute invoke (adaptiveCard/action).
@@ -864,18 +862,12 @@ async def test_teams_space_selection_reads_universal_action_data(monkeypatch: py
         "from": {"aadObjectId": "oid_1"},
         "conversation": {"id": "conv_1"},
     }
-    await teams._handle_workspace_selection(_json_request(app, {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1")
+    receipt = await teams._handle_workspace_selection(_json_request(app, {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1")
     assert store.saved == ["ws_1"]
-    assert cards == [teams._card(_catalog("channel_space_switched_title", "fr-FR"), _catalog("teams_space_switched", "fr-FR"))]
+    assert receipt == teams._card(_catalog("channel_space_switched_title", "fr-FR"), _catalog("teams_space_switched", "fr-FR"))
 
 
 async def test_teams_space_switch_receipt_uses_the_selected_space_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    cards: list[dict[str, Any]] = []
-
-    async def _send(_request: Request, _activity: dict[str, Any], _connection: Any, card: dict[str, Any]) -> None:
-        cards.append(card)
-
-    monkeypatch.setattr(teams, "_send_activity", _send)
     state = SimpleNamespace(
         teams_store=_TeamsStore(), user_store=_UserStore(), user_settings_store=_Settings({}), workspace_settings_store=_WorkspaceSettings()
     )
@@ -884,8 +876,10 @@ async def test_teams_space_switch_receipt_uses_the_selected_space_default(monkey
         "from": {"aadObjectId": "oid_1"},
         "conversation": {"id": "conv_1"},
     }
-    await teams._handle_workspace_selection(_json_request(SimpleNamespace(state=state), {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1")
-    assert cards == [teams._card(_catalog("channel_space_switched_title", "zh-CN"), _catalog("teams_space_switched", "zh-CN"))]
+    receipt = await teams._handle_workspace_selection(
+        _json_request(SimpleNamespace(state=state), {}), activity, SimpleNamespace(team_id="team_1"), "tenant_1"
+    )
+    assert receipt == teams._card(_catalog("channel_space_switched_title", "zh-CN"), _catalog("teams_space_switched", "zh-CN"))
 
 
 # ── Routine delivery reconciliation ──────────────────────────────────────────

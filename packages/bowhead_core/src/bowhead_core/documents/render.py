@@ -7,6 +7,7 @@ import io
 import json
 import platform
 import posixpath
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -269,15 +270,37 @@ def validate_pdf(source: bytes, pdf: bytes) -> dict[str, object]:
     }
 
 
-def _convert_presentation_to_pdf(candidate: Path, output: Path, *, soffice: str) -> Path:
+#: LibreOffice user profile built into the sandbox image (docx inline edit design §5.3). Building a new
+#: profile cost about 2.5 s of a 3.9 s conversion under gVisor with one CPU on 116 (2026-11-26); a
+#: copy of this one converts in 1.4 s.
+PROFILE_TEMPLATE = Path("/opt/bowhead/libreoffice-profile")
+
+
+def libreoffice_profile(temporary: Path) -> Path:
+    """A private, writable LibreOffice profile for one conversion inside `temporary`.
+
+    It is a copy of the image's pre-built profile when present, so conversions stay independent of
+    each other; without it (or when the copy fails) LibreOffice builds a new profile, only slower.
+    """
+    if PROFILE_TEMPLATE.is_dir():
+        copy = temporary / "profile"
+        try:
+            shutil.copytree(PROFILE_TEMPLATE, copy, symlinks=False)
+            return copy
+        except OSError:
+            shutil.rmtree(copy, ignore_errors=True)
+    return temporary
+
+
+def _convert_presentation_to_pdf(candidate: Path, output: Path, *, soffice: str, pdf_filter: str = PDF_FILTER) -> Path:
     with tempfile.TemporaryDirectory(prefix="document-lo-") as temporary:
         run_binary(
             [
                 soffice,
-                "-env:UserInstallation=" + Path(temporary).as_uri(),
+                "-env:UserInstallation=" + libreoffice_profile(Path(temporary)).as_uri(),
                 "--headless",
                 "--convert-to",
-                PDF_FILTER,
+                pdf_filter,
                 "--outdir",
                 str(output),
                 str(candidate),
@@ -309,6 +332,37 @@ def render_presentation_view(source: bytes, output: Path, *, soffice: str = "sof
         raise OfficePackageError("document_pdf_invalid")
     with pdfplumber.open(io.BytesIO(pdf)) as document:
         if len(document.pages) != len(slides) or any(not 0 < page.width <= 4096 or not 0 < page.height <= 4096 for page in document.pages):
+            raise OfficePackageError("document_pdf_page_mismatch")
+    return pdf
+
+
+#: Word pages for the Results preview (docx inline edit design §5.1).
+MAX_DOCUMENT_VIEW_PAGES = 300
+_WRITER_PDF_FILTER = "pdf:writer_pdf_Export"
+
+
+def render_document_view(source: bytes, output: Path, *, soffice: str = "soffice") -> bytes:
+    """Render a Word document's pages for viewing (docx inline edit design §5.1)."""
+    import pdfplumber
+
+    from bowhead_core.documents.package_io import OFFICE_MIMES, inspect_office_package
+
+    inspect_office_package(source, filename="document.docx", declared_mime=OFFICE_MIMES[".docx"])
+    with tempfile.TemporaryDirectory(prefix="document-view-") as temporary:
+        candidate = Path(temporary) / "document.docx"
+        candidate.write_bytes(source)
+        preview = _convert_presentation_to_pdf(candidate, output, soffice=soffice, pdf_filter=_WRITER_PDF_FILTER)
+        if preview.stat().st_size > MAX_VIEW_PDF:
+            raise OfficePackageError("document_preview_limit")
+        pdf = preview.read_bytes()
+        if candidate.read_bytes() != source:
+            raise OfficePackageError("source_hash_mismatch")
+    if not pdf.startswith(b"%PDF-"):
+        raise OfficePackageError("document_pdf_invalid")
+    with pdfplumber.open(io.BytesIO(pdf)) as document:
+        if not 1 <= len(document.pages) <= MAX_DOCUMENT_VIEW_PAGES:
+            raise OfficePackageError("document_page_limit")
+        if any(not 0 < page.width <= 4096 or not 0 < page.height <= 4096 for page in document.pages):
             raise OfficePackageError("document_pdf_page_mismatch")
     return pdf
 

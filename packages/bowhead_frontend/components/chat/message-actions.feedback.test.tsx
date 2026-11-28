@@ -62,9 +62,9 @@ describe("MessageActions — thumbs-down", () => {
     fireEvent.click(await thumbs());
     const dialog = await screen.findByRole("dialog", { name: "这条回答哪里不好？" });
     expect(within(dialog).getByText("都可以不填，直接提交也会记下。")).toBeTruthy();
-    const consent = within(dialog).getByRole("checkbox", { name: /允许智能体负责人用这一轮做评测用例（负责人会看到问题、回答和你的反馈）/ }) as HTMLInputElement;
+    const consent = within(dialog).getByRole("checkbox", { name: /允许智能体的所有者用这一轮做评测用例（所有者会看到问题、回答和你的反馈）/ }) as HTMLInputElement;
     expect(consent.checked).toBe(false);
-    expect(within(dialog).getByText("负责人：刘一鑫。之后可以在这条回答的「⋯」里撤回。")).toBeTruthy();
+    expect(within(dialog).getByText("所有者：刘一鑫。之后可以在这条回答的「⋯」里撤回。")).toBeTruthy();
     // Reasons are checkboxes and go out in display order.
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "太简略" }));
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "事实或数字不对" }));
@@ -89,14 +89,14 @@ describe("MessageActions — thumbs-down", () => {
     mount("t_1");
     fireEvent.click(await thumbs());
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: /允许智能体负责人/ }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /允许智能体的所有者/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "提交" }));
 
     await waitFor(() => expect(setTurnEvalShare).toHaveBeenCalledWith("t_1", true));
     expect(setTurnAnswerFeedback).toHaveBeenCalledWith("t_1", { reason_codes: [], comment: null });
-    await waitFor(() => expect(lastToast()).toMatchObject({ text: "已记下。负责人可以用这一轮改进智能体。", undo: true }));
+    await waitFor(() => expect(lastToast()).toMatchObject({ text: "已记下。所有者可以用这一轮改进智能体。", undo: true }));
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
-    expect(await screen.findByRole("menuitem", { name: "取消分享给负责人" })).toBeTruthy();
+    expect(await screen.findByRole("menuitem", { name: "取消分享给所有者" })).toBeTruthy();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     vi.mocked(setTurnAnswerFeedback).mockResolvedValueOnce({ kind: "turn_answer_feedback", schema_version: 1, turn_id: "t_1", feedback: null });
@@ -104,14 +104,14 @@ describe("MessageActions — thumbs-down", () => {
     fireEvent.click(await screen.findByRole("button", { name: "已标记为不好，再点一次撤销" }));
     await waitFor(() => expect(setTurnEvalShare).toHaveBeenLastCalledWith("t_1", false));
     expect(setTurnAnswerFeedback).toHaveBeenLastCalledWith("t_1", null);
-    await waitFor(() => expect(lastToast()).toMatchObject({ text: "已撤销点踩，并撤回了给负责人的分享。" }));
+    await waitFor(() => expect(lastToast()).toMatchObject({ text: "已撤销点踩，并撤回了给所有者的分享。" }));
   });
 
   it("asks no consent and shows no share menu on the member's own Agent", async () => {
     mount("t_2");
     fireEvent.click(await thumbs());
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).queryByRole("checkbox", { name: /允许智能体负责人/ })).toBeNull();
+    expect(within(dialog).queryByRole("checkbox", { name: /允许智能体的所有者/ })).toBeNull();
     expect(within(dialog).getAllByRole("checkbox")).toHaveLength(7);
     expect(screen.queryByRole("button", { name: "更多操作" })).toBeNull();
   });

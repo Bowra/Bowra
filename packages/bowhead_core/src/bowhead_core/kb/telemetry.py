@@ -24,6 +24,14 @@ KB_AUDIT_EVENTS = frozenset(
         "kb.parse_failed",
         "kb.deleted",
         "kb.scope_changed",
+        # ─── knowledge bases (organization phase 1, behind FEATURE_KNOWLEDGE_BASES) ───
+        "kb.knowledge_base_created",
+        "kb.knowledge_base_updated",
+        "kb.knowledge_base_deleted",
+        "kb.knowledge_base_members_changed",
+        "kb.knowledge_base_transferred",
+        "kb.knowledge_base_moved",  # a file moved to another knowledge base of its home
+        "kb.knowledge_base_move_rollback_failed",
         "kb.searched_chunks",
         "kb.previewed",
         "kb.downloaded",
@@ -112,6 +120,7 @@ KB_AUDIT_EVENTS = frozenset(
         "kb.matrix_run_finished",  # Credits estimate/charged + four cell counts
         "kb.matrix_run_cancelled",
         "kb.matrix_run_resumed",  # boot resume
+        "kb.matrix_run_auto_retry",  # Step 1 §3.3: one retry pass of transient failures (retried / skipped_outage, counts only)
         "kb.matrix_cell_failed_summary",  # Run convergence emits one per reason, not per cell
         "kb.matrix_cell_edited",
         "kb.matrix_cell_edit_superseded",  # Single-cell rerun replaces manual value (§5.5 light undo)
@@ -119,6 +128,9 @@ KB_AUDIT_EVENTS = frozenset(
         "kb.matrix_cell_verified",
         "kb.matrix_cell_verify_reverted",  # kb-matrix M3 FR-12: undo verification (no-op emits nothing)
         "kb.matrix_cell_edit_reverted",  # kb-matrix M3 FR-9: undo edit flag
+        "kb.matrix_cells_bulk_verified",  # Step 1 §4.2: bulk verify or undo (column id, counts and batch id only)
+        "kb.matrix_exported",  # Step 1 §5: Excel export (file, column and hidden-cell counts and language; never cell content)
+        "kb.matrix_visibility_changed",  # Step 1 §8: the creator changed who can see the matrix (matrix id and the new value only)
         "kb.matrix_provider_shortcircuit",
         "kb.matrix_graduated",  # kb-matrix M4 FR-40: graduation (flat counts + mode; never cell content/column definitions)
         "kb.matrix_graduation_swept",  # kb-matrix M4: pending self-healing sweep (flip/reclaim counts)

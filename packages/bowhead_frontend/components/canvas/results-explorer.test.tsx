@@ -345,3 +345,29 @@ describe("ResultsExplorer", () => {
     expect(screen.getAllByRole("listitem").length).toBeLessThan(80);
   });
 });
+
+describe("the Turn filter (chat running state R2.3)", () => {
+  const turnFilters = { ...defaultFilters, turn_id: "t_1" };
+
+  it("lists one Turn's files flat, and its tag clears the filter", () => {
+    const rows = buildResultsExplorerRows({
+      expandedGroups: ["deliverables", "evidence"],
+      filters: turnFilters,
+      groupCounts: { deliverables: 0, evidence: 2, data: 1, code: 0, input: 1 },
+      items: [item("artifact:data", 1), item("artifact:input", 2, { secondary_group: "input" })],
+      query: "",
+    });
+    expect(rows.map((row) => row.kind)).toEqual(["item", "item"]);
+
+    const onFiltersChange = vi.fn();
+    renderIntl(<ResultsExplorer {...props({ filters: turnFilters, onFiltersChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "取消只看这一轮，显示全部成果" }));
+    expect(onFiltersChange).toHaveBeenCalledWith({ ...turnFilters, turn_id: null });
+  });
+
+  it("shows no tag without a Turn filter", () => {
+    renderIntl(<ResultsExplorer {...props()} />);
+    expect(screen.queryByText("只看这一轮的文件")).toBeNull();
+  });
+});
+

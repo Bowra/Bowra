@@ -532,10 +532,10 @@ it("labels empty tool change lists as no changes, not as the no-auth option", as
 describe("signing in to a service with the member's own account", () => {
   function signInCatalog(
     connections: unknown[],
-    { oauth = true, onPost }: { oauth?: boolean; onPost?: (path: string, body: unknown) => unknown } = {},
+    { onPost }: { onPost?: (path: string, body: unknown) => unknown } = {},
   ) {
     mocks.api.mockImplementation(async (path: string, method?: string, body?: unknown) => {
-      if (path === "/capabilities") return { enabled: true, oauth_connectable: oauth };
+      if (path === "/capabilities") return { enabled: true };
       if (method === "POST" && onPost) return onPost(path, body);
       return { connections };
     });
@@ -630,15 +630,5 @@ describe("signing in to a service with the member's own account", () => {
     signInCatalog([]);
     render(<PersonalMcpSettings />);
     expect((await screen.findByText('oauthNotice.failed {"host":"","name":""}')).getAttribute("role")).toBe("alert");
-  });
-
-  it("hides sign-in while the deployment has it turned off", async () => {
-    signInCatalog([oauthConnection("needs_reauth")], { oauth: false });
-    render(<PersonalMcpSettings />);
-    expect(await screen.findByText("signInOff")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "signInAgain" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "addConnection" }));
-    const options = Array.from((screen.getByLabelText("auth") as HTMLSelectElement).options).map((option) => option.value);
-    expect(options).toEqual(["none", "bearer", "api_key"]);
   });
 });

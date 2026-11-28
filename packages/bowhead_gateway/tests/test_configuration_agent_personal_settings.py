@@ -376,3 +376,60 @@ async def test_personal_help_preserves_cas_and_refreshes_metadata_despite_matchi
     body = after.json()
     assert body["field_contract"]["domain"] == "personal_appearance"
     assert body == before.json()
+
+
+# ─── Chat running state R3.6: the run view through the same appearance form ───
+
+
+async def test_the_read_offers_the_run_view_with_its_default(settings_ctx):
+    child, _ = await prepare_configuration_agent(_lead(settings_ctx), form_id="personal_appearance")
+    read = await _call(settings_ctx, child, "configuration_read", form_id="personal_appearance")
+    assert read["fields"]["runningView"].items() >= {"value": "list", "unset": True, "default": "list"}.items()
+    assert "runningView" in read["editable_fields"]
+    await settings_ctx.user_store.set(settings_ctx.member.id, "running_view_style", "lanes")
+    read = await _call(settings_ctx, child, "configuration_read", form_id="personal_appearance")
+    assert read["fields"]["runningView"].items() >= {"value": "lanes", "unset": False, "default": "list"}.items()
+
+
+async def test_a_confirmed_run_view_saves_the_account_setting_and_undo_removes_it(settings_ctx, client):
+    ctx = settings_ctx
+    theme_before = client.get("/api/v1/theme/personal", cookies=_as(ctx.member)).json()
+    receipt = await _propose(ctx, {"runningView": "timeline"})
+    assert receipt["ok"] and not receipt.get("applied")
+    assert await ctx.user_store.get(ctx.member.id, "running_view_style") is None
+    pid = receipt["proposal_id"]
+    applied = client.post(f"/api/v1/config-proposals/{pid}/apply", cookies=_as(ctx.member))
+    assert applied.status_code == 200, applied.text
+    assert await ctx.user_store.get(ctx.member.id, "running_view_style") == "timeline"
+    # The theme document is untouched: the run view is not a V3 override.
+    assert client.get("/api/v1/theme/personal", cookies=_as(ctx.member)).json()["overrides"] == theme_before["overrides"]
+    undone = client.post(f"/api/v1/config-proposals/{pid}/undo", cookies=_as(ctx.member))
+    assert undone.status_code == 200, undone.text
+    assert await ctx.user_store.get(ctx.member.id, "running_view_style") is None
+
+
+async def test_a_run_view_changed_elsewhere_refuses_the_suggestion(settings_ctx, client):
+    receipt = await _propose(settings_ctx, {"runningView": "chips"})
+    # The reader picks another view on the running card before confirming.
+    await settings_ctx.user_store.set(settings_ctx.member.id, "running_view_style", "lanes")
+    failed = client.post(f"/api/v1/config-proposals/{receipt['proposal_id']}/apply", cookies=_as(settings_ctx.member))
+    assert failed.status_code == 409
+    assert failed.json()["detail"]["error"]["code"] == "configuration_baseline_changed"
+    assert await settings_ctx.user_store.get(settings_ctx.member.id, "running_view_style") == "lanes"
+
+
+async def test_a_theme_conflict_writes_nothing_of_a_mixed_suggestion(settings_ctx, client):
+    receipt = await _propose(settings_ctx, {"mode": "dark", "runningView": "lanes"})
+    current = client.get("/api/v1/theme/personal", cookies=_as(settings_ctx.member))
+    manual = client.patch(
+        "/api/v1/theme/personal",
+        cookies=_as(settings_ctx.member),
+        headers={"If-Match": current.headers["etag"]},
+        json={"changes": {"mode": "light"}},
+    )
+    assert manual.status_code == 200
+    failed = client.post(f"/api/v1/config-proposals/{receipt['proposal_id']}/apply", cookies=_as(settings_ctx.member))
+    assert failed.status_code == 409
+    # The run view was written first and is put back, so the refused suggestion leaves nothing behind.
+    assert await settings_ctx.user_store.get(settings_ctx.member.id, "running_view_style") is None
+    assert client.get("/api/v1/theme/personal", cookies=_as(settings_ctx.member)).json()["overrides"] == {"mode": "light"}

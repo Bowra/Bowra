@@ -69,10 +69,10 @@ async def count_delivered_files(store: ArtifactStore, *, session_id: str, user_i
     return await store.count_session_deliverables(session_id=session_id, user_id=user_id, exclude_turn_id=exclude_turn_id)
 
 
-def _user_edit_producer() -> str:
-    from bowhead_core.artifact_store import PRESENTATION_USER_EDIT_PRODUCER
+def _user_edit_producers() -> tuple[str, ...]:
+    from bowhead_core.artifact_store import USER_EDIT_PRODUCERS
 
-    return PRESENTATION_USER_EDIT_PRODUCER
+    return USER_EDIT_PRODUCERS
 
 
 def file_type(artifact: Artifact) -> str:
@@ -135,7 +135,7 @@ def render_delivered_files_block(
         line = f'- artifact_id={artifact.id} name="{quoted(artifact.filename)}" type={file_type(artifact)} {_age(artifact.created_at, current)}'
         if (artifact.version_no or 1) > 1:
             line += f" version={artifact.version_no}"
-        if (artifact.producer_kind or "") == _user_edit_producer():
+        if (artifact.producer_kind or "") in _user_edit_producers():
             line += " edited_by=user"
         producers = by_turn.get(artifact.created_by_turn or "", [])
         if len(producers) == 1:

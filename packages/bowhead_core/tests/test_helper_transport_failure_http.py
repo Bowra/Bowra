@@ -1,6 +1,6 @@
-"""A helper whose model call fails in transport returns its failure to Lead.
+"""A helper returns a settled model failure to Lead after retries are exhausted.
 
-116 dogfood `t_041e52fa751b`: a helper's model call failed in transport on a
+116 dogfood `an observed task`: a helper's model call failed in transport on a
 run resumed after a clarification answer. The physical receipt became unknown,
 which only a fresh run converts to an uncertain helper result, so the whole Turn
 failed as ``lead_internal_error``. The failure is now settled as not applied and
@@ -36,17 +36,18 @@ pytestmark = [
 ]
 
 
-# Transport failure -> (model failure Lead receives, helper card code).
+# Model failure -> (transport exception, Lead reason, helper card code, failure class).
 FAILURES = {
     "read_timeout": (httpx2.ReadTimeout, "llm_provider_timeout", "peer_model_timeout", "timeout"),
     "connect_error": (httpx2.ConnectError, "llm_provider_unavailable", "peer_model_unavailable", "upstream"),
     "read_error": (httpx2.ReadError, "llm_provider_unavailable", "peer_model_unavailable", "upstream"),
+    "http_503": (None, "llm_provider_unavailable", "peer_model_unavailable", "upstream"),
 }
 
 
 @pytest.mark.parametrize("failure", sorted(FAILURES))
 @pytest.mark.parametrize("resumed", [False, True])
-async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch, resumed, failure):
+async def test_helper_model_failure_returns_to_lead(http_start, monkeypatch, resumed, failure):
     error_type, llm_reason_code, peer_code, failure_class = FAILURES[failure]
     case = http_start
     case.client.headers["Content-Type"] = "application/json"
@@ -91,6 +92,8 @@ async def test_helper_transport_failure_returns_to_lead(http_start, monkeypatch,
             if resumed and len(helper_calls) == 1:
                 payload = {"delivery_surface": "chat", "exec_summary": "The request needs an audience first."}
                 return response(body, call("helper-return", "subagent_return", {"payload": payload}), "tool_calls")
+            if error_type is None:
+                return httpx2.Response(503)
             raise error_type("model transport failed", request=request)
         return response(body, {"role": "assistant", "content": "Helper request"}, "stop")
 

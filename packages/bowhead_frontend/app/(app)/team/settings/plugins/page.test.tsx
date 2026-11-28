@@ -21,7 +21,7 @@ vi.mock("@/lib/team-plugins-api", () => ({
   setTeamPluginEnabled: vi.fn(),
   deleteTeamPlugin: vi.fn(),
   // 4e9f63d76: the create form loads built-in connection templates.
-  listTeamPluginTemplates: vi.fn(async () => []),
+  listTeamPluginTemplates: vi.fn(async () => ({ templates: [] })),
 }));
 
 const catalog: AgentAuthoringCatalog = {

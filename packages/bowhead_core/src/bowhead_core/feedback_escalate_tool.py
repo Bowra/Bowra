@@ -75,6 +75,10 @@ _MSG_QUOTA: Final = "今日提交已达上限（或团队待审建议已满）�
 _MSG_REJECTED_INPUT: Final = "这段内容含有系统保留的标记文本，无法原样提交；如实告知用户这条不能提交，不要替他改写。"
 _MSG_AMBIGUOUS: Final = "团队里有多个同名目标：{names}。问用户指的是哪一个，再调用。"
 _MSG_CHANNEL: Final = "这里不是网页对话（定时任务/IM 渠道），不能代用户提交建议；如实告知用户请在网页对话里提。"
+_MSG_TRIAL: Final = (
+    "This chat is the Agent Owner trying an unreleased draft; suggestions go to the team inbox only from "
+    "normal chats. Tell the user the Owner can change the draft directly in the editor beside this chat."
+)
 _EVIDENCE_PRIOR_TURNS = 1  # Include the preceding N turns in this session too: the submission turn often omits the issue to change.
 
 
@@ -141,6 +145,9 @@ async def _evidence_refs(ctx: ToolExecutionContext, turn_id: str) -> list[str]:
 
 
 async def _handler(arguments: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
+    if getattr(ctx, "owner_trial", None) is not None:
+        # Not offered in an Owner draft trial; refuse a stale or injected call the same way.
+        return _fail("agent_trial_feedback_unavailable", _MSG_TRIAL)
     if not _interactive_channel(ctx):
         return _fail("channel_not_supported", _MSG_CHANNEL)
     if not bool(arguments.get("user_asked_to_submit")):

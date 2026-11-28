@@ -42,6 +42,8 @@ export interface ChatInlineFileData {
   pruned?: boolean;
   /** The file this card's version belongs to (its first version's id) and that version's number. */
   lineage?: { root: string; versionNo: number };
+  /** While the Turn runs, a later version of the file replaced this card (chat running state R2.1). */
+  updated?: boolean;
 }
 
 export function fmtSize(bytes?: number): string {
@@ -96,7 +98,11 @@ export function ChatInlineFile({ data }: { data: ChatInlineFileData }) {
   const ext = fileExtensionLabel(filename) || fileType.toUpperCase();
   // Meta: at most type · scale (pages) · size (spec §6).
   const facts = [
-    latest ? tAttach("file_updated_version", { version: latest.versionNo }) : null,
+    latest
+      ? tAttach("file_updated_version", { version: latest.versionNo })
+      : data.updated
+        ? data.versionNo ? tAttach("file_updated_version", { version: data.versionNo }) : tAttach("file_updated")
+        : null,
     ext,
     slideCount ? tAttach("file_pages", { count: slideCount }) : null,
     sizeStr || null,

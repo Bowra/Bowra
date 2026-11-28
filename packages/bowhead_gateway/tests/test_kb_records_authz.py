@@ -16,10 +16,13 @@ backs the route as defense-in-depth.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
 from bowhead_core.kb.extracted_record_store import KbExtractedRecordStore
+from bowhead_core.kb.files_store import KbFilesStore
+from bowhead_core.kb.schemas import KbFileDTO
 from bowhead_core.user_store import User
 from bowhead_gateway.routes import kb_records
 from bowhead_gateway.routes.auth import _current_user
@@ -68,6 +71,35 @@ class _MembershipStore:
         return False
 
 
+def _space_file(file_id: str, workspace_id: str) -> KbFileDTO:
+    return KbFileDTO(
+        file_id=file_id,
+        artifact_id=f"art_{file_id}",
+        filename=f"{file_id}.pdf",
+        mime_type="application/pdf",
+        size_bytes=1,
+        scope="space",
+        scope_id=workspace_id,
+        workspace_id=workspace_id,
+        team_id=TEAM,
+        uploaded_by="system",
+        uploaded_at="2026-01-01T00:00:00Z",
+    )
+
+
+class _SeededFiles:
+    """The Space files the seeded records below come from (what the records routes read)."""
+
+    def __init__(self) -> None:
+        self._files = {f.file_id: f for f in (_space_file("f_m", WS_MEMBER), _space_file("f_v", WS_VICTIM), _space_file("f_v1", WS_MEMBER))}
+
+    async def get(self, file_id: str) -> KbFileDTO | None:
+        return self._files.get(file_id)
+
+    async def list_access_rows_for_scopes(self, *, team_id: str, personal_owner_id: str | None, space_id: str | None, team_scope_id: str | None):
+        return [f for f in self._files.values() if f.team_id == team_id and f.workspace_id == space_id]
+
+
 @pytest.fixture
 async def ctx(tmp_path: Path):
     store = KbExtractedRecordStore(tmp_path / "records.db")
@@ -76,6 +108,7 @@ async def ctx(tmp_path: Path):
     app.include_router(kb_records.router)
     app.dependency_overrides[_current_user] = _user
     app.state.kb_extracted_record_store = store
+    app.state.kb_files_store = _SeededFiles()
     app.state.user_store = _MembershipStore()
     return TestClient(app, raise_server_exceptions=False), store
 
@@ -236,6 +269,7 @@ def _mk_client(store: KbExtractedRecordStore, user_store: object, doc_type_store
     app.include_router(kb_records.router)
     app.dependency_overrides[_current_user] = _user
     app.state.kb_extracted_record_store = store
+    app.state.kb_files_store = _SeededFiles()
     app.state.user_store = user_store
     if doc_type_store is not None:
         app.state.kb_doc_type_store = doc_type_store
@@ -444,3 +478,89 @@ async def test_record_errors_use_finite_codes_without_store_prose(
     assert invalid.status_code == 400
     assert invalid.json()["detail"]["error"]["code"] == "invalid_kb_record_value"
     assert "非法字符" not in invalid.text
+
+
+# ─── Records follow their file's readability, not only the Space ─────────
+# The worker stores a personal file's records under its upload Space, so the Space
+# filter alone served them to every member of that Space.
+
+OWNER = "u_owner"  # Owns the personal file; member of WS_MEMBER like ATTACKER.
+
+
+class _SharedSpaceMembers(_MembershipStore):
+    async def get_member_role(self, ws_id: str, user_id: str) -> str | None:
+        return "member" if ws_id == WS_MEMBER and user_id in {ATTACKER, OWNER} else None
+
+
+@pytest.fixture
+async def shared_space(tmp_path: Path, initialize_migrated_kb_files_database):
+    """OWNER's personal file, a Space file and a Team file, each with one record in WS_MEMBER."""
+    records = KbExtractedRecordStore(tmp_path / "records.db")
+    await records.initialize()
+    initialize_migrated_kb_files_database(tmp_path / "kb_files.db")
+    files = KbFilesStore(tmp_path / "kb_files.db")
+    await files.initialize()
+    with sqlite3.connect(tmp_path / "kb_files.db") as db:
+        for file_id, scope, scope_id, workspace_id in (
+            ("kbf_personal", "personal", OWNER, WS_MEMBER),
+            ("kbf_space", "space", WS_MEMBER, WS_MEMBER),
+            ("kbf_team", "team", TEAM, ""),
+        ):
+            db.execute(
+                "INSERT INTO kb_files(file_id,artifact_id,filename,mime_type,size_bytes,scope,scope_id,workspace_id,team_id,uploaded_by,uploaded_at,parse_status) "
+                "VALUES (?,?,?,'application/pdf',1,?,?,?,?,?,'2026-11-27T00:00:00Z','done')",
+                (file_id, f"art_{file_id}", f"{file_id}.pdf", scope, scope_id, workspace_id, TEAM, OWNER),
+            )
+    ids = {file_id: await _seed(records, WS_MEMBER, file_id) for file_id in ("kbf_personal", "kbf_space", "kbf_team")}
+
+    def client_for(user_id: str) -> TestClient:
+        app = FastAPI()
+        app.include_router(kb_records.router)
+        app.dependency_overrides[_current_user] = lambda: User(
+            id=user_id, email=f"{user_id}@test.com", team_id=TEAM, tier="ultra", email_verified=True
+        )
+        app.state.kb_extracted_record_store = records
+        app.state.kb_files_store = files
+        app.state.user_store = _SharedSpaceMembers()
+        return TestClient(app, raise_server_exceptions=False)
+
+    return client_for, records, ids
+
+
+async def test_member_cannot_list_or_count_another_members_personal_records(shared_space) -> None:
+    client_for, _records, _ids = shared_space
+    listed = client_for(ATTACKER).get(f"/api/v1/kb/doc_types/{DT}/records", params={"workspace_id": WS_MEMBER})
+    assert listed.status_code == 200, listed.text
+    assert sorted(item["file_id"] for item in listed.json()["items"]) == ["kbf_space", "kbf_team"]
+    assert listed.json()["total"] == 2
+
+    owner = client_for(OWNER).get(f"/api/v1/kb/doc_types/{DT}/records", params={"workspace_id": WS_MEMBER})
+    assert owner.status_code == 200, owner.text
+    assert sorted(item["file_id"] for item in owner.json()["items"]) == ["kbf_personal", "kbf_space", "kbf_team"]
+    assert owner.json()["total"] == 3
+
+
+async def test_unreadable_record_answers_like_a_missing_record(shared_space) -> None:
+    client_for, records, ids = shared_space
+    client = client_for(ATTACKER)
+    params = {"workspace_id": WS_MEMBER}
+    requests = [
+        ("get", "", None),
+        ("patch", "/field", {"field_name": "amount", "new_value": "1"}),
+        ("patch", "/verify_status", {"status": "approved"}),
+    ]
+    for method, suffix, body in requests:
+        options = {"json": body} if body else {}
+        hidden = getattr(client, method)(f"/api/v1/kb/records/{ids['kbf_personal']}{suffix}", params=params, **options)
+        missing = getattr(client, method)(f"/api/v1/kb/records/rec_missing{suffix}", params=params, **options)
+        assert hidden.status_code == missing.status_code == 404, (suffix, hidden.text)
+        assert hidden.json() == missing.json() == {"detail": {"error": {"code": "kb_record_not_found"}}}
+    fresh = await records.get(ids["kbf_personal"])
+    assert fresh is not None and fresh.verify_status == "ready" and fresh.edited_by_user == []
+
+    for file_id in ("kbf_space", "kbf_team"):
+        assert client.get(f"/api/v1/kb/records/{ids[file_id]}", params=params).status_code == 200
+    assert client.patch(f"/api/v1/kb/records/{ids['kbf_space']}/verify_status", params=params, json={"status": "approved"}).status_code == 200
+    owner = client_for(OWNER)
+    assert owner.get(f"/api/v1/kb/records/{ids['kbf_personal']}", params=params).status_code == 200
+    assert owner.patch(f"/api/v1/kb/records/{ids['kbf_personal']}/verify_status", params=params, json={"status": "approved"}).status_code == 200

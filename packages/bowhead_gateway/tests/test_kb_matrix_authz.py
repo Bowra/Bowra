@@ -14,6 +14,7 @@ import pytest
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.kb.matrix_engine import KbMatrixEngine
 from bowhead_core.kb.matrix_store import KbMatrixStore
+from bowhead_core.kb.source_location import SourceChunk
 from bowhead_core.kb.structured_extractor import StructuredExtractor
 from bowhead_core.kb.workspace_quotas_store import KbWorkspaceQuotasStore
 from bowhead_core.user_store import User, UserStore
@@ -34,6 +35,7 @@ U_MEMBER2 = "u_member2"  # WS_A member, not creator.
 U_VIEWER = "u_viewer"  # WS_A viewer
 U_OUTSIDER = "u_outsider"  # WS_B member only.
 U_TEAM_ADMIN = "u_team_admin"  # Team admin, member of no space.
+U_WS_ADMIN = "u_ws_admin"  # WS_A Space admin, not creator.
 
 
 def _mk_user(uid: str) -> User:
@@ -45,6 +47,7 @@ class _MembershipStore:
         (WS_A, U_MEMBER): "member",
         (WS_A, U_MEMBER2): "member",
         (WS_A, U_VIEWER): "viewer",
+        (WS_A, U_WS_ADMIN): "ws_admin",
         (WS_B, U_OUTSIDER): "member",
     }
 
@@ -77,6 +80,9 @@ class _MembershipStore:
 class _FakeKbStore:
     async def get_ordered_chunks_for_file(self, file: Any) -> list[tuple[str, str, int]]:
         return [("chk_1", "文本", 1)]
+
+    async def get_ordered_source_chunks(self, file: Any) -> list[SourceChunk]:
+        return [SourceChunk(cid, content, index) for cid, content, index in await self.get_ordered_chunks_for_file(file)]
 
 
 class _FakeRouter:
@@ -118,6 +124,7 @@ async def ctx(initialize_migrated_kb_files_database, tmp_path: Path):
         router=fake_router,
         user_store=engine_user_store,
         quotas_store=quotas,
+        auto_retry_delay_s=lambda: 0.0,
     )
 
     app = FastAPI()
@@ -382,6 +389,54 @@ async def test_from_template_cross_ws_doc_type_404(ctx, tmp_path: Path) -> None:
     _assert_code_only(r, 404, "matrix_template_not_found")
 
 
+async def test_from_template_materializes_only_readable_space_and_team_files(ctx, tmp_path: Path) -> None:
+    """S-P1-2: records of personal files (even the caller's own), other Spaces' files and other members' personal files stay out."""
+    from bowhead_core.kb.doc_type_store import ExtractField, KbDocTypeStore
+    from bowhead_core.kb.extracted_record_store import KbExtractedRecordStore
+
+    client, app, files_store = ctx["client"], ctx["app"], ctx["files_store"]
+    dt_store = KbDocTypeStore(tmp_path / "dt.db")
+    await dt_store.initialize()
+    rec_store = KbExtractedRecordStore(tmp_path / "rec.db")
+    await rec_store.initialize()
+    app.state.kb_doc_type_store = dt_store
+    app.state.kb_extracted_record_store = rec_store
+    app.state.kb_store = _FakeKbStore()
+    file_team = await files_store.create(
+        artifact_id="t",
+        filename="t.md",
+        mime_type="text/markdown",
+        size_bytes=1,
+        scope="team",
+        scope_id=TEAM,
+        workspace_id="",
+        team_id=TEAM,
+        uploaded_by=U_MEMBER2,
+    )
+    file_other_personal = await files_store.create(
+        artifact_id="o",
+        filename="o.md",
+        mime_type="text/markdown",
+        size_bytes=1,
+        scope="personal",
+        scope_id=U_MEMBER2,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        uploaded_by=U_MEMBER2,
+    )
+    dt = await dt_store.create(workspace_id=WS_A, name="合同", created_by=U_MEMBER, fields=[ExtractField(name="金额", type="currency")])
+    for file_id in (ctx["file_a"], ctx["file_b"], ctx["file_personal"], file_team, file_other_personal):
+        await rec_store.create(workspace_id=WS_A, doc_type_id=dt, file_id=file_id, fields={"金额": {"value": 1, "confidence": 0.9}})
+
+    _as(app, U_MEMBER)
+    r = client.post("/api/v1/kb/matrices/from_template", json={"workspace_id": WS_A, "doc_type_id": dt}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    assert r.json()["files_count"] == 2
+    matrix = await ctx["store"].get_matrix(r.json()["matrix_id"])
+    assert {entry["file_id"] for entry in matrix.files} == {ctx["file_a"], file_team}
+    assert {cell.file_id for cell in await ctx["store"].list_cells(matrix.matrix_id)} == {ctx["file_a"], file_team}
+
+
 # ─── viewer: all mutations 403 + snapshot 200 ────────────────
 
 
@@ -398,6 +453,8 @@ async def test_viewer_snapshot_200_mutations_403(ctx) -> None:
         ("PATCH", f"/api/v1/kb/matrices/{m.matrix_id}", {"name": "y"}),
         ("DELETE", f"/api/v1/kb/matrices/{m.matrix_id}", None),
         ("PUT", f"/api/v1/kb/matrices/{m.matrix_id}/files", {"file_ids": []}),
+        ("POST", f"/api/v1/kb/matrices/{m.matrix_id}/files", {"file_ids": [ctx["file_a"]]}),
+        ("POST", f"/api/v1/kb/matrices/{m.matrix_id}/files/remove", {"file_ids": [ctx["file_a"]]}),
         ("POST", f"/api/v1/kb/matrices/{m.matrix_id}/columns", {"name": "n", "type": "question", "question": "q?"}),
         ("POST", f"/api/v1/kb/matrices/{m.matrix_id}/columns/draft", {"question": "q?"}),
         ("PATCH", f"/api/v1/kb/matrices/{m.matrix_id}/columns/{col}", {"name": "n2"}),
@@ -924,3 +981,480 @@ async def test_snapshot_returns_navigation_purpose_without_changing_business_pro
     projected = result.json()["columns"][0]
     assert projected["navigation_role"] == "description"
     assert projected["prompt_version"] == column["prompt_version"]
+
+
+# ─── Document matrix step 1, S1 correctness ─────────────────
+
+
+async def _queued_run(ctx, matrix: Any, file_id: str) -> Any:
+    col = matrix.columns[0]["column_id"]
+    run = await ctx["store"].create_run_and_enqueue(
+        matrix_id=matrix.matrix_id,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        scope={"kind": "all_pending"},
+        initiated_by=U_MEMBER,
+        targets=[(file_id, col)],
+        skipped_edited=0,
+        credits_estimated=1,
+        column_versions={col: 1},
+        file_versions={},
+    )
+    assert run is not None
+    return run
+
+
+async def _workspace_file(ctx, name: str) -> str:
+    return await ctx["files_store"].create(
+        artifact_id=name,
+        filename=f"{name}.md",
+        mime_type="text/markdown",
+        size_bytes=1,
+        scope="workspace",
+        scope_id=WS_A,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        uploaded_by=U_MEMBER,
+    )
+
+
+async def test_delete_matrix_cancels_its_runs_and_later_cancel_converges(ctx) -> None:
+    """Spike bug B: delete used to leave runs spending, and cancel then answered 404."""
+    client, app, m, store = ctx["client"], ctx["app"], ctx["matrix"], ctx["store"]
+    run = await _queued_run(ctx, m, ctx["file_a"])
+    _as(app, U_MEMBER)
+
+    r = client.delete(f"/api/v1/kb/matrices/{m.matrix_id}", headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    got = await store.get_run(run.run_id)
+    assert got is not None and got.status == "cancelled"  # No live task: the cancel converged in the request.
+
+    r = client.post(f"/api/v1/kb/matrices/{m.matrix_id}/runs/{run.run_id}/cancel", headers=_h(WS_A))
+    _assert_code_only(r, 409, "run_not_cancellable")  # Found, already finished; not 404.
+
+
+async def test_cancel_finds_runs_of_a_deleted_matrix(ctx) -> None:
+    """A run that a delete did not cancel (a race) can still be cancelled; other Spaces still get 404."""
+    client, app, store = ctx["client"], ctx["app"], ctx["store"]
+    other = await store.create_matrix(
+        name="另一矩阵",
+        workspace_id=WS_A,
+        team_id=TEAM,
+        created_by=U_MEMBER,
+        files=[{"file_id": ctx["file_a"], "char_count": 1}],
+        columns=[{"name": "B", "type": "question", "question": "b?"}],
+    )
+    run = await _queued_run(ctx, other, ctx["file_a"])
+    assert await store.soft_delete_matrix(other.matrix_id, workspace_id=WS_A)
+    url = f"/api/v1/kb/matrices/{other.matrix_id}/runs/{run.run_id}/cancel"
+
+    _as(app, U_OUTSIDER)
+    _assert_code_only(client.post(url, headers=_h(WS_B)), 404, "matrix_not_found")
+    _as(app, U_MEMBER)
+    r = client.post(url, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    got = await store.get_run(run.run_id)
+    assert got is not None and got.status == "cancelled"
+
+
+async def test_edit_after_file_removed_and_added_back(ctx) -> None:
+    """Spike bug A: the edit used to fail with 500 (IntegrityError on the soft-deleted row)."""
+    client, app, m = ctx["client"], ctx["app"], ctx["matrix"]
+    app.state.kb_store = _FakeKbStore()
+    col = m.columns[0]["column_id"]
+    files_url = f"/api/v1/kb/matrices/{m.matrix_id}/files"
+    cell_url = f"/api/v1/kb/matrices/{m.matrix_id}/cells/{ctx['file_a']}/{col}"
+    _as(app, U_MEMBER)
+    assert client.patch(cell_url, json={"op": "edit_value", "value": "旧值"}, headers=_h(WS_A)).status_code == 200
+    assert client.put(files_url, json={"file_ids": []}, headers=_h(WS_A)).status_code == 200
+    assert client.put(files_url, json={"file_ids": [ctx["file_a"]]}, headers=_h(WS_A)).status_code == 200
+
+    r = client.patch(cell_url, json={"op": "edit_value", "value": "新值"}, headers=_h(WS_A))
+
+    assert r.status_code == 200, r.text
+    snapshot = client.get(f"/api/v1/kb/matrices/{m.matrix_id}/snapshot", headers=_h(WS_A)).json()
+    cell = snapshot["cells"][f"{ctx['file_a']}:{col}"]
+    assert cell["edited"] is True
+    assert [v["normalized"] for v in cell["variants"]] == [{"value": "新值"}]
+
+
+async def test_promotion_answers_column_busy_while_cells_are_pending(ctx) -> None:
+    client, app, m = ctx["client"], ctx["app"], ctx["matrix"]
+    col = m.columns[0]["column_id"]
+    await _queued_run(ctx, m, ctx["file_a"])
+    _as(app, U_MEMBER)
+    r = client.patch(f"/api/v1/kb/matrices/{m.matrix_id}/columns/{col}", json={"type": "number"}, headers=_h(WS_A))
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error"] == {"code": "column_busy", "column_id": col, "name": "列A", "pending": 1}
+
+
+async def test_column_name_writes_refuse_empty_and_duplicate_names(ctx) -> None:
+    client, app, m = ctx["client"], ctx["app"], ctx["matrix"]
+    app.state.kb_store = _FakeKbStore()
+    col = m.columns[0]["column_id"]
+    columns_url = f"/api/v1/kb/matrices/{m.matrix_id}/columns"
+    _as(app, U_MEMBER)
+
+    r = client.post(
+        "/api/v1/kb/matrices",
+        json={"workspace_id": WS_A, "name": "x", "columns": [{"name": "金额"}, {"name": "金额 "}]},
+        headers=_h(WS_A),
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "column_name_duplicate", "name": "金额"}
+    r = client.post(columns_url, json={"name": "列Ａ", "type": "question"}, headers=_h(WS_A))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "column_name_duplicate", "name": "列A", "column_id": col}
+    _assert_code_only(client.post(columns_url, json={"name": " ", "type": "question"}, headers=_h(WS_A)), 422, "column_name_invalid")
+    _assert_code_only(client.patch(f"{columns_url}/{col}", json={"name": ""}, headers=_h(WS_A)), 422, "column_name_invalid")
+    assert client.post(columns_url, json={"name": "金额（万元）", "type": "question"}, headers=_h(WS_A)).status_code == 200
+
+
+async def test_matrix_caps_refuse_only_growth_past_the_limit(ctx, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, app, m, store = ctx["client"], ctx["app"], ctx["matrix"], ctx["store"]
+    monkeypatch.setenv("BOWHEAD_KB_MATRIX_MAX_COLUMNS", "2")
+    monkeypatch.setenv("BOWHEAD_KB_MATRIX_MAX_FILES", "1")
+    app.state.kb_store = _FakeKbStore()
+    file_c = await _workspace_file(ctx, "c")
+    _as(app, U_MEMBER)
+
+    def error(response: Any, status: int) -> dict[str, Any]:
+        assert response.status_code == status, response.text
+        return response.json()["detail"]["error"]
+
+    create = {"workspace_id": WS_A, "name": "x"}
+    three_columns = [{"name": f"q{i}"} for i in range(3)]
+    assert error(client.post("/api/v1/kb/matrices", json={**create, "columns": three_columns}, headers=_h(WS_A)), 422) == {
+        "code": "matrix_column_limit",
+        "limit": 2,
+        "count": 0,
+        "requested": 3,
+    }
+    two_files = {**create, "file_ids": [ctx["file_a"], file_c, file_c]}  # Duplicates count once.
+    assert error(client.post("/api/v1/kb/matrices", json=two_files, headers=_h(WS_A)), 422) == {
+        "code": "matrix_file_limit",
+        "limit": 1,
+        "count": 0,
+        "requested": 2,
+    }
+
+    columns_url = f"/api/v1/kb/matrices/{m.matrix_id}/columns"
+    assert client.post(columns_url, json={"name": "第二列", "type": "question"}, headers=_h(WS_A)).status_code == 200
+    assert error(client.post(columns_url, json={"name": "第三列", "type": "question"}, headers=_h(WS_A)), 422) == {
+        "code": "matrix_column_limit",
+        "limit": 2,
+        "count": 2,
+        "requested": 3,
+    }
+    files_url = f"/api/v1/kb/matrices/{m.matrix_id}/files"
+    assert error(client.put(files_url, json={"file_ids": [ctx["file_a"], file_c]}, headers=_h(WS_A)), 422) == {
+        "code": "matrix_file_limit",
+        "limit": 1,
+        "count": 1,
+        "requested": 2,
+    }
+
+    # A matrix already above both caps stays readable, runnable and shrinkable.
+    big = await store.create_matrix(
+        name="大矩阵",
+        workspace_id=WS_A,
+        team_id=TEAM,
+        created_by=U_MEMBER,
+        files=[{"file_id": ctx["file_a"], "char_count": 1}, {"file_id": file_c, "char_count": 1}],
+        columns=three_columns,
+    )
+    big_url = f"/api/v1/kb/matrices/{big.matrix_id}"
+    assert client.get(f"{big_url}/snapshot", headers=_h(WS_A)).status_code == 200
+    estimate = client.post(f"{big_url}/runs/estimate", json={"kind": "all_pending"}, headers=_h(WS_A))
+    assert estimate.status_code == 200, estimate.text
+    assert estimate.json()["cells_pending"] == 6
+    assert client.put(f"{big_url}/files", json={"file_ids": [file_c, ctx["file_a"]]}, headers=_h(WS_A)).status_code == 200
+    assert client.put(f"{big_url}/files", json={"file_ids": [ctx["file_a"]]}, headers=_h(WS_A)).status_code == 200
+    assert error(client.post(f"{big_url}/columns", json={"name": "q3", "type": "question"}, headers=_h(WS_A)), 422)["count"] == 3
+
+
+# ─── Document matrix step 1, S2 manage the matrix ───────────
+
+
+class _CountingKbStore(_FakeKbStore):
+    def __init__(self) -> None:
+        self.read: list[str] = []
+
+    async def get_ordered_chunks_for_file(self, file: Any) -> list[tuple[str, str, int]]:
+        self.read.append(file.file_id)
+        return [("chk_1", "x" * 7, 1)]
+
+
+async def _reviewed_cell(ctx, matrix: Any, file_id: str, *, edited: bool, verified: bool) -> None:
+    await ctx["store"].insert_cells_bulk(
+        matrix.matrix_id,
+        [
+            {
+                "file_id": file_id,
+                "column_id": matrix.columns[0]["column_id"],
+                "workspace_id": WS_A,
+                "team_id": TEAM,
+                "status": "done",
+                "variants": [{"raw": "v", "normalized": {"value": "v"}, "is_primary": True}],
+                "edited_by_user": edited,
+                "verified": verified,
+                "prompt_version": 1,
+                "file_version": 1,
+            }
+        ],
+    )
+
+
+async def _matrix_of(ctx, *file_ids: str) -> Any:
+    return await ctx["store"].create_matrix(
+        name="审阅矩阵",
+        workspace_id=WS_A,
+        team_id=TEAM,
+        created_by=U_MEMBER,
+        files=[{"file_id": fid, "char_count": 1} for fid in file_ids],
+        columns=[{"name": "金额", "type": "question", "question": "金额？"}],
+    )
+
+
+async def test_add_files_appends_in_order_and_counts_only_added_files(ctx) -> None:
+    client, app, m, store = ctx["client"], ctx["app"], ctx["matrix"], ctx["store"]
+    kb_store = _CountingKbStore()
+    app.state.kb_store = kb_store
+    file_c = await _workspace_file(ctx, "c")
+    file_d = await _workspace_file(ctx, "d")
+    url = f"/api/v1/kb/matrices/{m.matrix_id}/files"
+    _as(app, U_MEMBER2)  # Any member may add rows.
+
+    r = client.post(url, json={"file_ids": [file_d, ctx["file_a"], file_c, file_d]}, headers=_h(WS_A))
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"matrix_id": m.matrix_id, "added": [file_d, file_c], "skipped": 1, "files_count": 3}
+    assert kb_store.read == [file_d, file_c]  # The row already present is not read again.
+    after = await store.get_matrix(m.matrix_id)
+    assert after is not None
+    assert after.files == [
+        {"file_id": ctx["file_a"], "char_count": 100},
+        {"file_id": file_d, "char_count": 7},
+        {"file_id": file_c, "char_count": 7},
+    ]
+    assert after.structure_seq > m.structure_seq
+
+    again = client.post(url, json={"file_ids": [file_c]}, headers=_h(WS_A))
+    assert again.json() == {"matrix_id": m.matrix_id, "added": [], "skipped": 1, "files_count": 3}
+    assert kb_store.read == [file_d, file_c]
+
+
+async def test_add_files_checks_new_files_caps_and_batch_size(ctx, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, app, m = ctx["client"], ctx["app"], ctx["matrix"]
+    app.state.kb_store = _FakeKbStore()
+    url = f"/api/v1/kb/matrices/{m.matrix_id}/files"
+    _as(app, U_MEMBER)
+
+    _assert_code_only(client.post(url, json={"file_ids": [ctx["file_personal"]]}, headers=_h(WS_A)), 422, "personal_files_not_allowed")
+    _assert_code_only(client.post(url, json={"file_ids": [ctx["file_b"]]}, headers=_h(WS_A)), 404, "matrix_source_file_unavailable")
+    r = client.post(url, json={"file_ids": [f"kbf_{i}" for i in range(101)]}, headers=_h(WS_A))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_files_batch_limit", "limit": 100, "requested": 101}
+
+    monkeypatch.setenv("BOWHEAD_KB_MATRIX_MAX_FILES", "2")
+    file_c = await _workspace_file(ctx, "c")
+    file_d = await _workspace_file(ctx, "d")
+    r = client.post(url, json={"file_ids": [file_c, file_d]}, headers=_h(WS_A))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_file_limit", "limit": 2, "count": 1, "requested": 3}
+    r = client.post(url, json={"file_ids": [ctx["file_a"], file_c]}, headers=_h(WS_A))  # Rows already present do not count.
+    assert r.status_code == 200, r.text
+    assert r.json()["files_count"] == 2
+
+
+async def test_remove_files_with_reviewed_cells_needs_creator_or_admin(ctx) -> None:
+    client, app, store = ctx["client"], ctx["app"], ctx["store"]
+    file_c = await _workspace_file(ctx, "c")
+    file_d = await _workspace_file(ctx, "d")
+    matrix = await _matrix_of(ctx, ctx["file_a"], file_c, file_d)
+    await _reviewed_cell(ctx, matrix, ctx["file_a"], edited=True, verified=True)
+    await _reviewed_cell(ctx, matrix, file_c, edited=False, verified=True)
+    url = f"/api/v1/kb/matrices/{matrix.matrix_id}/files/remove"
+
+    _as(app, U_MEMBER2)
+    r = client.post(url, json={"file_ids": [ctx["file_a"], file_c]}, headers=_h(WS_A))
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_remove_requires_owner", "edited": 1, "verified": 2}
+    # The compatibility PUT follows the same rule for the rows it would drop.
+    app.state.kb_store = _FakeKbStore()
+    r = client.put(f"/api/v1/kb/matrices/{matrix.matrix_id}/files", json={"file_ids": [file_c, file_d]}, headers=_h(WS_A))
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_remove_requires_owner", "edited": 1, "verified": 1}
+    unchanged = await store.get_matrix(matrix.matrix_id)
+    assert unchanged is not None and len(unchanged.files) == 3
+    assert len(await store.list_cells(matrix.matrix_id)) == 2
+
+    r = client.post(url, json={"file_ids": [file_d]}, headers=_h(WS_A))  # No reviewed cells: any member.
+    assert r.status_code == 200, r.text
+    assert r.json() == {"matrix_id": matrix.matrix_id, "removed": [file_d], "files_count": 2, "edited": 0, "verified": 0}
+
+    _as(app, U_WS_ADMIN)
+    r = client.post(url, json={"file_ids": [file_c]}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    assert r.json()["verified"] == 1
+    _as(app, U_MEMBER)
+    r = client.post(url, json={"file_ids": [ctx["file_a"]]}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"matrix_id": matrix.matrix_id, "removed": [ctx["file_a"]], "files_count": 0, "edited": 1, "verified": 1}
+    assert await store.list_cells(matrix.matrix_id) == []
+
+
+async def test_remove_files_touches_only_the_named_rows(ctx) -> None:
+    """Spike bug D: rows the caller cannot see, and their reviewed cells, stay where they are."""
+    client, app, store = ctx["client"], ctx["app"], ctx["store"]
+    file_c = await _workspace_file(ctx, "c")
+    matrix = await _matrix_of(ctx, ctx["file_a"], ctx["file_b"], file_c)
+    await _reviewed_cell(ctx, matrix, ctx["file_b"], edited=True, verified=False)  # file_b is not readable from WS_A.
+    _as(app, U_MEMBER2)
+
+    r = client.post(
+        f"/api/v1/kb/matrices/{matrix.matrix_id}/files/remove",
+        json={"file_ids": [file_c, "kbf_not_in_matrix"]},
+        headers=_h(WS_A),
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == [file_c]
+    after = await store.get_matrix(matrix.matrix_id)
+    assert after is not None
+    assert [f["file_id"] for f in after.files] == [ctx["file_a"], ctx["file_b"]]
+    hidden = await store.get_cell(matrix.matrix_id, ctx["file_b"], matrix.columns[0]["column_id"])
+    assert hidden is not None and hidden.edited_by_user
+    assert after.structure_seq > matrix.structure_seq
+
+
+async def test_remove_files_takes_queued_cells_out_of_active_runs(ctx) -> None:
+    client, app, store = ctx["client"], ctx["app"], ctx["store"]
+    file_c = await _workspace_file(ctx, "c")
+    matrix = await _matrix_of(ctx, ctx["file_a"], file_c)
+    col = matrix.columns[0]["column_id"]
+    run = await store.create_run_and_enqueue(
+        matrix_id=matrix.matrix_id,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        scope={"kind": "all_pending"},
+        initiated_by=U_MEMBER,
+        targets=[(ctx["file_a"], col), (file_c, col)],
+        skipped_edited=0,
+        credits_estimated=2,
+        column_versions={col: 1},
+        file_versions={},
+    )
+    assert run is not None and run.cells_total == 2
+    _as(app, U_MEMBER2)
+
+    r = client.post(f"/api/v1/kb/matrices/{matrix.matrix_id}/files/remove", json={"file_ids": [file_c]}, headers=_h(WS_A))
+
+    assert r.status_code == 200, r.text
+    after = await store.get_run(run.run_id)
+    assert after is not None and after.cells_total == 1 and after.status == "running"
+    assert [c.file_id for c in await store.list_cells_for_run(run.run_id)] == [ctx["file_a"]]
+
+
+async def test_rename_rejects_blank_names_and_trims(ctx) -> None:
+    client, app, m, store = ctx["client"], ctx["app"], ctx["matrix"], ctx["store"]
+    url = f"/api/v1/kb/matrices/{m.matrix_id}"
+    _as(app, U_MEMBER2)
+
+    for blank in ("", "   ", "　"):
+        _assert_code_only(client.patch(url, json={"name": blank}, headers=_h(WS_A)), 422, "matrix_name_invalid")
+    r = client.patch(url, json={"name": "  供应商合同  "}, headers=_h(WS_A))
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"matrix_id": m.matrix_id, "name": "供应商合同"}
+    renamed = await store.get_matrix(m.matrix_id)
+    assert renamed is not None and renamed.name == "供应商合同"
+
+
+async def test_list_names_creators_and_snapshot_says_who_manages(ctx) -> None:
+    client, app, m = ctx["client"], ctx["app"], ctx["matrix"]
+
+    async def labels(team_id: str, user_ids: list[str]) -> dict[str, str]:
+        assert team_id == TEAM
+        return {uid: "陈思远" for uid in user_ids if uid == U_MEMBER}
+
+    ctx["membership_store"].get_team_member_labels = labels
+    _as(app, U_MEMBER2)
+    listed = client.get("/api/v1/kb/matrices", params={"workspace_id": WS_A}, headers=_h(WS_A))
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"][0]["created_by_name"] == "陈思远"
+
+    snapshot_url = f"/api/v1/kb/matrices/{m.matrix_id}/snapshot"
+    assert client.get(snapshot_url, headers=_h(WS_A)).json()["matrix"]["can_manage"] is False
+    for uid in (U_MEMBER, U_WS_ADMIN):
+        _as(app, uid)
+        assert client.get(snapshot_url, headers=_h(WS_A)).json()["matrix"]["can_manage"] is True
+
+
+# ─── Document matrix step 1 (S3): run scopes ───
+
+
+@pytest.mark.parametrize("path", ["runs/estimate", "runs"])
+async def test_run_file_ids_must_be_few_rows_of_this_matrix(ctx, path: str) -> None:
+    client, app, m, fa, fb = ctx["client"], ctx["app"], ctx["matrix"], ctx["file_a"], ctx["file_b"]
+    _as(app, U_MEMBER)
+    url = f"/api/v1/kb/matrices/{m.matrix_id}/{path}"
+    r = client.post(url, json={"kind": "all_pending", "file_ids": [f"kbf_{i}" for i in range(51)]}, headers=_h(WS_A))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_run_files_limit", "limit": 50, "count": 51}
+    r = client.post(url, json={"kind": "force_all", "file_ids": [fa, fb]}, headers=_h(WS_A))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == {"code": "matrix_run_files_not_in_matrix", "count": 1}  # A file of another Space.
+    _assert_code_only(client.post(url, json={"kind": "all_pending", "file_ids": []}, headers=_h(WS_A)), 422, "matrix_run_files_empty")
+
+
+async def test_run_estimate_breakdown_trial_and_single_cell(ctx) -> None:
+    client, app, m, fa = ctx["client"], ctx["app"], ctx["matrix"], ctx["file_a"]
+    col = m.columns[0]["column_id"]
+    _as(app, U_MEMBER)
+    url = f"/api/v1/kb/matrices/{m.matrix_id}/runs/estimate"
+    r = client.post(url, json={"kind": "all_pending", "file_ids": [fa, fa]}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["cells_pending"], body["files"], body["trial_file_ids"], body["skipped_verified"]) == (1, 1, [fa], 0)
+    assert body["columns"] == [{"column_id": col, "cells": 1, "credits": body["credits_estimated"] - body["reading_credits"], "cross_verify": False}]
+    assert body["longest_file"]["file_id"] == fa
+    r = client.post(url, json={"kind": "failed"}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    assert r.json()["cells_pending"] == 0
+    r = client.post(url, json={"kind": "single_cell", "file_id": fa, "column_id": col}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+    assert (r.json()["cells_pending"], r.json()["trial_file_ids"]) == (1, [])
+    _assert_code_only(client.post(url, json={"kind": "single_cell", "column_id": col}, headers=_h(WS_A)), 422, "invalid_matrix_run_scope")
+    # keep_verified accepts null and is ignored outside force scopes.
+    r = client.post(url, json={"kind": "force_all", "keep_verified": None}, headers=_h(WS_A))
+    assert r.status_code == 200, r.text
+
+
+async def test_snapshot_marks_trial_runs(ctx) -> None:
+    client, app, m, store, fa = ctx["client"], ctx["app"], ctx["matrix"], ctx["store"], ctx["file_a"]
+    col = m.columns[0]["column_id"]
+    trial = await store.create_run(
+        matrix_id=m.matrix_id,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        scope={"kind": "all_pending", "file_ids": [fa]},
+        initiated_by=U_MEMBER,
+        cells_total=1,
+        skipped_edited=0,
+        credits_estimated=1,
+    )
+    plain = await store.create_run(
+        matrix_id=m.matrix_id,
+        workspace_id=WS_A,
+        team_id=TEAM,
+        scope={"kind": "column", "column_id": col},
+        initiated_by=U_MEMBER,
+        cells_total=1,
+        skipped_edited=0,
+        credits_estimated=1,
+    )
+    _as(app, U_MEMBER)
+    runs = {r["run_id"]: r for r in client.get(f"/api/v1/kb/matrices/{m.matrix_id}/snapshot", headers=_h(WS_A)).json()["runs"]}
+    assert (runs[trial.run_id]["trial"], runs[trial.run_id]["trial_files"]) == (True, 1)
+    assert (runs[plain.run_id]["trial"], runs[plain.run_id]["trial_files"]) == (False, None)

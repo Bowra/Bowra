@@ -59,6 +59,7 @@ from bowhead_router.invocation import (
     fail_physical_invocation,
     physical_invocation_required,
     physical_observation_active,
+    settle_provider_service_unavailable,
     settle_transport_failure,
 )
 from bowhead_router.outbound import (
@@ -526,6 +527,9 @@ class OpenAICompatibleAdapter:
         elif resp.status_code == 429:
             await confirm_provider_rate_limit_rejection(attempt, status_code=resp.status_code)
             attempt = None
+        elif resp.status_code == 503:
+            await settle_provider_service_unavailable(attempt, status_code=resp.status_code)
+            attempt = None
         try:
             self._raise_for_status(resp)
             try:
@@ -747,6 +751,10 @@ class OpenAICompatibleAdapter:
                             attempt = None
                         elif resp.status_code == 429:
                             await confirm_provider_rate_limit_rejection(attempt, status_code=resp.status_code)
+                            attempt_settled = True
+                            attempt = None
+                        elif resp.status_code == 503:
+                            await settle_provider_service_unavailable(attempt, status_code=resp.status_code)
                             attempt_settled = True
                             attempt = None
                         raise OpenAICompatError(

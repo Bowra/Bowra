@@ -7,7 +7,7 @@ Mit verbundenem Google Workspace können Agents die Google-Dokumente, -Tabellen 
 Nur Team-Inhaber und Team-Admins können die Verbindung konfigurieren. Sie verwendet die eigene Google-Cloud-App Ihres Unternehmens; Bowra stellt keine gemeinsame App bereit.
 
 1. Erstellen Sie in der Google Cloud Console einen OAuth-Client vom Typ „Webanwendung" mit dem Nutzertyp „Intern" (nur Ihre Organisation).
-2. Öffnen Sie **Team-Einstellungen → Tools → Integrierte Drittanbieter-Tools** und wählen Sie Google Workspace. Übernehmen Sie den angezeigten **Autorisierten Weiterleitungs-URI** in „Autorisierte Weiterleitungs-URIs" und den **Autorisierten JavaScript-Ursprung** in „Autorisierte JavaScript-Ursprünge". Fordert die Seite zuerst eine Zugriffsadresse an, registrieren Sie unter **Team-Einstellungen → Öffentlicher Zugang** eine HTTPS-Adresse.
+2. Öffnen Sie **Fähigkeiten → Tools → Werkzeugquellen verwalten → Integrierte Dienste**, wählen Sie **Integrierten Dienst hinzufügen** und dann Google Workspace. Übernehmen Sie den angezeigten **Autorisierten Weiterleitungs-URI** in „Autorisierte Weiterleitungs-URIs" und den **Autorisierten JavaScript-Ursprung** in „Autorisierte JavaScript-Ursprünge". Fordert die Seite zuerst eine Zugriffsadresse an, registrieren Sie unter **Team-Einstellungen → Öffentlicher Zugang** eine HTTPS-Adresse.
 3. Deklarieren Sie die aufgeführten Bereiche auf dem OAuth-Zustimmungsbildschirm.
 4. Geben Sie in Bowra Client-ID, Client-Secret und Ihre Google-Workspace-Domain ein und aktivieren Sie die benötigten Funktionen:
    - Basis (erforderlich): von Mitgliedern in Bowra ausgewählte Dateien lesen und schreiben; neue Dokumente, Präsentationen und Tabellen erstellen;

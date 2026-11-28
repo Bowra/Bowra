@@ -953,7 +953,8 @@
 .tcf-notice {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  /* Above a visible save bar (published by SaveBar), so the notice never covers Save. */
+  bottom: calc(16px + var(--ui-savebar-occupied, 0px));
   z-index: var(--z-drawer);
   display: grid;
   gap: 6px;

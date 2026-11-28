@@ -2870,9 +2870,6 @@
   background: var(--c-surface);
   box-shadow: 0 0 0 var(--hairline) var(--c-separator);
 }
-:root:root .ai-tools-card.is-failed {
-  box-shadow: 0 0 0 1px var(--c-err);
-}
 :root:root .ai-tools-card .tool-source-card-top {
   gap: 12px;
   padding: 12px 12px 12px 16px;

@@ -41,6 +41,23 @@ async def prune_file_versions(app: Any, lineage_roots: Sequence[str] | None = No
     return pruned
 
 
+async def versions_dropped_by_next_save(app: Any, artifact_id: str) -> list[int]:
+    """Version numbers pruning removes once one more version of this file is saved, KB-checked.
+
+    The same rules as ``prune_file_versions``, as a dry run: without the KB store nothing is pruned,
+    so nothing is reported either. A failed lookup raises; callers treat the fact as optional.
+    """
+    store = getattr(app.state, "artifact_store", None)
+    kb_store = getattr(app.state, "kb_files_store", None)
+    if store is None or kb_store is None or not hasattr(store, "versions_pruned_by_next_version"):
+        return []
+    found = await store.versions_pruned_by_next_version(artifact_id)
+    if not found:
+        return []
+    protected = set(await kb_store.artifact_ids_in_kb([item_id for item_id, _ in found]))
+    return [number for item_id, number in found if item_id not in protected]
+
+
 #: A version is usually written inside a Turn of its session, so its file waits until no Turn of
 #: that session is running or paused; after this long the nightly run prunes it instead.
 _DEFER_POLL_SECONDS = 30.0
@@ -88,4 +105,4 @@ def schedule_file_version_prune(app: Any, lineage_root: str) -> None:
     task.add_done_callback(tasks.discard)
 
 
-__all__ = ["prune_file_versions", "schedule_file_version_prune"]
+__all__ = ["prune_file_versions", "schedule_file_version_prune", "versions_dropped_by_next_save"]
